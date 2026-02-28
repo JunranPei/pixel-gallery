@@ -106,9 +106,16 @@ class MediaService {
 
   // Helper to group entries into albums. Improved for performance with large libraries.
   List<AlbumModel> _groupEntries(List<AvesEntry> entries) {
+    return groupEntriesStatic(entries, _trashService.trashedPathsSet);
+  }
+
+  static List<AlbumModel> groupEntriesStatic(
+    List<AvesEntry> entries,
+    Set<String> trashedPaths,
+  ) {
     // 1. Filter out entries in trash using O(1) set lookup
     final filteredEntries = entries
-        .where((entry) => !_trashService.isTrashed(entry.path))
+        .where((entry) => !trashedPaths.contains(entry.path))
         .toList();
 
     // Since entries from DB are already sorted by dateModifiedMillis DESC,
@@ -327,27 +334,32 @@ class MediaService {
           totalItems = p['total'] ?? 0;
         });
 
+    final batchBuffer = <AvesEntry>[];
     final newEntries = <AvesEntry>[];
+    DateTime lastUpdateTime = DateTime.now();
+
+    Future<void> processBatch() async {
+      if (batchBuffer.isEmpty) return;
+
+      final batch = List<AvesEntry>.from(batchBuffer);
+      batchBuffer.clear();
+
+      final result = await compute(_processBatchIsolate, {
+        'allEntries': _allEntries,
+        'batch': batch,
+        'trashedPaths': _trashService.trashedPathsSet,
+      });
+
+      _allEntries = List<AvesEntry>.from(result['allEntries'] as List);
+      _cachedAlbums = List<AlbumModel>.from(result['cachedAlbums'] as List);
+      _albumUpdateController.add(null);
+      lastUpdateTime = DateTime.now();
+    }
+
     await for (final entry in _service.getEntries(known)) {
       if (_trashService.isTrashed(entry.path)) continue;
 
-      // De-duplicate if we have prioritized entries or skeletons
-      final existingIndex = _allEntries.indexWhere(
-        (e) => e.contentId != null && e.contentId == entry.contentId,
-      );
-
-      if (existingIndex != -1) {
-        _allEntries[existingIndex] = entry; // Replace skeleton with real entry
-      } else {
-        _allEntries.add(entry);
-        // Regroup to show new items
-        _allEntries.sort(
-          (a, b) =>
-              (b.dateModifiedMillis ?? 0).compareTo(a.dateModifiedMillis ?? 0),
-        );
-        _cachedAlbums = _groupEntries(_allEntries);
-      }
-
+      batchBuffer.add(entry);
       newEntries.add(entry);
       currentItems++;
 
@@ -355,13 +367,19 @@ class MediaService {
         _notifications.showIndexingProgress(currentItems, totalItems);
       }
 
-      // Periodically notify UI
-      if (currentItems % 10 == 0) {
-        _albumUpdateController.add(null);
+      // Periodically process batch to update UI
+      final now = DateTime.now();
+      if (batchBuffer.length >= 200 ||
+          (batchBuffer.isNotEmpty &&
+              now.difference(lastUpdateTime).inMilliseconds > 1000)) {
+        await processBatch();
       }
 
       yield entry; // Emit new/updated entries as they arrive
     }
+
+    // Process remaining
+    await processBatch();
 
     progressSub.cancel();
     _notifications.dismissIndexingProgress();
@@ -526,5 +544,45 @@ class MediaService {
 
     flushDay();
     return grouped;
+  }
+
+  static Map<String, dynamic> _processBatchIsolate(Map<String, dynamic> args) {
+    final List<AvesEntry> allEntries = List<AvesEntry>.from(
+      args['allEntries'] as List,
+    );
+    final List<AvesEntry> batch = List<AvesEntry>.from(args['batch'] as List);
+    final Set<String> trashedPaths = args['trashedPaths'] as Set<String>;
+
+    // Use a map for O(1) lookups during merge
+    final Map<int, AvesEntry> entryMap = {};
+    final List<AvesEntry> otherEntries = [];
+
+    for (final entry in allEntries) {
+      if (entry.contentId != null) {
+        entryMap[entry.contentId!] = entry;
+      } else {
+        otherEntries.add(entry);
+      }
+    }
+
+    for (final entry in batch) {
+      if (entry.contentId != null) {
+        entryMap[entry.contentId!] = entry;
+      } else {
+        otherEntries.add(entry);
+      }
+    }
+
+    final mergedEntries = [...entryMap.values, ...otherEntries];
+
+    // Sort by date modified DESC
+    mergedEntries.sort(
+      (a, b) =>
+          (b.dateModifiedMillis ?? 0).compareTo(a.dateModifiedMillis ?? 0),
+    );
+
+    final albums = groupEntriesStatic(mergedEntries, trashedPaths);
+
+    return {'allEntries': mergedEntries, 'cachedAlbums': albums};
   }
 }

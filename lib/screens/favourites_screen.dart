@@ -302,6 +302,7 @@ class _FavouritesScreenState extends State<FavouritesScreen> {
                 index: photo.index ?? 0,
                 initialPhotos: _photos,
                 sourceAlbums: albums.first,
+                canLoadMore: false,
               ),
             ),
           );

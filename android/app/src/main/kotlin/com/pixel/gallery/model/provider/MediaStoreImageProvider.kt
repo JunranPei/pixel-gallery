@@ -143,10 +143,6 @@ class MediaStoreImageProvider : ImageProvider() {
                                     EntryFields.CONTENT_ID to id,
                                 )
 
-                                if (width <= 0 || height <= 0 || (durationMillis == 0L && needDuration)) {
-                                    val entry = SourceEntry(entryFields).fillPreCatalogMetadata(context)
-                                    entryFields = entry.toMap()
-                                }
 
                                 handleNewEntry(entryFields)
                                 found = true

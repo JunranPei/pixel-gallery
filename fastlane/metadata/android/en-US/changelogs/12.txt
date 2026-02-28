@@ -1,0 +1,4 @@
+* Optimized media scanning for near-instant loading
+* Improved UI smoothness with background isolates
+* Fixed favorites viewer overflow bug
+* Added auto-hide for video player controls

@@ -10,6 +10,7 @@ class VideoScreen extends StatefulWidget {
   final bool controlsVisible;
   final Player? player;
   final VideoController? controller;
+  final VoidCallback? onUserInteraction;
 
   const VideoScreen({
     super.key,
@@ -17,6 +18,7 @@ class VideoScreen extends StatefulWidget {
     required this.controlsVisible,
     required this.player,
     required this.controller,
+    this.onUserInteraction,
   });
 
   @override
@@ -168,6 +170,7 @@ class _VideoScreenState extends State<VideoScreen> {
                 child: IconButton(
                   onPressed: () {
                     widget.player!.playOrPause();
+                    widget.onUserInteraction?.call();
                     setState(() {});
                   },
                   icon: widget.player!.state.playing
@@ -213,6 +216,7 @@ class _VideoScreenState extends State<VideoScreen> {
                             min: 0.0,
                             max: duration.inMilliseconds.toDouble(),
                             onChangeStart: (value) {
+                              widget.onUserInteraction?.call();
                               setState(() {
                                 _isDragging = true;
                                 _dragValue = value;
@@ -233,6 +237,7 @@ class _VideoScreenState extends State<VideoScreen> {
                               }
                             },
                             onChangeEnd: (value) {
+                              widget.onUserInteraction?.call();
                               widget.player!
                                   .seek(Duration(milliseconds: value.toInt()))
                                   .then((_) {
@@ -268,6 +273,7 @@ class _VideoScreenState extends State<VideoScreen> {
                               widget.player!.setVolume(
                                 widget.player!.state.volume == 0 ? 100 : 0,
                               );
+                              widget.onUserInteraction?.call();
                             });
                           },
                         ),
