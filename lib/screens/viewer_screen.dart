@@ -26,12 +26,14 @@ class ViewerScreen extends StatefulWidget {
   final int index;
   final List<PhotoModel> initialPhotos;
   final AlbumModel sourceAlbums;
+  final bool canLoadMore;
 
   const ViewerScreen({
     super.key,
     required this.index,
     required this.initialPhotos,
     required this.sourceAlbums,
+    this.canLoadMore = true,
   });
 
   @override
@@ -58,8 +60,10 @@ class _ViewerScreenState extends State<ViewerScreen> {
   final MediaService _service = MediaService();
   final TrashService _trashService = TrashService();
   StreamSubscription? _updateSubscription;
+  Timer? _uiTimer;
 
   Future<void> _loadMore() async {
+    if (!widget.canLoadMore) return;
     _page++;
     final media = await _service.getMedia(
       album: widget.sourceAlbums,
@@ -110,6 +114,24 @@ class _ViewerScreenState extends State<ViewerScreen> {
       }
     } catch (e) {
       debugPrint('Error initializing video at index $index: $e');
+    }
+  }
+
+  void _startUiTimer() {
+    _uiTimer?.cancel();
+    _uiTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted && _showUI && _player?.state.playing == true) {
+        setState(() {
+          _showUI = false;
+        });
+      }
+    });
+  }
+
+  void _resetUiTimer() {
+    _uiTimer?.cancel();
+    if (_showUI && _player?.state.playing == true) {
+      _startUiTimer();
     }
   }
 
@@ -408,7 +430,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     child: FlutterMap(
                       options: MapOptions(
                         initialCenter: latLng.LatLng(
-                          location!['latitude'] as double,
+                          location['latitude'] as double,
                           location['longitude'] as double,
                         ),
                         initialZoom: 15.0,
@@ -426,7 +448,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                           markers: [
                             Marker(
                               point: latLng.LatLng(
-                                location!['latitude'] as double,
+                                location['latitude'] as double,
                                 location['longitude'] as double,
                               ),
                               child: const Icon(
@@ -461,6 +483,10 @@ class _ViewerScreenState extends State<ViewerScreen> {
     _initializeVideoController(widget.index);
     _checkMotionPhoto(widget.index);
 
+    if (widget.initialPhotos[widget.index].asset.isVideo) {
+      _startUiTimer();
+    }
+
     _updateSubscription = _service.entryUpdateStream.listen((entry) {
       if (mounted) {
         setState(() {
@@ -485,6 +511,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
     _controller.dispose();
     _player?.dispose();
     _motionPlayer?.dispose();
+    _uiTimer?.cancel();
     WakelockPlus.disable();
     _updateSubscription?.cancel();
     super.dispose();
@@ -500,6 +527,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
             onTap: () {
               setState(() {
                 _showUI = !_showUI;
+                if (_showUI) {
+                  _resetUiTimer();
+                }
               });
             },
             child: PageView.builder(
@@ -516,6 +546,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 }
                 _initializeVideoController(index);
                 _checkMotionPhoto(index);
+
+                if (_photos[index].asset.isVideo) {
+                  _startUiTimer();
+                } else {
+                  _uiTimer?.cancel();
+                }
+
                 if (index >= _photos.length - 5) {
                   _loadMore();
                 }
@@ -531,6 +568,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     controlsVisible: _showUI,
                     player: _player,
                     controller: _videoKitController,
+                    onUserInteraction: _resetUiTimer,
                   );
                 } else {
                   // Stack Logic: Photo is base, Video is overlay for Motion Photos

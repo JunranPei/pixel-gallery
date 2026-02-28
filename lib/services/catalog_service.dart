@@ -1,5 +1,4 @@
 import 'package:native_exif/native_exif.dart';
-import '../models/aves_entry.dart';
 import 'local_db.dart';
 import 'notification_service.dart';
 import 'media_service.dart';

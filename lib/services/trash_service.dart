@@ -113,6 +113,8 @@ class TrashService {
     return _trashedPathsSet.contains(path);
   }
 
+  Set<String> get trashedPathsSet => _trashedPathsSet;
+
   List<String> get trashedPaths =>
       _trashedItems.map((e) => e.trashPath).toList();
 
