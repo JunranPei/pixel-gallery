@@ -148,7 +148,13 @@ class RecentsScreenState extends State<RecentsScreen>
             ),
           )
           .toList();
-      _photos.sort((a, b) => b.timeTaken.compareTo(a.timeTaken));
+      _photos.sort((a, b) {
+        final c = (b.asset.bestDateMillis ?? 0).compareTo(
+          a.asset.bestDateMillis ?? 0,
+        );
+        if (c != 0) return c;
+        return (b.asset.contentId ?? 0).compareTo(a.asset.contentId ?? 0);
+      });
       _groupedItems = MediaService.groupPhotosByDate(_photos);
       _loading = false;
     });

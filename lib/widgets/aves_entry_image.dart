@@ -22,7 +22,7 @@ class AvesEntryImage extends StatelessWidget {
         width: extent,
         height: extent,
         fit: fit,
-        gaplessPlayback: true,
+        gaplessPlayback: false,
         frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
           if (wasSynchronouslyLoaded || frame != null) {
             return child;

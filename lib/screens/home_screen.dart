@@ -54,8 +54,10 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Refresh recents if needed
-      _recentsKey.currentState?.refresh();
+      // Refresh active tab if needed
+      if (_selectedIndex == 0) {
+        _recentsKey.currentState?.refresh();
+      }
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       _saveTopEntries();

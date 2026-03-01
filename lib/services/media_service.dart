@@ -149,6 +149,12 @@ class MediaService {
     // Add individual albums. They inherit the sorting order of the parent list.
     albumMap.forEach((path, folderEntries) {
       final name = path.split('/').last;
+      // Sort folder entries to ensure the first one is the latest (for thumbnails)
+      folderEntries.sort((a, b) {
+        final c = (b.bestDateMillis ?? 0).compareTo(a.bestDateMillis ?? 0);
+        if (c != 0) return c;
+        return (b.contentId ?? 0).compareTo(a.contentId ?? 0);
+      });
       albums.add(AlbumModel(id: path, name: name, entries: folderEntries));
     });
 
@@ -179,7 +185,8 @@ class MediaService {
         final db = await _db.database;
         final List<Map<String, dynamic>> maps = await db.query(
           LocalMediaDbSchema.entryTable,
-          orderBy: 'dateModifiedMillis DESC',
+          orderBy:
+              'COALESCE(NULLIF(sourceDateTakenMillis, 0), NULLIF(dateModifiedMillis, 0), dateAddedSecs * 1000, 0) DESC, contentId DESC',
           limit: 50,
         );
         fastPathEntries = maps.map((map) => AvesEntry.fromMap(map)).toList();
@@ -305,10 +312,11 @@ class MediaService {
           _allEntries.add(dbEntry);
         }
       }
-      _allEntries.sort(
-        (a, b) =>
-            (b.dateModifiedMillis ?? 0).compareTo(a.dateModifiedMillis ?? 0),
-      );
+      _allEntries.sort((a, b) {
+        final c = (b.bestDateMillis ?? 0).compareTo(a.bestDateMillis ?? 0);
+        if (c != 0) return c;
+        return (b.contentId ?? 0).compareTo(a.contentId ?? 0);
+      });
       _cachedAlbums = _groupEntries(_allEntries);
       _albumUpdateController.add(null);
     } else if (_allEntries.isEmpty) {
@@ -575,11 +583,12 @@ class MediaService {
 
     final mergedEntries = [...entryMap.values, ...otherEntries];
 
-    // Sort by date modified DESC
-    mergedEntries.sort(
-      (a, b) =>
-          (b.dateModifiedMillis ?? 0).compareTo(a.dateModifiedMillis ?? 0),
-    );
+    // Sort by best date DESC, then contentId DESC
+    mergedEntries.sort((a, b) {
+      final c = (b.bestDateMillis ?? 0).compareTo(a.bestDateMillis ?? 0);
+      if (c != 0) return c;
+      return (b.contentId ?? 0).compareTo(a.contentId ?? 0);
+    });
 
     final albums = groupEntriesStatic(mergedEntries, trashedPaths);
 

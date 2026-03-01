@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:lumina_gallery/services/trash_service.dart';
 import '../services/media_service.dart';
@@ -61,6 +62,8 @@ class _ViewerScreenState extends State<ViewerScreen> {
   final TrashService _trashService = TrashService();
   StreamSubscription? _updateSubscription;
   Timer? _uiTimer;
+
+  static const _platform = MethodChannel('com.pixel.gallery/open_file');
 
   Future<void> _loadMore() async {
     if (!widget.canLoadMore) return;
@@ -239,6 +242,25 @@ class _ViewerScreenState extends State<ViewerScreen> {
     }
   }
 
+  Future<void> _editPhoto(PhotoModel photo) async {
+    File? file = await photo.asset.file;
+    if (file != null) {
+      try {
+        await _platform.invokeMethod('editFile', {
+          'path': file.path,
+          'mimeType': photo.asset.sourceMimeType,
+        });
+      } on PlatformException catch (e) {
+        debugPrint("Error launching edit: $e");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Failed to launch editor")),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _setWallpaper(PhotoModel photo, int location) async {
     File? file = await photo.asset.file;
     if (file == null) return;
@@ -309,18 +331,18 @@ class _ViewerScreenState extends State<ViewerScreen> {
         ? "${(sizeBytes / (1024 * 1024)).toStringAsFixed(2)} MB"
         : "Unknown";
 
-    // Load metadata from database to get lat/long
     final db = LocalDatabase();
+    Map<String, dynamic>? dbMetadata;
     Map<String, dynamic>? location;
     if (asset.contentId != null) {
-      final metadata = await db.loadMetadataByIds([asset.contentId!]);
-      if (metadata.isNotEmpty) {
-        final latLongData = metadata[asset.contentId];
-        if (latLongData?['latitude'] != null &&
-            latLongData?['longitude'] != null) {
+      final metadataMap = await db.loadMetadataByIds([asset.contentId!]);
+      if (metadataMap.isNotEmpty) {
+        dbMetadata = metadataMap[asset.contentId];
+        if (dbMetadata?['latitude'] != null &&
+            dbMetadata?['longitude'] != null) {
           location = {
-            'latitude': latLongData!['latitude'] as double,
-            'longitude': latLongData['longitude'] as double,
+            'latitude': dbMetadata!['latitude'] as double,
+            'longitude': dbMetadata['longitude'] as double,
           };
         }
       }
@@ -377,25 +399,37 @@ class _ViewerScreenState extends State<ViewerScreen> {
                   leading: const Icon(Icons.calendar_today),
                   title: Text(DateFormat.yMMMd().format(photo.timeTaken)),
                 ),
-                if (exifData != null && exifData.isNotEmpty) ...[
+                if ((exifData != null && exifData.isNotEmpty) ||
+                    (dbMetadata != null &&
+                        (dbMetadata['make'] != null ||
+                            dbMetadata['model'] != null))) ...[
                   const SizedBox(height: 20),
                   const Text(
                     "Camera Info",
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 10),
-                  if (exifData['Model'] != null || exifData['Make'] != null)
+                  if (exifData?['Model'] != null ||
+                      exifData?['Make'] != null ||
+                      dbMetadata?['make'] != null ||
+                      dbMetadata?['model'] != null)
                     ListTile(
                       leading: const Icon(Icons.camera_alt),
                       title: Text(
-                        "${exifData['Make'] ?? ''} ${exifData['Model'] ?? ''}"
-                            .trim(),
+                        (exifData != null &&
+                                (exifData['Make'] != null ||
+                                    exifData['Model'] != null))
+                            ? "${exifData['Make'] ?? ''} ${exifData['Model'] ?? ''}"
+                                  .trim()
+                            : "${dbMetadata?['make'] ?? ''} ${dbMetadata?['model'] ?? ''}"
+                                  .trim(),
                       ),
                       subtitle: const Text("Camera"),
                     ),
-                  if (exifData['FNumber'] != null ||
-                      exifData['ExposureTime'] != null ||
-                      exifData['ISOSpeedRatings'] != null)
+                  if (exifData != null &&
+                      (exifData['FNumber'] != null ||
+                          exifData['ExposureTime'] != null ||
+                          exifData['ISOSpeedRatings'] != null))
                     ListTile(
                       leading: const Icon(Icons.camera),
                       title: Text(
@@ -640,9 +674,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                       if (value == 'wallpaper') {
                         _showWallpaperOptions(_photos[_currentIndex]);
                       } else if (value == 'edit') {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Editing coming soon")),
-                        );
+                        _editPhoto(_photos[_currentIndex]);
                       }
                     },
                     itemBuilder: (BuildContext context) =>

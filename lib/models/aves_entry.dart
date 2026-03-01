@@ -122,18 +122,21 @@ class AvesEntry {
   Future<File?> get file async => path != null ? File(path!) : null;
 
   DateTime? get bestDate {
-    final millis = (sourceDateTakenMillis != null && sourceDateTakenMillis! > 0)
+    final millis = bestDateMillis;
+    if (millis != null) {
+      return DateTime.fromMillisecondsSinceEpoch(millis);
+    }
+    return null;
+  }
+
+  int? get bestDateMillis {
+    return (sourceDateTakenMillis != null && sourceDateTakenMillis! > 0)
         ? sourceDateTakenMillis
         : (dateModifiedMillis != null && dateModifiedMillis! > 0)
         ? dateModifiedMillis
         : (dateAddedSecs != null && dateAddedSecs! > 0)
         ? dateAddedSecs! * 1000
         : null;
-
-    if (millis != null) {
-      return DateTime.fromMillisecondsSinceEpoch(millis);
-    }
-    return null;
   }
 
   static void normalizeMimeTypeFields(Map fields) {

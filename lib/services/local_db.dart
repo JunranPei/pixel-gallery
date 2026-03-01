@@ -25,7 +25,7 @@ class LocalDatabase {
 
     return await openDatabase(
       path,
-      version: 4, // New version with multi-table schema
+      version: 5, // v5: added make/model to metadata
       onCreate: (db, version) async {
         await LocalMediaDbSchema.createLatestVersion(db);
       },
@@ -61,7 +61,8 @@ class LocalDatabase {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       LocalMediaDbSchema.entryTable,
-      orderBy: 'dateModifiedMillis DESC',
+      orderBy:
+          'COALESCE(NULLIF(sourceDateTakenMillis, 0), NULLIF(dateModifiedMillis, 0), dateAddedSecs * 1000, 0) DESC, contentId DESC',
     );
     return maps.map((map) => AvesEntry.fromMap(map)).toList();
   }
@@ -71,7 +72,8 @@ class LocalDatabase {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       LocalMediaDbSchema.entryTable,
-      orderBy: 'dateModifiedMillis DESC',
+      orderBy:
+          'COALESCE(NULLIF(sourceDateTakenMillis, 0), NULLIF(dateModifiedMillis, 0), dateAddedSecs * 1000, 0) DESC, contentId DESC',
       limit: limit,
     );
     return maps.map((map) => AvesEntry.fromMap(map)).toList();
@@ -100,7 +102,7 @@ class LocalDatabase {
       WHERE contentId NOT IN (
         SELECT id FROM ${LocalMediaDbSchema.metadataTable}
       )
-      ORDER BY dateModifiedMillis DESC
+      ORDER BY COALESCE(NULLIF(sourceDateTakenMillis, 0), NULLIF(dateModifiedMillis, 0), dateAddedSecs * 1000, 0) DESC, contentId DESC
     ''');
 
     return maps.map((map) => AvesEntry.fromMap(map)).toList();
@@ -127,7 +129,8 @@ class LocalDatabase {
       LocalMediaDbSchema.entryTable,
       where: 'contentId IN ($placeholders)',
       whereArgs: contentIds,
-      orderBy: 'dateModifiedMillis DESC',
+      orderBy:
+          'COALESCE(NULLIF(sourceDateTakenMillis, 0), NULLIF(dateModifiedMillis, 0), dateAddedSecs * 1000, 0) DESC, contentId DESC',
     );
     return maps.map((map) => AvesEntry.fromMap(map)).toList();
   }
@@ -196,6 +199,8 @@ class LocalDatabase {
         'id': contentId,
         'latitude': metadata['latitude'],
         'longitude': metadata['longitude'],
+        'make': metadata['make'],
+        'model': metadata['model'],
         'xmpSubjects': metadata['xmpSubjects'],
         'xmpTitle': metadata['xmpTitle'],
         'rating': metadata['rating'],
@@ -227,7 +232,7 @@ class LocalDatabase {
     final List<Map<String, dynamic>> maps = await db.rawQuery('''
       SELECT e.* FROM ${LocalMediaDbSchema.entryTable} e
       INNER JOIN ${LocalMediaDbSchema.favouriteTable} f ON e.contentId = f.id
-      ORDER BY e.dateModifiedMillis DESC
+      ORDER BY COALESCE(NULLIF(e.sourceDateTakenMillis, 0), NULLIF(e.dateModifiedMillis, 0), e.dateAddedSecs * 1000, 0) DESC, e.contentId DESC
     ''');
     return maps.map((map) => AvesEntry.fromMap(map)).toList();
   }

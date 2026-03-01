@@ -52,6 +52,8 @@ class LocalMediaDbSchema {
             id INTEGER PRIMARY KEY,
             latitude REAL,
             longitude REAL,
+            make TEXT,
+            model TEXT,
             xmpSubjects TEXT,
             xmpTitle TEXT,
             rating INTEGER

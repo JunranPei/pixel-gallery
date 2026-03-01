@@ -12,6 +12,9 @@ class LocalMediaDbMigrations {
     if (oldVersion < 4 && newVersion >= 4) {
       await _migrateToV4(db);
     }
+    if (oldVersion < 5 && newVersion >= 5) {
+      await _migrateToV5(db);
+    }
   }
 
   /// Migration from v3 (single table) to v4 (multi-table schema)
@@ -89,5 +92,14 @@ class LocalMediaDbMigrations {
 
     // Step 5: Drop old backup table
     await db.execute('DROP TABLE IF EXISTS entries_old');
+  }
+
+  static Future<void> _migrateToV5(Database db) async {
+    await db.execute(
+      'ALTER TABLE ${LocalMediaDbSchema.metadataTable} ADD COLUMN make TEXT',
+    );
+    await db.execute(
+      'ALTER TABLE ${LocalMediaDbSchema.metadataTable} ADD COLUMN model TEXT',
+    );
   }
 }

@@ -1,6 +1,7 @@
 package com.pixel.gallery
 
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
@@ -33,6 +34,24 @@ class MainActivity : FlutterActivity() {
                     if (path != null) {
                         android.media.MediaScannerConnection.scanFile(this, arrayOf(path), null) { _, _ -> }
                         result.success(true)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "Path is null", null)
+                    }
+                }
+                "editFile" -> {
+                    val path = call.argument<String>("path")
+                    val mimeType = call.argument<String>("mimeType")
+                    if (path != null && mimeType != null) {
+                        editFile(path, mimeType)
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "Path or MIME type is null", null)
+                    }
+                }
+                "getVideoMetadata" -> {
+                    val path = call.argument<String>("path")
+                    if (path != null) {
+                        result.success(getVideoMetadata(path))
                     } else {
                         result.error("INVALID_ARGUMENT", "Path is null", null)
                     }
@@ -143,6 +162,36 @@ class MainActivity : FlutterActivity() {
                 handler.onDenied()
             }
         }
+    }
+
+    private fun editFile(path: String, mimeType: String) {
+        val file = File(path)
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this,
+            "${packageName}.fileprovider",
+            file
+        )
+        val intent = Intent(Intent.ACTION_EDIT).apply {
+            setDataAndType(uri, mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Edit with"))
+    }
+
+    private fun getVideoMetadata(path: String): Map<String, Any?> {
+        val retriever = MediaMetadataRetriever()
+        val metadata = mutableMapOf<String, Any?>()
+        try {
+            retriever.setDataSource(path)
+            metadata["location"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)
+            // Note: Extraction of Make/Model from video is less standard than EXIF.
+            // Some devices might store it in other keys or user data.
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error extracting video metadata: $e")
+        } finally {
+            retriever.release()
+        }
+        return metadata
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
