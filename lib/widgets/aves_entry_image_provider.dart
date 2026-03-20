@@ -64,9 +64,8 @@ class AvesEntryImageProvider extends ImageProvider<AvesEntryImageProviderKey> {
       if (file == null) {
         throw Exception('Failed to get file for AvesEntry: ${entry.uri}');
       }
-      final Uint8List bytes = await file.readAsBytes();
-      final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
-        bytes,
+      final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromFilePath(
+        file.path,
       );
       return decode(buffer);
     } catch (e) {

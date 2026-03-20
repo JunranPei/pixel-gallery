@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:lumina_gallery/screens/albums_screen.dart';
 import 'package:lumina_gallery/screens/recents_screen.dart';
 import 'package:lumina_gallery/screens/settings_screen.dart';
+import 'package:lumina_gallery/screens/hidden_albums_screen.dart';
 import 'package:lumina_gallery/services/settings_service.dart';
 import 'package:m3e_collection/m3e_collection.dart';
 import 'package:flutter_floating_bottom_bar/flutter_floating_bottom_bar.dart';
@@ -147,9 +148,40 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ]
           : [
-              IconButton(
-                icon: const Icon(Icons.settings),
-                onPressed: _openSettings,
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) {
+                  if (value == 'settings') {
+                    _openSettings();
+                  } else if (value == 'hidden_albums') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const HiddenAlbumsScreen(),
+                      ),
+                    );
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'settings',
+                    child: ListTile(
+                      leading: Icon(Icons.settings),
+                      title: Text('Settings'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'hidden_albums',
+                    child: ListTile(
+                      leading: Icon(Icons.visibility_off),
+                      title: Text('Hidden Albums'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
               ),
             ],
     );

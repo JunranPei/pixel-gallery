@@ -8,6 +8,7 @@ class SettingsService {
   static const String accentKey = 'material_you';
   static const String defaultPageKey = 'albums';
   static const String topEntryIdsKey = 'top_entry_ids';
+  static const String hiddenAlbumsKey = 'hidden_albums';
 
   SharedPreferences? _prefs;
 
@@ -35,5 +36,16 @@ class SettingsService {
       topEntryIdsKey,
       value.map((id) => id.toString()).toList(),
     );
+  }
+
+  // Hidden Albums
+  Set<String> get hiddenAlbums {
+    final list = _prefs?.getStringList(hiddenAlbumsKey);
+    if (list == null) return {};
+    return list.toSet();
+  }
+
+  Future<void> setHiddenAlbums(Set<String> value) async {
+    await _prefs?.setStringList(hiddenAlbumsKey, value.toList());
   }
 }

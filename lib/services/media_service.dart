@@ -53,6 +53,15 @@ class MediaService {
   // Clears the internal cache, useful when gallery changes are detected.
   void clearCache() {
     _cachedAlbums = null;
+    _fullLoadFuture = null;
+  }
+
+  // Force rebuild of albums in memory (e.g. after hiding an album)
+  void rebuildAlbums() {
+    if (_allEntries.isNotEmpty) {
+      _cachedAlbums = _groupEntries(_allEntries);
+      _albumUpdateController.add(null);
+    }
   }
 
   // Cache the permission future to handle concurrent requests
@@ -123,11 +132,20 @@ class MediaService {
     final albums = <AlbumModel>[];
 
     // Create "Recent" album
+    final hiddenAlbums = SettingsService().hiddenAlbums;
+    final recentEntries = filteredEntries.where((e) {
+      if (e.path == null) return true;
+      final lastSeparator = e.path!.lastIndexOf('/');
+      if (lastSeparator == -1) return true;
+      final parentPath = e.path!.substring(0, lastSeparator);
+      return !hiddenAlbums.contains(parentPath);
+    }).toList();
+
     albums.add(
       AlbumModel(
         id: 'recent',
         name: 'Recent',
-        entries: filteredEntries,
+        entries: recentEntries,
         isAll: true,
       ),
     );
@@ -421,8 +439,9 @@ class MediaService {
 
     if (paths.isEmpty) return [];
 
+    final hiddenAlbums = SettingsService().hiddenAlbums;
     final List<AlbumModel> filteredAlbums = paths
-        .where((a) => !a.isAll)
+        .where((a) => !a.isAll && !hiddenAlbums.contains(a.id))
         .toList();
 
     // Sort albums alphabetically by name
