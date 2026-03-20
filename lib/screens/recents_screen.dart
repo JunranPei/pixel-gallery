@@ -272,49 +272,59 @@ class RecentsScreenState extends State<RecentsScreen>
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: ListView.builder(
-              cacheExtent: 1500,
+            child: RawScrollbar(
               controller: _scrollController,
-              itemCount: _groupedItems.length,
-              itemBuilder: (context, index) {
-                final item = _groupedItems[index];
+              thumbVisibility: true,
+              interactive: true,
+              thickness: 8.0,
+              radius: const Radius.circular(4.0),
+              thumbColor: Theme.of(
+                context,
+              ).colorScheme.primary.withOpacity(0.5),
+              child: ListView.builder(
+                cacheExtent: 1500,
+                controller: _scrollController,
+                itemCount: _groupedItems.length,
+                itemBuilder: (context, index) {
+                  final item = _groupedItems[index];
 
-                if (item is String) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                    child: Text(
-                      item,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                  if (item is String) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
                       ),
-                    ),
-                  );
-                } else if (item is List<PhotoModel>) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 1.5),
-                    child: Row(
-                      children: [
-                        for (int i = 0; i < 4; i++)
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 1.5,
+                      child: Text(
+                        item,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    );
+                  } else if (item is List<PhotoModel>) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 1.5),
+                      child: Row(
+                        children: [
+                          for (int i = 0; i < 4; i++)
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 1.5,
+                                ),
+                                child: i < item.length
+                                    ? _buildPhotoItem(item[i])
+                                    : const SizedBox.shrink(),
                               ),
-                              child: i < item.length
-                                  ? _buildPhotoItem(item[i])
-                                  : const SizedBox.shrink(),
                             ),
-                          ),
-                      ],
-                    ),
-                  );
-                }
-                return const SizedBox.shrink();
-              },
+                        ],
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
             ),
           ),
         ),

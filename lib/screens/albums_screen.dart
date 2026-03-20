@@ -6,6 +6,7 @@ import '../widgets/aves_entry_image.dart';
 import 'photo_screen.dart';
 import 'recycle_bin_screen.dart';
 import 'favourites_screen.dart';
+import '../services/settings_service.dart';
 
 class AlbumsScreen extends StatefulWidget {
   const AlbumsScreen({super.key});
@@ -20,6 +21,7 @@ class _AlbumsScreenState extends State<AlbumsScreen> {
   final MediaService _service = MediaService();
   StreamSubscription? _albumSubscription;
   Timer? _debounceTimer;
+  final ScrollController _scrollController = ScrollController();
 
   // Initializes the screen: requests permissions and fetches all albums.
   Future<void> _init({bool silent = false}) async {
@@ -84,6 +86,7 @@ class _AlbumsScreenState extends State<AlbumsScreen> {
   void dispose() {
     _albumSubscription?.cancel();
     _debounceTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -93,77 +96,86 @@ class _AlbumsScreenState extends State<AlbumsScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return CustomScrollView(
-      slivers: [
-        // Buttons: Favourites and Bin
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(
-              left: 10,
-              right: 10,
-              top: 10,
-              bottom: 10,
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildHeaderButton(
-                        context,
-                        icon: Icons.star_outline,
-                        label: 'Favourites',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const FavouritesScreen(),
-                            ),
-                          );
-                        },
+    return RawScrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      interactive: true,
+      thickness: 8.0,
+      radius: const Radius.circular(4.0),
+      thumbColor: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+      child: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          // Buttons: Favourites and Bin
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(
+                left: 10,
+                right: 10,
+                top: 10,
+                bottom: 10,
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildHeaderButton(
+                          context,
+                          icon: Icons.star_outline,
+                          label: 'Favourites',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const FavouritesScreen(),
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildHeaderButton(
-                        context,
-                        icon: Icons.delete_outline,
-                        label: 'Bin',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const RecycleBinScreen(),
-                            ),
-                          );
-                        },
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildHeaderButton(
+                          context,
+                          icon: Icons.delete_outline,
+                          label: 'Bin',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const RecycleBinScreen(),
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
 
-        // Albums Grid
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 14,
-              childAspectRatio: 0.88,
+          // Albums Grid
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 14,
+                childAspectRatio: 0.88,
+              ),
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final album = _albums[index];
+                return _AlbumGridItem(album: album);
+              }, childCount: _albums.length),
             ),
-            delegate: SliverChildBuilderDelegate((context, index) {
-              final album = _albums[index];
-              return _AlbumGridItem(album: album);
-            }, childCount: _albums.length),
           ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 12)),
-      ],
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        ],
+      ),
     );
   }
 
@@ -207,9 +219,57 @@ class _AlbumGridItem extends StatelessWidget {
 
   const _AlbumGridItem({required this.album});
 
+  void _showOptions(BuildContext context) {
+    final hiddenAlbums = SettingsService().hiddenAlbums;
+    final isHidden = hiddenAlbums.contains(album.id);
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(
+                  isHidden ? Icons.visibility : Icons.visibility_off,
+                ),
+                title: Text(
+                  isHidden ? "Unhide from Recents" : "Hide from Recents",
+                ),
+                onTap: () async {
+                  Navigator.pop(context);
+                  if (isHidden) {
+                    hiddenAlbums.remove(album.id);
+                  } else {
+                    hiddenAlbums.add(album.id);
+                  }
+                  await SettingsService().setHiddenAlbums(hiddenAlbums);
+                  MediaService().rebuildAlbums();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          isHidden
+                              ? "Album unhidden from Recents"
+                              : "Album hidden from Recents",
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      onLongPress: () => _showOptions(context),
       onTap: () {
         Navigator.push(
           context,

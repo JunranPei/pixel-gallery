@@ -60,6 +60,49 @@ class TrashService {
     final initialCount = _trashedItems.length;
     _trashedItems.removeWhere((item) => !File(item.trashPath).existsSync());
 
+    // Recover orphaned files from .pixel_trash (e.g., after an app reinstall)
+    try {
+      final Directory internalTrashDir = Directory(
+        '/storage/emulated/0/.pixel_trash',
+      );
+      if (await internalTrashDir.exists()) {
+        final List<FileSystemEntity> entities = await internalTrashDir
+            .list()
+            .toList();
+        for (final entity in entities) {
+          if (entity is File) {
+            final fileName = path.basename(entity.path);
+
+            if (!_trashedItems.any((item) => item.trashPath == entity.path)) {
+              int? deletedMs;
+              final split = fileName.split('_');
+              if (split.length > 1) {
+                deletedMs = int.tryParse(split[0]);
+              }
+
+              final originalName = split.length > 1
+                  ? split.sublist(1).join('_')
+                  : fileName;
+              final fallbackOriginalPath =
+                  '/storage/emulated/0/LuminaRestored/$originalName';
+
+              _trashedItems.add(
+                TrashItem(
+                  trashPath: entity.path,
+                  originalPath: fallbackOriginalPath,
+                  dateDeletedMs:
+                      deletedMs ?? DateTime.now().millisecondsSinceEpoch,
+                ),
+              );
+              debugPrint('Recovered orphaned trash file: ${entity.path}');
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error recovering orphaned trash: $e');
+    }
+
     // Auto-empty: Remove items older than 30 days
     final now = DateTime.now().millisecondsSinceEpoch;
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds

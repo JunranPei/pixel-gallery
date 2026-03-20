@@ -140,6 +140,12 @@ class _MyAppState extends State<MyApp> {
             useMaterial3: true,
             colorScheme: lightScheme,
             switchTheme: _buildSwitchTheme(lightScheme),
+            pageTransitionsTheme: const PageTransitionsTheme(
+              builders: {
+                TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+                TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+              },
+            ),
           ),
 
           /// 🌙 DARK THEME
@@ -147,6 +153,12 @@ class _MyAppState extends State<MyApp> {
             useMaterial3: true,
             colorScheme: darkScheme,
             switchTheme: _buildSwitchTheme(darkScheme),
+            pageTransitionsTheme: const PageTransitionsTheme(
+              builders: {
+                TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+                TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+              },
+            ),
           ),
 
           home: _initialFilePath != null

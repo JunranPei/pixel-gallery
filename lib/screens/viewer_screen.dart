@@ -13,6 +13,7 @@ import '../widgets/aves_entry_image_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:photo_view/photo_view_gallery.dart';
 import 'video_screen.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -46,7 +47,6 @@ class _ViewerScreenState extends State<ViewerScreen> {
   int _currentIndex = 0;
   bool _showUI = true;
   late List<PhotoModel> _photos;
-  bool _isZoomed = false;
   Player? _player;
   VideoController? _videoKitController;
 
@@ -98,8 +98,15 @@ class _ViewerScreenState extends State<ViewerScreen> {
     try {
       final file = await photo.asset.file;
       if (file != null && await file.exists()) {
-        final player = Player();
-        final controller = VideoController(player);
+        final player = Player(
+          configuration: const PlayerConfiguration(
+            bufferSize: 64 * 1024 * 1024,
+          ),
+        );
+        final controller = VideoController(
+          player,
+          configuration: const VideoControllerConfiguration(hwdec: 'auto-safe'),
+        );
 
         await player.setVolume(100);
         await player.setPlaylistMode(PlaylistMode.loop);
@@ -566,11 +573,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 }
               });
             },
-            child: PageView.builder(
-              physics: _isZoomed
-                  ? const NeverScrollableScrollPhysics()
-                  : const PageScrollPhysics(),
-              controller: _controller,
+            child: PhotoViewGallery.builder(
+              scrollPhysics: const BouncingScrollPhysics(),
+              pageController: _controller,
               onPageChanged: (index) {
                 _stopVideo(); // Stop any playing motion video
                 if (mounted) {
@@ -592,51 +597,61 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 }
               },
               itemCount: _photos.length,
-              itemBuilder: (context, index) {
+              builder: (context, index) {
                 final photo = _photos[index];
 
-                final Widget content;
                 if (photo.asset.isVideo) {
-                  content = VideoScreen(
-                    asset: photo.asset,
-                    controlsVisible: _showUI,
-                    player: _player,
-                    controller: _videoKitController,
-                    onUserInteraction: _resetUiTimer,
+                  return PhotoViewGalleryPageOptions.customChild(
+                    child: VideoScreen(
+                      asset: photo.asset,
+                      controlsVisible: _showUI,
+                      player: _player,
+                      controller: _videoKitController,
+                      onUserInteraction: _resetUiTimer,
+                    ),
+                    initialScale: PhotoViewComputedScale.contained,
+                    minScale: PhotoViewComputedScale.contained,
+                    maxScale: PhotoViewComputedScale.contained,
+                    disableGestures: true,
                   );
                 } else {
-                  // Stack Logic: Photo is base, Video is overlay for Motion Photos
-                  content = Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      PhotoView(
-                        scaleStateChangedCallback: (state) {
-                          setState(() {
-                            _isZoomed = state != PhotoViewScaleState.initial;
-                          });
-                        },
-                        imageProvider: AvesEntryImageProvider(photo.asset),
-                        minScale: PhotoViewComputedScale.contained,
-                        maxScale: PhotoViewComputedScale.covered * 4,
-                        heroAttributes: PhotoViewHeroAttributes(
-                          tag: photo.asset.id,
-                        ),
-                      ),
-                      if (index == _currentIndex &&
-                          _isPlayingMotion &&
-                          _motionVideoController != null)
-                        Positioned.fill(
-                          child: Center(
-                            child: Video(
-                              controller: _motionVideoController!,
-                              controls: NoVideoControls,
+                  if (index == _currentIndex &&
+                      _isPlayingMotion &&
+                      _motionVideoController != null) {
+                    return PhotoViewGalleryPageOptions.customChild(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image(
+                            image: AvesEntryImageProvider(photo.asset),
+                            fit: BoxFit.contain,
+                          ),
+                          Positioned.fill(
+                            child: Center(
+                              child: Video(
+                                controller: _motionVideoController!,
+                                controls: NoVideoControls,
+                              ),
                             ),
                           ),
-                        ),
-                    ],
+                        ],
+                      ),
+                      initialScale: PhotoViewComputedScale.contained,
+                      minScale: PhotoViewComputedScale.contained,
+                      maxScale: PhotoViewComputedScale.contained,
+                      disableGestures: true,
+                    );
+                  }
+
+                  return PhotoViewGalleryPageOptions(
+                    imageProvider: AvesEntryImageProvider(photo.asset),
+                    minScale: PhotoViewComputedScale.contained,
+                    maxScale: PhotoViewComputedScale.covered * 4,
+                    heroAttributes: PhotoViewHeroAttributes(
+                      tag: photo.asset.id,
+                    ),
                   );
                 }
-                return content;
               },
             ),
           ),
