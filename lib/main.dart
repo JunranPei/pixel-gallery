@@ -8,6 +8,7 @@ import 'package:lumina_gallery/screens/single_viewer_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/settings_service.dart';
 import 'services/favourites_manager.dart';
+import 'services/locked_folder_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +16,9 @@ void main() async {
 
   // Initialize Settings
   await SettingsService().init();
+
+  // Initialize Locked Folder Service
+  await LockedFolderService().init();
 
   // Initialize Favourites Manager (loads favorites into memory)
   await favouritesManager.init();

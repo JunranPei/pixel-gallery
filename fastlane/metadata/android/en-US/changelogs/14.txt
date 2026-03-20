@@ -1,0 +1,3 @@
+- Added Locked Folder: Hide your private photos/videos behind biometric or screen-lock authentication. 
+- Added Hidden Albums: Hide albums from the main screen.
+- Added Scrollbar to all screens.

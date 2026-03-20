@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:lumina_gallery/services/trash_service.dart';
 import '../services/media_service.dart';
 import '../services/local_db.dart';
+import '../services/locked_folder_service.dart';
 import '../models/photo_model.dart';
 import '../models/album_model.dart';
 import '../models/extensions/favourites_extension.dart';
@@ -240,6 +241,31 @@ class _ViewerScreenState extends State<ViewerScreen> {
     }
 
     Navigator.pop(context);
+  }
+
+  Future<void> _toggleLock(PhotoModel photo) async {
+    final lockedService = LockedFolderService();
+    final isLocked = lockedService.isLocked(photo.asset.contentId);
+
+    if (isLocked) {
+      await lockedService.unlock(photo.asset);
+      _service.rebuildAlbums();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Removed from Locked Folder')),
+        );
+        setState(() {});
+      }
+    } else {
+      await lockedService.lock(photo.asset);
+      _service.rebuildAlbums();
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Moved to Locked Folder')));
+        Navigator.pop(context);
+      }
+    }
   }
 
   Future<void> _sharePhoto(PhotoModel photo) async {
@@ -690,19 +716,33 @@ class _ViewerScreenState extends State<ViewerScreen> {
                         _showWallpaperOptions(_photos[_currentIndex]);
                       } else if (value == 'edit') {
                         _editPhoto(_photos[_currentIndex]);
+                      } else if (value == 'lock') {
+                        _toggleLock(_photos[_currentIndex]);
                       }
                     },
-                    itemBuilder: (BuildContext context) =>
-                        <PopupMenuEntry<String>>[
-                          const PopupMenuItem<String>(
-                            value: 'wallpaper',
-                            child: Text('Set as wallpaper'),
+                    itemBuilder: (BuildContext context) {
+                      final isLocked = LockedFolderService().isLocked(
+                        _photos[_currentIndex].asset.contentId,
+                      );
+                      return <PopupMenuEntry<String>>[
+                        const PopupMenuItem<String>(
+                          value: 'wallpaper',
+                          child: Text('Set as wallpaper'),
+                        ),
+                        const PopupMenuItem<String>(
+                          value: 'edit',
+                          child: Text('Edit'),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'lock',
+                          child: Text(
+                            isLocked
+                                ? 'Remove from Locked Folder'
+                                : 'Move to Locked Folder',
                           ),
-                          const PopupMenuItem<String>(
-                            value: 'edit',
-                            child: Text('Edit'),
-                          ),
-                        ],
+                        ),
+                      ];
+                    },
                   ),
                 ],
               ),

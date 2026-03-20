@@ -13,6 +13,7 @@ import 'notification_service.dart';
 import 'catalog_service.dart';
 import 'trash_service.dart';
 import 'settings_service.dart';
+import 'locked_folder_service.dart';
 import 'db/db_schema.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'favourites_manager.dart';
@@ -120,11 +121,18 @@ class MediaService {
 
   static List<AlbumModel> groupEntriesStatic(
     List<AvesEntry> entries,
-    Set<String> trashedPaths,
-  ) {
-    // 1. Filter out entries in trash using O(1) set lookup
+    Set<String> trashedPaths, {
+    Set<int>? lockedIds,
+  }) {
+    // 1. Filter out entries in trash and locked folder using O(1) set lookup
+    final effectiveLockedIds = lockedIds ?? LockedFolderService().lockedIds;
     final filteredEntries = entries
-        .where((entry) => !trashedPaths.contains(entry.path))
+        .where(
+          (entry) =>
+              !trashedPaths.contains(entry.path) &&
+              !(entry.contentId != null &&
+                  effectiveLockedIds.contains(entry.contentId)),
+        )
         .toList();
 
     // Since entries from DB are already sorted by dateModifiedMillis DESC,
@@ -509,6 +517,22 @@ class MediaService {
         .toList();
   }
 
+  /// Returns photos that are in the locked folder.
+  Future<List<PhotoModel>> getLockedFolderMedia() async {
+    final lockedService = LockedFolderService();
+    final entries = await lockedService.getLockedEntries();
+    return entries
+        .map(
+          (entry) => PhotoModel(
+            uid: entry.id,
+            asset: entry,
+            timeTaken: entry.bestDate ?? DateTime.now(),
+            isVideo: entry.isVideo,
+          ),
+        )
+        .toList();
+  }
+
   Future<void> toggleFavorite(AvesEntry entry) async {
     if (entry.contentId == null) return;
 
@@ -609,7 +633,11 @@ class MediaService {
       return (b.contentId ?? 0).compareTo(a.contentId ?? 0);
     });
 
-    final albums = groupEntriesStatic(mergedEntries, trashedPaths);
+    final albums = groupEntriesStatic(
+      mergedEntries,
+      trashedPaths,
+      lockedIds: {},
+    );
 
     return {'allEntries': mergedEntries, 'cachedAlbums': albums};
   }

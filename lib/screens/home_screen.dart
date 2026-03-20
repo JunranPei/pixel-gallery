@@ -4,6 +4,7 @@ import 'package:lumina_gallery/screens/albums_screen.dart';
 import 'package:lumina_gallery/screens/recents_screen.dart';
 import 'package:lumina_gallery/screens/settings_screen.dart';
 import 'package:lumina_gallery/screens/hidden_albums_screen.dart';
+import 'package:lumina_gallery/screens/locked_folder_screen.dart';
 import 'package:lumina_gallery/services/settings_service.dart';
 import 'package:m3e_collection/m3e_collection.dart';
 import 'package:flutter_floating_bottom_bar/flutter_floating_bottom_bar.dart';
@@ -160,6 +161,13 @@ class _HomeScreenState extends State<HomeScreen>
                         builder: (_) => const HiddenAlbumsScreen(),
                       ),
                     );
+                  } else if (value == 'locked_folder') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const LockedFolderScreen(),
+                      ),
+                    );
                   }
                 },
                 itemBuilder: (context) => [
@@ -177,6 +185,15 @@ class _HomeScreenState extends State<HomeScreen>
                     child: ListTile(
                       leading: Icon(Icons.visibility_off),
                       title: Text('Hidden Albums'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'locked_folder',
+                    child: ListTile(
+                      leading: Icon(Icons.lock),
+                      title: Text('Locked Folder'),
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                     ),
