@@ -37,12 +37,7 @@ jobs:
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
 
       - name: Build APK
-        env:
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          STORE_FILE: upload-keystore.jks
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --debug
 
       - name: Upload APK to Release
         uses: softprops/action-gh-release@v2
