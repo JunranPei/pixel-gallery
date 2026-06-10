@@ -78,7 +78,8 @@ android {
             if (releaseConfig.storeFile != null && releaseConfig.storeFile!!.exists()) {
                 signingConfig = releaseConfig
             } else {
-                println("Release keystore not found at ${releaseConfig.storeFile}. Release build will be unsigned.")
+                signingConfig = signingConfigs.getByName("debug")
+                println("Release keystore not found at ${releaseConfig.storeFile}. Using debug signing config.")
             }
         }
         debug {

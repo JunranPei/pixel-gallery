@@ -34,6 +34,8 @@ class SettingsRepository @Inject constructor(
     private val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
     private val PHOTO_SORT_ORDER = stringPreferencesKey("photo_sort_order")
     private val ALBUM_SORT_ORDER = stringPreferencesKey("album_sort_order")
+    private val GLIDE_THREAD_COUNT = intPreferencesKey("glide_thread_count")
+    private val GLIDE_CACHE_SIZE = intPreferencesKey("glide_cache_size")
 
     val startupAtAlbums: Flow<Boolean> = context.dataStore.data
         .map { preferences -> preferences[STARTUP_AT_ALBUMS] ?: false }
@@ -120,6 +122,24 @@ class SettingsRepository @Inject constructor(
     suspend fun setAlbumSortOrder(value: String) {
         context.dataStore.edit { preferences ->
             preferences[ALBUM_SORT_ORDER] = value
+        }
+    }
+
+    val glideThreadCount: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[GLIDE_THREAD_COUNT] ?: 2 }
+
+    suspend fun setGlideThreadCount(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[GLIDE_THREAD_COUNT] = value
+        }
+    }
+
+    val glideCacheSize: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[GLIDE_CACHE_SIZE] ?: 250 }
+
+    suspend fun setGlideCacheSize(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[GLIDE_CACHE_SIZE] = value
         }
     }
 }

@@ -31,6 +31,7 @@ class MediaRepository @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) {
     private val gson = Gson()
+    private var lastSyncedGeneration = 0L
     val allEntries: Flow<List<MediaEntry>> = combine(
         mediaDao.getAllEntries(),
         settingsRepository.excludedFolders
@@ -240,6 +241,21 @@ class MediaRepository @Inject constructor(
 
     suspend fun syncWithMediaStore() = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
+        
+        // Optimize: Use Generation API (API 30+) to skip scan if nothing changed in MediaStore
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val currentGeneration = MediaStore.getGeneration(context, MediaStore.VOLUME_EXTERNAL)
+                if (lastSyncedGeneration > 0L && currentGeneration == lastSyncedGeneration) {
+                    android.util.Log.d("MediaRepository", "MediaStore generation unchanged ($currentGeneration). Skipping sync.")
+                    return@withContext
+                }
+                lastSyncedGeneration = currentGeneration
+            } catch (e: Exception) {
+                android.util.Log.e("MediaRepository", "Failed to check MediaStore generation", e)
+            }
+        }
+
         val knownEntries = mediaDao.getKnownEntries().associateBy { it.contentId }
         val newEntries = mutableListOf<MediaEntry>()
         val currentIds = mutableSetOf<Long>()
@@ -332,7 +348,8 @@ class MediaRepository @Inject constructor(
                 val id = cursor.getLong(idColumn)
                 currentIds.add(id)
                 val modified = cursor.getLong(modifiedColumn) * 1000
-                val path = cursor.getString(dataColumn)
+                val path = cursor.getString(dataColumn) ?: ""
+                val mimeType = cursor.getString(mimeColumn) ?: "image/jpeg"
 
                 // Also update if trashing status changed
                 val knownEntry = knownEntries[id]
@@ -346,7 +363,7 @@ class MediaRepository @Inject constructor(
                     
                     if (bestTime == 0L || isRecentlyAdded) { 
                         var foundExif = false
-                        if (cursor.getString(mimeColumn).startsWith("image/")) {
+                        if (mimeType.startsWith("image/") && path.isNotEmpty()) {
                             try {
                                 val exif = ExifInterface(path)
                                 val exifTime = exif.dateTime
@@ -357,12 +374,13 @@ class MediaRepository @Inject constructor(
                             } catch (e: Exception) { }
                         }
                         
-                        if (!foundExif) {
-                            // Fallback to actual file system time if MediaStore is too recent (e.g. after restore)
-                            val fileTime = java.io.File(path).lastModified()
-                            if (fileTime > 0 && (bestTime == 0L || fileTime < bestTime - 10000)) {
-                                bestTime = fileTime
-                            }
+                        if (!foundExif && path.isNotEmpty()) {
+                            try {
+                                val fileTime = java.io.File(path).lastModified()
+                                if (fileTime > 0 && (bestTime == 0L || fileTime < bestTime - 10000)) {
+                                    bestTime = fileTime
+                                }
+                            } catch (e: Exception) { }
                         }
                     }
 
@@ -373,7 +391,7 @@ class MediaRepository @Inject constructor(
                             contentId = id,
                             uri = uri.buildUpon().appendPath(id.toString()).toString(),
                             path = path,
-                            sourceMimeType = cursor.getString(mimeColumn),
+                            sourceMimeType = mimeType,
                             width = cursor.getInt(widthColumn),
                             height = cursor.getInt(heightColumn),
                             sourceRotationDegrees = cursor.getInt(rotationColumn),

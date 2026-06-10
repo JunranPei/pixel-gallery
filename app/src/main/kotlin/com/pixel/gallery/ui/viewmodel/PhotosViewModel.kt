@@ -134,6 +134,12 @@ class PhotosViewModel @Inject constructor(
     val materialYou: StateFlow<Boolean> = settingsRepository.materialYou
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val glideThreadCount: StateFlow<Int> = settingsRepository.glideThreadCount
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
+ 
+    val glideCacheSize: StateFlow<Int> = settingsRepository.glideCacheSize
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
+
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
 
@@ -192,6 +198,7 @@ class PhotosViewModel @Inject constructor(
     init {
         refresh()
         registerContentObserver()
+        observeGlideThreadCount()
     }
 
     private fun registerContentObserver() {
@@ -304,6 +311,18 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
+    fun setGlideThreadCount(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setGlideThreadCount(value)
+        }
+    }
+ 
+    fun setGlideCacheSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setGlideCacheSize(value)
+        }
+    }
+
     fun addExcludedFolder(path: String) {
         viewModelScope.launch {
             settingsRepository.addExcludedFolder(path)
@@ -349,6 +368,18 @@ class PhotosViewModel @Inject constructor(
     fun setAlbumSortOrder(order: AlbumSortOrder) {
         viewModelScope.launch {
             settingsRepository.setAlbumSortOrder(order.name)
+        }
+    }
+
+    private fun observeGlideThreadCount() {
+        viewModelScope.launch {
+            settingsRepository.glideThreadCount.collect { threads ->
+                try {
+                    com.pixel.gallery.glide.AvesAppGlideModule.updateThreadCount(threads)
+                } catch (e: Exception) {
+                    android.util.Log.e("PhotosViewModel", "Failed to update Glide thread count", e)
+                }
+            }
         }
     }
 }

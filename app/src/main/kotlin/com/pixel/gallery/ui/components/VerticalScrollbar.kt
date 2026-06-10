@@ -85,7 +85,7 @@ fun VerticalScrollbar(
         modifier = modifier
             .fillMaxHeight()
             .width(32.dp)
-            .alpha(alpha)
+            .graphicsLayer { this.alpha = alpha }
             .onSizeChanged { containerHeightPx = it.height.toFloat() }
     ) {
         Box(
