@@ -17,6 +17,17 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.filled.Sort
+import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
+import com.pixel.gallery.ui.components.SortDialog
+import com.pixel.gallery.ui.components.SortCriterion
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,13 +43,23 @@ fun PhotoScreen(
 ) {
     val allPhotos by viewModel.allPhotos.collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
+    val photoSortOrder by viewModel.photoSortOrder.collectAsState()
+    var showSortDialog by remember { mutableStateOf(false) }
     
-    val albumItems = remember(allPhotos, albumName, gridColumns) {
+    val albumItems = remember(allPhotos, albumName, gridColumns, photoSortOrder) {
         val filtered = allPhotos.filter { 
             val file = java.io.File(it.path)
             file.parentFile?.name == albumName
         }
-        viewModel.groupMedia(filtered, gridColumns)
+        val sorted = when (photoSortOrder) {
+            PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
+            PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
+            PhotoSortOrder.NAME_ASC -> filtered.sortedBy { java.io.File(it.path).name }
+            PhotoSortOrder.NAME_DESC -> filtered.sortedByDescending { java.io.File(it.path).name }
+            PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
+            PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
+        }
+        viewModel.groupMedia(sorted, gridColumns, photoSortOrder)
     }
 
     val photoCount = remember(albumItems) {
@@ -52,8 +73,9 @@ fun PhotoScreen(
         }?.let { java.io.File(it.path).parent } ?: ""
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0),
         topBar = {
             if (selectedIds.isEmpty()) {
                 TopAppBar(
@@ -84,6 +106,14 @@ fun PhotoScreen(
                             onDismissRequest = { showMenu = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text("Sort Photos") },
+                                onClick = {
+                                    showMenu = false
+                                    showSortDialog = true
+                                },
+                                leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Hide Album") },
                                 onClick = {
                                     showMenu = false
@@ -112,6 +142,8 @@ fun PhotoScreen(
         }
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
+
+
             PhotosScreen(
                 items = albumItems,
                 onNavigateToViewer = onNavigateToViewer,
@@ -121,6 +153,44 @@ fun PhotoScreen(
                 columns = gridColumns,
                 onColumnsChange = { viewModel.setGridColumns(it) },
                 state = gridState
+            )
+        }
+    }
+
+    val photoCriteria = remember {
+            listOf(
+                SortCriterion("DATE", "Date", "Oldest first", "Newest first"),
+                SortCriterion("NAME", "Name", "A to Z", "Z to A"),
+                SortCriterion("SIZE", "Size", "Smallest first", "Largest first")
+            )
+        }
+
+        AnimatedVisibility(
+            visible = showSortDialog,
+            enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
+        ) {
+            val currentCriterion = when (photoSortOrder) {
+                PhotoSortOrder.DATE_DESC, PhotoSortOrder.DATE_ASC -> "DATE"
+                PhotoSortOrder.NAME_DESC, PhotoSortOrder.NAME_ASC -> "NAME"
+                PhotoSortOrder.SIZE_DESC, PhotoSortOrder.SIZE_ASC -> "SIZE"
+            }
+            val currentDirection = when (photoSortOrder) {
+                PhotoSortOrder.DATE_DESC, PhotoSortOrder.NAME_DESC, PhotoSortOrder.SIZE_DESC -> "DESC"
+                PhotoSortOrder.DATE_ASC, PhotoSortOrder.NAME_ASC, PhotoSortOrder.SIZE_ASC -> "ASC"
+            }
+            SortDialog(
+                visible = showSortDialog,
+                onDismissRequest = { showSortDialog = false },
+                title = "Sort Photos By",
+                criteria = photoCriteria,
+                initialCriterion = currentCriterion,
+                initialDirection = currentDirection,
+                onConfirm = { criterion, direction ->
+                    val newOrder = PhotoSortOrder.valueOf("${criterion}_${direction}")
+                    viewModel.setPhotoSortOrder(newOrder)
+                    showSortDialog = false
+                }
             )
         }
     }

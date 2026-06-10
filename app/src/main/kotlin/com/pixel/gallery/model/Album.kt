@@ -4,5 +4,6 @@ data class Album(
     val name: String,
     val path: String,
     val coverUri: String,
-    val itemCount: Int
+    val itemCount: Int,
+    val lastModified: Long = 0L
 )

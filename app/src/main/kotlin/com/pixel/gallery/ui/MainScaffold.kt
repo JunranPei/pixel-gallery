@@ -43,6 +43,17 @@ import androidx.compose.material.icons.outlined.LockOpen
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
+import androidx.compose.material.icons.filled.Sort
+import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
+import com.pixel.gallery.ui.viewmodel.AlbumSortOrder
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
+import com.pixel.gallery.ui.components.SortDialog
+import com.pixel.gallery.ui.components.SortCriterion
 
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
@@ -90,7 +101,14 @@ fun MainScaffold(
     val groupedVault by photosViewModel.groupedVaultEntries.collectAsState()
     val albums by photosViewModel.albums.collectAsState()
     val gridColumns by photosViewModel.gridColumns.collectAsState()
+    val albumGridColumns by photosViewModel.albumGridColumns.collectAsState()
     val externalMedia by photosViewModel.externalMedia.collectAsState()
+    
+    val photoSortOrder by photosViewModel.photoSortOrder.collectAsState()
+    val albumSortOrder by photosViewModel.albumSortOrder.collectAsState()
+    
+    var showPhotoSortDialog by remember { mutableStateOf(false) }
+    var showAlbumSortDialog by remember { mutableStateOf(false) }
     
     // Simple navigation stack
     var navigationStack by rememberSaveable { mutableStateOf(listOf<Screen>(Screen.Home)) }
@@ -177,9 +195,10 @@ fun MainScaffold(
         (allPhotos + trash + vault).filter { selectedIds.contains(it.contentId) }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0), // Manual padding for full control
-        modifier = Modifier.nestedScroll(scrollBehavior),
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0), // Manual padding for full control
+            modifier = Modifier.nestedScroll(scrollBehavior),
         topBar = {
             if (selectedIds.isNotEmpty()) {
                 // Contextual Top Bar for Selection
@@ -257,6 +276,25 @@ fun MainScaffold(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
+                            if (homePagerState.currentPage == 0) {
+                                DropdownMenuItem(
+                                    text = { Text("Sort Photos") },
+                                    onClick = { 
+                                        showMenu = false
+                                        showPhotoSortDialog = true 
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("Sort Albums") },
+                                    onClick = { 
+                                        showMenu = false
+                                        showAlbumSortDialog = true 
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Hidden Albums") },
                                 onClick = { 
@@ -325,7 +363,9 @@ fun MainScaffold(
                                 onNavigateToTrash = { navigationStack = navigationStack + Screen.Trash },
                                 onNavigateToAlbum = { name -> navigationStack = navigationStack + Screen.Photo(name) },
                                 onExclude = { path -> photosViewModel.addExcludedFolder(path) },
-                                onHide = { path -> photosViewModel.addHiddenFolder(path) }
+                                onHide = { path -> photosViewModel.addHiddenFolder(path) },
+                                columns = albumGridColumns,
+                                onColumnsChange = { photosViewModel.setAlbumGridColumns(it) }
                             )
                         }
                     }
@@ -420,6 +460,8 @@ fun MainScaffold(
                 }
             }
 
+
+
             // Only show the floating bar on the Home screen
             if (currentScreen == Screen.Home) {
                 HorizontalFloatingToolbar(
@@ -475,6 +517,82 @@ fun MainScaffold(
                     }
                 )
             }
+        }
+    }
+
+    // Custom sort dialog overlays
+        val photoCriteria = remember {
+            listOf(
+                SortCriterion("DATE", "Date", "Oldest first", "Newest first"),
+                SortCriterion("NAME", "Name", "A to Z", "Z to A"),
+                SortCriterion("SIZE", "Size", "Smallest first", "Largest first")
+            )
+        }
+        
+        val albumCriteria = remember {
+            listOf(
+                SortCriterion("NAME", "Name", "A to Z", "Z to A"),
+                SortCriterion("COUNT", "Count", "Least first", "Most first"),
+                SortCriterion("DATE", "Date", "Oldest first", "Newest first")
+            )
+        }
+
+        AnimatedVisibility(
+            visible = showPhotoSortDialog,
+            enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
+        ) {
+            val currentCriterion = when (photoSortOrder) {
+                PhotoSortOrder.DATE_DESC, PhotoSortOrder.DATE_ASC -> "DATE"
+                PhotoSortOrder.NAME_DESC, PhotoSortOrder.NAME_ASC -> "NAME"
+                PhotoSortOrder.SIZE_DESC, PhotoSortOrder.SIZE_ASC -> "SIZE"
+            }
+            val currentDirection = when (photoSortOrder) {
+                PhotoSortOrder.DATE_DESC, PhotoSortOrder.NAME_DESC, PhotoSortOrder.SIZE_DESC -> "DESC"
+                PhotoSortOrder.DATE_ASC, PhotoSortOrder.NAME_ASC, PhotoSortOrder.SIZE_ASC -> "ASC"
+            }
+            SortDialog(
+                visible = showPhotoSortDialog,
+                onDismissRequest = { showPhotoSortDialog = false },
+                title = "Sort Photos By",
+                criteria = photoCriteria,
+                initialCriterion = currentCriterion,
+                initialDirection = currentDirection,
+                onConfirm = { criterion, direction ->
+                    val newOrder = PhotoSortOrder.valueOf("${criterion}_${direction}")
+                    photosViewModel.setPhotoSortOrder(newOrder)
+                    showPhotoSortDialog = false
+                }
+            )
+        }
+
+        AnimatedVisibility(
+            visible = showAlbumSortDialog,
+            enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
+        ) {
+            val currentCriterion = when (albumSortOrder) {
+                AlbumSortOrder.NAME_ASC, AlbumSortOrder.NAME_DESC -> "NAME"
+                AlbumSortOrder.COUNT_DESC, AlbumSortOrder.COUNT_ASC -> "COUNT"
+                AlbumSortOrder.DATE_DESC, AlbumSortOrder.DATE_ASC -> "DATE"
+            }
+            val currentDirection = when (albumSortOrder) {
+                AlbumSortOrder.NAME_DESC, AlbumSortOrder.COUNT_DESC, AlbumSortOrder.DATE_DESC -> "DESC"
+                AlbumSortOrder.NAME_ASC, AlbumSortOrder.COUNT_ASC, AlbumSortOrder.DATE_ASC -> "ASC"
+            }
+            SortDialog(
+                visible = showAlbumSortDialog,
+                onDismissRequest = { showAlbumSortDialog = false },
+                title = "Sort Albums By",
+                criteria = albumCriteria,
+                initialCriterion = currentCriterion,
+                initialDirection = currentDirection,
+                onConfirm = { criterion, direction ->
+                    val newOrder = AlbumSortOrder.valueOf("${criterion}_${direction}")
+                    photosViewModel.setAlbumSortOrder(newOrder)
+                    showAlbumSortDialog = false
+                }
+            )
         }
     }
 }

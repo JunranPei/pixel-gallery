@@ -310,13 +310,22 @@ fun AlbumsScreen(
     onNavigateToTrash: () -> Unit,
     onNavigateToAlbum: (String) -> Unit,
     onExclude: (String) -> Unit = {},
-    onHide: (String) -> Unit = {}
+    onHide: (String) -> Unit = {},
+    columns: Int = 2,
+    onColumnsChange: (Int) -> Unit = {}
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+            columns = GridCells.Fixed(columns),
             state = gridState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .pinchToZoomColumns(
+                    currentColumns = columns,
+                    onColumnsChange = onColumnsChange,
+                    minColumns = 1,
+                    maxColumns = 4
+                ),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 top = 16.dp,
@@ -327,7 +336,7 @@ fun AlbumsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header Buttons: Favourites and Bin
-            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columns) }) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
