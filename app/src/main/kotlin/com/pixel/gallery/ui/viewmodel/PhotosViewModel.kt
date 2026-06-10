@@ -47,25 +47,43 @@ class PhotosViewModel @Inject constructor(
     val hiddenFolders: StateFlow<Set<String>> = settingsRepository.hiddenFolders
         .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
 
+    val photoSortOrder: StateFlow<PhotoSortOrder> = settingsRepository.photoSortOrder
+        .map { runCatching { PhotoSortOrder.valueOf(it) }.getOrDefault(PhotoSortOrder.DATE_DESC) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PhotoSortOrder.DATE_DESC)
+
+    val albumSortOrder: StateFlow<AlbumSortOrder> = settingsRepository.albumSortOrder
+        .map { runCatching { AlbumSortOrder.valueOf(it) }.getOrDefault(AlbumSortOrder.NAME_ASC) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AlbumSortOrder.NAME_ASC)
+
     val photos: StateFlow<List<MediaEntry>> = combine(
         allPhotos,
-        hiddenFolders
-    ) { all, hidden ->
-        all.filter { entry ->
+        hiddenFolders,
+        photoSortOrder
+    ) { all, hidden, sort ->
+        val filtered = all.filter { entry ->
             !hidden.any { entry.path.startsWith(it) }
+        }
+        when (sort) {
+            PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
+            PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
+            PhotoSortOrder.NAME_ASC -> filtered.sortedBy { java.io.File(it.path).name }
+            PhotoSortOrder.NAME_DESC -> filtered.sortedByDescending { java.io.File(it.path).name }
+            PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
+            PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
         }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    fun groupMedia(entries: List<MediaEntry>, columns: Int = 3): List<GridItem> {
+    fun groupMedia(entries: List<MediaEntry>, columns: Int = 3, sortOrder: PhotoSortOrder = PhotoSortOrder.DATE_DESC): List<GridItem> {
+        if (sortOrder != PhotoSortOrder.DATE_DESC && sortOrder != PhotoSortOrder.DATE_ASC) {
+            return entries.map { GridItem.Photo(it) }
+        }
         val items = mutableListOf<GridItem>()
         var lastHeader = ""
-        // Use monthly grouping if columns are 6 or more
         val format = if (columns >= 6) "MMMM yyyy" else "MMMM d, yyyy"
         val sdf = java.text.SimpleDateFormat(format, java.util.Locale.getDefault())
         
         entries.forEach { entry ->
             val timestamp = entry.bestTimestamp
-            
             val date = java.util.Date(timestamp)
             val header = sdf.format(date)
             if (header != lastHeader) {
@@ -80,15 +98,18 @@ class PhotosViewModel @Inject constructor(
     val gridColumns: StateFlow<Int> = settingsRepository.gridColumns
         .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
 
-    val groupedPhotos: StateFlow<List<GridItem>> = combine(photos, gridColumns) { media, cols ->
-        groupMedia(media, cols)
+    val albumGridColumns: StateFlow<Int> = settingsRepository.albumGridColumns
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
+
+    val groupedPhotos: StateFlow<List<GridItem>> = combine(photos, gridColumns, photoSortOrder) { media, cols, sort ->
+        groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val favourites: StateFlow<List<MediaEntry>> = repository.favourites
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, gridColumns) { media, cols ->
-        groupMedia(media, cols)
+    val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, gridColumns, photoSortOrder) { media, cols, sort ->
+        groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val trashedMedia: StateFlow<List<MediaEntry>> = repository.trash
@@ -96,15 +117,15 @@ class PhotosViewModel @Inject constructor(
         .map { it.toList() } // Compatibility
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns) { media, cols ->
-        groupMedia(media, cols)
+    val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, photoSortOrder) { media, cols, sort ->
+        groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val vaultEntries: StateFlow<List<MediaEntry>> = repository.vaultEntries
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, gridColumns) { media, cols ->
-        groupMedia(media, cols)
+    val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, gridColumns, photoSortOrder) { media, cols, sort ->
+        groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val startupAtAlbums: StateFlow<Boolean> = settingsRepository.startupAtAlbums
@@ -117,24 +138,35 @@ class PhotosViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
 
 
-    val albums: StateFlow<List<Album>> = photos
-        .map { photos ->
-            photos.groupBy { 
-                val file = java.io.File(it.path)
-                file.parentFile?.name ?: "Unknown"
-            }.map { (name, entries) ->
-                val firstEntry = entries.first()
-                val parentPath = java.io.File(firstEntry.path).parent ?: ""
-                Album(name, parentPath, firstEntry.uri, entries.size)
-            }.sortedBy { it.name }
+    val albums: StateFlow<List<Album>> = combine(
+        photos,
+        albumSortOrder
+    ) { photosList, sort ->
+        val grouped = photosList.groupBy { 
+            val file = java.io.File(it.path)
+            file.parentFile?.name ?: "Unknown"
+        }.map { (name, entries) ->
+            val firstEntry = entries.first()
+            val parentPath = java.io.File(firstEntry.path).parent ?: ""
+            val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
+            Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        when (sort) {
+            AlbumSortOrder.NAME_ASC -> grouped.sortedBy { it.name }
+            AlbumSortOrder.NAME_DESC -> grouped.sortedByDescending { it.name }
+            AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
+            AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
+            AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
+            AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
-        hiddenFolders
-    ) { all, hidden ->
-        all.filter { entry ->
+        hiddenFolders,
+        albumSortOrder
+    ) { all, hidden, sort ->
+        val grouped = all.filter { entry ->
             hidden.any { entry.path.startsWith(it) }
         }.groupBy { 
             val file = java.io.File(it.path)
@@ -142,8 +174,17 @@ class PhotosViewModel @Inject constructor(
         }.map { (name, entries) ->
             val firstEntry = entries.first()
             val parentPath = java.io.File(firstEntry.path).parent ?: ""
-            Album(name, parentPath, firstEntry.uri, entries.size)
-        }.sortedBy { it.name }
+            val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
+            Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
+        }
+        when (sort) {
+            AlbumSortOrder.NAME_ASC -> grouped.sortedBy { it.name }
+            AlbumSortOrder.NAME_DESC -> grouped.sortedByDescending { it.name }
+            AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
+            AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
+            AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
+            AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
+        }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private var contentObserver: android.database.ContentObserver? = null
@@ -292,4 +333,40 @@ class PhotosViewModel @Inject constructor(
             settingsRepository.setGridColumns(value)
         }
     }
+
+    fun setAlbumGridColumns(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setAlbumGridColumns(value)
+        }
+    }
+
+    fun setPhotoSortOrder(order: PhotoSortOrder) {
+        viewModelScope.launch {
+            settingsRepository.setPhotoSortOrder(order.name)
+        }
+    }
+
+    fun setAlbumSortOrder(order: AlbumSortOrder) {
+        viewModelScope.launch {
+            settingsRepository.setAlbumSortOrder(order.name)
+        }
+    }
+}
+
+enum class PhotoSortOrder {
+    DATE_DESC,
+    DATE_ASC,
+    NAME_ASC,
+    NAME_DESC,
+    SIZE_DESC,
+    SIZE_ASC
+}
+
+enum class AlbumSortOrder {
+    NAME_ASC,
+    NAME_DESC,
+    COUNT_DESC,
+    COUNT_ASC,
+    DATE_DESC,
+    DATE_ASC
 }

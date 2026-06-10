@@ -31,6 +31,9 @@ class SettingsRepository @Inject constructor(
     private val EXCLUDED_FOLDERS = stringSetPreferencesKey("excluded_folders")
     private val HIDDEN_FOLDERS = stringSetPreferencesKey("hidden_folders")
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
+    private val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
+    private val PHOTO_SORT_ORDER = stringPreferencesKey("photo_sort_order")
+    private val ALBUM_SORT_ORDER = stringPreferencesKey("album_sort_order")
 
     val startupAtAlbums: Flow<Boolean> = context.dataStore.data
         .map { preferences -> preferences[STARTUP_AT_ALBUMS] ?: false }
@@ -90,6 +93,33 @@ class SettingsRepository @Inject constructor(
     suspend fun setGridColumns(value: Int) {
         context.dataStore.edit { preferences ->
             preferences[GRID_COLUMNS] = value
+        }
+    }
+
+    val albumGridColumns: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[ALBUM_GRID_COLUMNS] ?: 2 }
+
+    suspend fun setAlbumGridColumns(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[ALBUM_GRID_COLUMNS] = value
+        }
+    }
+
+    val photoSortOrder: Flow<String> = context.dataStore.data
+        .map { preferences -> preferences[PHOTO_SORT_ORDER] ?: "DATE_DESC" }
+
+    suspend fun setPhotoSortOrder(value: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PHOTO_SORT_ORDER] = value
+        }
+    }
+
+    val albumSortOrder: Flow<String> = context.dataStore.data
+        .map { preferences -> preferences[ALBUM_SORT_ORDER] ?: "NAME_ASC" }
+
+    suspend fun setAlbumSortOrder(value: String) {
+        context.dataStore.edit { preferences ->
+            preferences[ALBUM_SORT_ORDER] = value
         }
     }
 }

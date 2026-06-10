@@ -182,8 +182,23 @@ dependencies {
     implementation("me.saket.telephoto:zoomable-image-glide:0.14.0")
     
     // Other formats
-    implementation("com.github.deckerst:androidsvg:c7e58e8e59")
-    implementation("com.github.deckerst:Android-TiffBitmapFactory:424b18a4ae")
+    val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")
+    if (tiffFile.exists()) {
+        implementation(files(tiffFile))
+    } else {
+        implementation("com.github.deckerst:Android-TiffBitmapFactory:424b18a4ae")
+    }
+
+    val svgFile = file("libs/androidsvg-c7e58e8e59.aar")
+    val svgJarFile = file("libs/androidsvg-c7e58e8e59.jar")
+    if (svgFile.exists()) {
+        implementation(files(svgFile))
+    } else if (svgJarFile.exists()) {
+        implementation(files(svgJarFile))
+    } else {
+        implementation("com.github.deckerst:androidsvg:c7e58e8e59")
+    }
+
     implementation("org.osmdroid:osmdroid-android:6.1.18")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
