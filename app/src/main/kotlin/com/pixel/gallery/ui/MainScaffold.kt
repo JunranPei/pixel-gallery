@@ -239,7 +239,7 @@ fun MainScaffold(
                             }
                             IconButton(onClick = { 
                                 val uris = selectedEntries.map { 
-                                    FileProvider.getUriForFile(context, "com.pixel.gallery.fileprovider", java.io.File(it.path))
+                                    FileProvider.getUriForFile(context, context.packageName + ".fileprovider", java.io.File(it.path))
                                 }
                                 val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
                                     type = "*/*" // Could be more specific if all are same type
