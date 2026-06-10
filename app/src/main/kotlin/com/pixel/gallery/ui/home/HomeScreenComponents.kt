@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import com.pixel.gallery.ui.utils.photoGridDragSelect
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
+import androidx.compose.ui.text.font.FontWeight
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
@@ -366,7 +367,8 @@ fun AlbumsScreen(
                     album = albums[index],
                     onClick = { onNavigateToAlbum(albums[index].name) },
                     onExclude = { onExclude(albums[index].path) },
-                    onHide = { onHide(albums[index].path) }
+                    onHide = { onHide(albums[index].path) },
+                    columns = columns
                 )
             }
         }
@@ -386,9 +388,30 @@ fun AlbumCard(
     album: Album,
     onClick: () -> Unit,
     onExclude: () -> Unit,
-    onHide: () -> Unit
+    onHide: () -> Unit,
+    columns: Int = 2
 ) {
     var showMenu by remember { mutableStateOf(false) }
+
+    val titleStyle = when (columns) {
+        1 -> EmphasizedTypography.TitleLarge
+        2 -> EmphasizedTypography.TitleLarge
+        3 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+        else -> EmphasizedTypography.LabelLarge
+    }
+
+    val subtitleStyle = when (columns) {
+        1 -> MaterialTheme.typography.bodyMedium
+        2 -> MaterialTheme.typography.bodyMedium
+        3 -> MaterialTheme.typography.bodySmall
+        else -> MaterialTheme.typography.labelSmall
+    }
+
+    val spacerHeight = when (columns) {
+        1, 2 -> 12.dp
+        3 -> 8.dp
+        else -> 6.dp
+    }
 
     Column(
         modifier = Modifier.combinedClickable(
@@ -414,17 +437,17 @@ fun AlbumCard(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(spacerHeight))
         Text(
             text = album.name,
-            style = EmphasizedTypography.TitleLarge, // M3E Emphasized
+            style = titleStyle,
             modifier = Modifier.padding(start = 4.dp)
         )
         Text(
             text = "${album.itemCount} items",
-            style = MaterialTheme.typography.bodyMedium,
+            style = subtitleStyle,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            modifier = Modifier.padding(start = 4.dp, top = if (columns <= 2) 2.dp else 0.dp)
         )
 
         DropdownMenu(

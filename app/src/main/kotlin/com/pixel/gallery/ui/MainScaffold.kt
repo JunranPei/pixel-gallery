@@ -404,36 +404,38 @@ fun MainScaffold(
                 )
                 is Screen.Viewer -> {
                     val viewer = currentScreen as Screen.Viewer
-                    val photosForViewer = when (viewer.source) {
-                        Screen.ViewerSource.All -> allPhotos
-                        Screen.ViewerSource.Favourites -> favourites
-                        Screen.ViewerSource.Trash -> trash
-                        Screen.ViewerSource.Vault -> vault
-                        Screen.ViewerSource.Album -> {
-                            allPhotos.filter { 
-                                val file = java.io.File(it.path)
-                                file.parentFile?.name == viewer.albumName
+                    val photosForViewer = remember(viewer, allPhotos, favourites, trash, vault) {
+                        when (viewer.source) {
+                            Screen.ViewerSource.All -> allPhotos
+                            Screen.ViewerSource.Favourites -> favourites
+                            Screen.ViewerSource.Trash -> trash
+                            Screen.ViewerSource.Vault -> vault
+                            Screen.ViewerSource.Album -> {
+                                allPhotos.filter { 
+                                    val file = java.io.File(it.path)
+                                    file.parentFile?.name == viewer.albumName
+                                }
                             }
-                        }
-                        Screen.ViewerSource.External -> {
-                            val uri = viewer.externalUri ?: ""
-                            val mimeType = viewer.externalMimeType ?: "image/*"
-                            listOf(
-                                com.pixel.gallery.data.local.entity.MediaEntry(
-                                    contentId = -1L,
-                                    path = uri,
-                                    uri = uri,
-                                    sourceMimeType = mimeType,
-                                    width = 0,
-                                    height = 0,
-                                    sourceRotationDegrees = 0,
-                                    sizeBytes = 0,
-                                    dateAddedSecs = 0,
-                                    dateModifiedMillis = 0,
-                                    isTrashed = false,
-                                    bestTimestamp = 0L
+                            Screen.ViewerSource.External -> {
+                                val uri = viewer.externalUri ?: ""
+                                val mimeType = viewer.externalMimeType ?: "image/*"
+                                listOf(
+                                    com.pixel.gallery.data.local.entity.MediaEntry(
+                                        contentId = -1L,
+                                        path = uri,
+                                        uri = uri,
+                                        sourceMimeType = mimeType,
+                                        width = 0,
+                                        height = 0,
+                                        sourceRotationDegrees = 0,
+                                        sizeBytes = 0,
+                                        dateAddedSecs = 0,
+                                        dateModifiedMillis = 0,
+                                        isTrashed = false,
+                                        bestTimestamp = 0L
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                     ViewerScreen(
