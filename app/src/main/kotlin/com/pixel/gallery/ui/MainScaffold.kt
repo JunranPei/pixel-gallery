@@ -336,7 +336,12 @@ fun MainScaffold(
                 .padding(top = if (currentScreen is Screen.Viewer) 0.dp else innerPadding.calculateTopPadding())
         ) {
             // Screen content management
-            when (currentScreen) {
+            val baseScreen = remember(navigationStack) {
+                navigationStack.lastOrNull { it !is Screen.Viewer } ?: Screen.Home
+            }
+
+            // Render base screen (Home, Settings, Favourites, Photo Album list, etc.)
+            when (baseScreen) {
                 Screen.Home -> {
                     HorizontalPager(
                         state = homePagerState,
@@ -402,52 +407,10 @@ fun MainScaffold(
                     onToggleSelection = toggleSelection,
                     items = groupedVault
                 )
-                is Screen.Viewer -> {
-                    val viewer = currentScreen as Screen.Viewer
-                    val photosForViewer = remember(viewer, allPhotos, favourites, trash, vault) {
-                        when (viewer.source) {
-                            Screen.ViewerSource.All -> allPhotos
-                            Screen.ViewerSource.Favourites -> favourites
-                            Screen.ViewerSource.Trash -> trash
-                            Screen.ViewerSource.Vault -> vault
-                            Screen.ViewerSource.Album -> {
-                                allPhotos.filter { 
-                                    val file = java.io.File(it.path)
-                                    file.parentFile?.name == viewer.albumName
-                                }
-                            }
-                            Screen.ViewerSource.External -> {
-                                val uri = viewer.externalUri ?: ""
-                                val mimeType = viewer.externalMimeType ?: "image/*"
-                                listOf(
-                                    com.pixel.gallery.data.local.entity.MediaEntry(
-                                        contentId = -1L,
-                                        path = uri,
-                                        uri = uri,
-                                        sourceMimeType = mimeType,
-                                        width = 0,
-                                        height = 0,
-                                        sourceRotationDegrees = 0,
-                                        sizeBytes = 0,
-                                        dateAddedSecs = 0,
-                                        dateModifiedMillis = 0,
-                                        isTrashed = false,
-                                        bestTimestamp = 0L
-                                    )
-                                )
-                            }
-                        }
-                    }
-                    ViewerScreen(
-                        initialId = viewer.initialId,
-                        photos = photosForViewer,
-                        onBack = { navigationStack = navigationStack.dropLast(1) }
-                    )
-                }
                 Screen.ExcludedFolders -> ExcludedFoldersScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
                 Screen.Licenses -> LicensesScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
                 is Screen.Photo -> {
-                    val albumName = (currentScreen as Screen.Photo).albumName
+                    val albumName = (baseScreen as Screen.Photo).albumName
                     PhotoScreen(
                         albumName = albumName,
                         onBack = { navigationStack = navigationStack.dropLast(1) },
@@ -460,6 +423,53 @@ fun MainScaffold(
                         gridState = albumPhotoGridState
                     )
                 }
+                is Screen.Viewer -> {
+                    // Fallback, baseScreen should not be Viewer
+                }
+            }
+
+            // Overlay full-screen viewer if active
+            if (currentScreen is Screen.Viewer) {
+                val viewer = currentScreen
+                val photosForViewer = remember(viewer, allPhotos, favourites, trash, vault) {
+                    when (viewer.source) {
+                        Screen.ViewerSource.All -> allPhotos
+                        Screen.ViewerSource.Favourites -> favourites
+                        Screen.ViewerSource.Trash -> trash
+                        Screen.ViewerSource.Vault -> vault
+                        Screen.ViewerSource.Album -> {
+                            allPhotos.filter { 
+                                val file = java.io.File(it.path)
+                                file.parentFile?.name == viewer.albumName
+                            }
+                        }
+                        Screen.ViewerSource.External -> {
+                            val uri = viewer.externalUri ?: ""
+                            val mimeType = viewer.externalMimeType ?: "image/*"
+                            listOf(
+                                com.pixel.gallery.data.local.entity.MediaEntry(
+                                    contentId = -1L,
+                                    path = uri,
+                                    uri = uri,
+                                    sourceMimeType = mimeType,
+                                    width = 0,
+                                    height = 0,
+                                    sourceRotationDegrees = 0,
+                                    sizeBytes = 0,
+                                    dateAddedSecs = 0,
+                                    dateModifiedMillis = 0,
+                                    isTrashed = false,
+                                    bestTimestamp = 0L
+                                )
+                            )
+                        }
+                    }
+                }
+                ViewerScreen(
+                    initialId = viewer.initialId,
+                    photos = photosForViewer,
+                    onBack = { navigationStack = navigationStack.dropLast(1) }
+                )
             }
 
 

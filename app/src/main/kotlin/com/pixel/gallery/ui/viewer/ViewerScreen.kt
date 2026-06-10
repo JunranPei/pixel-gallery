@@ -42,6 +42,8 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.pixel.gallery.data.local.entity.MediaEntry
+import com.bumptech.glide.signature.ObjectKey
+import com.pixel.gallery.glide.AvesAppGlideModule
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.Dispatchers
@@ -183,6 +185,24 @@ fun ViewerScreen(
         ) { page ->
             val media = photos[page]
             val isVideo = media.sourceMimeType.startsWith("video/")
+            val context = LocalContext.current
+            val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
+                AvesAppGlideModule.getModel(
+                    context = context,
+                    uri = Uri.parse(media.uri),
+                    mimeType = media.sourceMimeType,
+                    pageId = null,
+                    sizeBytes = media.sizeBytes
+                )
+            }
+            val signatureKey = remember(media.dateModifiedMillis) {
+                ObjectKey(media.dateModifiedMillis)
+            }
+            val transform = remember(signatureKey) {
+                { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
+                    requestBuilder.signature(signatureKey)
+                }
+            }
             
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -198,12 +218,14 @@ fun ViewerScreen(
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
                         ZoomableGlideImage(
-                            model = media.uri,
+                            model = model,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             state = rememberZoomableImageState(),
                             contentScale = ContentScale.Fit,
+                            requestBuilderTransform = transform,
                             onClick = { 
+
                                 if (isPlayingMotion) {
                                     isPlayingMotion = false
                                 } else {

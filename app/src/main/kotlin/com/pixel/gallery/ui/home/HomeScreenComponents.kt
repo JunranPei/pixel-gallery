@@ -41,6 +41,12 @@ import com.pixel.gallery.ui.utils.photoGridDragSelect
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.compose.ui.text.font.FontWeight
+import android.net.Uri
+import android.webkit.MimeTypeMap
+import androidx.compose.ui.platform.LocalContext
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.signature.ObjectKey
+import com.pixel.gallery.glide.AvesAppGlideModule
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
@@ -128,18 +134,22 @@ fun PhotosScreen(
                     is GridItem.Photo -> {
                         val media = item.entry
                         val isSelected = selectedIds.contains(media.contentId)
-                        
-                        PhotoTile(
-                            media = media,
-                            isSelected = isSelected,
-                            isSelectionMode = selectedIds.isNotEmpty(),
-                            onClick = {
-                                if (selectedIds.isNotEmpty()) {
+                        val isSelectionMode = selectedIds.isNotEmpty()
+                        val onPhotoClick = remember(media.contentId, isSelectionMode) {
+                            {
+                                if (isSelectionMode) {
                                     onToggleSelection(media.contentId)
                                 } else {
                                     onNavigateToViewer(media.contentId)
                                 }
-                            },
+                            }
+                        }
+                        
+                        PhotoTile(
+                            media = media,
+                            isSelected = isSelected,
+                            isSelectionMode = isSelectionMode,
+                            onClick = onPhotoClick,
                             onLongClick = null
                         )
                     }
@@ -166,6 +176,28 @@ fun PhotoTile(
     onLongClick: (() -> Unit)? = null
 ) {
     val isVideo = remember(media.sourceMimeType) { media.sourceMimeType.startsWith("video/") }
+    val context = LocalContext.current
+    val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
+        AvesAppGlideModule.getModel(
+            context = context,
+            uri = Uri.parse(media.uri),
+            mimeType = media.sourceMimeType,
+            pageId = null,
+            sizeBytes = media.sizeBytes
+        )
+    }
+    val signatureKey = remember(media.dateModifiedMillis) {
+        ObjectKey(media.dateModifiedMillis)
+    }
+    val transform = remember(signatureKey) {
+        { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
+            requestBuilder
+                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                .signature(signatureKey)
+                .override(300)
+                .thumbnail(requestBuilder.clone().sizeMultiplier(0.1f))
+        }
+    }
     val formattedDuration = remember(media.durationMillis) {
         media.durationMillis?.let { ms ->
             val totalSeconds = ms / 1000
@@ -215,8 +247,9 @@ fun PhotoTile(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
+                clip = true
+                shape = RoundedCornerShape(cornerRadius)
             }
-            .clip(RoundedCornerShape(cornerRadius))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .combinedClickable(
                 onClick = onClick,
@@ -224,10 +257,11 @@ fun PhotoTile(
             )
     ) {
         GlideImage(
-            model = media.uri,
+            model = model,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            requestBuilderTransform = transform
         )
         
         // Selection overlay
@@ -363,11 +397,15 @@ fun AlbumsScreen(
                 count = albums.size,
                 key = { albums[it].name }
             ) { index ->
+                val album = albums[index]
+                val onAlbumClick = remember(album.name) { { onNavigateToAlbum(album.name) } }
+                val onAlbumExclude = remember(album.path) { { onExclude(album.path) } }
+                val onAlbumHide = remember(album.path) { { onHide(album.path) } }
                 AlbumCard(
-                    album = albums[index],
-                    onClick = { onNavigateToAlbum(albums[index].name) },
-                    onExclude = { onExclude(albums[index].path) },
-                    onHide = { onHide(albums[index].path) },
+                    album = album,
+                    onClick = onAlbumClick,
+                    onExclude = onAlbumExclude,
+                    onHide = onAlbumHide,
                     columns = columns
                 )
             }
@@ -392,6 +430,32 @@ fun AlbumCard(
     columns: Int = 2
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val mimeType = remember(album.coverUri) {
+        val extension = MimeTypeMap.getFileExtensionFromUrl(album.coverUri)
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "image/jpeg"
+    }
+    val model = remember(album.coverUri, mimeType) {
+        AvesAppGlideModule.getModel(
+            context = context,
+            uri = Uri.parse(album.coverUri),
+            mimeType = mimeType,
+            pageId = null,
+            sizeBytes = null
+        )
+    }
+    val signatureKey = remember(album.lastModified) {
+        ObjectKey(album.lastModified)
+    }
+    val transform = remember(signatureKey) {
+        { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
+            requestBuilder
+                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                .signature(signatureKey)
+                .override(300)
+                .thumbnail(requestBuilder.clone().sizeMultiplier(0.1f))
+        }
+    }
 
     val titleStyle = when (columns) {
         1 -> EmphasizedTypography.TitleLarge
@@ -431,10 +495,11 @@ fun AlbumCard(
             contentAlignment = Alignment.Center
         ) {
             GlideImage(
-                model = album.coverUri,
+                model = model,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                requestBuilderTransform = transform
             )
         }
         Spacer(Modifier.height(spacerHeight))
