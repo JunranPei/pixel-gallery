@@ -81,6 +81,9 @@ android {
                 println("Release keystore not found at ${releaseConfig.storeFile}. Release build will be unsigned.")
             }
         }
+        debug {
+            applicationIdSuffix = ".debug"
+        }
     }
 
     buildFeatures {
