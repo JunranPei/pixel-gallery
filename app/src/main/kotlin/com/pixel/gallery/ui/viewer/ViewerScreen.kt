@@ -355,7 +355,7 @@ fun ViewerScreen(
                 ) {
                     ViewerAction(Icons.Outlined.Share, "Share") {
                         currentMedia?.let { media ->
-                            val uri = FileProvider.getUriForFile(context, "com.pixel.gallery.fileprovider", File(media.path))
+                            val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", File(media.path))
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = media.sourceMimeType
                                 putExtra(Intent.EXTRA_STREAM, uri)

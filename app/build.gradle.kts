@@ -31,7 +31,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pixel.gallery"
+        applicationId = "com.pixel.gallery.debug"
         minSdk = 26
         targetSdk = 35
         versionCode = 21
