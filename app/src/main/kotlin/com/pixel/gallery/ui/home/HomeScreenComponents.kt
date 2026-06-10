@@ -117,18 +117,22 @@ fun PhotosScreen(
                             photos
                         }
                         val isHeaderSelected = headerPhotos.isNotEmpty() && headerPhotos.all { selectedIds.contains(it) }
-                        
-                        DateHeader(
-                            title = item.title,
-                            isSelectionMode = selectedIds.isNotEmpty(),
-                            isSelected = isHeaderSelected,
-                            onToggleSelection = {
+                        val isSelectionMode = selectedIds.isNotEmpty()
+                        val onHeaderClick = remember(isHeaderSelected, selectedIds, headerPhotos) {
+                            {
                                 if (isHeaderSelected) {
                                     onSelectionChange(selectedIds - headerPhotos.toSet())
                                 } else {
                                     onSelectionChange(selectedIds + headerPhotos.toSet())
                                 }
                             }
+                        }
+                        
+                        DateHeader(
+                            title = item.title,
+                            isSelectionMode = isSelectionMode,
+                            isSelected = isHeaderSelected,
+                            onToggleSelection = onHeaderClick
                         )
                     }
                     is GridItem.Photo -> {
