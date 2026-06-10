@@ -10,6 +10,8 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Tab
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -66,6 +68,30 @@ fun SettingsScreen(
                     icon = Icons.Outlined.Tab,
                     checked = startupAtAlbums,
                     onCheckedChange = { viewModel.setStartupAtAlbums(it) }
+                )
+            }
+            item {
+                val glideThreadCount by viewModel.glideThreadCount.collectAsState()
+                SettingsSliderItem(
+                    title = "Image Decoding Threads: $glideThreadCount",
+                    description = "Limits background CPU threads for decoding thumbnails. Lower values save battery; higher values load thumbnails faster.",
+                    icon = Icons.Outlined.Speed,
+                    value = glideThreadCount.toFloat(),
+                    valueRange = 1f..8f,
+                    steps = 6,
+                    onValueChangeFinished = { viewModel.setGlideThreadCount(it.toInt()) }
+                )
+            }
+            item {
+                val glideCacheSize by viewModel.glideCacheSize.collectAsState()
+                SettingsSliderItem(
+                    title = "Disk Cache Limit: $glideCacheSize MB",
+                    description = "Limits the maximum disk space used by Glide's thumbnail cache. Requires app restart to take effect.",
+                    icon = Icons.Outlined.Storage,
+                    value = glideCacheSize.toFloat(),
+                    valueRange = 100f..2000f,
+                    steps = 18,
+                    onValueChangeFinished = { viewModel.setGlideCacheSize(it.toInt()) }
                 )
             }
             item {
@@ -131,6 +157,42 @@ fun SettingsClickItem(
             ) 
         },
         supportingContent = { Text(description) },
+        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+    )
+}
+
+@Composable
+fun SettingsSliderItem(
+    title: String,
+    description: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onValueChangeFinished: (Float) -> Unit
+) {
+    var sliderValue by remember(value) { mutableStateOf(value) }
+    ListItem(
+        headlineContent = { 
+            Text(
+                title,
+                style = EmphasizedTypography.LabelLarge
+            ) 
+        },
+        supportingContent = {
+            Column {
+                Text(description)
+                Spacer(modifier = Modifier.height(4.dp))
+                Slider(
+                    value = sliderValue,
+                    onValueChange = { sliderValue = it },
+                    onValueChangeFinished = { onValueChangeFinished(sliderValue) },
+                    valueRange = valueRange,
+                    steps = steps,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
         leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
     )
 }

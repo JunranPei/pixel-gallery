@@ -47,6 +47,13 @@ import androidx.compose.ui.platform.LocalContext
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
 import com.pixel.gallery.glide.AvesAppGlideModule
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Velocity
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.DecodeFormat
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
@@ -61,12 +68,39 @@ fun PhotosScreen(
     bottomPadding: Dp = 0.dp,
     state: LazyGridState = rememberLazyGridState()
 ) {
+    var isFastScrolling by remember { mutableStateOf(false) }
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag) {
+                    isFastScrolling = false
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (java.lang.Math.abs(available.y) > 3000f) {
+                    isFastScrolling = true
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
+    LaunchedEffect(state.isScrollInProgress) {
+        if (!state.isScrollInProgress) {
+            isFastScrolling = false
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             state = state,
             modifier = Modifier
                 .fillMaxSize()
+                .nestedScroll(nestedScrollConnection)
                 .photoGridDragSelect(
                     gridState = state,
                     items = items,
@@ -153,6 +187,7 @@ fun PhotosScreen(
                             media = media,
                             isSelected = isSelected,
                             isSelectionMode = isSelectionMode,
+                            isFastScrolling = isFastScrolling,
                             onClick = onPhotoClick,
                             onLongClick = null
                         )
@@ -176,18 +211,23 @@ fun PhotoTile(
     media: MediaEntry,
     isSelected: Boolean,
     isSelectionMode: Boolean,
+    isFastScrolling: Boolean,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
 ) {
     val isVideo = remember(media.sourceMimeType) { media.sourceMimeType.startsWith("video/") }
     val context = LocalContext.current
-    val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
-        AvesAppGlideModule.getModel(
+    val model = remember(media.uri, media.sourceMimeType, media.sizeBytes, isFastScrolling) {
+        if (isFastScrolling) null
+        else AvesAppGlideModule.getModel(
             context = context,
             uri = Uri.parse(media.uri),
             mimeType = media.sourceMimeType,
             pageId = null,
-            sizeBytes = media.sizeBytes
+            sizeBytes = media.sizeBytes,
+            isThumbnail = true,
+            rotationDegrees = media.sourceRotationDegrees,
+            dateModifiedMillis = media.dateModifiedMillis
         )
     }
     val signatureKey = remember(media.dateModifiedMillis) {
@@ -196,6 +236,7 @@ fun PhotoTile(
     val transform = remember(signatureKey) {
         { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
             requestBuilder
+                .format(DecodeFormat.PREFER_RGB_565)
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)
                 .override(300)
@@ -216,35 +257,81 @@ fun PhotoTile(
         }
     }
 
-    val transition = updateTransition(isSelected, label = "SelectionTransition")
-    
-    val scale by transition.animateFloat(
-        label = "Scale",
-        transitionSpec = { 
-            if (targetState) {
-                spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow) 
-            } else {
-                spring(stiffness = Spring.StiffnessLow)
+    if (isSelectionMode || isSelected) {
+        val transition = updateTransition(isSelected, label = "SelectionTransition")
+        
+        val scale by transition.animateFloat(
+            label = "Scale",
+            transitionSpec = { 
+                if (targetState) {
+                    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow) 
+                } else {
+                    spring(stiffness = Spring.StiffnessLow)
+                }
             }
+        ) { state ->
+            if (state) 0.92f else 1.0f
         }
-    ) { state ->
-        if (state) 0.92f else 1.0f
-    }
-    
-    val cornerRadius by transition.animateDp(
-        label = "CornerRadius",
-        transitionSpec = { spring(stiffness = Spring.StiffnessLow) }
-    ) { state ->
-        if (state) 28.dp else 20.dp
-    }
-    
-    val overlayAlpha by transition.animateFloat(
-        label = "OverlayAlpha",
-        transitionSpec = { tween(200) }
-    ) { state ->
-        if (state) 0.3f else 0.0f
-    }
+        
+        val cornerRadius by transition.animateDp(
+            label = "CornerRadius",
+            transitionSpec = { spring(stiffness = Spring.StiffnessLow) }
+        ) { state ->
+            if (state) 28.dp else 20.dp
+        }
+        
+        val overlayAlpha by transition.animateFloat(
+            label = "OverlayAlpha",
+            transitionSpec = { tween(200) }
+        ) { state ->
+            if (state) 0.3f else 0.0f
+        }
 
+        PhotoTileContent(
+            model = model,
+            isVideo = isVideo,
+            formattedDuration = formattedDuration,
+            scale = scale,
+            cornerRadius = cornerRadius,
+            overlayAlpha = overlayAlpha,
+            isSelected = isSelected,
+            isSelectionMode = isSelectionMode,
+            transform = transform,
+            onClick = onClick,
+            onLongClick = onLongClick
+        )
+    } else {
+        PhotoTileContent(
+            model = model,
+            isVideo = isVideo,
+            formattedDuration = formattedDuration,
+            scale = 1.0f,
+            cornerRadius = 20.dp,
+            overlayAlpha = 0.0f,
+            isSelected = false,
+            isSelectionMode = false,
+            transform = transform,
+            onClick = onClick,
+            onLongClick = onLongClick
+        )
+    }
+}
+
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+fun PhotoTileContent(
+    model: Any?,
+    isVideo: Boolean,
+    formattedDuration: String?,
+    scale: Float,
+    cornerRadius: Dp,
+    overlayAlpha: Float,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    transform: (com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable>) -> com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable>,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?
+) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
@@ -269,11 +356,13 @@ fun PhotoTile(
         )
         
         // Selection overlay
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = overlayAlpha))
-        )
+        if (overlayAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = overlayAlpha))
+            )
+        }
         
         // Selection indicators
         if (isSelectionMode) {
@@ -445,7 +534,10 @@ fun AlbumCard(
             uri = Uri.parse(album.coverUri),
             mimeType = mimeType,
             pageId = null,
-            sizeBytes = null
+            sizeBytes = null,
+            isThumbnail = true,
+            rotationDegrees = 0,
+            dateModifiedMillis = album.lastModified
         )
     }
     val signatureKey = remember(album.lastModified) {
@@ -454,6 +546,7 @@ fun AlbumCard(
     val transform = remember(signatureKey) {
         { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
             requestBuilder
+                .format(DecodeFormat.PREFER_RGB_565)
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)
                 .override(300)
