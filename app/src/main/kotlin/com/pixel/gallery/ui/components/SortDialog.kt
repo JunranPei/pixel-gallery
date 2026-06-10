@@ -2,8 +2,6 @@ package com.pixel.gallery.ui.components
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +15,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.theme.EmphasizedTypography
@@ -65,22 +62,20 @@ fun SortDialog(
                 )
         )
 
-        // Dialog Content Card
-        Card(
+        // Dialog Content Container - using Surface with 6.dp elevations to match standard M3 AlertDialog shadow exactly
+        Surface(
             modifier = Modifier
                 .widthIn(max = 320.dp)
                 .fillMaxWidth(0.85f)
-                .shadow(elevation = 10.dp, shape = RoundedCornerShape(28.dp)) // Explicit shadow for M3 depth
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = {} // Intercept clicks inside the card
+                    onClick = {} // Intercept clicks inside the dialog
                 ),
             shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp, // Standard M3 AlertDialog tonal elevation
+            shadowElevation = 6.dp // Standard M3 AlertDialog shadow elevation
         ) {
             Column(
                 modifier = Modifier
@@ -109,17 +104,10 @@ fun SortDialog(
                 ) {
                     criteria.forEach { criterion ->
                         val isSelected = selectedCriterion == criterion.id
-                        
-                        // M3 Expressive shape morphing animation (Pill shape when selected, rounded rectangle when unselected)
-                        val cornerRadius by animateDpAsState(
-                            targetValue = if (isSelected) 24.dp else 12.dp,
-                            animationSpec = tween(durationMillis = 200)
-                        )
-                        val shape = RoundedCornerShape(cornerRadius)
 
                         Surface(
                             onClick = { selectedCriterion = criterion.id },
-                            shape = shape,
+                            shape = CircleShape, // Always use CircleShape (fully rounded / large corners) as requested
                             color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                             contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                             border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -171,17 +159,10 @@ fun SortDialog(
                     )
                     directions.forEach { (dirCode, dirLabel) ->
                         val isSelected = selectedDirection == dirCode
-                        
-                        // M3 Expressive shape morphing animation (Pill shape when selected, rounded rectangle when unselected)
-                        val cornerRadius by animateDpAsState(
-                            targetValue = if (isSelected) 24.dp else 12.dp,
-                            animationSpec = tween(durationMillis = 200)
-                        )
-                        val shape = RoundedCornerShape(cornerRadius)
 
                         Surface(
                             onClick = { selectedDirection = dirCode },
-                            shape = shape,
+                            shape = CircleShape, // Always use CircleShape (fully rounded / large corners) as requested
                             color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                             contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                             border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
