@@ -196,9 +196,9 @@ fun PhotosScreen(
             }
         }
 
-        com.pixel.gallery.ui.components.VerticalScrollbar(
-            gridState = state,
-            modifier = Modifier
+        com.pixel.gallery.ui.components.GalleryScrollbar(
+            lazyGridState = state,
+            layoutModifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(bottom = bottomPadding)
         )
@@ -504,9 +504,9 @@ fun AlbumsScreen(
             }
         }
 
-        com.pixel.gallery.ui.components.VerticalScrollbar(
-            gridState = gridState,
-            modifier = Modifier
+        com.pixel.gallery.ui.components.GalleryScrollbar(
+            lazyGridState = gridState,
+            layoutModifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(bottom = bottomPadding)
         )
