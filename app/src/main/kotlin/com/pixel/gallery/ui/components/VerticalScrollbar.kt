@@ -7,8 +7,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -146,32 +145,92 @@ fun VerticalScrollbar(
             .graphicsLayer { this.alpha = alpha }
             .onSizeChanged { containerHeightPx = it.height.toFloat() }
             .pointerInput(containerHeightPx) {
-                // Tap-to-jump on the scrollbar track
-                detectTapGestures { pressOffset ->
-                    val thumbHeightPx = thumbHeightDp.toPx()
-                    val trackHeight = containerHeightPx - thumbHeightPx
-                    if (trackHeight > 0f) {
-                        val clickY = pressOffset.y - (thumbHeightPx / 2)
-                        val targetPct = (clickY / trackHeight).coerceIn(0f, 1f)
-                        val info = gridState.layoutInfo
-                        val totalItems = info.totalItemsCount
-                        val visibleItems = info.visibleItemsInfo
-                        if (totalItems > 0 && visibleItems.isNotEmpty()) {
-                            val firstVisible = visibleItems.first()
-                            val itemHeight = firstVisible.size.height.coerceAtLeast(1)
-                            val totalRows = (totalItems + columns - 1) / columns
-                            val visibleRows = visibleItems.map { it.offset.y }.distinct().size.coerceAtLeast(1)
-                            val maxScrollableRows = (totalRows - visibleRows).coerceAtLeast(1)
+                val thumbHeightPx = thumbHeightDp.toPx()
+                val trackHeight = containerHeightPx - thumbHeightPx
+                if (trackHeight > 0f) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            // 1. Wait for touch down
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            
+                            // Check if the touch down position is inside the thumb bounds
+                            val currentThumbTop = thumbOffsetPx
+                            val isTouchOnThumb = down.position.y in currentThumbTop..(currentThumbTop + thumbHeightPx)
+                            
+                            if (isTouchOnThumb) {
+                                // A. User touched the thumb - trigger drag gesture immediately
+                                isPressed = true
+                                dragPercentage = scrollPercentage
+                                var dragPct = scrollPercentage
+                                var dragTriggered = false
+                                
+                                // Drag track uses the static outer container coordinate space, preventing zero-delta shifts
+                                drag(down.id) { change ->
+                                    change.consume()
+                                    if (!dragTriggered) {
+                                        dragTriggered = true
+                                        isDragging = true
+                                    }
+                                    val deltaY = change.position.y - change.previousPosition.y
+                                    dragPct = (dragPct + deltaY / trackHeight).coerceIn(0f, 1f)
+                                    dragPercentage = dragPct
 
-                            val targetRowFloat = targetPct * maxScrollableRows
-                            val targetRow = targetRowFloat.toInt().coerceIn(0, totalRows - 1)
-                            val fraction = targetRowFloat - targetRow
-                            val scrollOffset = (fraction * itemHeight).toInt()
-                            val targetIndex = targetRow * columns
+                                    val info = gridState.layoutInfo
+                                    val totalItems = info.totalItemsCount
+                                    val visibleItems = info.visibleItemsInfo
+                                    if (totalItems > 0 && visibleItems.isNotEmpty()) {
+                                        val firstVisible = visibleItems.first()
+                                        val itemHeight = firstVisible.size.height.coerceAtLeast(1)
+                                        val totalRows = (totalItems + columns - 1) / columns
+                                        val visibleRows = visibleItems.map { it.offset.y }.distinct().size.coerceAtLeast(1)
+                                        val maxScrollableRows = (totalRows - visibleRows).coerceAtLeast(1)
 
-                            scrollJob?.cancel()
-                            scrollJob = coroutineScope.launch {
-                                gridState.scrollToItem(targetIndex, scrollOffset)
+                                        val targetRowFloat = dragPct * maxScrollableRows
+                                        val targetRow = targetRowFloat.toInt().coerceIn(0, totalRows - 1)
+                                        val fraction = targetRowFloat - targetRow
+                                        val scrollOffset = (fraction * itemHeight).toInt()
+                                        val targetIndex = targetRow * columns
+
+                                        scrollJob?.cancel()
+                                        scrollJob = coroutineScope.launch {
+                                            gridState.scrollToItem(targetIndex, scrollOffset)
+                                        }
+                                    }
+                                }
+                                
+                                // Reset states upon release / cancel
+                                isPressed = false
+                                isDragging = false
+                                dragPercentage = null
+                            } else {
+                                // B. User touched the track (outside the thumb) - wait for release to perform tap-to-jump
+                                val up = waitForUpOrCancellation()
+                                if (up != null) {
+                                    val clickY = down.position.y - (thumbHeightPx / 2)
+                                    val targetPct = (clickY / trackHeight).coerceIn(0f, 1f)
+                                    
+                                    val info = gridState.layoutInfo
+                                    val totalItems = info.totalItemsCount
+                                    val visibleItems = info.visibleItemsInfo
+                                    if (totalItems > 0 && visibleItems.isNotEmpty()) {
+                                        val firstVisible = visibleItems.first()
+                                        val itemHeight = firstVisible.size.height.coerceAtLeast(1)
+                                        val totalRows = (totalItems + columns - 1) / columns
+                                        val visibleRows = visibleItems.map { it.offset.y }.distinct().size.coerceAtLeast(1)
+                                        val maxScrollableRows = (totalRows - visibleRows).coerceAtLeast(1)
+
+                                        val targetRowFloat = targetPct * maxScrollableRows
+                                        val targetRow = targetRowFloat.toInt().coerceIn(0, totalRows - 1)
+                                        val fraction = targetRowFloat - targetRow
+                                        val scrollOffset = (fraction * itemHeight).toInt()
+                                        val targetIndex = targetRow * columns
+
+                                        scrollJob?.cancel()
+                                        scrollJob = coroutineScope.launch {
+                                            gridState.scrollToItem(targetIndex, scrollOffset)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -188,65 +247,6 @@ fun VerticalScrollbar(
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                 .graphicsLayer {
                     translationY = thumbOffsetPx
-                }
-                .pointerInput(Unit) {
-                    // Detect press-to-expand gesture immediately
-                    awaitPointerEventScope {
-                        while (true) {
-                            awaitFirstDown(requireUnconsumed = false)
-                            isPressed = true
-                            waitForUpOrCancellation()
-                            isPressed = false
-                        }
-                    }
-                }
-                .pointerInput(containerHeightPx) {
-                    val thumbHeightPx = thumbHeightDp.toPx()
-                    val trackHeight = containerHeightPx - thumbHeightPx
-                    if (trackHeight > 0f) {
-                        detectDragGestures(
-                            onDragStart = {
-                                isDragging = true
-                                dragPercentage = scrollPercentage
-                            },
-                            onDragEnd = {
-                                isDragging = false
-                                dragPercentage = null
-                            },
-                            onDragCancel = {
-                                isDragging = false
-                                dragPercentage = null
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                val currentDragPct = dragPercentage ?: scrollPercentage
-                                val newDragPct = (currentDragPct + dragAmount.y / trackHeight).coerceIn(0f, 1f)
-                                dragPercentage = newDragPct
-
-                                val info = gridState.layoutInfo
-                                val totalItems = info.totalItemsCount
-                                val visibleItems = info.visibleItemsInfo
-                                if (totalItems > 0 && visibleItems.isNotEmpty()) {
-                                    val firstVisible = visibleItems.first()
-                                    val itemHeight = firstVisible.size.height.coerceAtLeast(1)
-                                    val totalRows = (totalItems + columns - 1) / columns
-                                    val visibleRows = visibleItems.map { it.offset.y }.distinct().size.coerceAtLeast(1)
-                                    val maxScrollableRows = (totalRows - visibleRows).coerceAtLeast(1)
-
-                                    val targetRowFloat = newDragPct * maxScrollableRows
-                                    val targetRow = targetRowFloat.toInt().coerceIn(0, totalRows - 1)
-                                    val fraction = targetRowFloat - targetRow
-                                    val scrollOffset = (fraction * itemHeight).toInt()
-                                    val targetIndex = targetRow * columns
-
-                                    scrollJob?.cancel()
-                                    scrollJob = coroutineScope.launch {
-                                        gridState.scrollToItem(targetIndex, scrollOffset)
-                                    }
-                                }
-                            }
-                        )
-                    }
                 }
         )
     }
