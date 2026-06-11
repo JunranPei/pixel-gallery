@@ -85,13 +85,25 @@ fun SettingsScreen(
             item {
                 val glideCacheSize by viewModel.glideCacheSize.collectAsState()
                 SettingsSliderItem(
-                    title = "Disk Cache Limit: $glideCacheSize MB",
-                    description = "Limits the maximum disk space used by Glide's thumbnail cache. Requires app restart to take effect.",
+                    title = "Flowing Cache Limit: $glideCacheSize MB",
+                    description = "Limits the maximum disk space used by Glide's standard LRU cache (for smaller files). Requires app restart to take effect.",
                     icon = Icons.Outlined.Storage,
                     value = glideCacheSize.toFloat(),
                     valueRange = 100f..2000f,
                     steps = 18,
                     onValueChangeFinished = { viewModel.setGlideCacheSize(it.toInt()) }
+                )
+            }
+            item {
+                val glidePersistentCacheSize by viewModel.glidePersistentCacheSize.collectAsState()
+                SettingsSliderItem(
+                    title = "Persistent Cache Limit: $glidePersistentCacheSize MB",
+                    description = "Limits the maximum space for persistent thumbnails of heavy files (>5MB) to avoid re-decoding. Managed independently.",
+                    icon = Icons.Outlined.Storage,
+                    value = glidePersistentCacheSize.toFloat(),
+                    valueRange = 100f..1000f,
+                    steps = 8,
+                    onValueChangeFinished = { viewModel.setGlidePersistentCacheSize(it.toInt()) }
                 )
             }
             item {

@@ -80,7 +80,7 @@ fun PhotosScreen(
             }
 
             override suspend fun onPreFling(available: Velocity): Velocity {
-                if (java.lang.Math.abs(available.y) > 3000f) {
+                if (java.lang.Math.abs(available.y) > 15000f) {
                     isFastScrolling = true
                 }
                 return Velocity.Zero
