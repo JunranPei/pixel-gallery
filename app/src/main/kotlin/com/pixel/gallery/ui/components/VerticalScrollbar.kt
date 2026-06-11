@@ -109,42 +109,48 @@ fun GalleryScrollbar(
         }
     }
 
+    val tapGestureModifier = if (scrollbarVisible) {
+        Modifier.pointerInput(effectiveTrackPx) {
+            detectTapGestures(
+                onPress = { tapCoord ->
+                    val touchY = tapCoord.y
+                    val touchOnSlider = touchY in sliderOffsetPx..(sliderOffsetPx + barHeightPx)
+                    if (touchOnSlider) {
+                        touchActive = true
+                        try {
+                            awaitRelease()
+                        } finally {
+                            touchActive = false
+                        }
+                    } else {
+                        if (effectiveTrackPx > 0f) {
+                            val clickCenterY = touchY - (barHeightPx / 2)
+                            val jumpPercentage = (clickCenterY / effectiveTrackPx).coerceIn(0f, 1f)
+                            val gridInfo = lazyGridState.layoutInfo
+                            val allItemsCount = gridInfo.totalItemsCount
+                            if (allItemsCount > 0) {
+                                val targetScrollIdx = (jumpPercentage * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
+                                activeScrollJob?.cancel()
+                                activeScrollJob = scrollbarScope.launch {
+                                    lazyGridState.scrollToItem(targetScrollIdx)
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        }
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = layoutModifier
             .fillMaxHeight()
             .width(36.dp)
             .alpha(scrollbarAlpha)
             .onSizeChanged { parentHeightPx = it.height.toFloat() }
-            .pointerInput(effectiveTrackPx) {
-                detectTapGestures(
-                    onPress = { tapCoord ->
-                        val touchY = tapCoord.y
-                        val touchOnSlider = touchY in sliderOffsetPx..(sliderOffsetPx + barHeightPx)
-                        if (touchOnSlider) {
-                            touchActive = true
-                            try {
-                                awaitRelease()
-                            } finally {
-                                touchActive = false
-                            }
-                        } else {
-                            if (effectiveTrackPx > 0f) {
-                                val clickCenterY = touchY - (barHeightPx / 2)
-                                val jumpPercentage = (clickCenterY / effectiveTrackPx).coerceIn(0f, 1f)
-                                val gridInfo = lazyGridState.layoutInfo
-                                val allItemsCount = gridInfo.totalItemsCount
-                                if (allItemsCount > 0) {
-                                    val targetScrollIdx = (jumpPercentage * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
-                                    activeScrollJob?.cancel()
-                                    activeScrollJob = scrollbarScope.launch {
-                                        lazyGridState.scrollToItem(targetScrollIdx)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                )
-            }
+            .then(tapGestureModifier)
     ) {
         Box(
             modifier = Modifier
