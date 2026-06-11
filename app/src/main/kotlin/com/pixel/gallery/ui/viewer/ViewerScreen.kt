@@ -180,7 +180,7 @@ fun ViewerScreen(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp,
-            beyondViewportPageCount = 0,
+            beyondViewportPageCount = 1,
             userScrollEnabled = !isPlayingMotion
         ) { page ->
             val media = photos[page]
@@ -195,12 +195,33 @@ fun ViewerScreen(
                     sizeBytes = media.sizeBytes
                 )
             }
+            val thumbnailModel = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
+                AvesAppGlideModule.getModel(
+                    context = context,
+                    uri = Uri.parse(media.uri),
+                    mimeType = media.sourceMimeType,
+                    pageId = null,
+                    sizeBytes = media.sizeBytes,
+                    isThumbnail = true,
+                    rotationDegrees = media.sourceRotationDegrees,
+                    dateModifiedMillis = media.dateModifiedMillis
+                )
+            }
             val signatureKey = remember(media.dateModifiedMillis) {
                 ObjectKey(media.dateModifiedMillis)
             }
-            val transform = remember(signatureKey) {
+            val transform = remember(signatureKey, thumbnailModel) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
-                    requestBuilder.signature(signatureKey)
+                    requestBuilder
+                        .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
+                        .signature(signatureKey)
+                        .thumbnail(
+                            com.bumptech.glide.Glide.with(context)
+                                .asDrawable()
+                                .load(thumbnailModel)
+                                .signature(signatureKey)
+                                .override(512)
+                        )
                 }
             }
             

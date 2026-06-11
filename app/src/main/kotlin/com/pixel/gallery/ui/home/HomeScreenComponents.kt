@@ -239,7 +239,7 @@ fun PhotoTile(
                 .format(DecodeFormat.PREFER_RGB_565)
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)
-                .override(300)
+                .override(200)
                 .thumbnail(requestBuilder.clone().sizeMultiplier(0.1f))
         }
     }
@@ -549,7 +549,7 @@ fun AlbumCard(
                 .format(DecodeFormat.PREFER_RGB_565)
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)
-                .override(300)
+                .override(200)
                 .thumbnail(requestBuilder.clone().sizeMultiplier(0.1f))
         }
     }
