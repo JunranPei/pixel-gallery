@@ -1,28 +1,47 @@
 package com.pixel.gallery.ui.components
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * A custom interactive scrollbar for LazyVerticalGrid.
- * Optimized to prevent layout/recomposition overhead during scrolling.
+ * A premium interactive scrollbar for LazyVerticalGrid designed to align with
+ * Material Design Expression principles. Features smooth animations, dynamic width
+ * expansion on interaction, tap-to-jump gestures, and an optimized, stutter-free scroll mapping.
  */
 @Composable
 fun VerticalScrollbar(
@@ -32,91 +51,198 @@ fun VerticalScrollbar(
     val coroutineScope = rememberCoroutineScope()
     val density = LocalDensity.current
 
-    // Buffer the visibility check via derivedStateOf to prevent recomposition on every pixel of scroll
-    val showScrollbar by remember {
-        derivedStateOf {
-            val info = gridState.layoutInfo
-            val totalItems = info.totalItemsCount
-            val visibleItems = info.visibleItemsInfo.size
-            totalItems > visibleItems && totalItems > 0
+    var isDragging by remember { mutableStateOf(false) }
+    var isPressed by remember { mutableStateOf(false) }
+    var dragPercentage by remember { mutableStateOf<Float?>(null) }
+    var isVisible by remember { mutableStateOf(false) }
+    var scrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    // Auto-hide control with delay
+    LaunchedEffect(gridState.isScrollInProgress, isDragging) {
+        if (gridState.isScrollInProgress || isDragging) {
+            isVisible = true
+        } else {
+            delay(1500)
+            isVisible = false
         }
     }
 
-    if (!showScrollbar) return
+    val alpha by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = tween(300),
+        label = "scrollbar_alpha"
+    )
 
-    // Calculate scroll percentage using derivedStateOf to avoid recomposing the main body on scroll
+    // Dynamic width expansion on touch / drag (Material Design Expression style)
+    val thumbWidth by animateDpAsState(
+        targetValue = if (isPressed || isDragging) 12.dp else 4.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "scrollbar_width"
+    )
+
+    // Dynamic columns count inference based on visible grid items' coordinates
+    val columns by remember {
+        derivedStateOf {
+            val visible = gridState.layoutInfo.visibleItemsInfo
+            if (visible.isEmpty()) 1
+            else visible.map { it.offset.x }.distinct().size.coerceAtLeast(1)
+        }
+    }
+
+    // High-precision row-based scroll percentage calculation
     val scrollPercentage by remember {
         derivedStateOf {
             val info = gridState.layoutInfo
             val totalItems = info.totalItemsCount
-            val visibleItems = info.visibleItemsInfo.size
-            val firstVisibleItemIndex = gridState.firstVisibleItemIndex
-            if (totalItems == 0 || totalItems <= visibleItems) 0f
+            val visibleItems = info.visibleItemsInfo
+            if (totalItems == 0 || visibleItems.isEmpty()) 0f
             else {
-                val totalScrollableIcons = totalItems - visibleItems
-                (firstVisibleItemIndex.toFloat() / maxOf(1, totalScrollableIcons)).coerceIn(0f, 1f)
+                val firstVisible = visibleItems.first()
+                val itemHeight = firstVisible.size.height.coerceAtLeast(1)
+                val firstVisibleIndex = gridState.firstVisibleItemIndex
+                val scrollOffset = gridState.firstVisibleItemScrollOffset
+                
+                val firstVisibleRow = firstVisibleIndex / columns
+                val progress = firstVisibleRow.toFloat() + (scrollOffset.toFloat() / itemHeight)
+                
+                val totalRows = (totalItems + columns - 1) / columns
+                val visibleRows = visibleItems.map { it.offset.y }.distinct().size.coerceAtLeast(1)
+                val maxProgress = (totalRows - visibleRows).coerceAtLeast(1)
+                (progress / maxProgress).coerceIn(0f, 1f)
             }
         }
     }
 
-    var isDragging by remember { mutableStateOf(false) }
-    
-    // Read state for alpha anim
-    val alpha by animateFloatAsState(
-        targetValue = if (isDragging || gridState.isScrollInProgress) 1f else 0f,
-        animationSpec = tween(durationMillis = 500),
-        label = "scrollbar_alpha"
-    )
-
-    // Store measured height of the container to eliminate BoxWithConstraints subcomposition
+    val activePercentage = dragPercentage ?: scrollPercentage
     var containerHeightPx by remember { mutableFloatStateOf(0f) }
-    val thumbHeight = 60.dp
 
-    // Calculate translationY purely in a derivedStateOf so it's read only in the draw pass
+    // Dynamic thumb height based on the ratio of visible rows
+    val thumbHeightDp by remember {
+        derivedStateOf {
+            val info = gridState.layoutInfo
+            val total = info.totalItemsCount
+            val visible = info.visibleItemsInfo.size
+            if (total == 0 || containerHeightPx <= 0f) 64.dp
+            else {
+                val ratio = visible.toFloat() / total
+                val calculated = (containerHeightPx * ratio) / density.density
+                calculated.coerceIn(48f, 120f).dp
+            }
+        }
+    }
+
     val thumbOffsetPx by remember {
         derivedStateOf {
-            val thumbHeightPx = with(density) { thumbHeight.toPx() }
+            val thumbHeightPx = with(density) { thumbHeightDp.toPx() }
             val trackHeight = containerHeightPx - thumbHeightPx
-            if (trackHeight <= 0f) 0f else scrollPercentage * trackHeight
+            if (trackHeight <= 0f) 0f else activePercentage * trackHeight
         }
     }
 
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .width(32.dp)
+            .width(36.dp) // Broadened interactive area for better grab target
             .graphicsLayer { this.alpha = alpha }
             .onSizeChanged { containerHeightPx = it.height.toFloat() }
+            .pointerInput(containerHeightPx) {
+                // Tap-to-jump on the scrollbar track
+                detectTapGestures { pressOffset ->
+                    val thumbHeightPx = thumbHeightDp.toPx()
+                    val trackHeight = containerHeightPx - thumbHeightPx
+                    if (trackHeight > 0f) {
+                        val clickY = pressOffset.y - (thumbHeightPx / 2)
+                        val targetPct = (clickY / trackHeight).coerceIn(0f, 1f)
+                        val info = gridState.layoutInfo
+                        val totalItems = info.totalItemsCount
+                        val visibleItems = info.visibleItemsInfo
+                        if (totalItems > 0 && visibleItems.isNotEmpty()) {
+                            val firstVisible = visibleItems.first()
+                            val itemHeight = firstVisible.size.height.coerceAtLeast(1)
+                            val totalRows = (totalItems + columns - 1) / columns
+                            val visibleRows = visibleItems.map { it.offset.y }.distinct().size.coerceAtLeast(1)
+                            val maxScrollableRows = (totalRows - visibleRows).coerceAtLeast(1)
+
+                            val targetRowFloat = targetPct * maxScrollableRows
+                            val targetRow = targetRowFloat.toInt().coerceIn(0, totalRows - 1)
+                            val fraction = targetRowFloat - targetRow
+                            val scrollOffset = (fraction * itemHeight).toInt()
+                            val targetIndex = targetRow * columns
+
+                            scrollJob?.cancel()
+                            scrollJob = coroutineScope.launch {
+                                gridState.scrollToItem(targetIndex, scrollOffset)
+                            }
+                        }
+                    }
+                }
+            }
     ) {
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .width(6.dp)
-                .height(thumbHeight)
-                .padding(end = 2.dp)
+                .padding(end = 4.dp)
+                .width(thumbWidth)
+                .height(thumbHeightDp)
                 .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                 .graphicsLayer {
-                    // Defer state read to Draw pass (translationY) to bypass layout/recomposition entirely
                     translationY = thumbOffsetPx
                 }
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+                .pointerInput(Unit) {
+                    // Detect press-to-expand gesture immediately
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitFirstDown(requireUnconsumed = false)
+                            isPressed = true
+                            waitForUpOrCancellation()
+                            isPressed = false
+                        }
+                    }
+                }
                 .pointerInput(containerHeightPx) {
-                    val thumbHeightPx = thumbHeight.toPx()
+                    val thumbHeightPx = thumbHeightDp.toPx()
                     val trackHeight = containerHeightPx - thumbHeightPx
-                    if (trackHeight > 0) {
+                    if (trackHeight > 0f) {
                         detectDragGestures(
-                            onDragStart = { isDragging = true },
-                            onDragEnd = { isDragging = false },
-                            onDragCancel = { isDragging = false },
+                            onDragStart = {
+                                isDragging = true
+                                dragPercentage = scrollPercentage
+                            },
+                            onDragEnd = {
+                                isDragging = false
+                                dragPercentage = null
+                            },
+                            onDragCancel = {
+                                isDragging = false
+                                dragPercentage = null
+                            },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                val currentPercentage = scrollPercentage
-                                val newScrollPercentage = (currentPercentage + dragAmount.y / trackHeight).coerceIn(0f, 1f)
+                                val currentDragPct = dragPercentage ?: scrollPercentage
+                                val newDragPct = (currentDragPct + dragAmount.y / trackHeight).coerceIn(0f, 1f)
+                                dragPercentage = newDragPct
+
                                 val info = gridState.layoutInfo
                                 val totalItems = info.totalItemsCount
-                                val targetIndex = (newScrollPercentage * (totalItems - 1)).toInt().coerceIn(0, totalItems - 1)
-                                coroutineScope.launch {
-                                    gridState.scrollToItem(targetIndex)
+                                val visibleItems = info.visibleItemsInfo
+                                if (totalItems > 0 && visibleItems.isNotEmpty()) {
+                                    val firstVisible = visibleItems.first()
+                                    val itemHeight = firstVisible.size.height.coerceAtLeast(1)
+                                    val totalRows = (totalItems + columns - 1) / columns
+                                    val visibleRows = visibleItems.map { it.offset.y }.distinct().size.coerceAtLeast(1)
+                                    val maxScrollableRows = (totalRows - visibleRows).coerceAtLeast(1)
+
+                                    val targetRowFloat = newDragPct * maxScrollableRows
+                                    val targetRow = targetRowFloat.toInt().coerceIn(0, totalRows - 1)
+                                    val fraction = targetRowFloat - targetRow
+                                    val scrollOffset = (fraction * itemHeight).toInt()
+                                    val targetIndex = targetRow * columns
+
+                                    scrollJob?.cancel()
+                                    scrollJob = coroutineScope.launch {
+                                        gridState.scrollToItem(targetIndex, scrollOffset)
+                                    }
                                 }
                             }
                         )
