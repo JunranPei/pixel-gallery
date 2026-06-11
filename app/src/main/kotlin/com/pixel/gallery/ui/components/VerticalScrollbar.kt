@@ -112,7 +112,6 @@ fun VerticalScrollbar(
         }
     }
 
-    val activePercentage = dragPercentage ?: scrollPercentage
     var containerHeightPx by remember { mutableFloatStateOf(0f) }
 
     // Dynamic thumb height based on the ratio of visible rows
@@ -134,9 +133,11 @@ fun VerticalScrollbar(
         derivedStateOf {
             val thumbHeightPx = with(density) { thumbHeightDp.toPx() }
             val trackHeight = containerHeightPx - thumbHeightPx
-            if (trackHeight <= 0f) 0f else activePercentage * trackHeight
+            val pct = dragPercentage ?: scrollPercentage
+            if (trackHeight <= 0f) 0f else pct * trackHeight
         }
     }
+
 
     Box(
         modifier = modifier
