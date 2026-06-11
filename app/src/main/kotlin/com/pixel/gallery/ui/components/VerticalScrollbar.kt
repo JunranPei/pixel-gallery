@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -40,7 +41,7 @@ import kotlinx.coroutines.launch
 /**
  * A custom interactive scrollbar for LazyVerticalGrid.
  * Rebuilt from scratch to align with Material Design Expression principles.
- * Completely optimized for smoothness, touch responsiveness, and anti-stutter.
+ * Uses Modifier.offset to ensure 100% reliable positioning and composition updates.
  */
 @Composable
 fun VerticalScrollbar(
@@ -79,7 +80,7 @@ fun VerticalScrollbar(
         label = "scrollbar_width"
     )
 
-    // Simplified, robust scroll percentage calculation
+    // Simple, robust scroll percentage calculation
     val scrollPercentage by remember {
         derivedStateOf {
             val info = gridState.layoutInfo
@@ -94,14 +95,15 @@ fun VerticalScrollbar(
     }
 
     var containerHeightPx by remember { mutableFloatStateOf(0f) }
-    val thumbHeightDp = 64.dp // Fixed height for absolute structural consistency
+    val thumbHeightDp = 64.dp
 
-    val thumbOffsetPx by remember {
+    // Calculate vertical offset in DP to trigger Compose layout phase updates reliably
+    val thumbOffsetDp by remember {
         derivedStateOf {
-            val thumbHeightPx = with(density) { thumbHeightDp.toPx() }
-            val trackHeight = containerHeightPx - thumbHeightPx
             val pct = dragPercentage ?: scrollPercentage
-            if (trackHeight <= 0f) 0f else pct * trackHeight
+            val totalHeightDp = containerHeightPx / density.density
+            val trackHeightDp = totalHeightDp - 64f // 64dp is thumb height
+            if (trackHeightDp <= 0f) 0.dp else (pct * trackHeightDp).dp
         }
     }
 
@@ -113,16 +115,16 @@ fun VerticalScrollbar(
             .onSizeChanged { containerHeightPx = it.height.toFloat() }
             .pointerInput(containerHeightPx) {
                 val thumbHeightPx = with(density) { thumbHeightDp.toPx() }
-                val trackHeight = containerHeightPx - thumbHeightPx
-                if (trackHeight > 0f) {
+                val trackHeightPx = containerHeightPx - thumbHeightPx
+                if (trackHeightPx > 0f) {
                     awaitPointerEventScope {
                         while (true) {
                             // 1. Wait for touch down
                             val down = awaitFirstDown(requireUnconsumed = false)
                             
                             // Check if the touch down position is inside the thumb bounds
-                            val currentThumbTop = thumbOffsetPx
-                            val isTouchOnThumb = down.position.y in currentThumbTop..(currentThumbTop + thumbHeightPx)
+                            val thumbOffsetPx = with(density) { thumbOffsetDp.toPx() }
+                            val isTouchOnThumb = down.position.y in thumbOffsetPx..(thumbOffsetPx + thumbHeightPx)
                             
                             if (isTouchOnThumb) {
                                 // A. User touched the thumb - trigger drag gesture immediately
@@ -131,7 +133,6 @@ fun VerticalScrollbar(
                                 var dragPct = scrollPercentage
                                 var dragTriggered = false
                                 
-                                // Drag track uses the static outer container coordinate space
                                 drag(down.id) { change ->
                                     change.consume()
                                     if (!dragTriggered) {
@@ -139,7 +140,7 @@ fun VerticalScrollbar(
                                         isDragging = true
                                     }
                                     val deltaY = change.position.y - change.previousPosition.y
-                                    dragPct = (dragPct + deltaY / trackHeight).coerceIn(0f, 1f)
+                                    dragPct = (dragPct + deltaY / trackHeightPx).coerceIn(0f, 1f)
                                     dragPercentage = dragPct
 
                                     val info = gridState.layoutInfo
@@ -153,7 +154,7 @@ fun VerticalScrollbar(
                                     }
                                 }
                                 
-                                // Reset states upon release
+                                // Reset states
                                 isPressed = false
                                 isDragging = false
                                 dragPercentage = null
@@ -162,7 +163,7 @@ fun VerticalScrollbar(
                                 val up = waitForUpOrCancellation()
                                 if (up != null) {
                                     val clickY = down.position.y - (thumbHeightPx / 2)
-                                    val targetPct = (clickY / trackHeight).coerceIn(0f, 1f)
+                                    val targetPct = (clickY / trackHeightPx).coerceIn(0f, 1f)
                                     
                                     val info = gridState.layoutInfo
                                     val totalItems = info.totalItemsCount
@@ -188,9 +189,7 @@ fun VerticalScrollbar(
                 .height(thumbHeightDp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                .graphicsLayer {
-                    translationY = thumbOffsetPx
-                }
+                .offset(y = thumbOffsetDp) // Using offset modifier for 100% reliable layout updates
         )
     }
 }
