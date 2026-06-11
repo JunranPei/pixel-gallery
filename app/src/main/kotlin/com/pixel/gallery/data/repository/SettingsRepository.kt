@@ -125,6 +125,8 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    private val GLIDE_PERSISTENT_CACHE_SIZE = intPreferencesKey("glide_persistent_cache_size")
+
     val glideThreadCount: Flow<Int> = context.dataStore.data
         .map { preferences -> preferences[GLIDE_THREAD_COUNT] ?: 2 }
 
@@ -140,6 +142,15 @@ class SettingsRepository @Inject constructor(
     suspend fun setGlideCacheSize(value: Int) {
         context.dataStore.edit { preferences ->
             preferences[GLIDE_CACHE_SIZE] = value
+        }
+    }
+
+    val glidePersistentCacheSize: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[GLIDE_PERSISTENT_CACHE_SIZE] ?: 250 }
+
+    suspend fun setGlidePersistentCacheSize(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[GLIDE_PERSISTENT_CACHE_SIZE] = value
         }
     }
 }

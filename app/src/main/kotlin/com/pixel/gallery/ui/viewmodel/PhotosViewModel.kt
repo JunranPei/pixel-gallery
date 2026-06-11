@@ -140,6 +140,9 @@ class PhotosViewModel @Inject constructor(
     val glideCacheSize: StateFlow<Int> = settingsRepository.glideCacheSize
         .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
 
+    val glidePersistentCacheSize: StateFlow<Int> = settingsRepository.glidePersistentCacheSize
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
+
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
 
@@ -320,6 +323,12 @@ class PhotosViewModel @Inject constructor(
     fun setGlideCacheSize(value: Int) {
         viewModelScope.launch {
             settingsRepository.setGlideCacheSize(value)
+        }
+    }
+
+    fun setGlidePersistentCacheSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setGlidePersistentCacheSize(value)
         }
     }
 

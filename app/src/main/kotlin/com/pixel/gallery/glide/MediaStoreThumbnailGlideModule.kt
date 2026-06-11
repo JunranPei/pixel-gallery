@@ -24,6 +24,10 @@ import com.pixel.gallery.utils.UriUtils.tryParseId
 import android.os.Process
 import androidx.exifinterface.media.ExifInterface
 import java.io.IOException
+import java.io.File
+import java.io.FileOutputStream
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 data class MediaStoreThumbnail(
     val uri: Uri,
@@ -74,6 +78,34 @@ internal class MediaStoreThumbnailFetcher(
         try {
             var bitmap: Bitmap? = null
             val resolver = context.contentResolver
+
+            // Double Cache: Persistent Cache for heavy files (>5MB) to prevent expensive re-decoding
+            val isLargeFile = model.sizeBytes != null && model.sizeBytes > 5 * 1024 * 1024
+            var persistentFile: File? = null
+            if (isLargeFile) {
+                val persistentDir = File(context.cacheDir, "persistent_thumbnails")
+                if (!persistentDir.exists()) {
+                    persistentDir.mkdirs()
+                }
+                val contentId = model.uri.tryParseId() ?: model.uri.hashCode()
+                val cacheFileName = "${contentId}_${model.dateModifiedMillis}_${model.rotationDegrees}.jpg"
+                persistentFile = File(persistentDir, cacheFileName)
+
+                if (persistentFile.exists()) {
+                    try {
+                        val options = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.RGB_565
+                        }
+                        val cachedBitmap = BitmapFactory.decodeFile(persistentFile.absolutePath, options)
+                        if (cachedBitmap != null) {
+                            callback.onDataReady(cachedBitmap)
+                            return
+                        }
+                    } catch (e: Exception) {
+                        // ignore and reload
+                    }
+                }
+            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Limit targetSize to a max of 180x180 to hit system pre-generated MINI_KIND/MICRO_KIND caches directly
@@ -131,6 +163,24 @@ internal class MediaStoreThumbnailFetcher(
             }
 
             if (bitmap != null) {
+                if (isLargeFile && persistentFile != null) {
+                    try {
+                        FileOutputStream(persistentFile).use { out ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                        }
+                        // Check and trim persistent cache size if it exceeds the limit
+                        val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
+                        val maxPersistentCacheMb = runBlocking {
+                            settingsRepository.glidePersistentCacheSize.first()
+                        }
+                        val maxPersistentCacheBytes = maxPersistentCacheMb.toLong() * 1024 * 1024
+                        persistentFile.parentFile?.let {
+                            trimPersistentCache(it, maxPersistentCacheBytes)
+                        }
+                    } catch (e: Exception) {
+                        // ignore write and trim errors
+                    }
+                }
                 callback.onDataReady(bitmap)
             } else {
                 callback.onLoadFailed(IOException("Failed to load or decode thumbnail for uri=${model.uri}"))
@@ -228,14 +278,42 @@ internal class MediaStoreThumbnailFetcher(
                 val decodeOptions = BitmapFactory.Options().apply {
                     this.inSampleSize = inSampleSize
                     inPreferredConfig = Bitmap.Config.RGB_565
+                    inTempStorage = ByteArray(16 * 1024)
                 }
 
-                resolver.openInputStream(model.uri)?.use { fallbackStream ->
-                    val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
-                    if (decoded != null) {
-                        applyExifOrientation(context, decoded, model.rotationDegrees, false)
-                    } else {
-                        null
+                // Try to reuse memory space from Glide's LruBitmapPool to minimize memory allocations and GC spikes
+                try {
+                    val targetWidthCalculated = srcWidth / inSampleSize
+                    val targetHeightCalculated = srcHeight / inSampleSize
+                    if (targetWidthCalculated > 0 && targetHeightCalculated > 0) {
+                        val bitmapPool = com.bumptech.glide.Glide.get(context).bitmapPool
+                        val reusableBitmap = bitmapPool.getDirty(targetWidthCalculated, targetHeightCalculated, Bitmap.Config.RGB_565)
+                        decodeOptions.inBitmap = reusableBitmap
+                        decodeOptions.inMutable = true
+                    }
+                } catch (e: Exception) {
+                    // ignore pool acquisition errors
+                }
+
+                try {
+                    resolver.openInputStream(model.uri)?.use { fallbackStream ->
+                        val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
+                        if (decoded != null) {
+                            applyExifOrientation(context, decoded, model.rotationDegrees, false)
+                        } else {
+                            null
+                        }
+                    }
+                } catch (e: IllegalArgumentException) {
+                    // Fallback: Clear inBitmap and retry if reuse failed (e.g. incompatible dimensions on older devices)
+                    decodeOptions.inBitmap = null
+                    resolver.openInputStream(model.uri)?.use { fallbackStream ->
+                        val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
+                        if (decoded != null) {
+                            applyExifOrientation(context, decoded, model.rotationDegrees, false)
+                        } else {
+                            null
+                        }
                     }
                 }
             }
@@ -251,4 +329,28 @@ internal class MediaStoreThumbnailFetcher(
     override fun getDataClass(): Class<Bitmap> = Bitmap::class.java
 
     override fun getDataSource(): DataSource = DataSource.LOCAL
+
+    private fun trimPersistentCache(persistentDir: File, maxSizeBytes: Long) {
+        try {
+            val files = persistentDir.listFiles() ?: return
+            var currentSize = files.sumOf { it.length() }
+            if (currentSize <= maxSizeBytes) {
+                return
+            }
+
+            // Sort by last modified time, oldest first
+            val sortedFiles = files.sortedBy { it.lastModified() }
+            for (file in sortedFiles) {
+                val length = file.length()
+                if (file.delete()) {
+                    currentSize -= length
+                    if (currentSize <= maxSizeBytes) {
+                        break
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
 }
