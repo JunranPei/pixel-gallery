@@ -67,23 +67,47 @@ internal class MediaStoreThumbnailFetcher(
 ) : DataFetcher<Bitmap> {
 
     override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in Bitmap>) {
-        // Force the execution of thumbnail loading/decoding to the lowest priority.
-        // This binds the thread to run ONLY on the CPU's LITTLE (efficiency) cores, preventing big cores from waking up.
-        try {
-            Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
+        val originalPriority = try {
+            Process.getThreadPriority(Process.myTid())
         } catch (e: Exception) {
-            // ignore
+            Process.THREAD_PRIORITY_BACKGROUND
         }
 
         try {
+            // Force the execution of thumbnail loading/decoding to the lowest priority.
+            // This binds the thread to run ONLY on the CPU's LITTLE (efficiency) cores, preventing big cores from waking up.
+            try {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
+            } catch (e: Exception) {
+                // ignore
+            }
+
             var bitmap: Bitmap? = null
             val resolver = context.contentResolver
 
             // Double Cache: Persistent Cache for heavy files (>5MB) to prevent expensive re-decoding
             val isLargeFile = model.sizeBytes != null && model.sizeBytes > 5 * 1024 * 1024
+            val isHighResRequest = width >= 200 || height >= 200
+            val usePersistentCache = isLargeFile && isHighResRequest
             var persistentFile: File? = null
-            if (isLargeFile) {
-                val persistentDir = File(context.cacheDir, "persistent_thumbnails")
+            if (usePersistentCache) {
+                if (!hasCleanedLegacyCaches) {
+                    hasCleanedLegacyCaches = true
+                    try {
+                        val legacyDir1 = File(context.cacheDir, "persistent_thumbnails")
+                        if (legacyDir1.exists()) {
+                            legacyDir1.deleteRecursively()
+                        }
+                        val legacyDir2 = File(context.cacheDir, "persistent_thumbnails_v2")
+                        if (legacyDir2.exists()) {
+                            legacyDir2.deleteRecursively()
+                        }
+                    } catch (e: Exception) {
+                        // ignore
+                    }
+                }
+
+                val persistentDir = File(context.cacheDir, "persistent_thumbnails_v3")
                 if (!persistentDir.exists()) {
                     persistentDir.mkdirs()
                 }
@@ -108,10 +132,10 @@ internal class MediaStoreThumbnailFetcher(
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Limit targetSize to a max of 180x180 to hit system pre-generated MINI_KIND/MICRO_KIND caches directly
+                // Limit targetSize to a max of 512x512 to hit system pre-generated MINI_KIND/MICRO_KIND caches directly
                 val targetSize = Size(
-                    if (width > 0) minOf(width, 180) else 180,
-                    if (height > 0) minOf(height, 180) else 180
+                    if (width > 0) minOf(width, 512) else 512,
+                    if (height > 0) minOf(height, 512) else 512
                 )
                 try {
                     bitmap = resolver.loadThumbnail(model.uri, targetSize, null)
@@ -163,7 +187,7 @@ internal class MediaStoreThumbnailFetcher(
             }
 
             if (bitmap != null) {
-                if (isLargeFile && persistentFile != null) {
+                if (usePersistentCache && persistentFile != null) {
                     try {
                         FileOutputStream(persistentFile).use { out ->
                             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
@@ -187,6 +211,12 @@ internal class MediaStoreThumbnailFetcher(
             }
         } catch (e: Exception) {
             callback.onLoadFailed(e)
+        } finally {
+            try {
+                Process.setThreadPriority(originalPriority)
+            } catch (e: Exception) {
+                // ignore
+            }
         }
     }
 
@@ -204,8 +234,8 @@ internal class MediaStoreThumbnailFetcher(
                     videoHeight = temp
                 }
                 
-                var dstWidth = if (width > 0) minOf(width, 180) else 180
-                var dstHeight = if (height > 0) minOf(height, 180) else 180
+                var dstWidth = if (width > 0) minOf(width, 512) else 512
+                var dstHeight = if (height > 0) minOf(height, 512) else 512
                 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -239,12 +269,16 @@ internal class MediaStoreThumbnailFetcher(
                 if (exifInterface.hasThumbnail()) {
                     val thumbnailBytes = exifInterface.thumbnail
                     if (thumbnailBytes != null) {
-                        val options = BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.RGB_565
-                        }
-                        val decoded = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size, options)
-                        if (decoded != null) {
-                            return applyExifOrientation(context, decoded, model.rotationDegrees, false)
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size, bounds)
+                        if (bounds.outWidth >= 200 && bounds.outHeight >= 200) {
+                            val options = BitmapFactory.Options().apply {
+                                inPreferredConfig = Bitmap.Config.RGB_565
+                            }
+                            val decoded = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size, options)
+                            if (decoded != null) {
+                                return applyExifOrientation(context, decoded, model.rotationDegrees, false)
+                            }
                         }
                     }
                 }
@@ -264,8 +298,8 @@ internal class MediaStoreThumbnailFetcher(
                 val srcWidth = options.outWidth
                 val srcHeight = options.outHeight
                 var inSampleSize = 1
-                val targetWidth = if (width > 0) minOf(width, 180) else 180
-                val targetHeight = if (height > 0) minOf(height, 180) else 180
+                val targetWidth = if (width > 0) minOf(width, 512) else 512
+                val targetHeight = if (height > 0) minOf(height, 512) else 512
 
                 if (srcWidth > targetWidth || srcHeight > targetHeight) {
                     val halfWidth = srcWidth / 2
@@ -330,9 +364,14 @@ internal class MediaStoreThumbnailFetcher(
 
     override fun getDataSource(): DataSource = DataSource.LOCAL
 
+    companion object {
+        @Volatile
+        private var hasCleanedLegacyCaches = false
+    }
+
     private fun trimPersistentCache(persistentDir: File, maxSizeBytes: Long) {
         try {
-            val files = persistentDir.listFiles() ?: return
+            val files = persistentDir.listFiles { _, name -> name.endsWith(".jpg") } ?: return
             var currentSize = files.sumOf { it.length() }
             if (currentSize <= maxSizeBytes) {
                 return
