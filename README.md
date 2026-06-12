@@ -88,6 +88,28 @@ Sample photos used in screenshots are by the following authors on Unsplash:
 
 Icons generated using [icon.kitchen](https://icon.kitchen)
 
+## 🔧 Custom Modifications
+
+This fork includes the following improvements compared to the upstream version:
+
+### 1. Grid Layout & Sorting
+* **Grid Column Adjustment**: Pinch-to-zoom gestures dynamically adjust the main photo grid's column count.
+* **Persistent Sorting**: Persistent media sorting settings (supporting sorting by date, size, or name).
+
+### 2. Performance, Power & Cache
+* **Custom Cache Limit**: Customizable maximum local disk cache size in settings.
+* **Decoding Optimization**: Background decoding threads are capped to prevent CPU throttling, and thumbnail rendering clarity is improved.
+* **Scroll-to-Suspend**: Suspension of thumbnail decoding during vertical scrollbar drag to reduce device heat and battery usage.
+
+### 3. Rebuilt Vertical Scrollbar
+* **Gesture Control & Misclick Protection**: Dynamic width expansions on touch and click-through protection when the scrollbar is hidden.
+* **Smooth Scrolling**: Anti-jitter logic that resolves list jumping and feedback loop shaking during drags.
+
+### 4. Media Viewer Zoom
+* **Double-Tap to Zoom**: Double-tap on images zooms to 100% of their actual dimensions.
+* **Video Pinch-to-Zoom**: Support for 0.3x to 15x zoom gestures on videos while keeping progress controls pinned to the bottom.
+
+
 ## 🛠 Installation
 
 To build Pixel Gallery locally, you'll need [Android Studio](https://developer.android.com/studio) and the Android SDK.
