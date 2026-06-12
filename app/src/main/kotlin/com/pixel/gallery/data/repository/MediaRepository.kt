@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -243,14 +244,15 @@ class MediaRepository @Inject constructor(
         val resolver = context.contentResolver
         
         // Optimize: Use Generation API (API 30+) to skip scan if nothing changed in MediaStore
+        var currentGeneration = 0L
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
-                val currentGeneration = MediaStore.getGeneration(context, MediaStore.VOLUME_EXTERNAL)
-                if (lastSyncedGeneration > 0L && currentGeneration == lastSyncedGeneration) {
+                currentGeneration = MediaStore.getGeneration(context, MediaStore.VOLUME_EXTERNAL)
+                val lastSynced = settingsRepository.lastSyncedGeneration.first()
+                if (lastSynced > 0L && currentGeneration == lastSynced) {
                     android.util.Log.d("MediaRepository", "MediaStore generation unchanged ($currentGeneration). Skipping sync.")
                     return@withContext
                 }
-                lastSyncedGeneration = currentGeneration
             } catch (e: Exception) {
                 android.util.Log.e("MediaRepository", "Failed to check MediaStore generation", e)
             }
@@ -291,6 +293,15 @@ class MediaRepository @Inject constructor(
         val obsoleteIds = knownEntries.keys.filter { it !in currentIds }
         if (obsoleteIds.isNotEmpty()) {
             mediaDao.deleteByIds(obsoleteIds)
+        }
+
+        // Save generation after successful sync
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && currentGeneration > 0L) {
+            try {
+                settingsRepository.setLastSyncedGeneration(currentGeneration)
+            } catch (e: Exception) {
+                android.util.Log.e("MediaRepository", "Failed to save synced generation", e)
+            }
         }
     }
 

@@ -154,6 +154,17 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    private val LAST_SYNCED_GENERATION = longPreferencesKey("last_synced_generation")
+
+    val lastSyncedGeneration: Flow<Long> = context.dataStore.data
+        .map { preferences -> preferences[LAST_SYNCED_GENERATION] ?: 0L }
+
+    suspend fun setLastSyncedGeneration(value: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[LAST_SYNCED_GENERATION] = value
+        }
+    }
+
     private val CUSTOM_SHORTCUTS = stringPreferencesKey("custom_shortcuts")
 
     val customShortcuts: Flow<List<com.pixel.gallery.utils.CustomShortcut>> = context.dataStore.data
