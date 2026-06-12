@@ -249,7 +249,7 @@ fun ViewerScreen(
                         onTap = { showUI = !showUI }
                     )
                 } else {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         ZoomableGlideImage(
                             model = model,
                             contentDescription = null,
@@ -269,6 +269,34 @@ fun ViewerScreen(
                                     isPlayingMotion = false
                                 } else {
                                     showUI = !showUI 
+                                }
+                            },
+                            onDoubleClick = { state, centroid ->
+                                val currentScale = state.contentTransformation.scale.scaleX
+                                if (currentScale > 1.001f) {
+                                    state.resetZoom()
+                                } else {
+                                    val containerWidth = constraints.maxWidth
+                                    val containerHeight = constraints.maxHeight
+                                    val targetZoom = if (media.width > 0 && media.height > 0 &&
+                                        containerWidth > 0 && containerHeight > 0) {
+                                        val imgRatio = media.width.toFloat() / media.height.toFloat()
+                                        val layoutRatio = containerWidth.toFloat() / containerHeight.toFloat()
+                                        val scaleFit = if (imgRatio > layoutRatio) {
+                                            containerWidth.toFloat() / media.width.toFloat()
+                                        } else {
+                                            containerHeight.toFloat() / media.height.toFloat()
+                                        }
+                                        val calcZoom = 1f / scaleFit
+                                        if (calcZoom < 1.0f) {
+                                            3.0f // If image is smaller than screen (stretched inside Fit), zoom 3x
+                                        } else {
+                                            calcZoom.coerceIn(1.0f, 15.0f)
+                                        }
+                                    } else {
+                                        3.0f // Fallback to 3x zoom
+                                    }
+                                    state.zoomTo(zoomFactor = targetZoom, centroid = centroid)
                                 }
                             }
                         )
