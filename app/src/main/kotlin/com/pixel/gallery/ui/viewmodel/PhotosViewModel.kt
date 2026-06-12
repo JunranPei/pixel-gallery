@@ -380,6 +380,21 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
+    val customShortcuts: StateFlow<List<com.pixel.gallery.utils.CustomShortcut>> = settingsRepository.customShortcuts
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    fun addCustomShortcut(shortcut: com.pixel.gallery.utils.CustomShortcut) {
+        viewModelScope.launch {
+            settingsRepository.addCustomShortcut(shortcut)
+        }
+    }
+
+    fun removeCustomShortcut(id: String) {
+        viewModelScope.launch {
+            settingsRepository.removeCustomShortcut(id)
+        }
+    }
+
     private fun observeGlideThreadCount() {
         viewModelScope.launch {
             settingsRepository.glideThreadCount.collect { threads ->

@@ -49,18 +49,61 @@ class MainActivity : FragmentActivity() {
         
         enableEdgeToEdge()
         
+        val initialScreen = getScreenFromIntent(intent)
+        val initialHomeTab = getHomeTabFromIntent(intent)
+        updateTaskDescriptionFromIntent(intent)
+        
         setContent {
             PixelGalleryTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    MainScaffold()
+                    MainScaffold(initialScreen = initialScreen, initialHomeTab = initialHomeTab)
                 }
             }
         }
         
         checkPermissions()
         handleIntent(intent)
+    }
+
+    private fun getScreenFromIntent(intent: Intent): com.pixel.gallery.ui.Screen {
+        val screen = intent.getStringExtra("extra_screen") ?: return com.pixel.gallery.ui.Screen.Home
+        return when (screen) {
+            "Photos", "Albums" -> com.pixel.gallery.ui.Screen.Home
+            "Favourites" -> com.pixel.gallery.ui.Screen.Favourites
+            "Trash" -> com.pixel.gallery.ui.Screen.Trash
+            "PhotoAlbum" -> {
+                val albumName = intent.getStringExtra("extra_param") ?: ""
+                com.pixel.gallery.ui.Screen.Photo(albumName)
+            }
+            else -> com.pixel.gallery.ui.Screen.Home
+        }
+    }
+
+    private fun getHomeTabFromIntent(intent: Intent): Int {
+        val screen = intent.getStringExtra("extra_screen") ?: return -1
+        return when (screen) {
+            "Photos" -> 0
+            "Albums" -> 1
+            else -> -1
+        }
+    }
+
+    private fun updateTaskDescriptionFromIntent(intent: Intent) {
+        val title = intent.getStringExtra("extra_title")
+        val shortcutId = intent.getStringExtra("extra_shortcut_id")
+        if (title != null && shortcutId != null) {
+            try {
+                val bitmap = com.pixel.gallery.utils.ShortcutHelper.getSavedIconBitmap(this, shortcutId)
+                if (bitmap != null) {
+                    @Suppress("DEPRECATION")
+                    setTaskDescription(android.app.ActivityManager.TaskDescription(title, bitmap, 0))
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private fun checkPermissions() {
@@ -102,6 +145,7 @@ class MainActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
+        updateTaskDescriptionFromIntent(intent)
     }
 
     private fun handleIntent(intent: Intent) {

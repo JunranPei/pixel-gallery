@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
 import com.pixel.gallery.ui.settings.SettingsScreen
+import com.pixel.gallery.ui.settings.ShortcutManagerScreen
 import com.pixel.gallery.ui.gallery.FavouritesScreen
 import com.pixel.gallery.ui.gallery.TrashScreen
 import com.pixel.gallery.ui.gallery.HiddenAlbumsScreen
@@ -82,6 +83,7 @@ sealed class Screen : Parcelable {
     @Parcelize object ExcludedFolders : Screen()
     @Parcelize object Licenses : Screen()
     @Parcelize data class Photo(val albumName: String) : Screen()
+    @Parcelize object ShortcutManager : Screen()
 
     enum class ViewerSource { All, Favourites, Trash, Album, Vault, External }
 }
@@ -89,6 +91,8 @@ sealed class Screen : Parcelable {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun MainScaffold(
+    initialScreen: Screen = Screen.Home,
+    initialHomeTab: Int = -1,
     photosViewModel: PhotosViewModel = hiltViewModel()
 ) {
     val allPhotos by photosViewModel.photos.collectAsState()
@@ -111,7 +115,7 @@ fun MainScaffold(
     var showAlbumSortDialog by remember { mutableStateOf(false) }
     
     // Simple navigation stack
-    var navigationStack by rememberSaveable { mutableStateOf(listOf<Screen>(Screen.Home)) }
+    var navigationStack by rememberSaveable { mutableStateOf(listOf<Screen>(initialScreen)) }
 
     LaunchedEffect(externalMedia) {
         externalMedia?.let { media ->
@@ -136,9 +140,13 @@ fun MainScaffold(
 
     // Initialize tab based on preference once
     var hasInitializedTab by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(startupAtAlbums) {
+    LaunchedEffect(startupAtAlbums, initialHomeTab) {
         if (!hasInitializedTab) {
-            val initialPage = if (startupAtAlbums) 1 else 0
+            val initialPage = when (initialHomeTab) {
+                0 -> 0
+                1 -> 1
+                else -> if (startupAtAlbums) 1 else 0
+            }
             homePagerState.scrollToPage(initialPage)
             hasInitializedTab = true
         }
@@ -169,6 +177,7 @@ fun MainScaffold(
         }
     }
 
+
     // Reset selection when navigating
     LaunchedEffect(currentScreen) {
         selectedIds = emptySet()
@@ -190,6 +199,13 @@ fun MainScaffold(
     
     val colorScheme = MaterialTheme.colorScheme
     val context = androidx.compose.ui.platform.LocalContext.current
+    val navigateBack: () -> Unit = {
+        if (navigationStack.size > 1) {
+            navigationStack = navigationStack.dropLast(1)
+        } else {
+            (context as? android.app.Activity)?.finish()
+        }
+    }
 
     val selectedEntries = remember(selectedIds, allPhotos, trash, vault) {
         (allPhotos + trash + vault).filter { selectedIds.contains(it.contentId) }
@@ -376,12 +392,16 @@ fun MainScaffold(
                     }
                 }
                 Screen.Settings -> SettingsScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
-                    onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses }
+                    onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
+                    onNavigateToShortcutManager = { navigationStack = navigationStack + Screen.ShortcutManager }
+                )
+                Screen.ShortcutManager -> ShortcutManagerScreen(
+                    onBack = navigateBack
                 )
                 Screen.Favourites -> FavouritesScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Favourites) },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
@@ -390,7 +410,7 @@ fun MainScaffold(
                     gridState = favouritesGridState
                 )
                 Screen.Trash -> TrashScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Trash) },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
@@ -398,22 +418,22 @@ fun MainScaffold(
                     items = groupedTrash,
                     gridState = trashGridState
                 )
-                Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
+                Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = navigateBack)
                 Screen.LockedFolder -> LockedFolderScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Vault) },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
                     onToggleSelection = toggleSelection,
                     items = groupedVault
                 )
-                Screen.ExcludedFolders -> ExcludedFoldersScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
-                Screen.Licenses -> LicensesScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
+                Screen.ExcludedFolders -> ExcludedFoldersScreen(onBack = navigateBack)
+                Screen.Licenses -> LicensesScreen(onBack = navigateBack)
                 is Screen.Photo -> {
                     val albumName = (baseScreen as Screen.Photo).albumName
                     PhotoScreen(
                         albumName = albumName,
-                        onBack = { navigationStack = navigationStack.dropLast(1) },
+                        onBack = navigateBack,
                         onNavigateToViewer = { id -> 
                             navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Album, albumName) 
                         },

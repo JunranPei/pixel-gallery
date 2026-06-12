@@ -153,4 +153,49 @@ class SettingsRepository @Inject constructor(
             preferences[GLIDE_PERSISTENT_CACHE_SIZE] = value
         }
     }
+
+    private val CUSTOM_SHORTCUTS = stringPreferencesKey("custom_shortcuts")
+
+    val customShortcuts: Flow<List<com.pixel.gallery.utils.CustomShortcut>> = context.dataStore.data
+        .map { preferences ->
+            val json = preferences[CUSTOM_SHORTCUTS] ?: "[]"
+            try {
+                val type = object : com.google.gson.reflect.TypeToken<List<com.pixel.gallery.utils.CustomShortcut>>() {}.type
+                com.google.gson.Gson().fromJson<List<com.pixel.gallery.utils.CustomShortcut>>(json, type) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
+    suspend fun addCustomShortcut(shortcut: com.pixel.gallery.utils.CustomShortcut) {
+        context.dataStore.edit { preferences ->
+            val json = preferences[CUSTOM_SHORTCUTS] ?: "[]"
+            val type = object : com.google.gson.reflect.TypeToken<List<com.pixel.gallery.utils.CustomShortcut>>() {}.type
+            val currentList = try {
+                com.google.gson.Gson().fromJson<List<com.pixel.gallery.utils.CustomShortcut>>(json, type) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }.toMutableList()
+
+            currentList.removeAll { it.id == shortcut.id }
+            currentList.add(shortcut)
+
+            preferences[CUSTOM_SHORTCUTS] = com.google.gson.Gson().toJson(currentList)
+        }
+    }
+
+    suspend fun removeCustomShortcut(id: String) {
+        context.dataStore.edit { preferences ->
+            val json = preferences[CUSTOM_SHORTCUTS] ?: "[]"
+            val type = object : com.google.gson.reflect.TypeToken<List<com.pixel.gallery.utils.CustomShortcut>>() {}.type
+            val currentList = try {
+                com.google.gson.Gson().fromJson<List<com.pixel.gallery.utils.CustomShortcut>>(json, type) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }.toMutableList()
+
+            currentList.removeAll { it.id == id }
+            preferences[CUSTOM_SHORTCUTS] = com.google.gson.Gson().toJson(currentList)
+        }
+    }
 }

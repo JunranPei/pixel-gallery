@@ -25,6 +25,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToExcludedFolders: () -> Unit,
     onNavigateToLicenses: () -> Unit,
+    onNavigateToShortcutManager: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val materialYou by viewModel.materialYou.collectAsState()
@@ -104,6 +105,14 @@ fun SettingsScreen(
                     valueRange = 100f..1000f,
                     steps = 8,
                     onValueChangeFinished = { viewModel.setGlidePersistentCacheSize(it.toInt()) }
+                )
+            }
+            item {
+                SettingsClickItem(
+                    title = "Desktop Shortcuts",
+                    description = "Create and manage independent custom shortcuts",
+                    icon = Icons.Outlined.Tab,
+                    onClick = onNavigateToShortcutManager
                 )
             }
             item {
