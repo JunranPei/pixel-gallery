@@ -46,7 +46,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun GalleryScrollbar(
     lazyGridState: LazyGridState,
-    layoutModifier: Modifier = Modifier
+    layoutModifier: Modifier = Modifier,
+    onDragStateChanged: (Boolean) -> Unit = {}
 ) {
     val scrollbarScope = rememberCoroutineScope()
     val localDensity = LocalDensity.current
@@ -55,6 +56,10 @@ fun GalleryScrollbar(
     var touchActive by remember { mutableStateOf(false) }
     var scrollbarVisible by remember { mutableStateOf(false) }
     var activeScrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    LaunchedEffect(dragActive) {
+        onDragStateChanged(dragActive)
+    }
 
     // Visibility control
     LaunchedEffect(lazyGridState.isScrollInProgress, dragActive, touchActive) {

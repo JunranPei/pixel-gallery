@@ -52,8 +52,20 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import me.saket.telephoto.zoomable.glide.ZoomableGlideImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
+import me.saket.telephoto.zoomable.ZoomSpec
+import me.saket.telephoto.zoomable.rememberZoomableState
+import me.saket.telephoto.zoomable.zoomable
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import java.io.File
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ScaleFactor
+import androidx.compose.ui.input.pointer.pointerInput
+
+
 
 private val MapnikHttps = XYTileSource(
     "Mapnik",
@@ -242,11 +254,17 @@ fun ViewerScreen(
                             model = model,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
-                            state = rememberZoomableImageState(),
+                            state = rememberZoomableImageState(
+                                zoomableState = rememberZoomableState(
+                                    zoomSpec = ZoomSpec(
+                                        maxZoomFactor = 15f,
+                                        preventOverOrUnderZoom = true
+                                    )
+                                )
+                            ),
                             contentScale = ContentScale.Fit,
                             requestBuilderTransform = transform,
                             onClick = { 
-
                                 if (isPlayingMotion) {
                                     isPlayingMotion = false
                                 } else {
@@ -561,6 +579,14 @@ fun VideoPlayer(
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    LaunchedEffect(uri) {
+        scale = 1f
+        offset = Offset.Zero
+    }
+
     DisposableEffect(isActive, uri) {
         val player = if (isActive) {
             ExoPlayer.Builder(context).build().apply {
@@ -581,29 +607,56 @@ fun VideoPlayer(
     }
 
     Box(
-        modifier = modifier.clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null,
-            onClick = onTap
-        )
+        modifier = modifier
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onTap
+            )
+            .pointerInput(uri) {
+                detectTransformGestures { centroid, pan, zoom, _ ->
+                    val newScale = (scale * zoom).coerceIn(0.3f, 15f)
+                    val rawOffset = (offset + pan) * zoom + centroid * (1f - zoom)
+                    
+                    val maxX = (size.width * (newScale - 1f)).coerceAtLeast(0f) / 2f
+                    val maxY = (size.height * (newScale - 1f)).coerceAtLeast(0f) / 2f
+                    
+                    scale = newScale
+                    offset = Offset(
+                        x = rawOffset.x.coerceIn(-maxX, maxX),
+                        y = rawOffset.y.coerceIn(-maxY, maxY)
+                    )
+                }
+            }
     ) {
         if (exoPlayer != null) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = false
-                        setBackgroundColor(android.graphics.Color.BLACK)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offset.x
+                        translationY = offset.y
                     }
-                },
-                update = { view ->
-                    view.player = exoPlayer
-                },
-                onRelease = { view ->
-                    view.player = null
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = exoPlayer
+                            useController = false
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                        }
+                    },
+                    update = { view ->
+                        view.player = exoPlayer
+                    },
+                    onRelease = { view ->
+                        view.player = null
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             
             if (!isMotionPhoto) {
                 VideoControls(

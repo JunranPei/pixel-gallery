@@ -69,6 +69,7 @@ fun PhotosScreen(
     state: LazyGridState = rememberLazyGridState()
 ) {
     var isFastScrolling by remember { mutableStateOf(false) }
+    var isScrollbarDragging by remember { mutableStateOf(false) }
 
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
@@ -91,6 +92,43 @@ fun PhotosScreen(
     LaunchedEffect(state.isScrollInProgress) {
         if (!state.isScrollInProgress) {
             isFastScrolling = false
+        }
+    }
+
+    val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
+    val context = LocalContext.current
+
+    LaunchedEffect(firstVisibleIndex, items, isFastScrolling, isScrollbarDragging) {
+        if (!isFastScrolling && !isScrollbarDragging) {
+            val info = state.layoutInfo
+            val visibleCount = info.visibleItemsInfo.size
+            if (visibleCount > 0 && items.isNotEmpty()) {
+                val preloadStartIndex = firstVisibleIndex + visibleCount
+                val preloadEndIndex = (preloadStartIndex + 18).coerceAtMost(items.size - 1)
+                for (i in preloadStartIndex..preloadEndIndex) {
+                    val item = items[i]
+                    if (item is GridItem.Photo) {
+                        val media = item.entry
+                        val model = AvesAppGlideModule.getModel(
+                            context = context,
+                            uri = Uri.parse(media.uri),
+                            mimeType = media.sourceMimeType,
+                            pageId = null,
+                            sizeBytes = media.sizeBytes,
+                            isThumbnail = true,
+                            rotationDegrees = media.sourceRotationDegrees,
+                            dateModifiedMillis = media.dateModifiedMillis
+                        )
+                        Glide.with(context)
+                            .load(model)
+                            .signature(ObjectKey(media.dateModifiedMillis))
+                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                            .format(DecodeFormat.PREFER_RGB_565)
+                            .override(200)
+                            .preload()
+                    }
+                }
+            }
         }
     }
 
@@ -187,7 +225,7 @@ fun PhotosScreen(
                             media = media,
                             isSelected = isSelected,
                             isSelectionMode = isSelectionMode,
-                            isFastScrolling = isFastScrolling,
+                            isFastScrolling = isFastScrolling || isScrollbarDragging,
                             onClick = onPhotoClick,
                             onLongClick = null
                         )
@@ -200,7 +238,8 @@ fun PhotosScreen(
             lazyGridState = state,
             layoutModifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(bottom = bottomPadding)
+                .padding(bottom = bottomPadding),
+            onDragStateChanged = { isScrollbarDragging = it }
         )
     }
 }
@@ -442,6 +481,44 @@ fun AlbumsScreen(
     columns: Int = 2,
     onColumnsChange: (Int) -> Unit = {}
 ) {
+    var isScrollbarDragging by remember { mutableStateOf(false) }
+    val firstVisibleIndex by remember { derivedStateOf { gridState.firstVisibleItemIndex } }
+    val context = LocalContext.current
+
+    LaunchedEffect(firstVisibleIndex, albums, isScrollbarDragging) {
+        if (!isScrollbarDragging) {
+            val info = gridState.layoutInfo
+            val visibleCount = info.visibleItemsInfo.size
+            if (visibleCount > 0 && albums.isNotEmpty()) {
+                val preloadStartIndex = firstVisibleIndex + visibleCount
+                val preloadEndIndex = (preloadStartIndex + 18).coerceAtMost(albums.size - 1)
+                for (i in preloadStartIndex..preloadEndIndex) {
+                    val album = albums[i]
+                    val mimeType = MimeTypeMap.getFileExtensionFromUrl(album.coverUri).lowercase().let { ext ->
+                        MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "image/jpeg"
+                    }
+                    val model = AvesAppGlideModule.getModel(
+                        context = context,
+                        uri = Uri.parse(album.coverUri),
+                        mimeType = mimeType,
+                        pageId = null,
+                        sizeBytes = null,
+                        isThumbnail = true,
+                        rotationDegrees = 0,
+                        dateModifiedMillis = album.lastModified
+                    )
+                    Glide.with(context)
+                        .load(model)
+                        .signature(ObjectKey(album.lastModified))
+                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                        .format(DecodeFormat.PREFER_RGB_565)
+                        .override(200)
+                        .preload()
+                }
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
@@ -499,7 +576,8 @@ fun AlbumsScreen(
                     onClick = onAlbumClick,
                     onExclude = onAlbumExclude,
                     onHide = onAlbumHide,
-                    columns = columns
+                    columns = columns,
+                    isFastScrolling = isScrollbarDragging
                 )
             }
         }
@@ -508,7 +586,8 @@ fun AlbumsScreen(
             lazyGridState = gridState,
             layoutModifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(bottom = bottomPadding)
+                .padding(bottom = bottomPadding),
+            onDragStateChanged = { isScrollbarDragging = it }
         )
     }
 }
@@ -520,7 +599,8 @@ fun AlbumCard(
     onClick: () -> Unit,
     onExclude: () -> Unit,
     onHide: () -> Unit,
-    columns: Int = 2
+    columns: Int = 2,
+    isFastScrolling: Boolean = false
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -528,8 +608,9 @@ fun AlbumCard(
         val extension = MimeTypeMap.getFileExtensionFromUrl(album.coverUri)
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "image/jpeg"
     }
-    val model = remember(album.coverUri, mimeType) {
-        AvesAppGlideModule.getModel(
+    val model = remember(album.coverUri, mimeType, isFastScrolling) {
+        if (isFastScrolling) null
+        else AvesAppGlideModule.getModel(
             context = context,
             uri = Uri.parse(album.coverUri),
             mimeType = mimeType,
