@@ -115,7 +115,15 @@ fun MainScaffold(
     var showAlbumSortDialog by remember { mutableStateOf(false) }
     
     // Simple navigation stack
-    var navigationStack by rememberSaveable { mutableStateOf(listOf<Screen>(initialScreen)) }
+    var navigationStack by rememberSaveable { 
+        mutableStateOf(
+            if (initialScreen == Screen.Home) {
+                listOf<Screen>(Screen.Home)
+            } else {
+                listOf<Screen>(Screen.Home, initialScreen)
+            }
+        )
+    }
 
     LaunchedEffect(externalMedia) {
         externalMedia?.let { media ->
