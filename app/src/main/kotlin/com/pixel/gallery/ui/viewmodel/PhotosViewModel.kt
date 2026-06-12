@@ -199,7 +199,7 @@ class PhotosViewModel @Inject constructor(
     private var contentObserver: android.database.ContentObserver? = null
 
     init {
-        refresh()
+        refresh(delayMillis = 1000)
         registerContentObserver()
         observeGlideThreadCount()
     }
@@ -223,8 +223,14 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun refresh() {
-        viewModelScope.launch {
+    private var syncJob: kotlinx.coroutines.Job? = null
+
+    fun refresh(delayMillis: Long = 0) {
+        if (syncJob?.isActive == true) return
+        syncJob = viewModelScope.launch {
+            if (delayMillis > 0) {
+                kotlinx.coroutines.delay(delayMillis)
+            }
             repository.syncWithMediaStore()
         }
     }
