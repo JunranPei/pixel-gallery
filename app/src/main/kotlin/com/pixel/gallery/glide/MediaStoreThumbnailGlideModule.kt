@@ -88,7 +88,8 @@ internal class MediaStoreThumbnailFetcher(
             // Double Cache: Persistent Cache for heavy files (>5MB) to prevent expensive re-decoding
             val isLargeFile = model.sizeBytes != null && model.sizeBytes > 5 * 1024 * 1024
             val isGridView = width < 300 && height < 300
-            val usePersistentCache = isLargeFile // Only heavy files use persistent cache
+            val isHighResRequest = width >= 200 || height >= 200
+            val usePersistentCache = isLargeFile && isHighResRequest
 
             val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
             var persistentFile: File? = null
@@ -103,7 +104,9 @@ internal class MediaStoreThumbnailFetcher(
                         val legacyDirs = listOf(
                             "persistent_thumbnails",
                             "persistent_thumbnails_v2",
-                            "persistent_thumbnails_v3"
+                            "persistent_thumbnails_v3",
+                            "persistent_grid_thumbnails",
+                            "persistent_viewer_thumbnails"
                         )
                         for (legacyName in legacyDirs) {
                             val legacyDir = File(context.cacheDir, legacyName)
