@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
 import com.pixel.gallery.ui.settings.SettingsScreen
-import com.pixel.gallery.ui.settings.ShortcutManagerScreen
 import com.pixel.gallery.ui.gallery.FavouritesScreen
 import com.pixel.gallery.ui.gallery.TrashScreen
 import com.pixel.gallery.ui.gallery.HiddenAlbumsScreen
@@ -85,7 +84,6 @@ sealed class Screen : Parcelable {
     @Parcelize object ExcludedFolders : Screen()
     @Parcelize object Licenses : Screen()
     @Parcelize data class Photo(val albumName: String) : Screen()
-    @Parcelize object ShortcutManager : Screen()
     @Parcelize object PerformanceSettings : Screen()
 
     enum class ViewerSource { All, Favourites, Trash, Album, Vault, External }
@@ -408,13 +406,9 @@ fun MainScaffold(
                     onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
                     onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
-                    onNavigateToShortcutManager = { navigationStack = navigationStack + Screen.ShortcutManager },
                     onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings }
                 )
                 Screen.PerformanceSettings -> PerformanceSettingsScreen(
-                    onBack = navigateBack
-                )
-                Screen.ShortcutManager -> ShortcutManagerScreen(
                     onBack = navigateBack
                 )
                 Screen.Favourites -> FavouritesScreen(
