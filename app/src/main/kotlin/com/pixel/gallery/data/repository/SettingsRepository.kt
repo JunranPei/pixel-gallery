@@ -153,4 +153,36 @@ class SettingsRepository @Inject constructor(
             preferences[GLIDE_PERSISTENT_CACHE_SIZE] = value
         }
     }
+
+    private val GLIDE_PERSISTENT_GRID_CACHE_SIZE = intPreferencesKey("glide_persistent_grid_cache_size")
+    private val GLIDE_PERSISTENT_VIEWER_CACHE_SIZE = intPreferencesKey("glide_persistent_viewer_cache_size")
+
+    val glidePersistentGridCacheSize: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[GLIDE_PERSISTENT_GRID_CACHE_SIZE] ?: 250 }
+
+    suspend fun setGlidePersistentGridCacheSize(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[GLIDE_PERSISTENT_GRID_CACHE_SIZE] = value
+        }
+    }
+
+    val glidePersistentViewerCacheSize: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[GLIDE_PERSISTENT_VIEWER_CACHE_SIZE] ?: 250 }
+
+    suspend fun setGlidePersistentViewerCacheSize(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[GLIDE_PERSISTENT_VIEWER_CACHE_SIZE] = value
+        }
+    }
+
+    private val LAST_SYNCED_GENERATION = longPreferencesKey("last_synced_generation")
+
+    val lastSyncedGeneration: Flow<Long> = context.dataStore.data
+        .map { preferences -> preferences[LAST_SYNCED_GENERATION] ?: 0L }
+
+    suspend fun setLastSyncedGeneration(value: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[LAST_SYNCED_GENERATION] = value
+        }
+    }
 }

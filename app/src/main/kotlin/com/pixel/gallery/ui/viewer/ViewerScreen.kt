@@ -37,6 +37,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.pixel.gallery.ui.components.DeleteConfirmDialog
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -94,6 +95,7 @@ fun ViewerScreen(
     var showUI by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var rotationLocked by remember { mutableStateOf(true) }
     
     val context = LocalContext.current
@@ -222,18 +224,27 @@ fun ViewerScreen(
             val signatureKey = remember(media.dateModifiedMillis) {
                 ObjectKey(media.dateModifiedMillis)
             }
-            val transform = remember(signatureKey, thumbnailModel) {
+            val hasThumbnail = remember(media.width, media.height) {
+                val w = media.width ?: 0
+                val h = media.height ?: 0
+                w > 512 || h > 512
+            }
+            val transform = remember(signatureKey, thumbnailModel, hasThumbnail) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
-                    requestBuilder
+                    val base = requestBuilder
                         .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
                         .signature(signatureKey)
-                        .thumbnail(
+                    if (hasThumbnail) {
+                        base.thumbnail(
                             com.bumptech.glide.Glide.with(context)
                                 .asDrawable()
                                 .load(thumbnailModel)
                                 .signature(signatureKey)
                                 .override(512)
                         )
+                    } else {
+                        base
+                    }
                 }
             }
             
@@ -485,10 +496,7 @@ fun ViewerScreen(
                         }
                     } else {
                         ViewerAction(Icons.Outlined.Delete, "Delete") {
-                            currentMedia?.let { media ->
-                                viewModel.moveToTrash(media.contentId, media.uri, media.path)
-                                onBack()
-                            }
+                            showDeleteConfirm = true
                         }
                     }
                 }
@@ -502,6 +510,21 @@ fun ViewerScreen(
                 onDismiss = { showInfo = false }
             )
         }
+
+        DeleteConfirmDialog(
+            visible = showDeleteConfirm,
+            onDismissRequest = { showDeleteConfirm = false },
+            title = "Move to Recycle Bin?",
+            message = "Move this item to the recycle bin?",
+            confirmLabel = "Move to Bin",
+            isDeletePermanently = false,
+            onConfirm = {
+                currentMedia?.let { media ->
+                    viewModel.moveToTrash(media.contentId, media.uri, media.path)
+                    onBack()
+                }
+            }
+        )
     }
 }
 

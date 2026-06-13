@@ -25,6 +25,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToExcludedFolders: () -> Unit,
     onNavigateToLicenses: () -> Unit,
+    onNavigateToPerformanceSettings: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val materialYou by viewModel.materialYou.collectAsState()
@@ -71,39 +72,11 @@ fun SettingsScreen(
                 )
             }
             item {
-                val glideThreadCount by viewModel.glideThreadCount.collectAsState()
-                SettingsSliderItem(
-                    title = "Image Decoding Threads: $glideThreadCount",
-                    description = "Limits background CPU threads for decoding thumbnails. Lower values save battery; higher values load thumbnails faster.",
+                SettingsClickItem(
+                    title = "Performance & Caching",
+                    description = "Manage cache limit, threads and cleanup",
                     icon = Icons.Outlined.Speed,
-                    value = glideThreadCount.toFloat(),
-                    valueRange = 1f..8f,
-                    steps = 6,
-                    onValueChangeFinished = { viewModel.setGlideThreadCount(it.toInt()) }
-                )
-            }
-            item {
-                val glideCacheSize by viewModel.glideCacheSize.collectAsState()
-                SettingsSliderItem(
-                    title = "Flowing Cache Limit: $glideCacheSize MB",
-                    description = "Limits the maximum disk space used by Glide's standard LRU cache (for smaller files). Requires app restart to take effect.",
-                    icon = Icons.Outlined.Storage,
-                    value = glideCacheSize.toFloat(),
-                    valueRange = 100f..2000f,
-                    steps = 18,
-                    onValueChangeFinished = { viewModel.setGlideCacheSize(it.toInt()) }
-                )
-            }
-            item {
-                val glidePersistentCacheSize by viewModel.glidePersistentCacheSize.collectAsState()
-                SettingsSliderItem(
-                    title = "Persistent Cache Limit: $glidePersistentCacheSize MB",
-                    description = "Limits the maximum space for persistent thumbnails of heavy files (>5MB) to avoid re-decoding. Managed independently.",
-                    icon = Icons.Outlined.Storage,
-                    value = glidePersistentCacheSize.toFloat(),
-                    valueRange = 100f..1000f,
-                    steps = 8,
-                    onValueChangeFinished = { viewModel.setGlidePersistentCacheSize(it.toInt()) }
+                    onClick = onNavigateToPerformanceSettings
                 )
             }
             item {

@@ -87,27 +87,39 @@ internal class MediaStoreThumbnailFetcher(
 
             // Double Cache: Persistent Cache for heavy files (>5MB) to prevent expensive re-decoding
             val isLargeFile = model.sizeBytes != null && model.sizeBytes > 5 * 1024 * 1024
+            val isGridView = width < 300 && height < 300
             val isHighResRequest = width >= 200 || height >= 200
             val usePersistentCache = isLargeFile && isHighResRequest
+
+            val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
             var persistentFile: File? = null
+            var dirName: String? = null
+
             if (usePersistentCache) {
+                dirName = if (isGridView) "persistent_grid_thumbnails" else "persistent_viewer_thumbnails"
+                
                 if (!hasCleanedLegacyCaches) {
                     hasCleanedLegacyCaches = true
                     try {
-                        val legacyDir1 = File(context.cacheDir, "persistent_thumbnails")
-                        if (legacyDir1.exists()) {
-                            legacyDir1.deleteRecursively()
-                        }
-                        val legacyDir2 = File(context.cacheDir, "persistent_thumbnails_v2")
-                        if (legacyDir2.exists()) {
-                            legacyDir2.deleteRecursively()
+                        val legacyDirs = listOf(
+                            "persistent_thumbnails",
+                            "persistent_thumbnails_v2",
+                            "persistent_thumbnails_v3",
+                            "persistent_grid_thumbnails",
+                            "persistent_viewer_thumbnails"
+                        )
+                        for (legacyName in legacyDirs) {
+                            val legacyDir = File(context.cacheDir, legacyName)
+                            if (legacyDir.exists()) {
+                                legacyDir.deleteRecursively()
+                            }
                         }
                     } catch (e: Exception) {
                         // ignore
                     }
                 }
 
-                val persistentDir = File(context.cacheDir, "persistent_thumbnails_v3")
+                val persistentDir = File(context.cacheDir, dirName)
                 if (!persistentDir.exists()) {
                     persistentDir.mkdirs()
                 }
@@ -193,13 +205,17 @@ internal class MediaStoreThumbnailFetcher(
                             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
                         }
                         // Check and trim persistent cache size if it exceeds the limit
-                        val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
-                        val maxPersistentCacheMb = runBlocking {
-                            settingsRepository.glidePersistentCacheSize.first()
+                        val limitFlow = if (isGridView) {
+                            settingsRepository.glidePersistentGridCacheSize
+                        } else {
+                            settingsRepository.glidePersistentViewerCacheSize
                         }
-                        val maxPersistentCacheBytes = maxPersistentCacheMb.toLong() * 1024 * 1024
+                        val limitMb = runBlocking {
+                            limitFlow.first()
+                        }
+                        val limitBytes = limitMb.toLong() * 1024 * 1024
                         persistentFile.parentFile?.let {
-                            trimPersistentCache(it, maxPersistentCacheBytes)
+                            trimPersistentCache(it, limitBytes)
                         }
                     } catch (e: Exception) {
                         // ignore write and trim errors
