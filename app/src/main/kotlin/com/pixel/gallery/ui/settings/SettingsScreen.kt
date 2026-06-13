@@ -25,7 +25,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToExcludedFolders: () -> Unit,
     onNavigateToLicenses: () -> Unit,
-    onNavigateToShortcutManager: () -> Unit,
     onNavigateToPerformanceSettings: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
@@ -80,14 +79,7 @@ fun SettingsScreen(
                     onClick = onNavigateToPerformanceSettings
                 )
             }
-            item {
-                SettingsClickItem(
-                    title = "Desktop Shortcuts",
-                    description = "Create and manage independent custom shortcuts",
-                    icon = Icons.Outlined.Tab,
-                    onClick = onNavigateToShortcutManager
-                )
-            }
+
             item {
                 SettingsClickItem(
                     title = "Excluded Folders",
@@ -100,7 +92,7 @@ fun SettingsScreen(
             item {
                 SettingsClickItem(
                     title = "About",
-                    description = "Pixel Gallery v4.2.0-shortcuts",
+                    description = "Pixel Gallery v4.2.0-multitask",
                     icon = Icons.Outlined.Info,
                     onClick = onNavigateToLicenses
                 )
