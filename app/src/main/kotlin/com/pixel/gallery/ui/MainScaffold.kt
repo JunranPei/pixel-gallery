@@ -32,6 +32,8 @@ import com.pixel.gallery.ui.viewer.ViewerScreen
 import com.pixel.gallery.ui.settings.ExcludedFoldersScreen
 import com.pixel.gallery.ui.settings.LicensesScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
+import com.pixel.gallery.ui.components.DeleteConfirmDialog
+import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
@@ -84,6 +86,7 @@ sealed class Screen : Parcelable {
     @Parcelize object Licenses : Screen()
     @Parcelize data class Photo(val albumName: String) : Screen()
     @Parcelize object ShortcutManager : Screen()
+    @Parcelize object PerformanceSettings : Screen()
 
     enum class ViewerSource { All, Favourites, Trash, Album, Vault, External }
 }
@@ -113,6 +116,8 @@ fun MainScaffold(
     
     var showPhotoSortDialog by remember { mutableStateOf(false) }
     var showAlbumSortDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var isDeletePermanentlyConfirm by remember { mutableStateOf(false) }
     
     // Simple navigation stack
     var navigationStack by rememberSaveable { 
@@ -242,8 +247,8 @@ fun MainScaffold(
                                 Icon(Icons.Outlined.RestoreFromTrash, contentDescription = "Restore")
                             }
                             IconButton(onClick = { 
-                                photosViewModel.deleteMediaBulk(selectedEntries.map { it.uri })
-                                selectedIds = emptySet()
+                                isDeletePermanentlyConfirm = true
+                                showDeleteConfirmDialog = true
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete permanently")
                             }
@@ -276,8 +281,8 @@ fun MainScaffold(
                             }
 
                             IconButton(onClick = { 
-                                photosViewModel.moveToTrashBulk(selectedEntries.map { it.uri })
-                                selectedIds = emptySet()
+                                isDeletePermanentlyConfirm = false
+                                showDeleteConfirmDialog = true
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete")
                             }
@@ -403,7 +408,11 @@ fun MainScaffold(
                     onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
                     onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
-                    onNavigateToShortcutManager = { navigationStack = navigationStack + Screen.ShortcutManager }
+                    onNavigateToShortcutManager = { navigationStack = navigationStack + Screen.ShortcutManager },
+                    onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings }
+                )
+                Screen.PerformanceSettings -> PerformanceSettingsScreen(
+                    onBack = navigateBack
                 )
                 Screen.ShortcutManager -> ShortcutManagerScreen(
                     onBack = navigateBack
@@ -634,6 +643,27 @@ fun MainScaffold(
                 }
             )
         }
+
+        DeleteConfirmDialog(
+            visible = showDeleteConfirmDialog,
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = if (isDeletePermanentlyConfirm) "Delete permanently?" else "Move to Recycle Bin?",
+            message = if (isDeletePermanentlyConfirm) {
+                "Are you sure you want to permanently delete the selected items? This action cannot be undone."
+            } else {
+                "Move the selected items to the recycle bin?"
+            },
+            confirmLabel = if (isDeletePermanentlyConfirm) "Delete" else "Move to Bin",
+            isDeletePermanently = isDeletePermanentlyConfirm,
+            onConfirm = {
+                if (isDeletePermanentlyConfirm) {
+                    photosViewModel.deleteMediaBulk(selectedEntries.map { it.uri })
+                } else {
+                    photosViewModel.moveToTrashBulk(selectedEntries.map { it.uri })
+                }
+                selectedIds = emptySet()
+            }
+        )
     }
 }
 

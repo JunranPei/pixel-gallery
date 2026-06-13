@@ -143,6 +143,12 @@ class PhotosViewModel @Inject constructor(
     val glidePersistentCacheSize: StateFlow<Int> = settingsRepository.glidePersistentCacheSize
         .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
 
+    val glidePersistentGridCacheSize: StateFlow<Int> = settingsRepository.glidePersistentGridCacheSize
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
+
+    val glidePersistentViewerCacheSize: StateFlow<Int> = settingsRepository.glidePersistentViewerCacheSize
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
+
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -335,6 +341,57 @@ class PhotosViewModel @Inject constructor(
     fun setGlidePersistentCacheSize(value: Int) {
         viewModelScope.launch {
             settingsRepository.setGlidePersistentCacheSize(value)
+        }
+    }
+
+    fun setGlidePersistentGridCacheSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setGlidePersistentGridCacheSize(value)
+        }
+    }
+
+    fun setGlidePersistentViewerCacheSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setGlidePersistentViewerCacheSize(value)
+        }
+    }
+
+    fun clearAllCaches(context: android.content.Context, onComplete: () -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                com.bumptech.glide.Glide.get(context).clearDiskCache()
+            } catch (e: Exception) {
+                // ignore
+            }
+            try {
+                val dirs = listOf(
+                    "small_grid_thumbnails",
+                    "large_grid_thumbnails",
+                    "small_viewer_thumbnails",
+                    "large_viewer_thumbnails",
+                    "persistent_grid_thumbnails",
+                    "persistent_viewer_thumbnails",
+                    "persistent_thumbnails",
+                    "persistent_thumbnails_v2",
+                    "persistent_thumbnails_v3"
+                )
+                for (dirName in dirs) {
+                    val dir = java.io.File(context.cacheDir, dirName)
+                    if (dir.exists()) {
+                        dir.deleteRecursively()
+                    }
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                try {
+                    com.bumptech.glide.Glide.get(context).clearMemory()
+                } catch (e: Exception) {
+                    // ignore
+                }
+                onComplete()
+            }
         }
     }
 
