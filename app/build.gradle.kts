@@ -31,7 +31,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pixel.gallery.isolated"
+        applicationId = "com.pixel.gallery.shortcuts"
         minSdk = 26
         targetSdk = 35
         versionCode = 22
