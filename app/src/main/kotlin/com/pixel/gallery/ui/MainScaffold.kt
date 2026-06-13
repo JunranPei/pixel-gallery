@@ -54,6 +54,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
+import com.pixel.gallery.ui.components.DeleteConfirmDialog
+import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
 
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
@@ -81,6 +83,7 @@ sealed class Screen : Parcelable {
     ) : Screen()
     @Parcelize object ExcludedFolders : Screen()
     @Parcelize object Licenses : Screen()
+    @Parcelize object PerformanceSettings : Screen()
     @Parcelize data class Photo(val albumName: String) : Screen()
 
     enum class ViewerSource { All, Favourites, Trash, Album, Vault, External }
@@ -109,6 +112,8 @@ fun MainScaffold(
     
     var showPhotoSortDialog by remember { mutableStateOf(false) }
     var showAlbumSortDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var isDeletePermanentlyConfirm by remember { mutableStateOf(false) }
     
     // Simple navigation stack
     var navigationStack by rememberSaveable { mutableStateOf(listOf<Screen>(Screen.Home)) }
@@ -190,6 +195,13 @@ fun MainScaffold(
     
     val colorScheme = MaterialTheme.colorScheme
     val context = androidx.compose.ui.platform.LocalContext.current
+    val navigateBack: () -> Unit = {
+        if (navigationStack.size > 1) {
+            navigationStack = navigationStack.dropLast(1)
+        } else {
+            (context as? android.app.Activity)?.finish()
+        }
+    }
 
     val selectedEntries = remember(selectedIds, allPhotos, trash, vault) {
         (allPhotos + trash + vault).filter { selectedIds.contains(it.contentId) }
@@ -218,8 +230,8 @@ fun MainScaffold(
                                 Icon(Icons.Outlined.RestoreFromTrash, contentDescription = "Restore")
                             }
                             IconButton(onClick = { 
-                                photosViewModel.deleteMediaBulk(selectedEntries.map { it.uri })
-                                selectedIds = emptySet()
+                                isDeletePermanentlyConfirm = true
+                                showDeleteConfirmDialog = true
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete permanently")
                             }
@@ -252,8 +264,8 @@ fun MainScaffold(
                             }
 
                             IconButton(onClick = { 
-                                photosViewModel.moveToTrashBulk(selectedEntries.map { it.uri })
-                                selectedIds = emptySet()
+                                isDeletePermanentlyConfirm = false
+                                showDeleteConfirmDialog = true
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete")
                             }
@@ -376,12 +388,16 @@ fun MainScaffold(
                     }
                 }
                 Screen.Settings -> SettingsScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
-                    onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses }
+                    onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
+                    onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings }
+                )
+                Screen.PerformanceSettings -> PerformanceSettingsScreen(
+                    onBack = navigateBack
                 )
                 Screen.Favourites -> FavouritesScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Favourites) },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
@@ -390,7 +406,7 @@ fun MainScaffold(
                     gridState = favouritesGridState
                 )
                 Screen.Trash -> TrashScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Trash) },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
@@ -398,22 +414,22 @@ fun MainScaffold(
                     items = groupedTrash,
                     gridState = trashGridState
                 )
-                Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
+                Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = navigateBack)
                 Screen.LockedFolder -> LockedFolderScreen(
-                    onBack = { navigationStack = navigationStack.dropLast(1) },
+                    onBack = navigateBack,
                     onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Vault) },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
                     onToggleSelection = toggleSelection,
                     items = groupedVault
                 )
-                Screen.ExcludedFolders -> ExcludedFoldersScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
-                Screen.Licenses -> LicensesScreen(onBack = { navigationStack = navigationStack.dropLast(1) })
+                Screen.ExcludedFolders -> ExcludedFoldersScreen(onBack = navigateBack)
+                Screen.Licenses -> LicensesScreen(onBack = navigateBack)
                 is Screen.Photo -> {
                     val albumName = (baseScreen as Screen.Photo).albumName
                     PhotoScreen(
                         albumName = albumName,
-                        onBack = { navigationStack = navigationStack.dropLast(1) },
+                        onBack = navigateBack,
                         onNavigateToViewer = { id -> 
                             navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Album, albumName) 
                         },
@@ -606,6 +622,27 @@ fun MainScaffold(
                 }
             )
         }
+
+        DeleteConfirmDialog(
+            visible = showDeleteConfirmDialog,
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = if (isDeletePermanentlyConfirm) "Delete permanently?" else "Move to Recycle Bin?",
+            message = if (isDeletePermanentlyConfirm) {
+                "Are you sure you want to permanently delete the selected items? This action cannot be undone."
+            } else {
+                "Move the selected items to the recycle bin?"
+            },
+            confirmLabel = if (isDeletePermanentlyConfirm) "Delete" else "Move to Bin",
+            isDeletePermanently = isDeletePermanentlyConfirm,
+            onConfirm = {
+                if (isDeletePermanentlyConfirm) {
+                    photosViewModel.deleteMediaBulk(selectedEntries.map { it.uri })
+                } else {
+                    photosViewModel.moveToTrashBulk(selectedEntries.map { it.uri })
+                }
+                selectedIds = emptySet()
+            }
+        )
     }
 }
 

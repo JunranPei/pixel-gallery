@@ -42,10 +42,10 @@ class PhotosViewModel @Inject constructor(
     }
 
     val allPhotos: StateFlow<List<MediaEntry>> = repository.allEntries
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenFolders: StateFlow<Set<String>> = settingsRepository.hiddenFolders
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     val photoSortOrder: StateFlow<PhotoSortOrder> = settingsRepository.photoSortOrder
         .map { runCatching { PhotoSortOrder.valueOf(it) }.getOrDefault(PhotoSortOrder.DATE_DESC) }
@@ -71,7 +71,7 @@ class PhotosViewModel @Inject constructor(
             PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
             PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
         }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun groupMedia(entries: List<MediaEntry>, columns: Int = 3, sortOrder: PhotoSortOrder = PhotoSortOrder.DATE_DESC): List<GridItem> {
         if (sortOrder != PhotoSortOrder.DATE_DESC && sortOrder != PhotoSortOrder.DATE_ASC) {
@@ -103,30 +103,30 @@ class PhotosViewModel @Inject constructor(
 
     val groupedPhotos: StateFlow<List<GridItem>> = combine(photos, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val favourites: StateFlow<List<MediaEntry>> = repository.favourites
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val trashedMedia: StateFlow<List<MediaEntry>> = repository.trash
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
         .map { it.toList() } // Compatibility
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val vaultEntries: StateFlow<List<MediaEntry>> = repository.vaultEntries
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val startupAtAlbums: StateFlow<Boolean> = settingsRepository.startupAtAlbums
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -143,8 +143,14 @@ class PhotosViewModel @Inject constructor(
     val glidePersistentCacheSize: StateFlow<Int> = settingsRepository.glidePersistentCacheSize
         .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
 
+    val glidePersistentGridCacheSize: StateFlow<Int> = settingsRepository.glidePersistentGridCacheSize
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
+
+    val glidePersistentViewerCacheSize: StateFlow<Int> = settingsRepository.glidePersistentViewerCacheSize
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
+
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
 
     val albums: StateFlow<List<Album>> = combine(
@@ -168,7 +174,7 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
@@ -194,12 +200,12 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var contentObserver: android.database.ContentObserver? = null
 
     init {
-        refresh()
+        refresh(delayMillis = 1000)
         registerContentObserver()
         observeGlideThreadCount()
     }
@@ -223,8 +229,14 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun refresh() {
-        viewModelScope.launch {
+    private var syncJob: kotlinx.coroutines.Job? = null
+
+    fun refresh(delayMillis: Long = 0) {
+        if (syncJob?.isActive == true) return
+        syncJob = viewModelScope.launch {
+            if (delayMillis > 0) {
+                kotlinx.coroutines.delay(delayMillis)
+            }
             repository.syncWithMediaStore()
         }
     }
@@ -329,6 +341,57 @@ class PhotosViewModel @Inject constructor(
     fun setGlidePersistentCacheSize(value: Int) {
         viewModelScope.launch {
             settingsRepository.setGlidePersistentCacheSize(value)
+        }
+    }
+
+    fun setGlidePersistentGridCacheSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setGlidePersistentGridCacheSize(value)
+        }
+    }
+
+    fun setGlidePersistentViewerCacheSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setGlidePersistentViewerCacheSize(value)
+        }
+    }
+
+    fun clearAllCaches(context: android.content.Context, onComplete: () -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                com.bumptech.glide.Glide.get(context).clearDiskCache()
+            } catch (e: Exception) {
+                // ignore
+            }
+            try {
+                val dirs = listOf(
+                    "small_grid_thumbnails",
+                    "large_grid_thumbnails",
+                    "small_viewer_thumbnails",
+                    "large_viewer_thumbnails",
+                    "persistent_grid_thumbnails",
+                    "persistent_viewer_thumbnails",
+                    "persistent_thumbnails",
+                    "persistent_thumbnails_v2",
+                    "persistent_thumbnails_v3"
+                )
+                for (dirName in dirs) {
+                    val dir = java.io.File(context.cacheDir, dirName)
+                    if (dir.exists()) {
+                        dir.deleteRecursively()
+                    }
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                try {
+                    com.bumptech.glide.Glide.get(context).clearMemory()
+                } catch (e: Exception) {
+                    // ignore
+                }
+                onComplete()
+            }
         }
     }
 
