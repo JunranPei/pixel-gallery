@@ -42,7 +42,6 @@ class PhotosViewModel @Inject constructor(
     }
 
     val allPhotos: StateFlow<List<MediaEntry>> = repository.allEntries
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenFolders: StateFlow<Set<String>> = settingsRepository.hiddenFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -106,23 +105,18 @@ class PhotosViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val favourites: StateFlow<List<MediaEntry>> = repository.favourites
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val trashedMedia: StateFlow<List<MediaEntry>> = repository.trash
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
-        .map { it.toList() } // Compatibility
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val vaultEntries: StateFlow<List<MediaEntry>> = repository.vaultEntries
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)

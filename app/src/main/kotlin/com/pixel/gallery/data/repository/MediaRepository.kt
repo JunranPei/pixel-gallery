@@ -17,10 +17,15 @@ import com.pixel.gallery.data.local.entity.VaultEntry
 import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,25 +38,39 @@ class MediaRepository @Inject constructor(
 ) {
     private val gson = Gson()
     private var lastSyncedGeneration = 0L
-    val allEntries: Flow<List<MediaEntry>> = combine(
+    private val repositoryScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    val allEntries: StateFlow<List<MediaEntry>> = combine(
         mediaDao.getAllEntries(),
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
             !excluded.any { entry.path.startsWith(it) }
         }
-    }
+    }.stateIn(
+        scope = repositoryScope,
+        started = SharingStarted.Eagerly,
+        initialValue = emptyList()
+    )
 
-    val favourites: Flow<List<MediaEntry>> = combine(
+    val favourites: StateFlow<List<MediaEntry>> = combine(
         mediaDao.getFavourites(),
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
             !excluded.any { entry.path.startsWith(it) }
         }
-    }
+    }.stateIn(
+        scope = repositoryScope,
+        started = SharingStarted.Eagerly,
+        initialValue = emptyList()
+    )
 
-    val trash: Flow<List<MediaEntry>> = mediaDao.getTrash() 
+    val trash: StateFlow<List<MediaEntry>> = mediaDao.getTrash().stateIn(
+        scope = repositoryScope,
+        started = SharingStarted.Eagerly,
+        initialValue = emptyList()
+    ) 
 
 
     fun isFavourite(id: Long): Flow<Boolean> = mediaDao.isFavourite(id)
@@ -227,7 +246,7 @@ class MediaRepository @Inject constructor(
         }
     }
 
-    val vaultEntries: Flow<List<MediaEntry>> = mediaDao.getVaultEntries().map { list ->
+    val vaultEntries: StateFlow<List<MediaEntry>> = mediaDao.getVaultEntries().map { list ->
         list.map { 
             val entry = gson.fromJson(it.entryJson, MediaEntry::class.java)
             // Update entry to point to vault path for correct rendering
@@ -236,7 +255,11 @@ class MediaRepository @Inject constructor(
                 uri = Uri.fromFile(java.io.File(it.vaultPath)).toString()
             )
         }.sortedByDescending { it.bestTimestamp }
-    }
+    }.stateIn(
+        scope = repositoryScope,
+        started = SharingStarted.Eagerly,
+        initialValue = emptyList()
+    )
 
     fun getContentResolver() = context.contentResolver
 
