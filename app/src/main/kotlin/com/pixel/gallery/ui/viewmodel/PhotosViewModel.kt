@@ -149,6 +149,18 @@ class PhotosViewModel @Inject constructor(
     val glidePersistentViewerCacheSize: StateFlow<Int> = settingsRepository.glidePersistentViewerCacheSize
         .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
 
+    val largeImageTileSize: StateFlow<Int> = settingsRepository.largeImageTileSize
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 1024)
+
+    val largeImageMaxCores: StateFlow<Int> = settingsRepository.largeImageMaxCores
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
+
+    val largeImageDebounceMs: StateFlow<Int> = settingsRepository.largeImageDebounceMs
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 150)
+
+    val largeImageHardwareBitmap: StateFlow<Boolean> = settingsRepository.largeImageHardwareBitmap
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -353,6 +365,30 @@ class PhotosViewModel @Inject constructor(
     fun setGlidePersistentViewerCacheSize(value: Int) {
         viewModelScope.launch {
             settingsRepository.setGlidePersistentViewerCacheSize(value)
+        }
+    }
+
+    fun setLargeImageTileSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageTileSize(value)
+        }
+    }
+
+    fun setLargeImageMaxCores(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageMaxCores(value)
+        }
+    }
+
+    fun setLargeImageDebounceMs(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageDebounceMs(value)
+        }
+    }
+
+    fun setLargeImageHardwareBitmap(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageHardwareBitmap(value)
         }
     }
 

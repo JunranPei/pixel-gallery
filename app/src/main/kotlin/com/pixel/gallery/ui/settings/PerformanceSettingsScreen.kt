@@ -1,6 +1,7 @@
 package com.pixel.gallery.ui.settings
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -30,6 +31,11 @@ fun PerformanceSettingsScreen(
     val glideCacheSize by viewModel.glideCacheSize.collectAsState()
     val glidePersistentGridCacheSize by viewModel.glidePersistentGridCacheSize.collectAsState()
     val glidePersistentViewerCacheSize by viewModel.glidePersistentViewerCacheSize.collectAsState()
+
+    val largeImageTileSize by viewModel.largeImageTileSize.collectAsState()
+    val largeImageMaxCores by viewModel.largeImageMaxCores.collectAsState()
+    val largeImageDebounceMs by viewModel.largeImageDebounceMs.collectAsState()
+    val largeImageHardwareBitmap by viewModel.largeImageHardwareBitmap.collectAsState()
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -97,6 +103,67 @@ fun PerformanceSettingsScreen(
                     steps = 18,
                     onValueChangeFinished = { viewModel.setGlidePersistentViewerCacheSize(it.toInt()) }
                 )
+            }
+            item {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            }
+            item {
+                val maxProcessors = remember { Runtime.getRuntime().availableProcessors().coerceAtLeast(1) }
+                SettingsSliderItem(
+                    title = "Large Image Decoder Threads: $largeImageMaxCores",
+                    description = "Limits maximum CPU threads/cores used for decoding ultra-large images. Lower values save battery; higher values render tiles faster.",
+                    icon = Icons.Outlined.Speed,
+                    value = largeImageMaxCores.toFloat(),
+                    valueRange = 1f..maxProcessors.toFloat(),
+                    steps = (maxProcessors - 2).coerceAtLeast(0),
+                    onValueChangeFinished = { viewModel.setLargeImageMaxCores(it.toInt()) }
+                )
+            }
+            item {
+                val tileSliderValue = when (largeImageTileSize) {
+                    512 -> 1f
+                    2048 -> 3f
+                    else -> 2f
+                }
+                SettingsSliderItem(
+                    title = "Large Image Tile Size: ${when(largeImageTileSize) { 512 -> "512px (Lower RAM)"; 2048 -> "2048px (Lower CPU)"; else -> "1024px (Balanced)" }}",
+                    description = "Larger tiles reduce decoding frequency during drag but consume more memory. Recommended: 1024px.",
+                    icon = Icons.Outlined.Storage,
+                    value = tileSliderValue,
+                    valueRange = 1f..3f,
+                    steps = 1,
+                    onValueChangeFinished = {
+                        val newSize = when (it.toInt()) {
+                            1 -> 512
+                            3 -> 2048
+                            else -> 1024
+                        }
+                        viewModel.setLargeImageTileSize(newSize)
+                    }
+                )
+            }
+            item {
+                SettingsSliderItem(
+                    title = "Gestures Throttling Delay: ${if (largeImageDebounceMs == 0) "Disabled" else "${largeImageDebounceMs}ms"}",
+                    description = "Delays full-resolution tile decoding during swipe and zoom gestures to prevent CPU spikes. Recommended: 150ms.",
+                    icon = Icons.Outlined.Speed,
+                    value = largeImageDebounceMs.toFloat(),
+                    valueRange = 0f..400f,
+                    steps = 7,
+                    onValueChangeFinished = { viewModel.setLargeImageDebounceMs(it.toInt()) }
+                )
+            }
+            item {
+                SettingsToggleItem(
+                    title = "Experimental: Hardware Bitmaps",
+                    description = "Decodes tiles directly into GPU texture memory (Zero-Copy) to reduce system bus power. May cause rendering issues on older systems.",
+                    icon = Icons.Outlined.Speed,
+                    checked = largeImageHardwareBitmap,
+                    onCheckedChange = { viewModel.setLargeImageHardwareBitmap(it) }
+                )
+            }
+            item {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             }
             item {
                 SettingsClickItem(
