@@ -172,6 +172,10 @@ dependencies {
     // Biometric
     implementation("androidx.biometric:biometric:1.2.0-alpha05")
     
+    // Immutable collections & Tracing (needed for local subsampling source compilation)
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.8")
+    implementation("androidx.tracing:tracing-ktx:1.2.0")
+    
     // Utilities
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.commonsware.cwac:document:0.5.0")
