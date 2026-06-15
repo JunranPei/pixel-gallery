@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.Velocity
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DecodeFormat
 
+
+
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun PhotosScreen(
@@ -576,8 +578,7 @@ fun AlbumsScreen(
                     onClick = onAlbumClick,
                     onExclude = onAlbumExclude,
                     onHide = onAlbumHide,
-                    columns = columns,
-                    isFastScrolling = isScrollbarDragging
+                    columns = columns
                 )
             }
         }
@@ -599,8 +600,7 @@ fun AlbumCard(
     onClick: () -> Unit,
     onExclude: () -> Unit,
     onHide: () -> Unit,
-    columns: Int = 2,
-    isFastScrolling: Boolean = false
+    columns: Int = 2
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -608,9 +608,8 @@ fun AlbumCard(
         val extension = MimeTypeMap.getFileExtensionFromUrl(album.coverUri)
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "image/jpeg"
     }
-    val model = remember(album.coverUri, mimeType, isFastScrolling) {
-        if (isFastScrolling) null
-        else AvesAppGlideModule.getModel(
+    val model = remember(album.coverUri, mimeType) {
+        AvesAppGlideModule.getModel(
             context = context,
             uri = Uri.parse(album.coverUri),
             mimeType = mimeType,
@@ -665,11 +664,11 @@ fun AlbumCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .background(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = ExpressiveShapes.ExtraLargeIncreased
-                )
-                .clip(ExpressiveShapes.ExtraLargeIncreased),
+                .graphicsLayer {
+                    clip = true
+                    shape = RoundedCornerShape(24.dp)
+                }
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             GlideImage(
