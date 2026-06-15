@@ -54,6 +54,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.Velocity
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DecodeFormat
+import kotlinx.coroutines.delay
+
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
@@ -481,12 +483,39 @@ fun AlbumsScreen(
     columns: Int = 2,
     onColumnsChange: (Int) -> Unit = {}
 ) {
+    var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag) {
+                    isFastScrolling = false
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (java.lang.Math.abs(available.y) > 15000f) {
+                    isFastScrolling = true
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
+    LaunchedEffect(gridState.isScrollInProgress) {
+        if (!gridState.isScrollInProgress) {
+            isFastScrolling = false
+        }
+    }
+
     val firstVisibleIndex by remember { derivedStateOf { gridState.firstVisibleItemIndex } }
     val context = LocalContext.current
 
-    LaunchedEffect(firstVisibleIndex, albums, isScrollbarDragging) {
-        if (!isScrollbarDragging) {
+    LaunchedEffect(firstVisibleIndex, albums, isFastScrolling, isScrollbarDragging) {
+        delay(100)
+        if (!isFastScrolling && !isScrollbarDragging) {
             val info = gridState.layoutInfo
             val visibleCount = info.visibleItemsInfo.size
             if (visibleCount > 0 && albums.isNotEmpty()) {
@@ -525,6 +554,7 @@ fun AlbumsScreen(
             state = gridState,
             modifier = Modifier
                 .fillMaxSize()
+                .nestedScroll(nestedScrollConnection)
                 .pinchToZoomColumns(
                     currentColumns = columns,
                     onColumnsChange = onColumnsChange,
@@ -577,7 +607,7 @@ fun AlbumsScreen(
                     onExclude = onAlbumExclude,
                     onHide = onAlbumHide,
                     columns = columns,
-                    isFastScrolling = isScrollbarDragging
+                    isFastScrolling = isFastScrolling || isScrollbarDragging
                 )
             }
         }
@@ -665,11 +695,11 @@ fun AlbumCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .background(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = ExpressiveShapes.ExtraLargeIncreased
-                )
-                .clip(ExpressiveShapes.ExtraLargeIncreased),
+                .graphicsLayer {
+                    clip = true
+                    shape = RoundedCornerShape(24.dp)
+                }
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             GlideImage(
