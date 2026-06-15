@@ -264,7 +264,7 @@ fun ViewerScreen(
                         val containerWidth = constraints.maxWidth.toFloat()
                         val containerHeight = constraints.maxHeight.toFloat()
 
-                        val calculatedMaxZoom = remember(
+                        val scaleFit = remember(
                             media.width,
                             media.height,
                             media.sourceRotationDegrees,
@@ -277,20 +277,25 @@ fun ViewerScreen(
                             val imgHeight = (if (isSwapped) media.width else media.height).toFloat()
 
                             if (imgWidth <= 0f || imgHeight <= 0f || containerWidth <= 0f || containerHeight <= 0f) {
-                                15f
+                                1f
                             } else {
                                 val imgRatio = imgWidth / imgHeight
                                 val layoutRatio = containerWidth / containerHeight
 
-                                val scaleFit = if (imgRatio > layoutRatio) {
+                                if (imgRatio > layoutRatio) {
                                     containerWidth / imgWidth
                                 } else {
                                     containerHeight / imgHeight
                                 }
-
-                                val scaleToOriginal = 1f / scaleFit
-                                maxOf(scaleToOriginal * 3.0f, 3.0f).coerceIn(3.0f, 60.0f)
                             }
+                        }
+
+                        val scaleToOriginal = remember(scaleFit) {
+                            if (scaleFit > 0f) 1f / scaleFit else 1f
+                        }
+
+                        val calculatedMaxZoom = remember(scaleToOriginal) {
+                            maxOf(scaleToOriginal * 3.0f, 3.0f).coerceIn(3.0f, 60.0f)
                         }
 
                         val zoomableState = key(calculatedMaxZoom) {
@@ -316,6 +321,14 @@ fun ViewerScreen(
                                     isPlayingMotion = false
                                 } else {
                                     showUI = !showUI 
+                                }
+                            },
+                            onDoubleClick = { state, centroid ->
+                                val currentScale = state.contentTransformation.scale.scaleX
+                                if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
+                                    state.resetZoom()
+                                } else {
+                                    state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
                                 }
                             }
                         )
@@ -564,6 +577,7 @@ fun InfoBottomSheet(
             )
 
             InfoRow(Icons.Outlined.Image, media.path.substringAfterLast("/"), "${media.width} x ${media.height} • ${media.sizeBytes / 1024} KB")
+            InfoRow(Icons.Outlined.Folder, "Storage Path", media.path)
             InfoRow(Icons.Outlined.CalendarToday, "Date Taken", metadata["Date Taken"] ?: "Unknown")
 
             if (metadata["Model"] != "Unknown") {
