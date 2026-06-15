@@ -18,6 +18,9 @@ interface MediaDao {
     @Query("SELECT contentId, dateModifiedMillis, isTrashed FROM media_entries")
     suspend fun getKnownEntries(): List<KnownEntry>
 
+    @Query("SELECT * FROM media_entries")
+    suspend fun getAllMediaEntries(): List<MediaEntry>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entries: List<MediaEntry>)
 
