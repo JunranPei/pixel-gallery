@@ -483,39 +483,13 @@ fun AlbumsScreen(
     columns: Int = 2,
     onColumnsChange: (Int) -> Unit = {}
 ) {
-    var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
-
-    val nestedScrollConnection = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.Drag) {
-                    isFastScrolling = false
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (java.lang.Math.abs(available.y) > 15000f) {
-                    isFastScrolling = true
-                }
-                return Velocity.Zero
-            }
-        }
-    }
-
-    LaunchedEffect(gridState.isScrollInProgress) {
-        if (!gridState.isScrollInProgress) {
-            isFastScrolling = false
-        }
-    }
-
     val firstVisibleIndex by remember { derivedStateOf { gridState.firstVisibleItemIndex } }
     val context = LocalContext.current
 
-    LaunchedEffect(firstVisibleIndex, albums, isFastScrolling, isScrollbarDragging) {
+    LaunchedEffect(firstVisibleIndex, albums, isScrollbarDragging) {
         delay(100)
-        if (!isFastScrolling && !isScrollbarDragging) {
+        if (!isScrollbarDragging) {
             val info = gridState.layoutInfo
             val visibleCount = info.visibleItemsInfo.size
             if (visibleCount > 0 && albums.isNotEmpty()) {
@@ -554,7 +528,6 @@ fun AlbumsScreen(
             state = gridState,
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(nestedScrollConnection)
                 .pinchToZoomColumns(
                     currentColumns = columns,
                     onColumnsChange = onColumnsChange,
@@ -606,8 +579,7 @@ fun AlbumsScreen(
                     onClick = onAlbumClick,
                     onExclude = onAlbumExclude,
                     onHide = onAlbumHide,
-                    columns = columns,
-                    isFastScrolling = isFastScrolling || isScrollbarDragging
+                    columns = columns
                 )
             }
         }
@@ -629,8 +601,7 @@ fun AlbumCard(
     onClick: () -> Unit,
     onExclude: () -> Unit,
     onHide: () -> Unit,
-    columns: Int = 2,
-    isFastScrolling: Boolean = false
+    columns: Int = 2
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -638,9 +609,8 @@ fun AlbumCard(
         val extension = MimeTypeMap.getFileExtensionFromUrl(album.coverUri)
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "image/jpeg"
     }
-    val model = remember(album.coverUri, mimeType, isFastScrolling) {
-        if (isFastScrolling) null
-        else AvesAppGlideModule.getModel(
+    val model = remember(album.coverUri, mimeType) {
+        AvesAppGlideModule.getModel(
             context = context,
             uri = Uri.parse(album.coverUri),
             mimeType = mimeType,
