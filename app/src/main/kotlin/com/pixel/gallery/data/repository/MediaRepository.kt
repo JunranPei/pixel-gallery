@@ -265,6 +265,22 @@ class MediaRepository @Inject constructor(
 
     suspend fun syncWithMediaStore() = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
+
+        // 物理验证数据库中已知的所有文件路径是否依然存在。
+        // 如果文件已经被移动或删除，直接从本地 Room 数据库中清理，保证列表实时同步
+        try {
+            val allEntriesBefore = mediaDao.getAllMediaEntries()
+            val missingIds = allEntriesBefore.filter { entry ->
+                !java.io.File(entry.path).exists()
+            }.map { entry -> entry.contentId }
+
+            if (missingIds.isNotEmpty()) {
+                mediaDao.deleteByIds(missingIds)
+                android.util.Log.d("MediaRepository", "Deleted ${missingIds.size} missing physical file entries from Room.")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MediaRepository", "Failed to check physical file existence", e)
+        }
         
         // Optimize: Use Generation API (API 30+) to skip scan if nothing changed in MediaStore
         var currentGeneration = 0L
