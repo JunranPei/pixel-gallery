@@ -54,7 +54,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.Velocity
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DecodeFormat
-import kotlinx.coroutines.delay
+
 
 
 @OptIn(ExperimentalGlideComposeApi::class)
@@ -488,7 +488,6 @@ fun AlbumsScreen(
     val context = LocalContext.current
 
     LaunchedEffect(firstVisibleIndex, albums, isScrollbarDragging) {
-        delay(100)
         if (!isScrollbarDragging) {
             val info = gridState.layoutInfo
             val visibleCount = info.visibleItemsInfo.size
