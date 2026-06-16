@@ -109,8 +109,15 @@ class MainActivity : FragmentActivity() {
             checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
         }
         if (hasPermission) {
-            viewModel.refresh()
+            viewModel.setResumed(true)
+        } else {
+            viewModel.setResumed(false)
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        viewModel.setResumed(false)
     }
 
     override fun onNewIntent(intent: Intent) {
