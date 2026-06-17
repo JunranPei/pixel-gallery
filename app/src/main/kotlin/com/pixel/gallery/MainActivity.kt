@@ -61,6 +61,7 @@ class MainActivity : FragmentActivity() {
         
         checkPermissions()
         handleIntent(intent)
+        checkNotificationListenerPermission()
     }
 
 
@@ -99,6 +100,28 @@ class MainActivity : FragmentActivity() {
         } else {
             viewModel.refresh()
         }
+    }
+
+    private fun checkNotificationListenerPermission() {
+        if (!isNotificationListenerEnabled()) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("开启后台保活支持")
+                .setMessage("为防止多分身在后台被系统强杀，请在接下来的设置中，为本应用开启“通知使用权”。\n\n开启后，系统将为其提供硬件级的后台常驻保护。")
+                .setPositiveButton("去开启") { _, _ ->
+                    try {
+                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(this, "未找到通知监听设置页面，请手动开启", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
+    private fun isNotificationListenerEnabled(): Boolean {
+        val packageNames = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(this)
+        return packageNames.contains(packageName)
     }
 
     override fun onResume() {
