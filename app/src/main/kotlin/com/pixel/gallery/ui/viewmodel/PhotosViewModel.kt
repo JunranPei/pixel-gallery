@@ -198,8 +198,16 @@ class PhotosViewModel @Inject constructor(
 
     private var contentObserver: android.database.ContentObserver? = null
 
+    private var isResumed = false
+
+    fun setResumed(resumed: Boolean) {
+        isResumed = resumed
+        if (resumed) {
+            refresh()
+        }
+    }
+
     init {
-        refresh(delayMillis = 1000)
         registerContentObserver()
         observeGlideThreadCount()
     }
@@ -208,7 +216,9 @@ class PhotosViewModel @Inject constructor(
         contentObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
                 super.onChange(selfChange)
-                refresh()
+                if (isResumed) {
+                    refresh()
+                }
             }
         }
         val resolver = repository.getContentResolver()
@@ -434,21 +444,6 @@ class PhotosViewModel @Inject constructor(
     fun setAlbumSortOrder(order: AlbumSortOrder) {
         viewModelScope.launch {
             settingsRepository.setAlbumSortOrder(order.name)
-        }
-    }
-
-    val customShortcuts: StateFlow<List<com.pixel.gallery.utils.CustomShortcut>> = settingsRepository.customShortcuts
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-
-    fun addCustomShortcut(shortcut: com.pixel.gallery.utils.CustomShortcut) {
-        viewModelScope.launch {
-            settingsRepository.addCustomShortcut(shortcut)
-        }
-    }
-
-    fun removeCustomShortcut(id: String) {
-        viewModelScope.launch {
-            settingsRepository.removeCustomShortcut(id)
         }
     }
 
