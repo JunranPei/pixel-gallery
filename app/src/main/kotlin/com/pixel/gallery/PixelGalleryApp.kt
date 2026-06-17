@@ -54,8 +54,8 @@ class PixelGalleryApp : Application() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        // 当应用的 UI 已经完全不可见（切到后台），或者系统处于中度及以上内存吃紧状态时
-        if (level == TRIM_MEMORY_UI_HIDDEN || level >= TRIM_MEMORY_MODERATE) {
+        // 仅在系统内存真正处于中度及以上吃紧状态时才彻底清空缓存
+        if (level >= TRIM_MEMORY_MODERATE) {
             try {
                 // 立刻清除 Glide 所有的内存图片缓存（Bitmap 物理内存占用的大头）
                 com.bumptech.glide.Glide.get(this).clearMemory()
