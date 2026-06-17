@@ -171,6 +171,10 @@ dependencies {
     // Biometric
     implementation("androidx.biometric:biometric:1.2.0-alpha05")
     
+    // Immutable collections & Tracing (needed for local subsampling source compilation)
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.8")
+    implementation("androidx.tracing:tracing-ktx:1.2.0")
+    
     // Utilities
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.commonsware.cwac:document:0.5.0")
@@ -182,7 +186,9 @@ dependencies {
     implementation("com.github.bumptech.glide:glide:4.16.0")
     implementation("com.github.bumptech.glide:compose:1.0.0-beta01")
     ksp("com.github.bumptech.glide:ksp:4.16.0")
-    implementation("me.saket.telephoto:zoomable-image-glide:0.14.0")
+    implementation("me.saket.telephoto:zoomable-image-glide:0.14.0") {
+        exclude(group = "me.saket.telephoto", module = "sub-sampling-image")
+    }
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")
