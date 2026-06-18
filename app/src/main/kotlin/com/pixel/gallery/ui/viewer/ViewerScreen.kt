@@ -252,7 +252,7 @@ fun ViewerScreen(
                                 dataSource: com.bumptech.glide.load.DataSource,
                                 isFirstResource: Boolean
                             ): Boolean {
-                                android.util.Log.d("GalleryImageLoad", "Large Image LOAD SUCCESS: uri=${media.uri}, dataSource=$dataSource")
+                                android.util.Log.e("GalleryImageLoad", "Large Image LOAD SUCCESS: uri=${media.uri}, dataSource=$dataSource")
                                 return false
                             }
                         })
@@ -332,7 +332,7 @@ fun ViewerScreen(
                         }
 
                         SideEffect {
-                            android.util.Log.d("GalleryCompose", "ZoomableGlideImage recomposed: mediaId=${media.contentId}, uri=${media.uri}, zoomableState=${zoomableState.hashCode()}")
+                            android.util.Log.e("GalleryCompose", "ZoomableGlideImage recomposed: mediaId=${media.contentId}, uri=${media.uri}, zoomableState=${zoomableState.hashCode()}")
                         }
 
                         ZoomableGlideImage(
