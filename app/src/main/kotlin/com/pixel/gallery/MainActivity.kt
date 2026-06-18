@@ -44,6 +44,7 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onCreate(hashCode=${hashCode()})")
         super.onCreate(savedInstanceState)
         _intentSenderLauncher = intentSenderLauncher
         
@@ -61,6 +62,7 @@ class MainActivity : FragmentActivity() {
         
         checkPermissions()
         handleIntent(intent)
+        checkNotificationListenerPermission()
     }
 
 
@@ -101,8 +103,36 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    private fun checkNotificationListenerPermission() {
+        if (!isNotificationListenerEnabled()) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("开启后台保活支持")
+                .setMessage("为防止多分身在后台被系统强杀，请在接下来的设置中，为本应用开启“通知使用权”。\n\n开启后，系统将为其提供硬件级的后台常驻保护。")
+                .setPositiveButton("去开启") { _, _ ->
+                    try {
+                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(this, "未找到通知监听设置页面，请手动开启", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
+    private fun isNotificationListenerEnabled(): Boolean {
+        val packageNames = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(this)
+        return packageNames.contains(packageName)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onStart(hashCode=${hashCode()})")
+    }
+
     override fun onResume() {
         super.onResume()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onResume(hashCode=${hashCode()})")
         val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
         } else {
@@ -117,7 +147,18 @@ class MainActivity : FragmentActivity() {
 
     override fun onPause() {
         super.onPause()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onPause(hashCode=${hashCode()})")
         viewModel.setResumed(false)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onStop(hashCode=${hashCode()})")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onDestroy(hashCode=${hashCode()})")
     }
 
     override fun onNewIntent(intent: Intent) {
