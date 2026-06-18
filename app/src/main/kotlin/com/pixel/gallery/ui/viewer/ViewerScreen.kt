@@ -192,6 +192,7 @@ fun ViewerScreen(
     ) {
         HorizontalPager(
             state = pagerState,
+            key = { photos[it].contentId },
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
@@ -229,11 +230,45 @@ fun ViewerScreen(
                 val h = media.height ?: 0
                 w > 512 || h > 512
             }
-            val transform = remember(signatureKey, thumbnailModel, hasThumbnail) {
+            val configuration = LocalConfiguration.current
+            val screenWidth = remember(configuration) {
+                val density = context.resources.displayMetrics.density
+                (configuration.screenWidthDp * density).toInt()
+            }
+            val screenHeight = remember(configuration) {
+                val density = context.resources.displayMetrics.density
+                (configuration.screenHeightDp * density).toInt()
+            }
+
+            val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
                     val base = requestBuilder
                         .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
                         .signature(signatureKey)
+                        .override(screenWidth, screenHeight)
+                        .dontAnimate()
+                        .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                            override fun onLoadFailed(
+                                e: com.bumptech.glide.load.engine.GlideException?,
+                                model: Any?,
+                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>,
+                                isFirstResource: Boolean
+                            ): Boolean {
+                                android.util.Log.e("GalleryImageLoad", "Large Image LOAD FAILED: uri=${media.uri}, reason=${e?.message}")
+                                return false
+                            }
+
+                            override fun onResourceReady(
+                                resource: android.graphics.drawable.Drawable,
+                                model: Any,
+                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                                dataSource: com.bumptech.glide.load.DataSource,
+                                isFirstResource: Boolean
+                            ): Boolean {
+                                android.util.Log.e("GalleryImageLoad", "Large Image LOAD SUCCESS: uri=${media.uri}, dataSource=$dataSource")
+                                return false
+                            }
+                        })
                     if (hasThumbnail) {
                         base.thumbnail(
                             com.bumptech.glide.Glide.with(context)
@@ -298,7 +333,7 @@ fun ViewerScreen(
                             maxOf(scaleToOriginal * 3.0f, 3.0f).coerceIn(3.0f, 60.0f)
                         }
 
-                        val zoomableState = key(calculatedMaxZoom) {
+                        val zoomableState = key(media.contentId) {
                             rememberZoomableImageState(
                                 zoomableState = rememberZoomableState(
                                     zoomSpec = ZoomSpec(
@@ -307,6 +342,10 @@ fun ViewerScreen(
                                     )
                                 )
                             )
+                        }
+
+                        SideEffect {
+                            android.util.Log.e("GalleryCompose", "ZoomableGlideImage recomposed: mediaId=${media.contentId}, uri=${media.uri}, zoomableState=${zoomableState.hashCode()}")
                         }
 
                         ZoomableGlideImage(
