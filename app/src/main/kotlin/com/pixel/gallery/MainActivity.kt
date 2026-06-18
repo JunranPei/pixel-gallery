@@ -44,6 +44,7 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        android.util.Log.d("GalleryLifecycle", "MainActivity.onCreate(hashCode=${hashCode()})")
         super.onCreate(savedInstanceState)
         _intentSenderLauncher = intentSenderLauncher
         
@@ -101,8 +102,14 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        android.util.Log.d("GalleryLifecycle", "MainActivity.onStart(hashCode=${hashCode()})")
+    }
+
     override fun onResume() {
         super.onResume()
+        android.util.Log.d("GalleryLifecycle", "MainActivity.onResume(hashCode=${hashCode()})")
         val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
         } else {
@@ -117,7 +124,18 @@ class MainActivity : FragmentActivity() {
 
     override fun onPause() {
         super.onPause()
+        android.util.Log.d("GalleryLifecycle", "MainActivity.onPause(hashCode=${hashCode()})")
         viewModel.setResumed(false)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        android.util.Log.d("GalleryLifecycle", "MainActivity.onStop(hashCode=${hashCode()})")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        android.util.Log.d("GalleryLifecycle", "MainActivity.onDestroy(hashCode=${hashCode()})")
     }
 
     override fun onNewIntent(intent: Intent) {
