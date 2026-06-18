@@ -195,11 +195,15 @@ fun ViewerScreen(
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
-            userScrollEnabled = !isPlayingMotion
+            userScrollEnabled = !isPlayingMotion,
+            key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
             val isVideo = media.sourceMimeType.startsWith("video/")
             val context = LocalContext.current
+            val displayMetrics = context.resources.displayMetrics
+            val screenWidth = displayMetrics.widthPixels
+            val screenHeight = displayMetrics.heightPixels
             val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
                 AvesAppGlideModule.getModel(
                     context = context,
@@ -229,11 +233,13 @@ fun ViewerScreen(
                 val h = media.height ?: 0
                 w > 512 || h > 512
             }
-            val transform = remember(signatureKey, thumbnailModel, hasThumbnail) {
+            val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
                     val base = requestBuilder
                         .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
                         .signature(signatureKey)
+                        .override(screenWidth, screenHeight)
+                        .dontAnimate()
                         .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
                             override fun onLoadFailed(
                                 e: com.bumptech.glide.load.engine.GlideException?,
