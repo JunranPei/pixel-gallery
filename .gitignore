@@ -40,3 +40,10 @@ fastlane/slather
 
 # VS Code
 .vscode/
+
+# APK Archives
+released_apks/
+all_apks/
+*.apk
+*.txt
+
