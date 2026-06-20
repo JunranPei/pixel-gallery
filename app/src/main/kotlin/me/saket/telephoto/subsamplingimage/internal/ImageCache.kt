@@ -33,6 +33,13 @@ internal class ImageCache(
   private val visibleRegions = Channel<List<ImageRegionTile>>(capacity = 10)
   private val cachedImages = MutableStateFlow(emptyMap<ImageRegionTile, LoadingState>())
 
+  // Thread-safe LRU cache for off-screen tiles (keeps up to 12 loaded tiles in memory)
+  private val lruCache = object : LinkedHashMap<ImageRegionTile, Loaded>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ImageRegionTile, Loaded>?): Boolean {
+      return size > 12
+    }
+  }
+
   private sealed interface LoadingState {
     data class Loaded(val painter: Painter) : LoadingState
     data class InFlight(val job: Job) : LoadingState
@@ -46,26 +53,48 @@ internal class ImageCache(
         .collect { tiles ->
           val tilesToLoad = tiles.fastFilter { it !in cachedImages.value }
           tilesToLoad.fastForEach { tile ->
-            // CoroutineStart.UNDISPATCHED is used to ensure that the coroutines are executed
-            // in the same order they were launched. Otherwise, the tiles may load in a different
-            // order than what was requested. SubSamplingImageTest#draw_tile_under_centroid_first()
-            // test will also become flaky.
-            launch(start = CoroutineStart.UNDISPATCHED) {
+            val cachedLoaded = synchronized(lruCache) { lruCache.remove(tile) }
+            if (cachedLoaded != null) {
               cachedImages.update {
-                check(tile !in it)
-                it + (tile to InFlight(currentCoroutineContext().job))
+                it + (tile to cachedLoaded)
               }
-              val painter = decoder.decodeRegion(tile)
-              cachedImages.update {
-                it + (tile to Loaded(painter))
+            } else {
+              // CoroutineStart.UNDISPATCHED is used to ensure that the coroutines are executed
+              // in the same order they were launched. Otherwise, the tiles may load in a different
+              // order than what was requested. SubSamplingImageTest#draw_tile_under_centroid_first()
+              // test will also become flaky.
+              launch(start = CoroutineStart.UNDISPATCHED) {
+                cachedImages.update {
+                  if (tile in it) return@update it
+                  it + (tile to InFlight(currentCoroutineContext().job))
+                }
+                val painter = try {
+                  decoder.decodeRegion(tile)
+                } catch (e: Exception) {
+                  cachedImages.update { it - tile }
+                  throw e
+                }
+                cachedImages.update {
+                  if (tile in it && it[tile] is InFlight) {
+                    it + (tile to Loaded(painter))
+                  } else {
+                    it
+                  }
+                }
               }
             }
           }
 
           val tilesToUnload = cachedImages.value.keys.filter { it !in tiles }
           tilesToUnload.fastForEach { region ->
-            val inFlight = cachedImages.value[region] as? InFlight
-            inFlight?.job?.cancel()
+            val state = cachedImages.value[region]
+            if (state is InFlight) {
+              state.job.cancel()
+            } else if (state is Loaded) {
+              synchronized(lruCache) {
+                lruCache[region] = state
+              }
+            }
           }
           cachedImages.update { it - tilesToUnload.toSet() }
         }
