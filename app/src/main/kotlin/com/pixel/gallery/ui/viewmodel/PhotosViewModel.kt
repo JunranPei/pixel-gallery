@@ -66,8 +66,8 @@ class PhotosViewModel @Inject constructor(
         when (sort) {
             PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
             PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
-            PhotoSortOrder.NAME_ASC -> filtered.sortedBy { java.io.File(it.path).name }
-            PhotoSortOrder.NAME_DESC -> filtered.sortedByDescending { java.io.File(it.path).name }
+            PhotoSortOrder.NAME_ASC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
+            PhotoSortOrder.NAME_DESC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
             PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
             PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
         }
@@ -179,8 +179,8 @@ class PhotosViewModel @Inject constructor(
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
         when (sort) {
-            AlbumSortOrder.NAME_ASC -> grouped.sortedBy { it.name }
-            AlbumSortOrder.NAME_DESC -> grouped.sortedByDescending { it.name }
+            AlbumSortOrder.NAME_ASC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a1.name, a2.name) }
+            AlbumSortOrder.NAME_DESC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a2.name, a1.name) }
             AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
             AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
@@ -205,8 +205,8 @@ class PhotosViewModel @Inject constructor(
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
         when (sort) {
-            AlbumSortOrder.NAME_ASC -> grouped.sortedBy { it.name }
-            AlbumSortOrder.NAME_DESC -> grouped.sortedByDescending { it.name }
+            AlbumSortOrder.NAME_ASC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a1.name, a2.name) }
+            AlbumSortOrder.NAME_DESC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a2.name, a1.name) }
             AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
             AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
@@ -509,3 +509,25 @@ enum class AlbumSortOrder {
     DATE_DESC,
     DATE_ASC
 }
+
+private val CASE_INSENSITIVE_NATURAL_ORDER = Comparator<String> { s1, s2 ->
+    val len1 = s1.length
+    val len2 = s2.length
+    val minLen = minOf(len1, len2)
+    for (i in 0 until minLen) {
+        val c1 = s1[i]
+        val c2 = s2[i]
+        if (c1 != c2) {
+            val u1 = c1.uppercaseChar()
+            val u2 = c2.uppercaseChar()
+            if (u1 != u2) {
+                return@Comparator u1.compareTo(u2)
+            } else {
+                return@Comparator if (c1.isUpperCase()) -1 else 1
+            }
+        }
+    }
+    len1.compareTo(len2)
+}
+
+
