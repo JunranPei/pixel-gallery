@@ -185,4 +185,45 @@ class SettingsRepository @Inject constructor(
             preferences[LAST_SYNCED_GENERATION] = value
         }
     }
+
+    private val LARGE_IMAGE_TILE_SIZE = intPreferencesKey("large_image_tile_size")
+    private val LARGE_IMAGE_MAX_CORES = intPreferencesKey("large_image_max_cores")
+    private val LARGE_IMAGE_DEBOUNCE_MS = intPreferencesKey("large_image_debounce_ms")
+    private val LARGE_IMAGE_HARDWARE_BITMAP = booleanPreferencesKey("large_image_hardware_bitmap")
+
+    val largeImageTileSize: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[LARGE_IMAGE_TILE_SIZE] ?: 1024 }
+
+    suspend fun setLargeImageTileSize(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[LARGE_IMAGE_TILE_SIZE] = value
+        }
+    }
+
+    val largeImageMaxCores: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[LARGE_IMAGE_MAX_CORES] ?: 4 }
+
+    suspend fun setLargeImageMaxCores(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[LARGE_IMAGE_MAX_CORES] = value
+        }
+    }
+
+    val largeImageDebounceMs: Flow<Int> = context.dataStore.data
+        .map { preferences -> preferences[LARGE_IMAGE_DEBOUNCE_MS] ?: 150 }
+
+    suspend fun setLargeImageDebounceMs(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[LARGE_IMAGE_DEBOUNCE_MS] = value
+        }
+    }
+
+    val largeImageHardwareBitmap: Flow<Boolean> = context.dataStore.data
+        .map { preferences -> preferences[LARGE_IMAGE_HARDWARE_BITMAP] ?: false }
+
+    suspend fun setLargeImageHardwareBitmap(value: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[LARGE_IMAGE_HARDWARE_BITMAP] = value
+        }
+    }
 }
