@@ -195,11 +195,15 @@ fun ViewerScreen(
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
-            userScrollEnabled = !isPlayingMotion
+            userScrollEnabled = !isPlayingMotion,
+            key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
             val isVideo = media.sourceMimeType.startsWith("video/")
             val context = LocalContext.current
+            val displayMetrics = context.resources.displayMetrics
+            val screenWidth = displayMetrics.widthPixels
+            val screenHeight = displayMetrics.heightPixels
             val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
                 AvesAppGlideModule.getModel(
                     context = context,
@@ -229,13 +233,45 @@ fun ViewerScreen(
                 val h = media.height ?: 0
                 w > 512 || h > 512
             }
-            val transform = remember(signatureKey, thumbnailModel, hasThumbnail) {
+            val isGif = remember(media.sourceMimeType) { media.sourceMimeType == "image/gif" }
+            val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
                     val base = requestBuilder
-                        .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
                         .signature(signatureKey)
+                    
+                    val withOptions = if (isGif) {
+                        base.format(com.bumptech.glide.load.DecodeFormat.PREFER_ARGB_8888)
+                    } else {
+                        base
+                            .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
+                            .override(screenWidth, screenHeight)
+                            .dontAnimate()
+                    }
+                    
+                    val finalBase = withOptions.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                            override fun onLoadFailed(
+                                e: com.bumptech.glide.load.engine.GlideException?,
+                                model: Any?,
+                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>,
+                                isFirstResource: Boolean
+                            ): Boolean {
+                                android.util.Log.e("GalleryImageLoad", "Large Image LOAD FAILED: uri=${media.uri}, reason=${e?.message}")
+                                return false
+                            }
+
+                            override fun onResourceReady(
+                                resource: android.graphics.drawable.Drawable,
+                                model: Any,
+                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                                dataSource: com.bumptech.glide.load.DataSource,
+                                isFirstResource: Boolean
+                            ): Boolean {
+                                android.util.Log.e("GalleryImageLoad", "Large Image LOAD SUCCESS: uri=${media.uri}, dataSource=$dataSource")
+                                return false
+                            }
+                        })
                     if (hasThumbnail) {
-                        base.thumbnail(
+                        finalBase.thumbnail(
                             com.bumptech.glide.Glide.with(context)
                                 .asDrawable()
                                 .load(thumbnailModel)
@@ -243,7 +279,7 @@ fun ViewerScreen(
                                 .override(512)
                         )
                     } else {
-                        base
+                        finalBase
                     }
                 }
             }
@@ -298,7 +334,7 @@ fun ViewerScreen(
                             maxOf(scaleToOriginal * 3.0f, 3.0f).coerceIn(3.0f, 60.0f)
                         }
 
-                        val zoomableState = key(calculatedMaxZoom) {
+                        val zoomableState = key(media.contentId) {
                             rememberZoomableImageState(
                                 zoomableState = rememberZoomableState(
                                     zoomSpec = ZoomSpec(
@@ -307,6 +343,10 @@ fun ViewerScreen(
                                     )
                                 )
                             )
+                        }
+
+                        SideEffect {
+                            android.util.Log.e("GalleryCompose", "ZoomableGlideImage recomposed: mediaId=${media.contentId}, uri=${media.uri}, zoomableState=${zoomableState.hashCode()}")
                         }
 
                         ZoomableGlideImage(
