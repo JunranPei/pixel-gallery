@@ -9,9 +9,11 @@ plugins {
 
 allprojects {
     repositories {
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/") }
         maven { url = uri("https://jitpack.net") }
         maven { url = uri("https://jitpack.io") }
-        maven { url = uri("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/") }
         google()
         mavenCentral()
         maven { url = uri("https://s3.amazonaws.com/repo.commonsware.com") }

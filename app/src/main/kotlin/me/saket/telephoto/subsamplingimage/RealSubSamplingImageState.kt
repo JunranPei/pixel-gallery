@@ -62,6 +62,7 @@ internal class RealSubSamplingImageState(
   internal var imageRegionDecoder: ImageRegionDecoder? by mutableStateOf(null)
   internal var viewportSize: IntSize? by mutableStateOf(null)
   internal var showTileBounds = false  // Only used by tests.
+  private var lastSampleSize: Int = 1
 
   /**
    * Images collected from [ImageCache].
@@ -99,10 +100,37 @@ internal class RealSubSamplingImageState(
     val tileGrid = tileGrid ?: return@derivedStateOf persistentListOf()
     val transformation = contentTransformation()
     val baseSampleSize = tileGrid.base.sampleSize
-
-    val currentSampleSize = ImageSampleSize
-      .calculateFor(zoom = transformation.scale.maxScale)
-      .coerceAtMost(baseSampleSize)
+ 
+    val rawZoom = transformation.scale.maxScale
+    val targetSize = ImageSampleSize.calculateFor(rawZoom).size
+    val finalSampleSize = if (targetSize != lastSampleSize) {
+        val currentLast = lastSampleSize
+        val thresholdFactor = 0.12f // 12% hysteresis buffer
+        if (targetSize < currentLast) { // Zooming in, going to a clearer level (smaller sample size)
+            val normalBoundary = 1.0f / (currentLast.toFloat())
+            if (rawZoom > normalBoundary * (1.0f + thresholdFactor)) {
+                targetSize
+            } else {
+                currentLast
+            }
+        } else { // Zooming out, going to a blurrier level (larger sample size)
+            val normalBoundary = 1.0f / (targetSize.toFloat())
+            if (rawZoom < normalBoundary * (1.0f - thresholdFactor)) {
+                targetSize
+            } else {
+                currentLast
+            }
+        }
+    } else {
+        targetSize
+    }
+ 
+    val constrainedSize = finalSampleSize.coerceIn(1, baseSampleSize.size)
+    if (constrainedSize != lastSampleSize) {
+        lastSampleSize = constrainedSize
+        android.util.Log.e("SubSamplingHysteresis", "Hysteresis SampleSize changed: $lastSampleSize (rawZoom=$rawZoom)")
+    }
+    val currentSampleSize = ImageSampleSize(constrainedSize)
 
     val isBaseSampleSize = currentSampleSize == baseSampleSize
     val foregroundRegions = if (isBaseSampleSize) emptyList() else tileGrid.foreground[currentSampleSize]!!
