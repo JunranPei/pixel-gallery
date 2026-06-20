@@ -44,6 +44,8 @@ fastlane/slather
 # APK Archives
 released_apks/
 all_apks/
+build_apks/
 *.apk
 *.txt
+
 
