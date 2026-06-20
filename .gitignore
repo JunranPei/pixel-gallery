@@ -46,4 +46,4 @@ released_apks/
 all_apks/
 *.apk
 *.txt
-
+build_apks/
