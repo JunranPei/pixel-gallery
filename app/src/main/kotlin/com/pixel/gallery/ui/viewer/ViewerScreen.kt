@@ -51,6 +51,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
+import com.bumptech.glide.integration.compose.GlideImage
 import me.saket.telephoto.zoomable.glide.ZoomableGlideImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.ZoomSpec
@@ -59,6 +62,7 @@ import me.saket.telephoto.zoomable.zoomable
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import java.io.File
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -79,7 +83,7 @@ private val MapnikHttps = XYTileSource(
     "© OpenStreetMap contributors"
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
 @Composable
 fun ViewerScreen(
     initialId: Long,
@@ -228,12 +232,19 @@ fun ViewerScreen(
             val signatureKey = remember(media.dateModifiedMillis) {
                 ObjectKey(media.dateModifiedMillis)
             }
-            val hasThumbnail = remember(media.width, media.height) {
-                val w = media.width ?: 0
-                val h = media.height ?: 0
-                w > 512 || h > 512
+            val isGif = remember(media.sourceMimeType, media.path) {
+                media.sourceMimeType.equals("image/gif", ignoreCase = true) ||
+                media.path.endsWith(".gif", ignoreCase = true)
             }
-            val isGif = remember(media.sourceMimeType) { media.sourceMimeType == "image/gif" }
+            val hasThumbnail = remember(media.width, media.height, isGif) {
+                if (isGif) {
+                    false
+                } else {
+                    val w = media.width ?: 0
+                    val h = media.height ?: 0
+                    w > 512 || h > 512
+                }
+            }
             val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
                     val withOptions = requestBuilder
@@ -344,29 +355,78 @@ fun ViewerScreen(
                             android.util.Log.e("GalleryCompose", "ZoomableGlideImage recomposed: mediaId=${media.contentId}, uri=${media.uri}, zoomableState=${zoomableState.hashCode()}")
                         }
 
-                        ZoomableGlideImage(
-                            model = model,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            state = zoomableState,
-                            contentScale = ContentScale.Fit,
-                            requestBuilderTransform = transform,
-                            onClick = { 
-                                if (isPlayingMotion) {
-                                    isPlayingMotion = false
-                                } else {
-                                    showUI = !showUI 
-                                }
-                            },
-                            onDoubleClick = { state, centroid ->
-                                val currentScale = state.contentTransformation.scale.scaleX
-                                if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
-                                    state.resetZoom()
-                                } else {
-                                    state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
-                                }
+                        if (isGif) {
+                            val coroutineScope = rememberCoroutineScope()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(scaleFit, scaleToOriginal) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                if (isPlayingMotion) {
+                                                    isPlayingMotion = false
+                                                } else {
+                                                    showUI = !showUI
+                                                }
+                                            },
+                                            onDoubleTap = { centroid: Offset ->
+                                                val state = zoomableState.zoomableState
+                                                val currentScale = state.contentTransformation.scale.scaleX
+                                                if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
+                                                    coroutineScope.launch {
+                                                        state.resetZoom()
+                                                    }
+                                                } else {
+                                                    coroutineScope.launch {
+                                                        state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                    .zoomable(zoomableState.zoomableState)
+                                    .graphicsLayer {
+                                        val transformation = zoomableState.zoomableState.contentTransformation
+                                        scaleX = transformation.scale.scaleX
+                                        scaleY = transformation.scale.scaleY
+                                        translationX = transformation.offset.x
+                                        translationY = transformation.offset.y
+                                        transformOrigin = transformation.transformOrigin
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                GlideImage(
+                                    model = model,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit
+                                )
                             }
-                        )
+                        } else {
+                            ZoomableGlideImage(
+                                model = model,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                state = zoomableState,
+                                contentScale = ContentScale.Fit,
+                                requestBuilderTransform = transform,
+                                onClick = { 
+                                    if (isPlayingMotion) {
+                                        isPlayingMotion = false
+                                    } else {
+                                        showUI = !showUI 
+                                    }
+                                },
+                                onDoubleClick = { state, centroid ->
+                                    val currentScale = state.contentTransformation.scale.scaleX
+                                    if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
+                                        state.resetZoom()
+                                    } else {
+                                        state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
+                                    }
+                                }
+                            )
+                        }
                         
                         if (isPlayingMotion && motionVideoFile != null) {
                             VideoPlayer(
