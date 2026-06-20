@@ -236,14 +236,19 @@ fun ViewerScreen(
             val isGif = remember(media.sourceMimeType) { media.sourceMimeType == "image/gif" }
             val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
-                    val withOptions = requestBuilder
-                        .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
+                    val base = requestBuilder
                         .signature(signatureKey)
-                        .override(screenWidth, screenHeight)
                     
-                    val withAnimate = if (isGif) withOptions else withOptions.dontAnimate()
+                    val withOptions = if (isGif) {
+                        base.format(com.bumptech.glide.load.DecodeFormat.PREFER_ARGB_8888)
+                    } else {
+                        base
+                            .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
+                            .override(screenWidth, screenHeight)
+                            .dontAnimate()
+                    }
                     
-                    val base = withAnimate.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                    val finalBase = withOptions.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
                             override fun onLoadFailed(
                                 e: com.bumptech.glide.load.engine.GlideException?,
                                 model: Any?,
@@ -266,7 +271,7 @@ fun ViewerScreen(
                             }
                         })
                     if (hasThumbnail) {
-                        base.thumbnail(
+                        finalBase.thumbnail(
                             com.bumptech.glide.Glide.with(context)
                                 .asDrawable()
                                 .load(thumbnailModel)
@@ -274,7 +279,7 @@ fun ViewerScreen(
                                 .override(512)
                         )
                     } else {
-                        base
+                        finalBase
                     }
                 }
             }
