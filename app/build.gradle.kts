@@ -34,8 +34,8 @@ android {
         applicationId = "com.pixel.gallery.multitask"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "4.2.6-auto"
+        versionCode = 24
+        versionName = "4.3.0"
     }
 
     signingConfigs {
