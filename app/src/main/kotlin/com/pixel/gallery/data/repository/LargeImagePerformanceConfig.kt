@@ -9,7 +9,9 @@ import java.util.concurrent.Executors
 object LargeImagePerformanceConfig {
     @Volatile var tileSize: Int = 1024
     @Volatile var debounceMs: Int = 150
-    @Volatile var useHardwareBitmap: Boolean = false
+    var useHardwareBitmap: Boolean
+        get() = true
+        set(value) {}
     @Volatile var maxCores: Int = 4
 
     private var executor: ExecutorService? = null
