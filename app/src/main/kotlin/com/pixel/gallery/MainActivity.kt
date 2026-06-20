@@ -13,6 +13,10 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.pixel.gallery.data.repository.SettingsRepository
+import com.pixel.gallery.data.repository.LargeImagePerformanceConfig
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -23,6 +27,9 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
+
+    @javax.inject.Inject
+    lateinit var settingsRepository: SettingsRepository
 
     private val viewModel: PhotosViewModel by viewModels()
 
@@ -63,6 +70,27 @@ class MainActivity : FragmentActivity() {
         checkPermissions()
         handleIntent(intent)
         checkNotificationListenerPermission()
+
+        lifecycleScope.launch {
+            settingsRepository.largeImageTileSize.collect {
+                LargeImagePerformanceConfig.tileSize = it
+            }
+        }
+        lifecycleScope.launch {
+            settingsRepository.largeImageDebounceMs.collect {
+                LargeImagePerformanceConfig.debounceMs = it
+            }
+        }
+        lifecycleScope.launch {
+            settingsRepository.largeImageHardwareBitmap.collect {
+                LargeImagePerformanceConfig.useHardwareBitmap = it
+            }
+        }
+        lifecycleScope.launch {
+            settingsRepository.largeImageMaxCores.collect {
+                LargeImagePerformanceConfig.updateMaxCores(it)
+            }
+        }
     }
 
 
