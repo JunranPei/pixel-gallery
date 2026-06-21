@@ -71,14 +71,30 @@ internal class AndroidImageRegionDecoder private constructor(
         if (decoded == null) {
           try {
             android.util.Log.i("AndroidImageRegionDecoder", "Recreating decoder for source: $imageSource")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+              android.widget.Toast.makeText(context, "⚠️ 大图解码失败，正在尝试重建解码器...", android.widget.Toast.LENGTH_SHORT).show()
+            }
             val newDecoder = imageSource.decoder(context)
             try {
               decoder.recycle()
             } catch (ignored: Exception) {}
             decoder = newDecoder
             decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+            if (decoded != null) {
+              kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                android.widget.Toast.makeText(context, "✅ 重建解码器成功，大图已自动恢复！", android.widget.Toast.LENGTH_SHORT).show()
+              }
+            } else {
+              kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                android.widget.Toast.makeText(context, "❌ 重载失败：重试解码仍返回空！", android.widget.Toast.LENGTH_SHORT).show()
+              }
+            }
           } catch (recreateEx: Exception) {
             android.util.Log.e("AndroidImageRegionDecoder", "Failed to recreate decoder and decode region", recreateEx)
+            val errorMsg = recreateEx.message ?: "未知原因"
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+              android.widget.Toast.makeText(context, "❌ 重建解码器失败: $errorMsg", android.widget.Toast.LENGTH_LONG).show()
+            }
           }
         }
 
