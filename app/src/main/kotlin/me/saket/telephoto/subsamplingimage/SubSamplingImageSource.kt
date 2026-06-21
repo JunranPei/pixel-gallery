@@ -157,19 +157,62 @@ internal data class FileImageSource(
     check(path.isAbsolute)
   }
 
+  @Volatile
+  private var safeCopyFile: java.io.File? = null
+  private var hasAttemptedCopy = false
+
+  @Synchronized
+  private fun getOrCreateSafePath(context: Context): java.io.File {
+    val originalFile = path.toFile()
+    val cacheDirPath = context.cacheDir.absolutePath
+    
+    if (originalFile.absolutePath.contains(cacheDirPath) && !hasAttemptedCopy) {
+      hasAttemptedCopy = true
+      try {
+        val safeDir = java.io.File(context.cacheDir, "large_image_safe_copies")
+        if (!safeDir.exists()) {
+          safeDir.mkdirs()
+        }
+        val targetFile = java.io.File(safeDir, "safe_${originalFile.name}_${System.currentTimeMillis()}")
+        if (originalFile.exists()) {
+          originalFile.copyTo(targetFile, overwrite = true)
+          safeCopyFile = targetFile
+          android.util.Log.i("FileImageSource", "Successfully created safe copy of cache image: ${targetFile.absolutePath}")
+        }
+      } catch (e: Exception) {
+        android.util.Log.e("FileImageSource", "Failed to create safe copy of cache image", e)
+      }
+    }
+    return safeCopyFile ?: originalFile
+  }
+
   override fun peek(context: Context): BufferedSource {
     return FileSystem.SYSTEM.source(path).buffer()
   }
 
   override suspend fun decoder(context: Context): BitmapRegionDecoder {
-    return ParcelFileDescriptor.open(path.toFile(), ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+    val fileToUse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+      getOrCreateSafePath(context)
+    }
+    return ParcelFileDescriptor.open(fileToUse, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
       @Suppress("DEPRECATION")
       BitmapRegionDecoder.newInstance(fd.fileDescriptor, /* ignored */ false)
     }
   }
 
   override fun close() {
-    onClose?.close()
+    try {
+      safeCopyFile?.let { file ->
+        if (file.exists()) {
+          file.delete()
+          android.util.Log.i("FileImageSource", "Deleted safe copy of cache image: ${file.absolutePath}")
+        }
+      }
+    } catch (e: Exception) {
+      android.util.Log.e("FileImageSource", "Failed to delete safe copy of cache image", e)
+    } finally {
+      onClose?.close()
+    }
   }
 }
 
