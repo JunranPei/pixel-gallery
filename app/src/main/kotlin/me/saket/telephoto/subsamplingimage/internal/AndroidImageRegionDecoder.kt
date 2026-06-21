@@ -22,7 +22,7 @@ internal class AndroidImageRegionDecoder private constructor(
   private val context: android.content.Context,
   private val imageSource: SubSamplingImageSource,
   private val imageOptions: ImageBitmapOptions,
-  private val decoder: BitmapRegionDecoder,
+  private var decoder: BitmapRegionDecoder,
   private val exif: ExifMetadata,
   private val dispatcher: CoroutineDispatcher,
 ) : ImageRegionDecoder {
@@ -62,7 +62,26 @@ internal class AndroidImageRegionDecoder private constructor(
       }
 
       if (decoded == null) {
-        decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+        try {
+          decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+        } catch (e: Exception) {
+          android.util.Log.e("AndroidImageRegionDecoder", "Failed to decode region, will attempt to recreate decoder", e)
+        }
+
+        if (decoded == null) {
+          try {
+            android.util.Log.i("AndroidImageRegionDecoder", "Recreating decoder for source: $imageSource")
+            val newDecoder = imageSource.decoder(context)
+            try {
+              decoder.recycle()
+            } catch (ignored: Exception) {}
+            decoder = newDecoder
+            decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+          } catch (recreateEx: Exception) {
+            android.util.Log.e("AndroidImageRegionDecoder", "Failed to recreate decoder and decode region", recreateEx)
+          }
+        }
+
         if (decoded != null) {
           try {
             if (!cacheDir.exists()) {

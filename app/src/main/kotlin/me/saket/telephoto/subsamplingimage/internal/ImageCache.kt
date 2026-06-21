@@ -72,7 +72,8 @@ internal class ImageCache(
                   decoder.decodeRegion(tile)
                 } catch (e: Exception) {
                   cachedImages.update { it - tile }
-                  throw e
+                  android.util.Log.e("ImageCache", "Failed to decode region tile $tile", e)
+                  return@launch
                 }
                 cachedImages.update {
                   if (tile in it && it[tile] is InFlight) {
