@@ -177,9 +177,8 @@ internal class RealSubSamplingImageState(
       return
     }
 
-    val scope = rememberCoroutineScope()
     val imageCache = remember(this) {
-      ImageCache(scope, imageRegionDecoder!!)
+      ImageCache(imageRegionDecoder!!)
     }
 
     LaunchedEffect(imageCache, viewportTiles) {
@@ -192,6 +191,7 @@ internal class RealSubSamplingImageState(
       )
     }
     LaunchedEffect(imageCache) {
+      imageCache.listen(this)
       imageCache.observeCachedImages().collect {
         loadedImages = it
       }
