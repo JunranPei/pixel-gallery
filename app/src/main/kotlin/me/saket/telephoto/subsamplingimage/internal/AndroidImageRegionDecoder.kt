@@ -51,7 +51,7 @@ internal class AndroidImageRegionDecoder private constructor(
     val cacheDir = java.io.File(context.cacheDir, "tile_cache")
     val cacheFile = java.io.File(cacheDir, tileFileName)
  
-    val bitmap = withContext(dispatcher) {
+    val bitmap = withContext(com.pixel.gallery.data.repository.LargeImagePerformanceConfig.decoderDispatcher) {
       var decoded: android.graphics.Bitmap? = null
       if (cacheDir.exists() && cacheFile.exists()) {
         try {
