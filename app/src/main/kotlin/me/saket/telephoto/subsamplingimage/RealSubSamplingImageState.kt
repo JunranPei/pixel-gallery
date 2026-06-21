@@ -192,6 +192,7 @@ internal class RealSubSamplingImageState(
       }
       imageCache.loadOrUnloadForTiles(regions = visibleTiles)
     }
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     LaunchedEffect(imageCache) {
       android.util.Log.e("TileDiag", "listen() starting on scope=${this.hashCode()}")
       try {
@@ -203,7 +204,7 @@ internal class RealSubSamplingImageState(
         android.util.Log.e("TileDiag", "listen() or observeCachedImages CRASHED", e)
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
           android.widget.Toast.makeText(
-            android.app.ActivityThread.currentApplication(),
+            context,
             "❌ 瓦片监听崩溃: ${e.javaClass.simpleName}: ${e.message}",
             android.widget.Toast.LENGTH_LONG
           ).show()
