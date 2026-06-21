@@ -188,7 +188,7 @@ internal data class FileImageSource(
 
   override fun peek(context: Context): BufferedSource {
     val fileToUse = getOrCreateSafePath(context)
-    return FileSystem.SYSTEM.source(fileToUse.toPath()).buffer()
+    return FileSystem.SYSTEM.source(fileToUse.absolutePath.toPath()).buffer()
   }
 
   override suspend fun decoder(context: Context): BitmapRegionDecoder {
