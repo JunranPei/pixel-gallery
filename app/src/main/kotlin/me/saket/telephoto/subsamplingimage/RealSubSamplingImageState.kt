@@ -174,27 +174,42 @@ internal class RealSubSamplingImageState(
   @Composable
   fun LoadImageTilesEffect() {
     if (!isReadyToBeDisplayed) {
+      android.util.Log.e("TileDiag", "LoadImageTilesEffect: NOT ready (decoder=${imageRegionDecoder != null}, viewportSize=$viewportSize)")
       return
     }
 
     val imageCache = remember(this) {
+      android.util.Log.e("TileDiag", "Creating NEW ImageCache, decoder=${imageRegionDecoder?.hashCode()}")
       ImageCache(imageRegionDecoder!!)
     }
 
     LaunchedEffect(imageCache, viewportTiles) {
+      val visibleTiles = viewportTiles.fastMapNotNull { if (it.isVisible) it.region else null }
+      android.util.Log.e("TileDiag", "loadOrUnloadForTiles: ${visibleTiles.size} visible tiles (viewportTiles changed)")
       val debounceMs = com.pixel.gallery.data.repository.LargeImagePerformanceConfig.debounceMs
       if (debounceMs > 0) {
         kotlinx.coroutines.delay(debounceMs.toLong())
       }
-      imageCache.loadOrUnloadForTiles(
-        regions = viewportTiles.fastMapNotNull { if (it.isVisible) it.region else null }
-      )
+      imageCache.loadOrUnloadForTiles(regions = visibleTiles)
     }
     LaunchedEffect(imageCache) {
-      imageCache.listen(this)
-      imageCache.observeCachedImages().collect {
-        loadedImages = it
+      android.util.Log.e("TileDiag", "listen() starting on scope=${this.hashCode()}")
+      try {
+        imageCache.listen(this)
+        imageCache.observeCachedImages().collect {
+          loadedImages = it
+        }
+      } catch (e: Exception) {
+        android.util.Log.e("TileDiag", "listen() or observeCachedImages CRASHED", e)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+          android.widget.Toast.makeText(
+            android.app.ActivityThread.currentApplication(),
+            "❌ 瓦片监听崩溃: ${e.javaClass.simpleName}: ${e.message}",
+            android.widget.Toast.LENGTH_LONG
+          ).show()
+        }
       }
+      android.util.Log.e("TileDiag", "listen() LaunchedEffect ENDED (scope cancelled or collect finished)")
     }
   }
 }
