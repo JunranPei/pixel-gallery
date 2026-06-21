@@ -119,12 +119,9 @@ internal class AndroidImageRegionDecoder private constructor(
   }
  
   override fun close() {
-    // Previous versions of telephoto recycled the dispatcher as well, but this was later removed
-    // after discovering that close() and decodeRegion() could be called from different threads,
-    // potentially causing a race condition. If a zoomable image is disposed while it was still
-    // decoding regions, the underlying decoder will remain in memory for a bit longer until GC
-    // kicks in. I think that is okay as its memory usage would be similar to displaying multiple
-    // _active_ images in a pager, each allocating a decoder.
+    try {
+      decoder.recycle()
+    } catch (ignored: Exception) {}
   }
  
   private fun BitmapRegionDecoder.size(): IntSize {

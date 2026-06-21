@@ -194,10 +194,8 @@ internal data class FileImageSource(
     val fileToUse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       getOrCreateSafePath(context)
     }
-    return ParcelFileDescriptor.open(fileToUse, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-      @Suppress("DEPRECATION")
-      BitmapRegionDecoder.newInstance(fd.fileDescriptor, /* ignored */ false)
-    }
+    @Suppress("DEPRECATION")
+    return BitmapRegionDecoder.newInstance(fileToUse.absolutePath, /* ignored */ false)
   }
 
   override fun close() {
@@ -275,6 +273,14 @@ internal data class UriImageSource(
   }
 
   override suspend fun decoder(context: Context): BitmapRegionDecoder {
+    val physicalPath = uri.toPhysicalPath(context)
+    if (physicalPath != null) {
+      val file = java.io.File(physicalPath)
+      if (file.exists()) {
+        @Suppress("DEPRECATION")
+        return BitmapRegionDecoder.newInstance(file.absolutePath, /* ignored */ false)!!
+      }
+    }
     return inputStream(context).use { stream ->
       @Suppress("DEPRECATION")
       BitmapRegionDecoder.newInstance(stream, /* ignored */ false)!!
@@ -366,4 +372,24 @@ private sealed interface UriType {
       }
     }
   }
+}
+
+private fun android.net.Uri.toPhysicalPath(context: Context): String? {
+  if (scheme == android.content.ContentResolver.SCHEME_FILE) {
+    return path
+  }
+  if (scheme == android.content.ContentResolver.SCHEME_CONTENT) {
+    val projection = arrayOf(android.provider.MediaStore.Images.Media.DATA)
+    try {
+      context.contentResolver.query(this, projection, null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+          val columnIndex = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATA)
+          return cursor.getString(columnIndex)
+        }
+      }
+    } catch (e: Exception) {
+      android.util.Log.e("UriExt", "Failed to resolve physical path for uri: $this", e)
+    }
+  }
+  return null
 }
