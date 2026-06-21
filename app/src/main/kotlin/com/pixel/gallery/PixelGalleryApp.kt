@@ -16,7 +16,7 @@ class PixelGalleryApp : Application() {
         
         // [DEBUG] 启动时弹出 Toast 验证 APK 是否为最新编译版本，修复完成后删除
         android.os.Handler(mainLooper).postDelayed({
-            android.widget.Toast.makeText(this, "🔧 BUILD_ID: 20260621-V8", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(this, "🔧 BUILD_ID: 20260621-V9", android.widget.Toast.LENGTH_LONG).show()
         }, 1500)
 
         // OSMdroid Configuration
