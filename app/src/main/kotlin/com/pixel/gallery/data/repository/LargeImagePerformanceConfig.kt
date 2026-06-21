@@ -19,6 +19,9 @@ object LargeImagePerformanceConfig {
 
     fun updateMaxCores(cores: Int) {
         synchronized(this) {
+            if (executor != null && maxCores == cores) {
+                return
+            }
             maxCores = cores
             executor?.shutdown()
             val newExecutor = Executors.newFixedThreadPool(cores) { runnable ->
