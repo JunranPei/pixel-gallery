@@ -123,17 +123,6 @@ private fun createImageRegionDecoder(
         )
       } catch (e: IOException) {
         errorReporter.onImageLoadingFailed(e, imageSource)
-        // [DEBUG] 初始化解码器失败时弹出 Toast，方便真机定位根因
-        val errorMsg = e.message ?: "未知错误"
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-          android.widget.Toast.makeText(context, "❌ 初始化解码器失败: $errorMsg", android.widget.Toast.LENGTH_LONG).show()
-        }
-      } catch (e: Exception) {
-        // [DEBUG] 捕获非 IOException 的其他异常
-        val errorMsg = e.message ?: "未知错误"
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-          android.widget.Toast.makeText(context, "❌ 解码器初始化异常(${e.javaClass.simpleName}): $errorMsg", android.widget.Toast.LENGTH_LONG).show()
-        }
       }
     }
     DisposableEffect(imageSource) {

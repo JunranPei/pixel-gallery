@@ -46,15 +46,12 @@ internal class ImageCache(
   }
 
   fun listen(scope: CoroutineScope) {
-    android.util.Log.e("TileDiag", "ImageCache.listen(): cancelling old job=${listenJob?.hashCode()}, starting new")
     listenJob?.cancel()
     listenJob = scope.launch {
-      android.util.Log.e("TileDiag", "ImageCache.listen(): coroutine started, consuming channel")
       visibleRegions.consumeAsFlow()
         .distinctUntilChanged()
         .throttleLatest(throttleEvery)  // In case the image is animating its zoom.
         .collect { tiles ->
-          android.util.Log.e("TileDiag", "ImageCache.collect: received ${tiles.size} tiles, cachedImages has ${cachedImages.value.size} entries")
           val tilesToLoad = tiles.fastFilter { it !in cachedImages.value }
           tilesToLoad.fastForEach { tile ->
             val cachedLoaded = synchronized(lruCache) { lruCache.remove(tile) }
@@ -73,12 +70,10 @@ internal class ImageCache(
                   it + (tile to InFlight(currentCoroutineContext().job))
                 }
                 val painter = try {
-                  val result = decoder.decodeRegion(tile)
-                  android.util.Log.e("TileDiag", "ImageCache: tile decoded OK - ${tile.bounds}")
-                  result
+                  decoder.decodeRegion(tile)
                 } catch (e: Exception) {
                   cachedImages.update { it - tile }
-                  android.util.Log.e("TileDiag", "ImageCache: tile decode FAILED - ${tile.bounds}: ${e.message}")
+                  android.util.Log.e("ImageCache", "Failed to decode region tile $tile", e)
                   return@launch
                 }
                 cachedImages.update {
@@ -105,7 +100,6 @@ internal class ImageCache(
           }
           cachedImages.update { it - tilesToUnload.toSet() }
         }
-      android.util.Log.e("TileDiag", "ImageCache.listen(): consumeAsFlow().collect ENDED (channel closed?)")
     }
   }
 
@@ -122,8 +116,7 @@ internal class ImageCache(
   }
 
   fun loadOrUnloadForTiles(regions: List<ImageRegionTile>) {
-    val result = visibleRegions.trySend(regions)
-    android.util.Log.e("TileDiag", "loadOrUnloadForTiles: trySend ${regions.size} regions, success=${result.isSuccess}, failure=${result.isFailure}, closed=${result.isClosed}")
+    visibleRegions.trySend(regions)
   }
 
   // Copied from https://github.com/Kotlin/kotlinx.coroutines/issues/1446#issuecomment-1198103541.
