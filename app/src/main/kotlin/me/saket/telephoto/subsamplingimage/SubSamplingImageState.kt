@@ -85,9 +85,10 @@ internal fun rememberSubSamplingImageState(
   val transformation by rememberUpdatedState(transformation)
   val state = remember(imageSource) {
     RealSubSamplingImageState(imageSource, transformation)
-  }.also {
-    it.imageRegionDecoder = createImageRegionDecoder(imageSource, imageOptions, errorReporter)
   }
+  state.currentSource = imageSource
+  val decoder = createImageRegionDecoder(imageSource, imageOptions, errorReporter)
+  state.imageRegionDecoder = decoder
 
   state.LoadImageTilesEffect()
   DisposableEffect(imageSource) {
