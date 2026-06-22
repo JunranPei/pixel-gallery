@@ -81,7 +81,7 @@ object AppLogger {
         if (throwable != null) {
             Log.e(tag, message, throwable)
         } else {
-            Log.d(tag, message)
+            Log.i(tag, message)
         }
 
         executor.submit {

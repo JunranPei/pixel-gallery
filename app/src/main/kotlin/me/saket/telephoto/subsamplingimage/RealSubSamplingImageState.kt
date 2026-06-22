@@ -51,28 +51,39 @@ internal class RealSubSamplingImageState(
   // todo: it isn't great that the preview image remains in memory even after the full image is loaded.
   private val imagePreview: Painter? =
     imageSource.preview?.let { previewImage ->
-        try {
-            val androidBitmap = previewImage.asAndroidBitmap()
-            val maxDimension = 2048
-            if (androidBitmap.width > maxDimension || androidBitmap.height > maxDimension) {
-                val ratio = androidBitmap.width.toFloat() / androidBitmap.height.toFloat()
+        val w = previewImage.width
+        val h = previewImage.height
+        val maxDim = maxOf(w, h)
+        val minDim = minOf(w, h)
+        val ratio = if (minDim > 0) maxDim.toFloat() / minDim.toFloat() else 1f
+        
+        // 快速低成本过滤：只有图片极大，或长宽纵横比超过 1:4 时，才进行转换和缩放，防止普通图产生侧滑卡顿
+        if (maxDim > 2048 || ratio > 4f) {
+            try {
+                val androidBitmap = previewImage.asAndroidBitmap()
+                val maxDimension = 2048
                 val targetWidth: Int
                 val targetHeight: Int
-                if (androidBitmap.width > androidBitmap.height) {
-                    targetWidth = maxDimension
-                    targetHeight = (maxDimension / ratio).toInt().coerceAtLeast(1)
+                if (w > h) {
+                    targetWidth = minOf(w, maxDimension)
+                    targetHeight = (targetWidth / ratio).toInt().coerceAtLeast(1)
                 } else {
-                    targetHeight = maxDimension
-                    targetWidth = (maxDimension * ratio).toInt().coerceAtLeast(1)
+                    targetHeight = minOf(h, maxDimension)
+                    targetWidth = (targetHeight / ratio).toInt().coerceAtLeast(1)
                 }
-                com.pixel.gallery.utils.AppLogger.log("SubSamplingPreview", "Scaling down preview bitmap from ${androidBitmap.width}x${androidBitmap.height} to ${targetWidth}x${targetHeight} to prevent Canvas draw too large crash")
-                val scaledBitmap = android.graphics.Bitmap.createScaledBitmap(androidBitmap, targetWidth, targetHeight, true)
-                BitmapPainter(scaledBitmap.asImageBitmap())
-            } else {
+                
+                if (targetWidth < w || targetHeight < h) {
+                    com.pixel.gallery.utils.AppLogger.log("SubSamplingPreview", "Scaling down preview bitmap from ${w}x${h} to ${targetWidth}x${targetHeight} (ratio=$ratio)")
+                    val scaledBitmap = android.graphics.Bitmap.createScaledBitmap(androidBitmap, targetWidth, targetHeight, true)
+                    BitmapPainter(scaledBitmap.asImageBitmap())
+                } else {
+                    BitmapPainter(previewImage)
+                }
+            } catch (e: Exception) {
+                com.pixel.gallery.utils.AppLogger.log("SubSamplingPreview", "Failed to scale down preview bitmap", e)
                 BitmapPainter(previewImage)
             }
-        } catch (e: Exception) {
-            com.pixel.gallery.utils.AppLogger.log("SubSamplingPreview", "Failed to scale down preview bitmap", e)
+        } else {
             BitmapPainter(previewImage)
         }
     }
