@@ -23,6 +23,16 @@ object DatabaseModule {
             GalleryDatabase::class.java,
             "gallery_db"
         ).fallbackToDestructiveMigration()
+            .addCallback(object : androidx.room.RoomDatabase.Callback() {
+                override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    super.onOpen(db)
+                    try {
+                        db.execSQL("PRAGMA cursor_window_size = 10485760") // 10MB
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            })
             .build()
     }
 

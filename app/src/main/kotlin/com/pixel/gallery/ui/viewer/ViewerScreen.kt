@@ -245,7 +245,13 @@ fun ViewerScreen(
                     w > 512 || h > 512
                 }
             }
-            val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
+            val targetOverrideWidth = remember(media.width, media.height, screenWidth) {
+                if ((media.width ?: 0) > 2048 || (media.height ?: 0) > 2048) 1280 else screenWidth
+            }
+            val targetOverrideHeight = remember(media.width, media.height, screenHeight) {
+                if ((media.width ?: 0) > 2048 || (media.height ?: 0) > 2048) 1280 else screenHeight
+            }
+            val transform = remember(signatureKey, thumbnailModel, hasThumbnail, targetOverrideWidth, targetOverrideHeight, isGif) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
                     val base = requestBuilder
                         .signature(signatureKey)
@@ -255,7 +261,7 @@ fun ViewerScreen(
                     } else {
                         base
                             .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
-                            .override(screenWidth, screenHeight)
+                            .override(targetOverrideWidth, targetOverrideHeight)
                             .fitCenter()
                             .dontAnimate()
                     }
