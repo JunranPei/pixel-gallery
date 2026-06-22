@@ -14,28 +14,40 @@ class PixelGalleryApp : Application() {
     override fun onCreate() {
         super.onCreate()
         
+        // Initialize Logger
+        com.pixel.gallery.utils.AppLogger.init(this)
+        com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Application onCreate, initialization complete.")
+
         // OSMdroid Configuration
         Configuration.getInstance().userAgentValue = packageName
 
         // 监听全局前后台切换，动态伸缩 Glide 缓存池
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
+                com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "onActivityStarted: ${activity::class.java.simpleName}, active: $activeActivities")
                 if (activeActivities == 0) {
                     try {
+                        com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "App entering foreground, setting Glide MemoryCategory to NORMAL")
                         com.bumptech.glide.Glide.get(applicationContext)
                             .setMemoryCategory(com.bumptech.glide.MemoryCategory.NORMAL)
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Failed to set Glide MemoryCategory to NORMAL", e)
+                    }
                 }
                 activeActivities++
             }
 
             override fun onActivityStopped(activity: Activity) {
                 activeActivities--
+                com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "onActivityStopped: ${activity::class.java.simpleName}, active: $activeActivities")
                 if (activeActivities == 0) {
                     try {
+                        com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "App entering background, setting Glide MemoryCategory to LOW")
                         com.bumptech.glide.Glide.get(applicationContext)
                             .setMemoryCategory(com.bumptech.glide.MemoryCategory.LOW)
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Failed to set Glide MemoryCategory to LOW", e)
+                    }
                 }
             }
 
@@ -49,15 +61,17 @@ class PixelGalleryApp : Application() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "onTrimMemory level: $level")
         // 仅在系统内存真正处于中度及以上吃紧状态时才彻底清空缓存
         if (level >= TRIM_MEMORY_MODERATE) {
             try {
+                com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Trim memory moderate/severe, clearing Glide memory cache and calling System.gc()")
                 // 立刻清除 Glide 所有的内存图片缓存（Bitmap 物理内存占用的大头）
                 com.bumptech.glide.Glide.get(this).clearMemory()
                 // 建议 JVM 运行 GC 彻底回收被释放的大对象和物理内存
                 System.gc()
             } catch (e: Exception) {
-                e.printStackTrace()
+                com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Failed to trim memory", e)
             }
         }
     }

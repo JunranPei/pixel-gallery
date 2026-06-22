@@ -143,7 +143,7 @@ fun MainScaffold(
     val favouritesGridState = rememberLazyGridState()
     val trashGridState = rememberLazyGridState()
     val vaultGridState = rememberLazyGridState()
-    val albumPhotoGridState = rememberLazyGridState() // Shared for individual albums
+    val albumGridStates = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
     
     val startupAtAlbums by photosViewModel.startupAtAlbums.collectAsState()
     val homePagerState = rememberPagerState(pageCount = { 2 })
@@ -442,6 +442,9 @@ fun MainScaffold(
                 Screen.Licenses -> LicensesScreen(onBack = navigateBack)
                 is Screen.Photo -> {
                     val albumName = (baseScreen as Screen.Photo).albumName
+                    val albumState = remember(albumName) {
+                        albumGridStates.getOrPut(albumName) { androidx.compose.foundation.lazy.grid.LazyGridState() }
+                    }
                     PhotoScreen(
                         albumName = albumName,
                         onBack = navigateBack,
@@ -451,7 +454,7 @@ fun MainScaffold(
                         selectedIds = selectedIds,
                         onSelectionChange = updateSelection,
                         onToggleSelection = toggleSelection,
-                        gridState = albumPhotoGridState
+                        gridState = albumState
                     )
                 }
                 is Screen.Viewer -> {
