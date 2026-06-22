@@ -818,7 +818,11 @@ fun VideoPlayer(
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        PlayerView(ctx).apply {
+                        object : PlayerView(ctx) {
+                            override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
+                                return false
+                            }
+                        }.apply {
                             player = exoPlayer
                             useController = false
                             setBackgroundColor(android.graphics.Color.BLACK)
