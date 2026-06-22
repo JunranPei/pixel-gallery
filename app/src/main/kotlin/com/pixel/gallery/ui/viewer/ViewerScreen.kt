@@ -752,13 +752,15 @@ fun VideoPlayer(
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-
-    LaunchedEffect(uri) {
-        scale = 1f
-        offset = Offset.Zero
+    val zoomableState = key(uri) {
+        rememberZoomableState(
+            zoomSpec = ZoomSpec(
+                maxZoomFactor = 3f,
+                preventOverOrUnderZoom = true
+            )
+        )
     }
 
     DisposableEffect(isActive, uri) {
@@ -782,36 +784,36 @@ fun VideoPlayer(
 
     Box(
         modifier = modifier
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onTap
-            )
             .pointerInput(uri) {
-                detectTransformGestures { centroid, pan, zoom, _ ->
-                    val newScale = (scale * zoom).coerceIn(0.3f, 15f)
-                    val rawOffset = (offset + pan) * zoom + centroid * (1f - zoom)
-                    
-                    val maxX = (size.width * (newScale - 1f)).coerceAtLeast(0f) / 2f
-                    val maxY = (size.height * (newScale - 1f)).coerceAtLeast(0f) / 2f
-                    
-                    scale = newScale
-                    offset = Offset(
-                        x = rawOffset.x.coerceIn(-maxX, maxX),
-                        y = rawOffset.y.coerceIn(-maxY, maxY)
-                    )
-                }
+                detectTapGestures(
+                    onTap = { onTap() },
+                    onDoubleTap = { centroid ->
+                        val currentScale = zoomableState.contentTransformation.scale.scaleX
+                        if (currentScale > 1.005f) {
+                            coroutineScope.launch {
+                                zoomableState.resetZoom()
+                            }
+                        } else {
+                            coroutineScope.launch {
+                                zoomableState.zoomTo(zoomFactor = 3f, centroid = centroid)
+                            }
+                        }
+                    }
+                )
             }
+            .zoomable(zoomableState)
     ) {
         if (exoPlayer != null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offset.x
-                        translationY = offset.y
+                        val transformation = zoomableState.contentTransformation
+                        scaleX = transformation.scale.scaleX
+                        scaleY = transformation.scale.scaleY
+                        translationX = transformation.offset.x
+                        translationY = transformation.offset.y
+                        transformOrigin = transformation.transformOrigin
                     }
             ) {
                 AndroidView(
