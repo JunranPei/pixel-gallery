@@ -86,6 +86,7 @@ internal fun rememberSubSamplingImageState(
   val state = remember(imageSource) {
     RealSubSamplingImageState(imageSource, transformation)
   }
+  state.currentSource = imageSource
   val decoder = createImageRegionDecoder(imageSource, imageOptions, errorReporter)
   state.imageRegionDecoder = decoder
 

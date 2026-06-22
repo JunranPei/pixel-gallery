@@ -261,6 +261,16 @@ internal data class ResourceImageSource(
   private fun inputStream(context: Context): InputStream {
     return context.resources.openRawResource(id)
   }
+
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is ResourceImageSource) return false
+    return this.id == other.id
+  }
+
+  override fun hashCode(): Int {
+    return id
+  }
 }
 
 @Immutable
@@ -348,6 +358,16 @@ internal data class UriImageSource(
     } catch (e: Exception) {
       com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to delete temp file", e)
     }
+  }
+
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is UriImageSource) return false
+    return this.uri == other.uri
+  }
+
+  override fun hashCode(): Int {
+    return uri.hashCode()
   }
 }
 
