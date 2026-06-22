@@ -53,6 +53,7 @@ fun GalleryScrollbar(
     val localDensity = LocalDensity.current
 
     var dragActive by remember { mutableStateOf(false) }
+    var dragFraction by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var touchActive by remember { mutableStateOf(false) }
     var scrollbarVisible by remember { mutableStateOf(false) }
     var activeScrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -110,7 +111,8 @@ fun GalleryScrollbar(
 
     val sliderOffsetPx by remember {
         derivedStateOf {
-            scrollFraction * effectiveTrackPx
+            val fraction = if (dragActive) dragFraction else scrollFraction
+            fraction * effectiveTrackPx
         }
     }
 
@@ -171,12 +173,11 @@ fun GalleryScrollbar(
                     state = rememberDraggableState { dragDelta ->
                         if (effectiveTrackPx > 0f) {
                             dragActive = true
-                            val currentFraction = scrollFraction
-                            val nextFraction = (currentFraction + dragDelta / effectiveTrackPx).coerceIn(0f, 1f)
+                            dragFraction = (dragFraction + dragDelta / effectiveTrackPx).coerceIn(0f, 1f)
                             val gridInfo = lazyGridState.layoutInfo
                             val allItemsCount = gridInfo.totalItemsCount
                             if (allItemsCount > 0) {
-                                val targetScrollIdx = (nextFraction * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
+                                val targetScrollIdx = (dragFraction * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
                                 activeScrollJob?.cancel()
                                 activeScrollJob = scrollbarScope.launch {
                                     lazyGridState.scrollToItem(targetScrollIdx)
@@ -184,8 +185,13 @@ fun GalleryScrollbar(
                             }
                         }
                     },
-                    onDragStarted = { dragActive = true },
-                    onDragStopped = { dragActive = false }
+                    onDragStarted = { startedPosition ->
+                        dragActive = true
+                        dragFraction = scrollFraction
+                    },
+                    onDragStopped = { velocity ->
+                        dragActive = false
+                    }
                 )
         )
     }
