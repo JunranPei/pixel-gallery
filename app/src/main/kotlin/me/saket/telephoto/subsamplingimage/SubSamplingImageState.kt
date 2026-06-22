@@ -112,9 +112,16 @@ private fun createImageRegionDecoder(
   if (!LocalInspectionMode.current) {
     val localFactory = LocalImageRegionDecoderFactory.current
     LaunchedEffect(imageSource) {
+      val startTime = System.nanoTime()
+      android.util.Log.e("ImageLoadFlow", "[Start] createImageRegionDecoder launched for source = $imageSource")
       try {
+        val exifStartTime = System.nanoTime()
         val exif = ExifMetadata.read(context, imageSource)
-        decoder = PooledImageRegionDecoder.Factory(localFactory).create(
+        val exifDuration = (System.nanoTime() - exifStartTime) / 1_000_000.0
+        android.util.Log.e("ImageLoadFlow", "[Exif] Read Exif for source = $imageSource took $exifDuration ms")
+
+        val decoderStartTime = System.nanoTime()
+        val createdDecoder = PooledImageRegionDecoder.Factory(localFactory).create(
           ImageRegionDecoder.FactoryParams(
             context = context,
             imageSource = imageSource,
@@ -122,14 +129,25 @@ private fun createImageRegionDecoder(
             exif = exif,
           )
         )
+        val decoderDuration = (System.nanoTime() - decoderStartTime) / 1_000_000.0
+        android.util.Log.e("ImageLoadFlow", "[DecoderInit] Created PooledImageRegionDecoder for source = $imageSource took $decoderDuration ms")
+
+        decoder = createdDecoder
+        val totalDuration = (System.nanoTime() - startTime) / 1_000_000.0
+        android.util.Log.e("ImageLoadFlow", "[Success] createImageRegionDecoder completed for source = $imageSource, total = $totalDuration ms")
       } catch (e: IOException) {
+        android.util.Log.e("ImageLoadFlow", "[Error] createImageRegionDecoder failed for source = $imageSource", e)
         errorReporter.onImageLoadingFailed(e, imageSource)
       }
     }
     DisposableEffect(imageSource) {
+      android.util.Log.e("ImageLoadFlow", "[Lifecycle] DisposableEffect entered for source = $imageSource")
       onDispose {
+        val closeStartTime = System.nanoTime()
         decoder?.close()
         decoder = null
+        val closeDuration = (System.nanoTime() - closeStartTime) / 1_000_000.0
+        android.util.Log.e("ImageLoadFlow", "[Lifecycle] Closed decoder for source = $imageSource, took $closeDuration ms")
       }
     }
   }
