@@ -21,6 +21,9 @@ interface MediaDao {
     @Query("SELECT * FROM media_entries")
     suspend fun getAllMediaEntries(): List<MediaEntry>
 
+    @Query("SELECT contentId, path FROM media_entries")
+    suspend fun getAllMediaPaths(): List<MediaPath>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entries: List<MediaEntry>)
 
@@ -75,4 +78,9 @@ data class KnownEntry(
     val contentId: Long,
     val dateModifiedMillis: Long,
     val isTrashed: Boolean
+)
+
+data class MediaPath(
+    val contentId: Long,
+    val path: String
 )
