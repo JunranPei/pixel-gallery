@@ -256,6 +256,7 @@ fun ViewerScreen(
                         base
                             .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
                             .override(screenWidth, screenHeight)
+                            .fitCenter()
                             .dontAnimate()
                     }
                     
