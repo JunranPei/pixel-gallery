@@ -52,33 +52,45 @@ internal class AndroidImageRegionDecoder private constructor(
     val cacheFile = java.io.File(cacheDir, tileFileName)
  
     val bitmap = withContext(com.pixel.gallery.data.repository.LargeImagePerformanceConfig.decoderDispatcher) {
+      val maxW = decoder.width
+      val maxH = decoder.height
+      val safeLeft = bounds.left.coerceIn(0, maxW)
+      val safeTop = bounds.top.coerceIn(0, maxH)
+      val safeRight = bounds.right.coerceIn(0, maxW)
+      val safeBottom = bounds.bottom.coerceIn(0, maxH)
+      if (safeLeft >= safeRight || safeTop >= safeBottom) {
+        com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Invalid bounds: left=$safeLeft, top=$safeTop, right=$safeRight, bottom=$safeBottom (width=$maxW, height=$maxH)")
+        return@withContext null
+      }
+      val safeRect = android.graphics.Rect(safeLeft, safeTop, safeRight, safeBottom)
+
       var decoded: android.graphics.Bitmap? = null
       if (cacheDir.exists() && cacheFile.exists()) {
         try {
           decoded = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
         } catch (e: Exception) {
-          android.util.Log.e("TileCache", "Failed to decode cached tile: ${cacheFile.name}", e)
+          com.pixel.gallery.utils.AppLogger.log("TileCache", "Failed to decode cached tile: ${cacheFile.name}", e)
         }
       }
 
       if (decoded == null) {
         try {
-          decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+          decoded = decoder.decodeRegion(safeRect, options)
         } catch (e: Exception) {
-          android.util.Log.e("AndroidImageRegionDecoder", "Failed to decode region, will attempt to recreate decoder", e)
+          com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Failed to decode region safeRect=$safeRect, attempting recreate", e)
         }
 
         if (decoded == null) {
           try {
-            android.util.Log.i("AndroidImageRegionDecoder", "Recreating decoder for source: $imageSource")
+            com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Recreating decoder for source: $imageSource")
             val newDecoder = imageSource.decoder(context)
             try {
               decoder.recycle()
             } catch (ignored: Exception) {}
             decoder = newDecoder
-            decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+            decoded = decoder.decodeRegion(safeRect, options)
           } catch (recreateEx: Exception) {
-            android.util.Log.e("AndroidImageRegionDecoder", "Failed to recreate decoder and decode region", recreateEx)
+            com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Failed to recreate decoder and decode region", recreateEx)
           }
         }
 
@@ -91,7 +103,7 @@ internal class AndroidImageRegionDecoder private constructor(
               decoded.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
             }
           } catch (e: Exception) {
-            android.util.Log.e("TileCache", "Failed to save tile cache: ${cacheFile.name}", e)
+            com.pixel.gallery.utils.AppLogger.log("TileCache", "Failed to save tile cache: ${cacheFile.name}", e)
           }
         }
       }
@@ -114,7 +126,8 @@ internal class AndroidImageRegionDecoder private constructor(
         orientation = exif.orientation,
       )
     } else {
-      error("BitmapRegionDecoder returned a null bitmap. Image format may not be supported: $imageSource.")
+      com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "BitmapRegionDecoder returned a null bitmap for $imageSource, bounds=$bounds, returning EmptyPainter")
+      return EmptyPainter
     }
   }
  
@@ -157,4 +170,9 @@ internal class AndroidImageRegionDecoder private constructor(
       )
     }
   }
+}
+
+private object EmptyPainter : androidx.compose.ui.graphics.painter.Painter() {
+    override val intrinsicSize: androidx.compose.ui.geometry.Size get() = androidx.compose.ui.geometry.Size.Unspecified
+    override fun androidx.compose.ui.graphics.drawscope.DrawScope.onDraw() {}
 }

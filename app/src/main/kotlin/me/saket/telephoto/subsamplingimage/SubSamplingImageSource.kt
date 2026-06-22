@@ -250,9 +250,9 @@ internal data class UriImageSource(
           }
         }
         tempFile = targetFile
-        android.util.Log.i("UriImageSource", "Successfully created temp file for uri: ${targetFile.absolutePath}")
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Successfully created temp file for uri: ${targetFile.absolutePath}")
       } catch (e: Exception) {
-        android.util.Log.e("UriImageSource", "Failed to create temp file for uri: $uri", e)
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to create temp file for uri: $uri", e)
       }
     }
     return tempFile ?: error("Failed to create temp file for uri: $uri")
@@ -267,6 +267,7 @@ internal data class UriImageSource(
     if (physicalPath != null) {
       val file = java.io.File(physicalPath)
       if (file.exists()) {
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Using physical file path: ${file.absolutePath}")
         @Suppress("DEPRECATION")
         return BitmapRegionDecoder.newInstance(file.absolutePath, /* ignored */ false)!!
       }
@@ -279,9 +280,11 @@ internal data class UriImageSource(
       }
     }
     if (fileToUse != null && fileToUse.exists()) {
+      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Using copied temp file: ${fileToUse.absolutePath}")
       @Suppress("DEPRECATION")
       return BitmapRegionDecoder.newInstance(fileToUse.absolutePath, /* ignored */ false)!!
     }
+    com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Fallback to decoding direct input stream for uri: $uri")
     return inputStream(context).use { stream ->
       @Suppress("DEPRECATION")
       BitmapRegionDecoder.newInstance(stream, /* ignored */ false)!!
@@ -297,11 +300,11 @@ internal data class UriImageSource(
       tempFile?.let { file ->
         if (file.exists()) {
           file.delete()
-          android.util.Log.i("UriImageSource", "Deleted temp file for uri: ${file.absolutePath}")
+          com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Deleted temp file for uri: ${file.absolutePath}")
         }
       }
     } catch (e: Exception) {
-      android.util.Log.e("UriImageSource", "Failed to delete temp file", e)
+      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to delete temp file", e)
     }
   }
 }
