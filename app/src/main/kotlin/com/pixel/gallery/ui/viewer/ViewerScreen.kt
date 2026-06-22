@@ -636,11 +636,6 @@ fun VideoPlayer(
 
     Box(
         modifier = modifier
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onTap
-            )
             .pointerInput(uri) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     val newScale = (scale * zoom).coerceIn(0.3f, 15f)
@@ -683,6 +678,17 @@ fun VideoPlayer(
                         view.player = null
                     },
                     modifier = Modifier.fillMaxSize()
+                )
+
+                // Transparent click overlay to capture taps without being blocked by AndroidView
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onTap
+                        )
                 )
             }
             
@@ -729,10 +735,9 @@ fun VideoControls(
     AnimatedVisibility(
         visible = isVisible,
         enter = fadeIn(),
-        exit = fadeOut(),
-        modifier = modifier
+        exit = fadeOut()
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = modifier) {
             IconButton(
                 onClick = { 
                     try {
