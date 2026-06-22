@@ -41,9 +41,22 @@ class MediaRepository @Inject constructor(
     private var lastSyncedGeneration = 0L
     private val repositoryScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    companion object {
-        private var lastPhysicalCheckTime = 0L
-        private const val PHYSICAL_CHECK_INTERVAL = 10 * 60 * 1000L // 10 minutes
+    init {
+        repositoryScope.launch(Dispatchers.IO) {
+            try {
+                val allPaths = mediaDao.getAllMediaPaths()
+                val missingIds = allPaths.filter { entry ->
+                    !java.io.File(entry.path).exists()
+                }.map { entry -> entry.contentId }
+
+                if (missingIds.isNotEmpty()) {
+                    mediaDao.deleteByIds(missingIds)
+                    android.util.Log.d("MediaRepository", "Startup physical check: Deleted ${missingIds.size} missing physical file entries from Room.")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MediaRepository", "Failed to run startup physical check", e)
+            }
+        }
     }
 
     val allEntries: StateFlow<List<MediaEntry>> = combine(
@@ -272,29 +285,7 @@ class MediaRepository @Inject constructor(
     suspend fun syncWithMediaStore() = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
 
-        // 物理验证数据库中已知的所有文件路径是否依然存在。
-        // 使用轻量级 getAllMediaPaths() 代替 getAllMediaEntries()，只加载 contentId + path，
-        // 避免在大型媒体库上触发 CursorWindow: Failed NO_MEMORY。
-        // 同时加入 10 分钟防抖：避免多个分身（多进程）同时或频繁触发此检查。
-        val now = System.currentTimeMillis()
-        if (now - lastPhysicalCheckTime > PHYSICAL_CHECK_INTERVAL) {
-            lastPhysicalCheckTime = now
-            repositoryScope.launch(Dispatchers.IO) {
-                try {
-                    val allPaths = mediaDao.getAllMediaPaths()
-                    val missingIds = allPaths.filter { entry ->
-                        !java.io.File(entry.path).exists()
-                    }.map { entry -> entry.contentId }
 
-                    if (missingIds.isNotEmpty()) {
-                        mediaDao.deleteByIds(missingIds)
-                        android.util.Log.d("MediaRepository", "Deleted ${missingIds.size} missing physical file entries from Room.")
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("MediaRepository", "Failed to check physical file existence", e)
-                }
-            }
-        }
         
         // Optimize: Use Generation API (API 30+) to skip scan if nothing changed in MediaStore
         var currentGeneration = 0L
