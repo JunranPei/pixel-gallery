@@ -247,14 +247,19 @@ fun ViewerScreen(
             }
             val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
-                    val withOptions = requestBuilder
-                        .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
-                        .signature(signatureKey)
-                        .override(screenWidth, screenHeight)
-                    
+                    val withOptions = if (isGif) {
+                        requestBuilder.format(com.bumptech.glide.load.DecodeFormat.PREFER_ARGB_8888)
+                    } else {
+                        requestBuilder
+                            .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
+                            .override(screenWidth, screenHeight)
+                            .fitCenter()
+                    }
                     val withAnimate = if (isGif) withOptions else withOptions.dontAnimate()
                     
-                    val base = withAnimate.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                    val base = withAnimate
+                        .signature(signatureKey)
+                        .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
                             override fun onLoadFailed(
                                 e: com.bumptech.glide.load.engine.GlideException?,
                                 model: Any?,

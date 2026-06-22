@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.IntSize
@@ -48,7 +49,15 @@ internal class RealSubSamplingImageState(
 
   // todo: it isn't great that the preview image remains in memory even after the full image is loaded.
   private val imagePreview: Painter? =
-    imageSource.preview?.let(::BitmapPainter)
+    imageSource.preview?.let { previewImage ->
+      val byteCount = previewImage.asAndroidBitmap().byteCount
+      if (byteCount < 80 * 1024 * 1024) {
+        BitmapPainter(previewImage)
+      } else {
+        android.util.Log.w("SubSamplingImageState", "Preview image is too large ($byteCount bytes), skipping preview rendering to prevent crash")
+        null
+      }
+    }
 
   override val isImageDisplayed: Boolean by derivedStateOf {
     isReadyToBeDisplayed && viewportImageTiles.isNotEmpty() &&

@@ -52,6 +52,21 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         android.util.Log.e("GalleryLifecycle", "MainActivity.onCreate(hashCode=${hashCode()})")
+        
+        // Catch all uncaught exceptions to prevent showing a crash dialog.
+        // Instead, we restart the app back to the main grid page.
+        Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
+            android.util.Log.e("CrashHandler", "Uncaught exception in gallery app", throwable)
+            try {
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+                startActivity(intent)
+            } catch (ignored: Exception) {}
+            android.os.Process.killProcess(android.os.Process.myPid())
+            java.lang.System.exit(10)
+        }
+
         super.onCreate(savedInstanceState)
         _intentSenderLauncher = intentSenderLauncher
         
