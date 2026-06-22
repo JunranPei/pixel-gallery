@@ -47,9 +47,11 @@ internal class RealSubSamplingImageState(
   override val imageSize: IntSize?
     get() = imageRegionDecoder?.imageSize
 
+  internal var currentSource by mutableStateOf(imageSource)
+
   // todo: it isn't great that the preview image remains in memory even after the full image is loaded.
-  private val imagePreview: Painter? =
-    imageSource.preview?.let { previewImage ->
+  private val imagePreview: Painter? by derivedStateOf {
+    currentSource.preview?.let { previewImage ->
       val byteCount = previewImage.asAndroidBitmap().byteCount
       if (byteCount < 80 * 1024 * 1024) {
         BitmapPainter(previewImage)
@@ -58,6 +60,7 @@ internal class RealSubSamplingImageState(
         null
       }
     }
+  }
 
   override val isImageDisplayed: Boolean by derivedStateOf {
     isReadyToBeDisplayed && viewportImageTiles.isNotEmpty() &&
