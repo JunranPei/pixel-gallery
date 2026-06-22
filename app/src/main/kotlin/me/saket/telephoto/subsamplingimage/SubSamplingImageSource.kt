@@ -269,6 +269,37 @@ internal data class UriImageSource(
   override val preview: ImageBitmap?
 ) : SubSamplingImageSource {
 
+  @Volatile
+  private var tempFile: java.io.File? = null
+  private var hasAttemptedCopy = false
+
+  @Synchronized
+  private fun getOrCreateTempFile(context: Context): java.io.File {
+    if (tempFile != null) {
+      return tempFile!!
+    }
+    if (!hasAttemptedCopy) {
+      hasAttemptedCopy = true
+      try {
+        val tempDir = java.io.File(context.cacheDir, "large_image_uri_temp")
+        if (!tempDir.exists()) {
+          tempDir.mkdirs()
+        }
+        val targetFile = java.io.File(tempDir, "temp_uri_${uri.toString().hashCode()}_${System.currentTimeMillis()}.tmp")
+        inputStream(context).use { input ->
+          java.io.FileOutputStream(targetFile).use { output ->
+            input.copyTo(output)
+          }
+        }
+        tempFile = targetFile
+        android.util.Log.i("UriImageSource", "Successfully created temp file for uri: ${targetFile.absolutePath}")
+      } catch (e: Exception) {
+        android.util.Log.e("UriImageSource", "Failed to create temp file for uri: $uri", e)
+      }
+    }
+    return tempFile ?: error("Failed to create temp file for uri: $uri")
+  }
+
   override fun peek(context: Context): BufferedSource {
     return inputStream(context).source().buffer()
   }
@@ -282,6 +313,17 @@ internal data class UriImageSource(
         return BitmapRegionDecoder.newInstance(file.absolutePath, /* ignored */ false)!!
       }
     }
+    val fileToUse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+      try {
+        getOrCreateTempFile(context)
+      } catch (e: Exception) {
+        null
+      }
+    }
+    if (fileToUse != null && fileToUse.exists()) {
+      @Suppress("DEPRECATION")
+      return BitmapRegionDecoder.newInstance(fileToUse.absolutePath, /* ignored */ false)!!
+    }
     return inputStream(context).use { stream ->
       @Suppress("DEPRECATION")
       BitmapRegionDecoder.newInstance(stream, /* ignored */ false)!!
@@ -290,6 +332,19 @@ internal data class UriImageSource(
 
   private fun inputStream(context: Context): InputStream {
     return context.contentResolver.openInputStream(uri) ?: error("Failed to read uri: $uri")
+  }
+
+  override fun close() {
+    try {
+      tempFile?.let { file ->
+        if (file.exists()) {
+          file.delete()
+          android.util.Log.i("UriImageSource", "Deleted temp file for uri: ${file.absolutePath}")
+        }
+      }
+    } catch (e: Exception) {
+      android.util.Log.e("UriImageSource", "Failed to delete temp file", e)
+    }
   }
 }
 
