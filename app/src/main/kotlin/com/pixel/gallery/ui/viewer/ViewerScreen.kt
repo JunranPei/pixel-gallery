@@ -782,25 +782,7 @@ fun VideoPlayer(
     }
 
     Box(
-        modifier = modifier
-            .pointerInput(uri) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onDoubleTap = { centroid ->
-                        val currentScale = zoomableState.contentTransformation.scale.scaleX
-                        if (currentScale > 1.005f) {
-                            coroutineScope.launch {
-                                zoomableState.resetZoom()
-                            }
-                        } else {
-                            coroutineScope.launch {
-                                zoomableState.zoomTo(zoomFactor = 3f, centroid = centroid)
-                            }
-                        }
-                    }
-                )
-            }
-            .zoomable(zoomableState)
+        modifier = modifier.zoomable(zoomableState)
     ) {
         if (exoPlayer != null) {
             Box(
@@ -834,6 +816,28 @@ fun VideoPlayer(
                         view.player = null
                     },
                     modifier = Modifier.fillMaxSize()
+                )
+                // 引入透明手势遮罩，确保 Compose 100% 捕获点击，且与视频完全同步缩放
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(uri) {
+                            detectTapGestures(
+                                onTap = { onTap() },
+                                onDoubleTap = { centroid ->
+                                    val currentScale = zoomableState.contentTransformation.scale.scaleX
+                                    if (currentScale > 1.005f) {
+                                        coroutineScope.launch {
+                                            zoomableState.resetZoom()
+                                        }
+                                    } else {
+                                        coroutineScope.launch {
+                                            zoomableState.zoomTo(zoomFactor = 3f, centroid = centroid)
+                                        }
+                                    }
+                                }
+                            )
+                        }
                 )
             }
             
@@ -880,10 +884,9 @@ fun VideoControls(
     AnimatedVisibility(
         visible = isVisible,
         enter = fadeIn(),
-        exit = fadeOut(),
-        modifier = modifier
+        exit = fadeOut()
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = modifier) {
             IconButton(
                 onClick = { 
                     try {
