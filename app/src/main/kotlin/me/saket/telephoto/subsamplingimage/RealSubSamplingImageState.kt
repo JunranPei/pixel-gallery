@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.IntSize
@@ -48,7 +50,32 @@ internal class RealSubSamplingImageState(
 
   // todo: it isn't great that the preview image remains in memory even after the full image is loaded.
   private val imagePreview: Painter? =
-    imageSource.preview?.let(::BitmapPainter)
+    imageSource.preview?.let { previewImage ->
+        try {
+            val androidBitmap = previewImage.asAndroidBitmap()
+            val maxDimension = 2048
+            if (androidBitmap.width > maxDimension || androidBitmap.height > maxDimension) {
+                val ratio = androidBitmap.width.toFloat() / androidBitmap.height.toFloat()
+                val targetWidth: Int
+                val targetHeight: Int
+                if (androidBitmap.width > androidBitmap.height) {
+                    targetWidth = maxDimension
+                    targetHeight = (maxDimension / ratio).toInt().coerceAtLeast(1)
+                } else {
+                    targetHeight = maxDimension
+                    targetWidth = (maxDimension * ratio).toInt().coerceAtLeast(1)
+                }
+                com.pixel.gallery.utils.AppLogger.log("SubSamplingPreview", "Scaling down preview bitmap from ${androidBitmap.width}x${androidBitmap.height} to ${targetWidth}x${targetHeight} to prevent Canvas draw too large crash")
+                val scaledBitmap = android.graphics.Bitmap.createScaledBitmap(androidBitmap, targetWidth, targetHeight, true)
+                BitmapPainter(scaledBitmap.asImageBitmap())
+            } else {
+                BitmapPainter(previewImage)
+            }
+        } catch (e: Exception) {
+            com.pixel.gallery.utils.AppLogger.log("SubSamplingPreview", "Failed to scale down preview bitmap", e)
+            BitmapPainter(previewImage)
+        }
+    }
 
   override val isImageDisplayed: Boolean by derivedStateOf {
     isReadyToBeDisplayed && viewportImageTiles.isNotEmpty() &&
