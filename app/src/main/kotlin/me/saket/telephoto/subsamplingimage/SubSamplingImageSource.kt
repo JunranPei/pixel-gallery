@@ -283,51 +283,6 @@ internal data class UriImageSource(
   override val preview: ImageBitmap?
 ) : SubSamplingImageSource {
 
-  @Volatile
-  private var tempFile: java.io.File? = null
-  private var hasAttemptedCopy = false
-
-  @Synchronized
-  private fun getOrCreateTempFile(context: Context): java.io.File {
-    if (tempFile != null) {
-      return tempFile!!
-    }
-    if (!hasAttemptedCopy) {
-      hasAttemptedCopy = true
-      try {
-        val tempDir = java.io.File(context.cacheDir, "large_image_uri_temp")
-        if (!tempDir.exists()) {
-          tempDir.mkdirs()
-        }
-        var size: Long = 0
-        try {
-          context.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.SIZE), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-              val sizeIndex = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.SIZE)
-              if (sizeIndex != -1) size = cursor.getLong(sizeIndex)
-            }
-          }
-        } catch (ignored: Exception) {}
-
-        val targetFile = java.io.File(tempDir, "temp_uri_${uri.toString().hashCode()}_$size.tmp")
-        if (!targetFile.exists() || (size > 0 && targetFile.length() != size)) {
-          val writingFile = java.io.File(tempDir, "temp_uri_${uri.toString().hashCode()}_$size.writing.tmp")
-          inputStream(context).use { input ->
-            java.io.FileOutputStream(writingFile).use { output ->
-              input.copyTo(output)
-            }
-          }
-          writingFile.renameTo(targetFile)
-        }
-        tempFile = targetFile
-        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Successfully created or reused temp file for uri: ${targetFile.absolutePath}")
-      } catch (e: Exception) {
-        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to create temp file for uri: $uri", e)
-      }
-    }
-    return tempFile ?: error("Failed to create temp file for uri: $uri")
-  }
-
   override fun peek(context: Context): BufferedSource {
     return inputStream(context).source().buffer()
   }
@@ -342,18 +297,19 @@ internal data class UriImageSource(
         return BitmapRegionDecoder.newInstance(file.absolutePath, /* ignored */ false)!!
       }
     }
-    val fileToUse = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-      try {
-        getOrCreateTempFile(context)
-      } catch (e: Exception) {
-        null
+    
+    try {
+      val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+      if (pfd != null) {
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Using ParcelFileDescriptor for uri: $uri")
+        val decoder = @Suppress("DEPRECATION") BitmapRegionDecoder.newInstance(pfd.fileDescriptor, false)!!
+        pfd.close()
+        return decoder
       }
+    } catch (e: Exception) {
+      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to use FileDescriptor for uri: $uri", e)
     }
-    if (fileToUse != null && fileToUse.exists()) {
-      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Using copied temp file: ${fileToUse.absolutePath}")
-      @Suppress("DEPRECATION")
-      return BitmapRegionDecoder.newInstance(fileToUse.absolutePath, /* ignored */ false)!!
-    }
+
     com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Fallback to decoding direct input stream for uri: $uri")
     return inputStream(context).use { stream ->
       @Suppress("DEPRECATION")
@@ -366,16 +322,7 @@ internal data class UriImageSource(
   }
 
   override fun close() {
-    try {
-      tempFile?.let { file ->
-        if (file.exists()) {
-          // Intentionally do not delete to support multitask feature.
-          // file.delete()
-        }
-      }
-    } catch (e: Exception) {
-      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to close temp file", e)
-    }
+    // No-op
   }
 
   override fun equals(other: Any?): Boolean {

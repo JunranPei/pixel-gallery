@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import me.saket.telephoto.subsamplingimage.ImageBitmapOptions
 import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
 import me.saket.telephoto.subsamplingimage.internal.ExifMetadata.ImageOrientation
@@ -65,6 +66,7 @@ internal class AndroidImageRegionDecoder private constructor(
       }
       val safeRect = android.graphics.Rect(safeLeft, safeTop, safeRight, safeBottom)
 
+      if (!isActive) return@withContext null
       var decoded: android.graphics.Bitmap? = null
       var cacheHit = false
       if (cacheDir.exists() && cacheFile.exists()) {
@@ -108,7 +110,7 @@ internal class AndroidImageRegionDecoder private constructor(
           }
         }
 
-        if (decoded != null) {
+        if (decoded != null && isActive) {
           try {
             val cacheSaveStartTime = System.nanoTime()
             if (!cacheDir.exists()) {
@@ -184,7 +186,7 @@ internal class AndroidImageRegionDecoder private constructor(
       val factoryStartTime = System.nanoTime()
       android.util.Log.e("ImageLoadFlow", "[AndroidDecoderFactory] Start creating decoder for source = ${params.imageSource}")
 
-      val decoderInstance = withContext(dispatcher) {
+      val decoderInstance = withContext(Dispatchers.IO) {
         val sourceDecoderStartTime = System.nanoTime()
         val result = params.imageSource.decoder(params.context)
         val sourceDecoderDuration = (System.nanoTime() - sourceDecoderStartTime) / 1_000_000.0
