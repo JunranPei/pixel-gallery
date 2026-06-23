@@ -173,14 +173,16 @@ internal data class FileImageSource(
         if (!safeDir.exists()) {
           safeDir.mkdirs()
         }
-        val targetFile = java.io.File(safeDir, "safe_${originalFile.name}_${System.currentTimeMillis()}")
-        if (originalFile.exists()) {
-          originalFile.copyTo(targetFile, overwrite = true)
+        val targetFile = java.io.File(safeDir, "safe_${originalFile.name}_${originalFile.absolutePath.hashCode()}")
+        if (originalFile.exists() && !targetFile.exists()) {
+          android.system.Os.link(originalFile.absolutePath, targetFile.absolutePath)
+          android.util.Log.i("FileImageSource", "Successfully created hard link of cache image: ${targetFile.absolutePath}")
+        }
+        if (targetFile.exists()) {
           safeCopyFile = targetFile
-          android.util.Log.i("FileImageSource", "Successfully created safe copy of cache image: ${targetFile.absolutePath}")
         }
       } catch (e: Exception) {
-        android.util.Log.e("FileImageSource", "Failed to create safe copy of cache image", e)
+        android.util.Log.e("FileImageSource", "Failed to create hard link of cache image", e)
       }
     }
     return safeCopyFile ?: originalFile
@@ -203,15 +205,17 @@ internal data class FileImageSource(
     try {
       safeCopyFile?.let { file ->
         if (file.exists()) {
-          file.delete()
-          android.util.Log.i("FileImageSource", "Deleted safe copy of cache image: ${file.absolutePath}")
+          // Intentionally do not delete to support multitask feature.
+          // file.delete()
         }
       }
-    } catch (e: Exception) {
-      android.util.Log.e("FileImageSource", "Failed to delete safe copy of cache image", e)
-    } finally {
+    } catch (ignored: Exception) {} finally {
       onClose?.close()
     }
+  }
+
+  override fun toString(): String {
+    return "FileImageSource(path=${path})"
   }
 }
 
@@ -295,14 +299,28 @@ internal data class UriImageSource(
         if (!tempDir.exists()) {
           tempDir.mkdirs()
         }
-        val targetFile = java.io.File(tempDir, "temp_uri_${uri.toString().hashCode()}_${System.currentTimeMillis()}.tmp")
-        inputStream(context).use { input ->
-          java.io.FileOutputStream(targetFile).use { output ->
-            input.copyTo(output)
+        var size: Long = 0
+        try {
+          context.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+              val sizeIndex = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.SIZE)
+              if (sizeIndex != -1) size = cursor.getLong(sizeIndex)
+            }
           }
+        } catch (ignored: Exception) {}
+
+        val targetFile = java.io.File(tempDir, "temp_uri_${uri.toString().hashCode()}_$size.tmp")
+        if (!targetFile.exists() || (size > 0 && targetFile.length() != size)) {
+          val writingFile = java.io.File(tempDir, "temp_uri_${uri.toString().hashCode()}_$size.writing.tmp")
+          inputStream(context).use { input ->
+            java.io.FileOutputStream(writingFile).use { output ->
+              input.copyTo(output)
+            }
+          }
+          writingFile.renameTo(targetFile)
         }
         tempFile = targetFile
-        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Successfully created temp file for uri: ${targetFile.absolutePath}")
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Successfully created or reused temp file for uri: ${targetFile.absolutePath}")
       } catch (e: Exception) {
         com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to create temp file for uri: $uri", e)
       }
@@ -351,12 +369,12 @@ internal data class UriImageSource(
     try {
       tempFile?.let { file ->
         if (file.exists()) {
-          file.delete()
-          com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Deleted temp file for uri: ${file.absolutePath}")
+          // Intentionally do not delete to support multitask feature.
+          // file.delete()
         }
       }
     } catch (e: Exception) {
-      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to delete temp file", e)
+      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to close temp file", e)
     }
   }
 
@@ -368,6 +386,10 @@ internal data class UriImageSource(
 
   override fun hashCode(): Int {
     return uri.hashCode()
+  }
+
+  override fun toString(): String {
+    return "UriImageSource(uri=$uri)"
   }
 }
 

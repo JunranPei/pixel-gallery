@@ -156,9 +156,12 @@ internal class AndroidImageRegionDecoder private constructor(
   }
  
   override fun close() {
-    try {
-      decoder.recycle()
-    } catch (ignored: Exception) {}
+    val decoderToRecycle = decoder
+    Thread {
+      try {
+        decoderToRecycle.recycle()
+      } catch (ignored: Exception) {}
+    }.start()
   }
  
   private fun BitmapRegionDecoder.size(): IntSize {
