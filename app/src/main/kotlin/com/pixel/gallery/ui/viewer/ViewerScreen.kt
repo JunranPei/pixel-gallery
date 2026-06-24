@@ -784,24 +784,10 @@ fun VideoPlayer(
 
     Box(
         modifier = modifier
-            .pointerInput(uri) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onDoubleTap = { centroid ->
-                        val currentScale = zoomableState.contentTransformation.scale.scaleX
-                        if (currentScale > 1.005f) {
-                            coroutineScope.launch {
-                                zoomableState.resetZoom()
-                            }
-                        } else {
-                            coroutineScope.launch {
-                                zoomableState.zoomTo(zoomFactor = 3f, centroid = centroid)
-                            }
-                        }
-                    }
-                )
-            }
-            .zoomable(zoomableState)
+            .zoomable(
+                state = zoomableState,
+                onClick = { _ -> onTap() }
+            )
     ) {
         if (exoPlayer != null) {
             Box(
