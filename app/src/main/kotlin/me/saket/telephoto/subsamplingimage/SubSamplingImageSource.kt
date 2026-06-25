@@ -173,9 +173,15 @@ internal data class FileImageSource(
         if (!safeDir.exists()) {
           safeDir.mkdirs()
         }
-        val targetFile = java.io.File(safeDir, "safe_${originalFile.name}_${System.currentTimeMillis()}")
+        val targetFile = java.io.File(safeDir, "safe_${originalFile.name}")
         if (originalFile.exists()) {
-          originalFile.copyTo(targetFile, overwrite = true)
+          if (!targetFile.exists()) {
+            try {
+              android.system.Os.link(originalFile.absolutePath, targetFile.absolutePath)
+            } catch (e: Exception) {
+              originalFile.copyTo(targetFile, overwrite = true)
+            }
+          }
           safeCopyFile = targetFile
           android.util.Log.i("FileImageSource", "Successfully created safe copy of cache image: ${targetFile.absolutePath}")
         }

@@ -74,9 +74,20 @@ private class ResourcePool<T>(val resources: List<T>) {
   }
 
   suspend fun <R> borrow(handler: suspend (T) -> R): R {
+    val waitStartTime = System.nanoTime()
     val borrowed = channel.receive()
-    return try {
-      handler(borrowed)
+    val waitDuration = (System.nanoTime() - waitStartTime) / 1_000_000.0
+
+    val execStartTime = System.nanoTime()
+    try {
+      val result = handler(borrowed)
+      val execDuration = (System.nanoTime() - execStartTime) / 1_000_000.0
+      android.util.Log.e("ImageLoadFlow", "[ResourcePool] Borrow queue wait = $waitDuration ms, execution = $execDuration ms (pool size = ${resources.size})")
+      return result
+    } catch (e: Exception) {
+      val execDuration = (System.nanoTime() - execStartTime) / 1_000_000.0
+      android.util.Log.e("ImageLoadFlow", "[ResourcePool] Borrow failed! queue wait = $waitDuration ms, execution = $execDuration ms", e)
+      throw e
     } finally {
       channel.send(borrowed)
     }
