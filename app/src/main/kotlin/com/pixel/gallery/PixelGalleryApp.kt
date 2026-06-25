@@ -49,7 +49,7 @@ class PixelGalleryApp : Application() {
                         com.bumptech.glide.Glide.get(applicationContext)
                             .setMemoryCategory(com.bumptech.glide.MemoryCategory.LOW)
                         // 触发系统级的轻量 GC，把刚才释放的历史缓存内存彻底还给系统，降低后台被杀率
-                        System.gc()
+                        // System.gc()
                     } catch (e: Exception) {
                         com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Failed to set Glide MemoryCategory to LOW", e)
                     }
