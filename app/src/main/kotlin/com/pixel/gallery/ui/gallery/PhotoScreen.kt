@@ -28,6 +28,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
+import kotlinx.coroutines.flow.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,32 +47,45 @@ fun PhotoScreen(
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
     
-    val albumItems = remember(allPhotos, albumName, gridColumns, photoSortOrder) {
-        val filtered = allPhotos.filter { 
-            val file = java.io.File(it.path)
-            file.parentFile?.name == albumName
-        }
-        val sorted = when (photoSortOrder) {
-            PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
-            PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
-            PhotoSortOrder.NAME_ASC -> filtered.sortedBy { java.io.File(it.path).name }
-            PhotoSortOrder.NAME_DESC -> filtered.sortedByDescending { java.io.File(it.path).name }
-            PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
-            PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
-        }
-        viewModel.groupMedia(sorted, gridColumns, photoSortOrder)
-    }
+    val albumItems by remember(albumName, gridColumns, photoSortOrder) {
+        viewModel.photos.map { all ->
+            val filtered = all.filter { 
+                viewModel.getParentFolderName(it.path) == albumName 
+            }
+            val sorted = when (photoSortOrder) {
+                PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
+                PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
+                PhotoSortOrder.NAME_ASC -> filtered.sortedBy { 
+                    val lastSlash = it.path.lastIndexOf('/')
+                    if (lastSlash >= 0) it.path.substring(lastSlash + 1) else it.path
+                }
+                PhotoSortOrder.NAME_DESC -> filtered.sortedByDescending { 
+                    val lastSlash = it.path.lastIndexOf('/')
+                    if (lastSlash >= 0) it.path.substring(lastSlash + 1) else it.path
+                }
+                PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
+                PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
+            }
+            viewModel.groupMedia(sorted, gridColumns, photoSortOrder)
+        }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+    }.collectAsState(initial = emptyList())
 
     val photoCount = remember(albumItems) {
         albumItems.count { it is GridItem.Photo }
     }
 
     var showMenu by remember { mutableStateOf(false) }
-    val albumPath = remember(allPhotos, albumName) {
-        allPhotos.find { 
-            java.io.File(it.path).parentFile?.name == albumName 
-        }?.let { java.io.File(it.path).parent } ?: ""
-    }
+    val albumPath by remember(allPhotos, albumName) {
+        flow {
+            val path = allPhotos.find { 
+                viewModel.getParentFolderName(it.path) == albumName 
+            }?.let { 
+                val lastSlash = it.path.lastIndexOf('/')
+                if (lastSlash > 0) it.path.substring(0, lastSlash) else ""
+            } ?: ""
+            emit(path)
+        }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+    }.collectAsState(initial = "")
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(

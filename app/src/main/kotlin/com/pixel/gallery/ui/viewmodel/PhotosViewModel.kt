@@ -159,16 +159,28 @@ class PhotosViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
 
+    fun getParentFolderName(path: String): String {
+        if (path.isEmpty()) return "Unknown"
+        val lastSlash = path.lastIndexOf('/')
+        if (lastSlash <= 0) return "Unknown"
+        val parentPath = path.substring(0, lastSlash)
+        val secondLastSlash = parentPath.lastIndexOf('/')
+        return if (secondLastSlash >= 0) {
+            parentPath.substring(secondLastSlash + 1)
+        } else {
+            parentPath
+        }
+    }
+
     val albums: StateFlow<List<Album>> = combine(
         photos,
         albumSortOrder
     ) { photosList, sort ->
         val grouped = photosList.groupBy { 
-            val file = java.io.File(it.path)
-            file.parentFile?.name ?: "Unknown"
+            getParentFolderName(it.path)
         }.map { (name, entries) ->
             val firstEntry = entries.first()
-            val parentPath = java.io.File(firstEntry.path).parent ?: ""
+            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
             val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
@@ -180,7 +192,9 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
@@ -190,11 +204,10 @@ class PhotosViewModel @Inject constructor(
         val grouped = all.filter { entry ->
             hidden.any { entry.path.startsWith(it) }
         }.groupBy { 
-            val file = java.io.File(it.path)
-            file.parentFile?.name ?: "Unknown"
+            getParentFolderName(it.path)
         }.map { (name, entries) ->
             val firstEntry = entries.first()
-            val parentPath = java.io.File(firstEntry.path).parent ?: ""
+            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
             val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
@@ -206,7 +219,9 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var contentObserver: android.database.ContentObserver? = null
 
