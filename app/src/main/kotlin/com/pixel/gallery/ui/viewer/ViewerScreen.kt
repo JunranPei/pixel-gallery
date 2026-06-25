@@ -391,6 +391,7 @@ fun ViewerScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .zoomable(zoomableState.zoomableState)
                                     .pointerInput(scaleFit, scaleToOriginal) {
                                         detectTapGestures(
                                             onTap = {
@@ -415,7 +416,6 @@ fun ViewerScreen(
                                             }
                                         )
                                     }
-                                    .zoomable(zoomableState.zoomableState)
                                     .graphicsLayer {
                                         val transformation = zoomableState.zoomableState.contentTransformation
                                         scaleX = transformation.scale.scaleX
