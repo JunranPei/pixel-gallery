@@ -26,12 +26,12 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 internal class ImageCache(
-  scope: CoroutineScope,
   private val decoder: ImageRegionDecoder,
   private val throttleEvery: Duration = 100.milliseconds,
 ) {
   private val visibleRegions = Channel<List<ImageRegionTile>>(capacity = 10)
   private val cachedImages = MutableStateFlow(emptyMap<ImageRegionTile, LoadingState>())
+  private var listenJob: Job? = null
 
   // Thread-safe LRU cache for off-screen tiles (keeps up to 12 loaded tiles in memory)
   private val lruCache = object : LinkedHashMap<ImageRegionTile, Loaded>(16, 0.75f, true) {
@@ -45,8 +45,9 @@ internal class ImageCache(
     data class InFlight(val job: Job) : LoadingState
   }
 
-  init {
-    scope.launch {
+  fun listen(scope: CoroutineScope) {
+    listenJob?.cancel()
+    listenJob = scope.launch {
       visibleRegions.consumeAsFlow()
         .distinctUntilChanged()
         .throttleLatest(throttleEvery)  // In case the image is animating its zoom.

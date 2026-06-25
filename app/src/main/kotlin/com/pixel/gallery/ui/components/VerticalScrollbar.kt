@@ -178,9 +178,11 @@ fun GalleryScrollbar(
                             val allItemsCount = gridInfo.totalItemsCount
                             if (allItemsCount > 0) {
                                 val targetScrollIdx = (dragFraction * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
-                                activeScrollJob?.cancel()
-                                activeScrollJob = scrollbarScope.launch {
-                                    lazyGridState.scrollToItem(targetScrollIdx)
+                                if (targetScrollIdx != lazyGridState.firstVisibleItemIndex) {
+                                    activeScrollJob?.cancel()
+                                    activeScrollJob = scrollbarScope.launch {
+                                        lazyGridState.scrollToItem(targetScrollIdx)
+                                    }
                                 }
                             }
                         }
