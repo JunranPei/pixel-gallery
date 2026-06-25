@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import me.saket.telephoto.subsamplingimage.ImageBitmapOptions
 import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
@@ -108,7 +109,7 @@ internal class AndroidImageRegionDecoder private constructor(
           }
         }
 
-        if (decoded != null) {
+        if (decoded != null && isActive) {
           try {
             val cacheSaveStartTime = System.nanoTime()
             if (!cacheDir.exists()) {

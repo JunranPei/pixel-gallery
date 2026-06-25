@@ -664,11 +664,11 @@ fun AlbumCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .graphicsLayer {
-                    clip = true
-                    shape = RoundedCornerShape(24.dp)
-                }
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = ExpressiveShapes.ExtraLargeIncreased
+                )
+                .clip(ExpressiveShapes.ExtraLargeIncreased),
             contentAlignment = Alignment.Center
         ) {
             GlideImage(
