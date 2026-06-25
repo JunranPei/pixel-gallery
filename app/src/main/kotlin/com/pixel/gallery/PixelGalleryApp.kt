@@ -26,7 +26,6 @@ class PixelGalleryApp : Application() {
             override fun onActivityStarted(activity: Activity) {
                 com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "onActivityStarted: ${activity::class.java.simpleName}, active: $activeActivities")
                 if (activeActivities == 0) {
-                    // 应用切回前台：恢复正常的图片缓存池大小，提升滑动流畅度
                     try {
                         com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "App entering foreground, setting Glide MemoryCategory to NORMAL")
                         com.bumptech.glide.Glide.get(applicationContext)
@@ -42,14 +41,10 @@ class PixelGalleryApp : Application() {
                 activeActivities--
                 com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "onActivityStopped: ${activity::class.java.simpleName}, active: $activeActivities")
                 if (activeActivities == 0) {
-                    // 应用切到后台：将 Glide 缓存池上限直接砍掉 50%（释放历史无用缩略图缓存）
-                    // 关键：Glide 绝对不会清理当前正在详情页显示的 active 图片，因此切回时大图绝不发糊、不重载
                     try {
                         com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "App entering background, setting Glide MemoryCategory to LOW")
                         com.bumptech.glide.Glide.get(applicationContext)
                             .setMemoryCategory(com.bumptech.glide.MemoryCategory.LOW)
-                        // 触发系统级的轻量 GC，把刚才释放的历史缓存内存彻底还给系统，降低后台被杀率
-                        System.gc()
                     } catch (e: Exception) {
                         com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Failed to set Glide MemoryCategory to LOW", e)
                     }
