@@ -2,7 +2,9 @@ package com.pixel.gallery.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Photo
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.filled.MoreVert
+import kotlinx.coroutines.flow.*
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Lock
@@ -143,7 +146,7 @@ fun MainScaffold(
     val favouritesGridState = rememberLazyGridState()
     val trashGridState = rememberLazyGridState()
     val vaultGridState = rememberLazyGridState()
-    val albumGridStates = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
+    val albumGridStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
     
     val startupAtAlbums by photosViewModel.startupAtAlbums.collectAsState()
     val homePagerState = rememberPagerState(pageCount = { 2 })
@@ -465,45 +468,63 @@ fun MainScaffold(
             // Overlay full-screen viewer if active
             if (currentScreen is Screen.Viewer) {
                 val viewer = currentScreen
-                val photosForViewer = remember(viewer, allPhotos, favourites, trash, vault) {
-                    when (viewer.source) {
-                        Screen.ViewerSource.All -> allPhotos
-                        Screen.ViewerSource.Favourites -> favourites
-                        Screen.ViewerSource.Trash -> trash
-                        Screen.ViewerSource.Vault -> vault
-                        Screen.ViewerSource.Album -> {
-                            allPhotos.filter { 
-                                val file = java.io.File(it.path)
-                                file.parentFile?.name == viewer.albumName
+                val photosForViewer by remember(viewer, allPhotos, favourites, trash, vault) {
+                    flow {
+                        val result = when (viewer.source) {
+                            Screen.ViewerSource.All -> allPhotos
+                            Screen.ViewerSource.Favourites -> favourites
+                            Screen.ViewerSource.Trash -> trash
+                            Screen.ViewerSource.Vault -> vault
+                            Screen.ViewerSource.Album -> {
+                                allPhotos.filter { 
+                                    val lastSlash = it.path.lastIndexOf('/')
+                                    if (lastSlash <= 0) false
+                                    else {
+                                        val parentPath = it.path.substring(0, lastSlash)
+                                        val prevSlash = parentPath.lastIndexOf('/')
+                                        val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
+                                        parentName == viewer.albumName
+                                    }
+                                }
+                            }
+                            Screen.ViewerSource.External -> {
+                                val uri = viewer.externalUri ?: ""
+                                val mimeType = viewer.externalMimeType ?: "image/*"
+                                listOf(
+                                    com.pixel.gallery.data.local.entity.MediaEntry(
+                                        contentId = -1L,
+                                        path = uri,
+                                        uri = uri,
+                                        sourceMimeType = mimeType,
+                                        width = 0,
+                                        height = 0,
+                                        sourceRotationDegrees = 0,
+                                        sizeBytes = 0,
+                                        dateAddedSecs = 0,
+                                        dateModifiedMillis = 0,
+                                        isTrashed = false,
+                                        bestTimestamp = 0L
+                                    )
+                                )
                             }
                         }
-                        Screen.ViewerSource.External -> {
-                            val uri = viewer.externalUri ?: ""
-                            val mimeType = viewer.externalMimeType ?: "image/*"
-                            listOf(
-                                com.pixel.gallery.data.local.entity.MediaEntry(
-                                    contentId = -1L,
-                                    path = uri,
-                                    uri = uri,
-                                    sourceMimeType = mimeType,
-                                    width = 0,
-                                    height = 0,
-                                    sourceRotationDegrees = 0,
-                                    sizeBytes = 0,
-                                    dateAddedSecs = 0,
-                                    dateModifiedMillis = 0,
-                                    isTrashed = false,
-                                    bestTimestamp = 0L
-                                )
-                            )
-                        }
-                    }
+                        emit(result)
+                    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+                }.collectAsState(initial = emptyList())
+
+                if (photosForViewer.isNotEmpty()) {
+                    ViewerScreen(
+                        initialId = viewer.initialId,
+                        photos = photosForViewer,
+                        onBack = { navigationStack = navigationStack.dropLast(1) }
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                    )
                 }
-                ViewerScreen(
-                    initialId = viewer.initialId,
-                    photos = photosForViewer,
-                    onBack = { navigationStack = navigationStack.dropLast(1) }
-                )
             }
 
 
