@@ -13,6 +13,10 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.pixel.gallery.data.repository.SettingsRepository
+import com.pixel.gallery.data.repository.LargeImagePerformanceConfig
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -23,6 +27,9 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
+
+    @javax.inject.Inject
+    lateinit var settingsRepository: SettingsRepository
 
     private val viewModel: PhotosViewModel by viewModels()
 
@@ -44,6 +51,8 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onCreate(hashCode=${hashCode()})")
+        
         // Catch all uncaught exceptions to prevent showing a crash dialog.
         // Instead, we restart the app back to the main grid page.
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
@@ -75,6 +84,28 @@ class MainActivity : FragmentActivity() {
         
         checkPermissions()
         handleIntent(intent)
+        checkNotificationListenerPermission()
+
+        lifecycleScope.launch {
+            settingsRepository.largeImageTileSize.collect {
+                LargeImagePerformanceConfig.tileSize = it
+            }
+        }
+        lifecycleScope.launch {
+            settingsRepository.largeImageDebounceMs.collect {
+                LargeImagePerformanceConfig.debounceMs = it
+            }
+        }
+        lifecycleScope.launch {
+            settingsRepository.largeImageHardwareBitmap.collect {
+                LargeImagePerformanceConfig.useHardwareBitmap = it
+            }
+        }
+        lifecycleScope.launch {
+            settingsRepository.largeImageMaxCores.collect {
+                LargeImagePerformanceConfig.updateMaxCores(it)
+            }
+        }
     }
 
 
@@ -115,16 +146,62 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    private fun checkNotificationListenerPermission() {
+        if (!isNotificationListenerEnabled()) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("开启后台保活支持")
+                .setMessage("为防止多分身在后台被系统强杀，请在接下来的设置中，为本应用开启“通知使用权”。\n\n开启后，系统将为其提供硬件级的后台常驻保护。")
+                .setPositiveButton("去开启") { _, _ ->
+                    try {
+                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    } catch (e: Exception) {
+                        android.widget.Toast.makeText(this, "未找到通知监听设置页面，请手动开启", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
+    private fun isNotificationListenerEnabled(): Boolean {
+        val packageNames = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(this)
+        return packageNames.contains(packageName)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onStart(hashCode=${hashCode()})")
+    }
+
     override fun onResume() {
         super.onResume()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onResume(hashCode=${hashCode()})")
         val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
         } else {
             checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
         }
         if (hasPermission) {
-            viewModel.refresh()
+            viewModel.setResumed(true)
+        } else {
+            viewModel.setResumed(false)
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onPause(hashCode=${hashCode()})")
+        viewModel.setResumed(false)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onStop(hashCode=${hashCode()})")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        android.util.Log.e("GalleryLifecycle", "MainActivity.onDestroy(hashCode=${hashCode()})")
     }
 
     override fun onNewIntent(intent: Intent) {

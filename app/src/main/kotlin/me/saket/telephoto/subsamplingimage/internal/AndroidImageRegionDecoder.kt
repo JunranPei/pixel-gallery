@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import me.saket.telephoto.subsamplingimage.ImageBitmapOptions
 import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
@@ -30,6 +31,7 @@ internal class AndroidImageRegionDecoder private constructor(
   override val imageSize: IntSize get() = decoder.size()
  
   override suspend fun decodeRegion(region: ImageRegionTile): Painter {
+    val decodeRegionStartTime = System.nanoTime()
     val options = BitmapFactory.Options().apply {
       inSampleSize = region.sampleSize.size
       inPreferredConfig = imageOptions.config.toAndroidConfig()
@@ -51,80 +53,113 @@ internal class AndroidImageRegionDecoder private constructor(
     val cacheDir = java.io.File(context.cacheDir, "tile_cache")
     val cacheFile = java.io.File(cacheDir, tileFileName)
  
-    val bitmap = withContext(dispatcher) {
+    val bitmap = withContext(com.pixel.gallery.data.repository.LargeImagePerformanceConfig.decoderDispatcher) {
+      val maxW = decoder.width
+      val maxH = decoder.height
+      val safeLeft = bounds.left.coerceIn(0, maxW)
+      val safeTop = bounds.top.coerceIn(0, maxH)
+      val safeRight = bounds.right.coerceIn(0, maxW)
+      val safeBottom = bounds.bottom.coerceIn(0, maxH)
+      if (safeLeft >= safeRight || safeTop >= safeBottom) {
+        com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Invalid bounds: left=$safeLeft, top=$safeTop, right=$safeRight, bottom=$safeBottom (width=$maxW, height=$maxH)")
+        return@withContext null
+      }
+      val safeRect = android.graphics.Rect(safeLeft, safeTop, safeRight, safeBottom)
+
       var decoded: android.graphics.Bitmap? = null
+      var cacheHit = false
       if (cacheDir.exists() && cacheFile.exists()) {
         try {
+          val cacheReadStartTime = System.nanoTime()
           decoded = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
+          val cacheReadDuration = (System.nanoTime() - cacheReadStartTime) / 1_000_000.0
+          if (decoded != null) {
+            cacheHit = true
+            android.util.Log.e("ImageLoadFlow", "[TileDecode] Cache Hit for tile = $tileFileName, read took $cacheReadDuration ms")
+          }
         } catch (e: Exception) {
-          android.util.Log.e("TileCache", "Failed to decode cached tile: ${cacheFile.name}", e)
+          com.pixel.gallery.utils.AppLogger.log("TileCache", "Failed to decode cached tile: ${cacheFile.name}", e)
         }
       }
 
       if (decoded == null) {
         try {
-          decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+          val rawDecodeStartTime = System.nanoTime()
+          decoded = decoder.decodeRegion(safeRect, options)
+          val rawDecodeDuration = (System.nanoTime() - rawDecodeStartTime) / 1_000_000.0
+          android.util.Log.e("ImageLoadFlow", "[TileDecode] Cache Miss. Raw decodeRegion took $rawDecodeDuration ms for tile = $tileFileName")
         } catch (e: Exception) {
-          android.util.Log.e("AndroidImageRegionDecoder", "Failed to decode region, will attempt to recreate decoder", e)
+          com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Failed to decode region safeRect=$safeRect, attempting recreate", e)
         }
 
         if (decoded == null) {
           try {
-            android.util.Log.i("AndroidImageRegionDecoder", "Recreating decoder for source: $imageSource")
+            com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Recreating decoder for source: $imageSource")
             val newDecoder = imageSource.decoder(context)
             try {
               decoder.recycle()
             } catch (ignored: Exception) {}
             decoder = newDecoder
-            decoded = decoder.decodeRegion(bounds.toAndroidRect(), options)
+            val rawDecodeStartTime = System.nanoTime()
+            decoded = decoder.decodeRegion(safeRect, options)
+            val rawDecodeDuration = (System.nanoTime() - rawDecodeStartTime) / 1_000_000.0
+            android.util.Log.e("ImageLoadFlow", "[TileDecode] Decoded after recreating decoder took $rawDecodeDuration ms")
           } catch (recreateEx: Exception) {
-            android.util.Log.e("AndroidImageRegionDecoder", "Failed to recreate decoder and decode region", recreateEx)
+            com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "Failed to recreate decoder and decode region", recreateEx)
           }
         }
 
-        if (decoded != null) {
+        if (decoded != null && isActive) {
           try {
+            val cacheSaveStartTime = System.nanoTime()
             if (!cacheDir.exists()) {
               cacheDir.mkdirs()
             }
             java.io.FileOutputStream(cacheFile).use { out ->
               decoded.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
             }
+            val cacheSaveDuration = (System.nanoTime() - cacheSaveStartTime) / 1_000_000.0
+            android.util.Log.e("ImageLoadFlow", "[TileDecode] Saved tile to cache took $cacheSaveDuration ms")
           } catch (e: Exception) {
-            android.util.Log.e("TileCache", "Failed to save tile cache: ${cacheFile.name}", e)
+            com.pixel.gallery.utils.AppLogger.log("TileCache", "Failed to save tile cache: ${cacheFile.name}", e)
           }
         }
       }
 
+      var resultBitmap = decoded
       if (decoded != null && com.pixel.gallery.data.repository.LargeImagePerformanceConfig.useHardwareBitmap) {
         try {
-          decoded.copy(android.graphics.Bitmap.Config.HARDWARE, false).also {
+          val hardwareCopyStartTime = System.nanoTime()
+          resultBitmap = decoded.copy(android.graphics.Bitmap.Config.HARDWARE, false).also {
             decoded.recycle()
           }
+          val hardwareCopyDuration = (System.nanoTime() - hardwareCopyStartTime) / 1_000_000.0
+          android.util.Log.e("ImageLoadFlow", "[TileDecode] Copy to HARDWARE bitmap took $hardwareCopyDuration ms")
         } catch (e: Exception) {
-          decoded
+          resultBitmap = decoded
         }
-      } else {
-        decoded
       }
+      resultBitmap
     }
+
+    val totalDecodeDuration = (System.nanoTime() - decodeRegionStartTime) / 1_000_000.0
+    android.util.Log.e("ImageLoadFlow", "[TileDecode] Total decodeRegion took $totalDecodeDuration ms for bounds = $bounds, sampleSize = ${region.sampleSize.size}")
+
     if (bitmap != null) {
       return RotatedBitmapPainter(
         image = bitmap,
         orientation = exif.orientation,
       )
     } else {
-      error("BitmapRegionDecoder returned a null bitmap. Image format may not be supported: $imageSource.")
+      com.pixel.gallery.utils.AppLogger.log("AndroidImageRegionDecoder", "BitmapRegionDecoder returned a null bitmap for $imageSource, bounds=$bounds, returning EmptyPainter")
+      return EmptyPainter
     }
   }
  
   override fun close() {
-    // Previous versions of telephoto recycled the dispatcher as well, but this was later removed
-    // after discovering that close() and decodeRegion() could be called from different threads,
-    // potentially causing a race condition. If a zoomable image is disposed while it was still
-    // decoding regions, the underlying decoder will remain in memory for a bit longer until GC
-    // kicks in. I think that is okay as its memory usage would be similar to displaying multiple
-    // _active_ images in a pager, each allocating a decoder.
+    try {
+      decoder.recycle()
+    } catch (ignored: Exception) {}
   }
  
   private fun BitmapRegionDecoder.size(): IntSize {
@@ -144,17 +179,33 @@ internal class AndroidImageRegionDecoder private constructor(
     @OptIn(ExperimentalCoroutinesApi::class)
     val Factory = ImageRegionDecoder.Factory { params ->
       val dispatcher = com.pixel.gallery.data.repository.LargeImagePerformanceConfig.decoderDispatcher
- 
+      val factoryStartTime = System.nanoTime()
+      android.util.Log.e("ImageLoadFlow", "[AndroidDecoderFactory] Start creating decoder for source = ${params.imageSource}")
+
+      val decoderInstance = withContext(dispatcher) {
+        val sourceDecoderStartTime = System.nanoTime()
+        val result = params.imageSource.decoder(params.context)
+        val sourceDecoderDuration = (System.nanoTime() - sourceDecoderStartTime) / 1_000_000.0
+        android.util.Log.e("ImageLoadFlow", "[AndroidDecoderFactory] Raw decoder initialization (params.imageSource.decoder) took $sourceDecoderDuration ms for source = ${params.imageSource}")
+        result
+      }
+
+      val factoryDuration = (System.nanoTime() - factoryStartTime) / 1_000_000.0
+      android.util.Log.e("ImageLoadFlow", "[AndroidDecoderFactory] AndroidImageRegionDecoder creation took $factoryDuration ms for source = ${params.imageSource}")
+
       AndroidImageRegionDecoder(
         context = params.context,
         imageSource = params.imageSource,
         imageOptions = params.imageOptions,
-        decoder = withContext(dispatcher) {
-          params.imageSource.decoder(params.context)
-        },
+        decoder = decoderInstance,
         exif = params.exif,
         dispatcher = dispatcher,
       )
     }
   }
+}
+
+private object EmptyPainter : androidx.compose.ui.graphics.painter.Painter() {
+    override val intrinsicSize: androidx.compose.ui.geometry.Size get() = androidx.compose.ui.geometry.Size.Unspecified
+    override fun androidx.compose.ui.graphics.drawscope.DrawScope.onDraw() {}
 }

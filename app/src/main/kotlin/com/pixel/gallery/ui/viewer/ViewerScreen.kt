@@ -217,7 +217,25 @@ fun ViewerScreen(
                     sizeBytes = media.sizeBytes
                 )
             }
-            val thumbnailModel = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
+            val isTargetPage = pagerState.targetPage == page
+            val fastPreviewModel = remember(media.uri, media.sourceMimeType, media.sizeBytes, isTargetPage) {
+                if (isTargetPage) {
+                    AvesAppGlideModule.getModel(
+                        context = context,
+                        uri = Uri.parse(media.uri),
+                        mimeType = media.sourceMimeType,
+                        pageId = null,
+                        sizeBytes = media.sizeBytes,
+                        isThumbnail = false,
+                        isFastScreenPreview = true,
+                        rotationDegrees = media.sourceRotationDegrees,
+                        dateModifiedMillis = media.dateModifiedMillis
+                    )
+                } else {
+                    null
+                }
+            }
+            val microThumbnailModel = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
                 AvesAppGlideModule.getModel(
                     context = context,
                     uri = Uri.parse(media.uri),
@@ -225,6 +243,7 @@ fun ViewerScreen(
                     pageId = null,
                     sizeBytes = media.sizeBytes,
                     isThumbnail = true,
+                    isFastScreenPreview = false,
                     rotationDegrees = media.sourceRotationDegrees,
                     dateModifiedMillis = media.dateModifiedMillis
                 )
@@ -245,21 +264,21 @@ fun ViewerScreen(
                     w > 512 || h > 512
                 }
             }
-            val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
+            val transform = remember(signatureKey, fastPreviewModel, microThumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
-                    val withOptions = if (isGif) {
-                        requestBuilder.format(com.bumptech.glide.load.DecodeFormat.PREFER_ARGB_8888)
-                    } else {
-                        requestBuilder
-                            .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
-                            .override(screenWidth, screenHeight)
-                            .fitCenter()
-                    }
-                    val withAnimate = if (isGif) withOptions else withOptions.dontAnimate()
-                    
-                    val base = withAnimate
+                    val base = requestBuilder
                         .signature(signatureKey)
-                        .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                    
+                    val withOptions = if (isGif) {
+                        base.format(com.bumptech.glide.load.DecodeFormat.PREFER_ARGB_8888)
+                    } else {
+                        base
+                            .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
+                            .dontAnimate()
+                            .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
+                    }
+                    
+                    val finalBase = withOptions.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
                             override fun onLoadFailed(
                                 e: com.bumptech.glide.load.engine.GlideException?,
                                 model: Any?,
@@ -282,15 +301,22 @@ fun ViewerScreen(
                             }
                         })
                     if (hasThumbnail) {
-                        base.thumbnail(
+                        finalBase.thumbnail(
                             com.bumptech.glide.Glide.with(context)
                                 .asDrawable()
-                                .load(thumbnailModel)
+                                .load(fastPreviewModel)
                                 .signature(signatureKey)
-                                .override(512)
+                                .override(screenWidth, screenHeight)
+                                .thumbnail(
+                                    com.bumptech.glide.Glide.with(context)
+                                        .asDrawable()
+                                        .load(microThumbnailModel)
+                                        .signature(signatureKey)
+                                        .override(512)
+                                )
                         )
                     } else {
-                        base
+                        finalBase
                     }
                 }
             }
@@ -782,7 +808,11 @@ fun VideoPlayer(
     }
 
     Box(
-        modifier = modifier.zoomable(zoomableState)
+        modifier = modifier
+            .zoomable(
+                state = zoomableState,
+                onClick = { _ -> onTap() }
+            )
     ) {
         if (exoPlayer != null) {
             Box(
@@ -816,28 +846,6 @@ fun VideoPlayer(
                         view.player = null
                     },
                     modifier = Modifier.fillMaxSize()
-                )
-                // 引入透明手势遮罩，确保 Compose 100% 捕获点击，且与视频完全同步缩放
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(uri) {
-                            detectTapGestures(
-                                onTap = { onTap() },
-                                onDoubleTap = { centroid ->
-                                    val currentScale = zoomableState.contentTransformation.scale.scaleX
-                                    if (currentScale > 1.005f) {
-                                        coroutineScope.launch {
-                                            zoomableState.resetZoom()
-                                        }
-                                    } else {
-                                        coroutineScope.launch {
-                                            zoomableState.zoomTo(zoomFactor = 3f, centroid = centroid)
-                                        }
-                                    }
-                                }
-                            )
-                        }
                 )
             }
             
@@ -884,9 +892,10 @@ fun VideoControls(
     AnimatedVisibility(
         visible = isVisible,
         enter = fadeIn(),
-        exit = fadeOut()
+        exit = fadeOut(),
+        modifier = modifier
     ) {
-        Box(modifier = modifier) {
+        Box(modifier = Modifier.fillMaxSize()) {
             IconButton(
                 onClick = { 
                     try {

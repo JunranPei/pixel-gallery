@@ -19,11 +19,14 @@ object LargeImagePerformanceConfig {
 
     fun updateMaxCores(cores: Int) {
         synchronized(this) {
+            if (executor != null && maxCores == cores) {
+                return
+            }
             maxCores = cores
             executor?.shutdown()
             val newExecutor = Executors.newFixedThreadPool(cores) { runnable ->
                 Thread(runnable, "large-image-decoder").apply {
-                    priority = Thread.MIN_PRIORITY // 低优先级
+                    priority = Thread.NORM_PRIORITY
                 }
             }
             executor = newExecutor

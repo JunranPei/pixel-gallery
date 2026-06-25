@@ -42,7 +42,6 @@ class PhotosViewModel @Inject constructor(
     }
 
     val allPhotos: StateFlow<List<MediaEntry>> = repository.allEntries
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenFolders: StateFlow<Set<String>> = settingsRepository.hiddenFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -106,23 +105,18 @@ class PhotosViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val favourites: StateFlow<List<MediaEntry>> = repository.favourites
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val trashedMedia: StateFlow<List<MediaEntry>> = repository.trash
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
-        .map { it.toList() } // Compatibility
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val vaultEntries: StateFlow<List<MediaEntry>> = repository.vaultEntries
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
@@ -165,16 +159,28 @@ class PhotosViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
 
+    fun getParentFolderName(path: String): String {
+        if (path.isEmpty()) return "Unknown"
+        val lastSlash = path.lastIndexOf('/')
+        if (lastSlash <= 0) return "Unknown"
+        val parentPath = path.substring(0, lastSlash)
+        val secondLastSlash = parentPath.lastIndexOf('/')
+        return if (secondLastSlash >= 0) {
+            parentPath.substring(secondLastSlash + 1)
+        } else {
+            parentPath
+        }
+    }
+
     val albums: StateFlow<List<Album>> = combine(
         photos,
         albumSortOrder
     ) { photosList, sort ->
         val grouped = photosList.groupBy { 
-            val file = java.io.File(it.path)
-            file.parentFile?.name ?: "Unknown"
+            getParentFolderName(it.path)
         }.map { (name, entries) ->
             val firstEntry = entries.first()
-            val parentPath = java.io.File(firstEntry.path).parent ?: ""
+            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
             val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
@@ -186,7 +192,9 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
@@ -196,11 +204,10 @@ class PhotosViewModel @Inject constructor(
         val grouped = all.filter { entry ->
             hidden.any { entry.path.startsWith(it) }
         }.groupBy { 
-            val file = java.io.File(it.path)
-            file.parentFile?.name ?: "Unknown"
+            getParentFolderName(it.path)
         }.map { (name, entries) ->
             val firstEntry = entries.first()
-            val parentPath = java.io.File(firstEntry.path).parent ?: ""
+            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
             val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
@@ -212,12 +219,22 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var contentObserver: android.database.ContentObserver? = null
 
+    private var isResumed = false
+
+    fun setResumed(resumed: Boolean) {
+        isResumed = resumed
+        if (resumed) {
+            refresh()
+        }
+    }
+
     init {
-        refresh(delayMillis = 1000)
         registerContentObserver()
         observeGlideThreadCount()
     }
@@ -226,7 +243,9 @@ class PhotosViewModel @Inject constructor(
         contentObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
                 super.onChange(selfChange)
-                refresh()
+                if (isResumed) {
+                    refresh()
+                }
             }
         }
         val resolver = repository.getContentResolver()
@@ -368,30 +387,6 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun setLargeImageTileSize(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageTileSize(value)
-        }
-    }
-
-    fun setLargeImageMaxCores(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageMaxCores(value)
-        }
-    }
-
-    fun setLargeImageDebounceMs(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageDebounceMs(value)
-        }
-    }
-
-    fun setLargeImageHardwareBitmap(value: Boolean) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageHardwareBitmap(value)
-        }
-    }
-
     fun clearAllCaches(context: android.content.Context, onComplete: () -> Unit) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
@@ -479,6 +474,30 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
+    fun setLargeImageTileSize(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageTileSize(value)
+        }
+    }
+
+    fun setLargeImageMaxCores(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageMaxCores(value)
+        }
+    }
+
+    fun setLargeImageDebounceMs(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageDebounceMs(value)
+        }
+    }
+
+    fun setLargeImageHardwareBitmap(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageHardwareBitmap(value)
+        }
+    }
+
     private fun observeGlideThreadCount() {
         viewModelScope.launch {
             settingsRepository.glideThreadCount.collect { threads ->
@@ -529,5 +548,3 @@ private val CASE_INSENSITIVE_NATURAL_ORDER = Comparator<String> { s1, s2 ->
     }
     len1.compareTo(len2)
 }
-
-

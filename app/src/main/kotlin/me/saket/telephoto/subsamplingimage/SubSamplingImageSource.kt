@@ -173,9 +173,15 @@ internal data class FileImageSource(
         if (!safeDir.exists()) {
           safeDir.mkdirs()
         }
-        val targetFile = java.io.File(safeDir, "safe_${originalFile.name}_${System.currentTimeMillis()}")
+        val targetFile = java.io.File(safeDir, "safe_${originalFile.name}")
         if (originalFile.exists()) {
-          originalFile.copyTo(targetFile, overwrite = true)
+          if (!targetFile.exists()) {
+            try {
+              android.system.Os.link(originalFile.absolutePath, targetFile.absolutePath)
+            } catch (e: Exception) {
+              originalFile.copyTo(targetFile, overwrite = true)
+            }
+          }
           safeCopyFile = targetFile
           android.util.Log.i("FileImageSource", "Successfully created safe copy of cache image: ${targetFile.absolutePath}")
         }
@@ -302,9 +308,9 @@ internal data class UriImageSource(
           }
         }
         tempFile = targetFile
-        android.util.Log.i("UriImageSource", "Successfully created temp file for uri: ${targetFile.absolutePath}")
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Successfully created temp file for uri: ${targetFile.absolutePath}")
       } catch (e: Exception) {
-        android.util.Log.e("UriImageSource", "Failed to create temp file for uri: $uri", e)
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to create temp file for uri: $uri", e)
       }
     }
     return tempFile ?: error("Failed to create temp file for uri: $uri")
@@ -319,7 +325,7 @@ internal data class UriImageSource(
     if (physicalPath != null) {
       val file = java.io.File(physicalPath)
       if (file.exists()) {
-        android.util.Log.i("UriImageSource", "Using physical file path: ${file.absolutePath}")
+        com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Using physical file path: ${file.absolutePath}")
         @Suppress("DEPRECATION")
         return BitmapRegionDecoder.newInstance(file.absolutePath, /* ignored */ false)!!
       }
@@ -332,11 +338,11 @@ internal data class UriImageSource(
       }
     }
     if (fileToUse != null && fileToUse.exists()) {
-      android.util.Log.i("UriImageSource", "Using copied temp file: ${fileToUse.absolutePath}")
+      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Using copied temp file: ${fileToUse.absolutePath}")
       @Suppress("DEPRECATION")
       return BitmapRegionDecoder.newInstance(fileToUse.absolutePath, /* ignored */ false)!!
     }
-    android.util.Log.i("UriImageSource", "Fallback to decoding direct input stream for uri: $uri")
+    com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Fallback to decoding direct input stream for uri: $uri")
     return inputStream(context).use { stream ->
       @Suppress("DEPRECATION")
       BitmapRegionDecoder.newInstance(stream, /* ignored */ false)!!
@@ -352,11 +358,11 @@ internal data class UriImageSource(
       tempFile?.let { file ->
         if (file.exists()) {
           file.delete()
-          android.util.Log.i("UriImageSource", "Deleted temp file for uri: ${file.absolutePath}")
+          com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Deleted temp file for uri: ${file.absolutePath}")
         }
       }
     } catch (e: Exception) {
-      android.util.Log.e("UriImageSource", "Failed to delete temp file", e)
+      com.pixel.gallery.utils.AppLogger.log("UriImageSource", "Failed to delete temp file", e)
     }
   }
 
