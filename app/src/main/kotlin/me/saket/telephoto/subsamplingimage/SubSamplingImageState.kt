@@ -17,6 +17,9 @@ import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import me.saket.telephoto.subsamplingimage.internal.ExifMetadata
 import me.saket.telephoto.subsamplingimage.internal.ImageRegionDecoder
 import me.saket.telephoto.subsamplingimage.internal.LocalImageRegionDecoderFactory
@@ -93,7 +96,9 @@ internal fun rememberSubSamplingImageState(
   state.LoadImageTilesEffect()
   DisposableEffect(imageSource) {
     onDispose {
-      imageSource.close()
+      kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        imageSource.close()
+      }
     }
   }
   return state
@@ -144,10 +149,13 @@ private fun createImageRegionDecoder(
       android.util.Log.e("ImageLoadFlow", "[Lifecycle] DisposableEffect entered for source = $imageSource")
       onDispose {
         val closeStartTime = System.nanoTime()
-        decoder?.close()
+        val oldDecoder = decoder
         decoder = null
-        val closeDuration = (System.nanoTime() - closeStartTime) / 1_000_000.0
-        android.util.Log.e("ImageLoadFlow", "[Lifecycle] Closed decoder for source = $imageSource, took $closeDuration ms")
+        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+          oldDecoder?.close()
+          val closeDuration = (System.nanoTime() - closeStartTime) / 1_000_000.0
+          android.util.Log.e("ImageLoadFlow", "[Lifecycle] Closed decoder for source = $imageSource, took $closeDuration ms")
+        }
       }
     }
   }

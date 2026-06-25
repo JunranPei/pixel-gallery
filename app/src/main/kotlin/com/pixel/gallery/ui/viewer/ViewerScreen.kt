@@ -217,7 +217,25 @@ fun ViewerScreen(
                     sizeBytes = media.sizeBytes
                 )
             }
-            val thumbnailModel = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
+            val isTargetPage = pagerState.targetPage == page
+            val fastPreviewModel = remember(media.uri, media.sourceMimeType, media.sizeBytes, isTargetPage) {
+                if (isTargetPage) {
+                    AvesAppGlideModule.getModel(
+                        context = context,
+                        uri = Uri.parse(media.uri),
+                        mimeType = media.sourceMimeType,
+                        pageId = null,
+                        sizeBytes = media.sizeBytes,
+                        isThumbnail = false,
+                        isFastScreenPreview = true,
+                        rotationDegrees = media.sourceRotationDegrees,
+                        dateModifiedMillis = media.dateModifiedMillis
+                    )
+                } else {
+                    null
+                }
+            }
+            val microThumbnailModel = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
                 AvesAppGlideModule.getModel(
                     context = context,
                     uri = Uri.parse(media.uri),
@@ -225,6 +243,7 @@ fun ViewerScreen(
                     pageId = null,
                     sizeBytes = media.sizeBytes,
                     isThumbnail = true,
+                    isFastScreenPreview = false,
                     rotationDegrees = media.sourceRotationDegrees,
                     dateModifiedMillis = media.dateModifiedMillis
                 )
@@ -245,7 +264,7 @@ fun ViewerScreen(
                     w > 512 || h > 512
                 }
             }
-            val transform = remember(signatureKey, thumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
+            val transform = remember(signatureKey, fastPreviewModel, microThumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
                 { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
                     val base = requestBuilder
                         .signature(signatureKey)
@@ -255,9 +274,8 @@ fun ViewerScreen(
                     } else {
                         base
                             .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
-                            .override(screenWidth, screenHeight)
-                            .fitCenter()
                             .dontAnimate()
+                            .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
                     }
                     
                     val finalBase = withOptions.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
@@ -286,9 +304,16 @@ fun ViewerScreen(
                         finalBase.thumbnail(
                             com.bumptech.glide.Glide.with(context)
                                 .asDrawable()
-                                .load(thumbnailModel)
+                                .load(fastPreviewModel)
                                 .signature(signatureKey)
-                                .override(512)
+                                .override(screenWidth, screenHeight)
+                                .thumbnail(
+                                    com.bumptech.glide.Glide.with(context)
+                                        .asDrawable()
+                                        .load(microThumbnailModel)
+                                        .signature(signatureKey)
+                                        .override(512)
+                                )
                         )
                     } else {
                         finalBase

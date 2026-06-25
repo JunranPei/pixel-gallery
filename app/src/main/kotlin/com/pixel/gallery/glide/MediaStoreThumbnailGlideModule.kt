@@ -91,7 +91,6 @@ internal class MediaStoreThumbnailFetcher(
             val isHighResRequest = width >= 200 || height >= 200
             val usePersistentCache = isLargeFile && isHighResRequest
 
-            val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
             var persistentFile: File? = null
             var dirName: String? = null
 
@@ -205,6 +204,7 @@ internal class MediaStoreThumbnailFetcher(
                             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
                         }
                         // Check and trim persistent cache size if it exceeds the limit
+                        val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
                         val limitFlow = if (isGridView) {
                             settingsRepository.glidePersistentGridCacheSize
                         } else {

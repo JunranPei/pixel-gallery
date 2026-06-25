@@ -80,6 +80,7 @@ class AvesAppGlideModule : AppGlideModule() {
         parsersToRemove.forEach { registry.imageHeaderParsers.remove(it) }
 
         registry.append(MediaStoreThumbnail::class.java, Bitmap::class.java, MediaStoreThumbnailLoader.Factory(context))
+        registry.append(FastScreenPreview::class.java, Bitmap::class.java, FastScreenPreviewLoader.Factory(context))
     }
 
     override fun isManifestParsingEnabled(): Boolean = false
@@ -141,6 +142,7 @@ class AvesAppGlideModule : AppGlideModule() {
             pageId: Int?,
             sizeBytes: Long? = null,
             isThumbnail: Boolean = false,
+            isFastScreenPreview: Boolean = false,
             rotationDegrees: Int = 0,
             dateModifiedMillis: Long = 0L
         ): Any {
@@ -151,6 +153,8 @@ class AvesAppGlideModule : AppGlideModule() {
             } else*/ 
             return if (mimeType == MimeTypes.SVG) {
                 SvgImage(context, uri)
+            } else if (isFastScreenPreview && StorageUtils.isMediaStoreContentUri(uri)) {
+                FastScreenPreview(uri, rotationDegrees)
             } else if (isThumbnail && StorageUtils.isMediaStoreContentUri(uri)) {
                 MediaStoreThumbnail(uri, mimeType, rotationDegrees, dateModifiedMillis, sizeBytes)
             } else if (isVideo(mimeType)) {
