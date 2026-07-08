@@ -494,11 +494,17 @@ fun ViewerScreen(
                                         )
                                     }
                                 ) {
-                                    SubSamplingImage(
-                                        state = subSamplingState,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                                    // Only render SubSamplingImage tiles on the settled (current) page.
+                                    // During swipe transitions, adjacent pages show the thumbnail only.
+                                    // This prevents SubSamplingImage tiles from adjacent pages bleeding
+                                    // into the visible area and causing the ghost-image overlap.
+                                    if (pagerState.settledPage == page) {
+                                        SubSamplingImage(
+                                            state = subSamplingState,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
                                 }
                             }
                         }
