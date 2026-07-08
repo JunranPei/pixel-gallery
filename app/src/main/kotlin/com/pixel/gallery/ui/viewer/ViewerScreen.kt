@@ -381,67 +381,31 @@ fun ViewerScreen(
                             maxOf(scaleToOriginal * 3.0f, 3.0f).coerceIn(3.0f, 60.0f)
                         }
 
-                        val zoomableState = key(media.contentId) {
-                            rememberZoomableImageState(
-                                zoomableState = rememberZoomableState(
-                                    zoomSpec = ZoomSpec(
-                                        maxZoomFactor = calculatedMaxZoom,
-                                        preventOverOrUnderZoom = true
-                                    )
-                                )
-                            )
-                        }
 
-                        SideEffect {
-                            android.util.Log.e("GalleryCompose", "ZoomableGlideImage recomposed: mediaId=${media.contentId}, uri=${media.uri}, zoomableState=${zoomableState.hashCode()}")
-                        }
 
                         if (isGif) {
-                            val coroutineScope = rememberCoroutineScope()
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .zoomable(zoomableState.zoomableState)
-                                    .pointerInput(scaleFit, scaleToOriginal) {
-                                        detectTapGestures(
-                                            onTap = {
-                                                if (isPlayingMotion) {
-                                                    isPlayingMotion = false
-                                                } else {
-                                                    showUI = !showUI
-                                                }
-                                            },
-                                            onDoubleTap = { centroid: Offset ->
-                                                val state = zoomableState.zoomableState
-                                                val currentScale = state.contentTransformation.scale.scaleX
-                                                if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
-                                                    coroutineScope.launch {
-                                                        state.resetZoom()
-                                                    }
-                                                } else {
-                                                    coroutineScope.launch {
-                                                        state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                    .graphicsLayer {
-                                        val transformation = zoomableState.zoomableState.contentTransformation
-                                        scaleX = transformation.scale.scaleX
-                                        scaleY = transformation.scale.scaleY
-                                        translationX = transformation.offset.x
-                                        translationY = transformation.offset.y
-                                        transformOrigin = transformation.transformOrigin
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                GlideImage(
-                                    model = model,
-                                    contentDescription = null,
+                            key(media.contentId) {
+                                ZoomableContainer(
                                     modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit
-                                )
+                                    minScale = minOf(scaleToOriginal * 0.333f, 0.333f),
+                                    maxScale = calculatedMaxZoom,
+                                    scaleToOriginal = scaleToOriginal,
+                                    autoApplyTransformations = true,
+                                    onTap = {
+                                        if (isPlayingMotion) {
+                                            isPlayingMotion = false
+                                        } else {
+                                            showUI = !showUI
+                                        }
+                                    }
+                                ) {
+                                    GlideImage(
+                                        model = model,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                }
                             }
                         } else {
                             var transformation by remember {
@@ -504,6 +468,14 @@ fun ViewerScreen(
                                         )
                                     }
                                 ) {
+                                    // Fast-loading preview thumbnail (shows while tiles decode)
+                                    GlideImage(
+                                        model = microThumbnailModel,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                    // Full-resolution tiled image (draws over preview once ready)
                                     SubSamplingImage(
                                         state = subSamplingState,
                                         contentDescription = null,
@@ -861,26 +833,16 @@ fun VideoPlayer(
         }
     }
 
-    Box(
-        modifier = modifier
-            .zoomable(
-                state = zoomableState,
-                onClick = { _ -> onTap() }
-            )
-    ) {
-        if (exoPlayer != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val transformation = zoomableState.contentTransformation
-                        scaleX = transformation.scale.scaleX
-                        scaleY = transformation.scale.scaleY
-                        translationX = transformation.offset.x
-                        translationY = transformation.offset.y
-                        transformOrigin = transformation.transformOrigin
-                    }
-            ) {
+    Box(modifier = modifier) {
+        ZoomableContainer(
+            modifier = Modifier.fillMaxSize(),
+            minScale = 0.333f,
+            maxScale = 3.0f,
+            scaleToOriginal = 1.0f,
+            autoApplyTransformations = true,
+            onTap = onTap
+        ) {
+            if (exoPlayer != null) {
                 AndroidView(
                     factory = { ctx ->
                         object : PlayerView(ctx) {
@@ -902,14 +864,15 @@ fun VideoPlayer(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            
-            if (!isMotionPhoto) {
-                VideoControls(
-                    player = exoPlayer!!,
-                    isVisible = showUI,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+        }
+
+        // Controls overlay (outside ZoomableContainer so they don't get zoomed)
+        if (exoPlayer != null && !isMotionPhoto) {
+            VideoControls(
+                player = exoPlayer!!,
+                isVisible = showUI,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }

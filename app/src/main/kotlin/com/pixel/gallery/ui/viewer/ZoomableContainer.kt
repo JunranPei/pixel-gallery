@@ -181,8 +181,17 @@ fun ZoomableContainer(
                                 // Not zoomed in → let Pager handle horizontal swipes
                                 false
                             } else {
-                                // Zoomed in → consume for panning
-                                true
+                                // Zoomed in → check if at horizontal boundary
+                                val w = containerSize.width.toFloat()
+                                val maxX = w * (newScale - 1f) / 2f
+                                val atLeftEdge = gestureOffsetX >= maxX - 1f
+                                val atRightEdge = gestureOffsetX <= -maxX + 1f
+
+                                when {
+                                    atLeftEdge && panChange.x > 0f -> false  // Can't pan further right → Pager
+                                    atRightEdge && panChange.x < 0f -> false // Can't pan further left → Pager
+                                    else -> true  // Still room to pan → consume
+                                }
                             }
 
                             if (shouldConsume) {
