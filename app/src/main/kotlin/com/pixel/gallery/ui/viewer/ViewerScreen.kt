@@ -379,7 +379,7 @@ fun ViewerScreen(
                         }
 
                         val calculatedMaxZoom = remember(scaleToOriginal) {
-                            maxOf(scaleToOriginal * 6.0f, 6.0f).coerceIn(6.0f, 60.0f)
+                            maxOf(scaleToOriginal * 10.0f, 10.0f).coerceIn(10.0f, 60.0f)
                         }
 
 
@@ -392,8 +392,8 @@ fun ViewerScreen(
                                     maxScale = calculatedMaxZoom,
                                     scaleToOriginal = scaleToOriginal,
                                     autoApplyTransformations = true,
-                                    imageWidth = adjustedWidth,
-                                    imageHeight = adjustedHeight,
+                                    imageFitScaleX = (adjustedWidth * scaleFit / containerWidth).coerceIn(0f, 1f),
+                                    imageFitScaleY = (adjustedHeight * scaleFit / containerHeight).coerceIn(0f, 1f),
                                     onTap = {
                                         if (isPlayingMotion) {
                                             isPlayingMotion = false
@@ -462,8 +462,8 @@ fun ViewerScreen(
                                     maxScale = calculatedMaxZoom,
                                     scaleToOriginal = scaleToOriginal,
                                     autoApplyTransformations = false,
-                                    imageWidth = adjustedWidth,
-                                    imageHeight = adjustedHeight,
+                                    imageFitScaleX = (adjustedWidth * scaleFit / containerWidth).coerceIn(0f, 1f),
+                                    imageFitScaleY = (adjustedHeight * scaleFit / containerHeight).coerceIn(0f, 1f),
                                     onTap = {
                                         if (isPlayingMotion) {
                                             isPlayingMotion = false
