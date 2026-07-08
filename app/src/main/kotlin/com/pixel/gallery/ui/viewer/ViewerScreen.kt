@@ -60,11 +60,17 @@ import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.zoomable
+import me.saket.telephoto.subsamplingimage.SubSamplingImage
+import me.saket.telephoto.subsamplingimage.rememberSubSamplingImageState
+import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
+import me.saket.telephoto.zoomable.ZoomableContentTransformation
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import java.io.File
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
@@ -435,29 +441,66 @@ fun ViewerScreen(
                                 )
                             }
                         } else {
-                            ZoomableGlideImage(
-                                model = model,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                state = zoomableState,
-                                contentScale = ContentScale.Fit,
-                                requestBuilderTransform = transform,
-                                onClick = { 
-                                    if (isPlayingMotion) {
-                                        isPlayingMotion = false
-                                    } else {
-                                        showUI = !showUI 
-                                    }
-                                },
-                                onDoubleClick = { state, centroid ->
-                                    val currentScale = state.contentTransformation.scale.scaleX
-                                    if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
-                                        state.resetZoom()
-                                    } else {
-                                        state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
-                                    }
-                                }
+                            var transformation by remember {
+                                mutableStateOf<ZoomableContentTransformation>(
+                                    CustomZoomableContentTransformation(
+                                        isSpecified = true,
+                                        contentSize = Size(media.width.toFloat(), media.height.toFloat()),
+                                        scale = ScaleFactor(scaleFit, scaleFit),
+                                        offset = Offset.Zero,
+                                        transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                        centroid = null,
+                                        rotationZ = 0f,
+                                        scaleMetadata = CustomScaleMetadata(
+                                            initialScale = ScaleFactor(scaleFit, scaleFit),
+                                            userZoom = 1f
+                                        )
+                                    )
+                                )
+                            }
+
+                            val subSamplingState = rememberSubSamplingImageState(
+                                imageSource = SubSamplingImageSource.contentUri(Uri.parse(media.uri)),
+                                transformation = { transformation }
                             )
+
+                            key(media.contentId) {
+                                ZoomableContainer(
+                                    modifier = Modifier.fillMaxSize(),
+                                    minScale = minOf(scaleToOriginal * 0.333f, 0.333f),
+                                    maxScale = calculatedMaxZoom,
+                                    scaleToOriginal = scaleToOriginal,
+                                    autoApplyTransformations = false, // Tiles are drawn directly at source coordinates, do not graphicsLayer scale
+                                    onTap = {
+                                        if (isPlayingMotion) {
+                                            isPlayingMotion = false
+                                        } else {
+                                            showUI = !showUI
+                                        }
+                                    },
+                                    onTransformChanged = { scale, offsetX, offsetY ->
+                                        transformation = CustomZoomableContentTransformation(
+                                            isSpecified = true,
+                                            contentSize = Size(media.width.toFloat(), media.height.toFloat()),
+                                            scale = ScaleFactor(scaleFit * scale, scaleFit * scale),
+                                            offset = Offset(offsetX, offsetY),
+                                            transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                            centroid = null,
+                                            rotationZ = 0f,
+                                            scaleMetadata = CustomScaleMetadata(
+                                                initialScale = ScaleFactor(scaleFit, scaleFit),
+                                                userZoom = scale
+                                            )
+                                        )
+                                    }
+                                ) {
+                                    SubSamplingImage(
+                                        state = subSamplingState,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
                         }
                         
                         if (isPlayingMotion && motionVideoFile != null) {
@@ -983,3 +1026,19 @@ fun ViewerAction(
         Icon(icon, contentDescription = label, tint = Color.White)
     }
 }
+
+data class CustomScaleMetadata(
+    override val initialScale: ScaleFactor,
+    override val userZoom: Float
+) : ZoomableContentTransformation.ScaleMetadata
+
+data class CustomZoomableContentTransformation(
+    override val isSpecified: Boolean,
+    override val contentSize: Size,
+    override val scale: ScaleFactor,
+    override val scaleMetadata: ZoomableContentTransformation.ScaleMetadata,
+    override val rotationZ: Float,
+    override val offset: Offset,
+    override val transformOrigin: TransformOrigin = TransformOrigin(0.5f, 0.5f),
+    override val centroid: Offset?
+) : ZoomableContentTransformation

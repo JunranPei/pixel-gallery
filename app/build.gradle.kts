@@ -83,6 +83,7 @@ android {
             }
         }
         debug {
+            applicationIdSuffix = ".test9"
         }
     }
 
