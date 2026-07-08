@@ -436,10 +436,13 @@ fun ViewerScreen(
                             )
 
                             // Fast-loading preview thumbnail (below ZoomableContainer in z-order)
-                            // Hides immediately once SubSamplingImage reports its first decoded frame
+                            // Hides once SubSamplingImage has displayed its first frame.
+                            // The 32ms delay (≈2 frames) ensures SubSamplingImage has actually been
+                            // composited to screen before we remove the preview, preventing a 1-frame flash.
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
                             LaunchedEffect(subSamplingState.isImageDisplayed) {
                                 if (subSamplingState.isImageDisplayed) {
+                                    delay(32)
                                     showPreview = false
                                 }
                             }
