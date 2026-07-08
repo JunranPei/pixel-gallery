@@ -436,11 +436,12 @@ fun ViewerScreen(
                             )
 
                             // Fast-loading preview thumbnail (below ZoomableContainer in z-order)
-                            // Auto-hides after SubSamplingImage has time to decode first tiles
+                            // Hides immediately once SubSamplingImage reports its first decoded frame
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
-                            LaunchedEffect(media.contentId) {
-                                delay(500)
-                                showPreview = false
+                            LaunchedEffect(subSamplingState.isImageDisplayed) {
+                                if (subSamplingState.isImageDisplayed) {
+                                    showPreview = false
+                                }
                             }
                             if (showPreview) {
                                 GlideImage(
