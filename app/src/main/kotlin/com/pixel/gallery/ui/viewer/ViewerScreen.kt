@@ -379,7 +379,7 @@ fun ViewerScreen(
                         }
 
                         val calculatedMaxZoom = remember(scaleToOriginal) {
-                            maxOf(scaleToOriginal * 3.0f, 3.0f).coerceIn(3.0f, 60.0f)
+                            maxOf(scaleToOriginal * 6.0f, 6.0f).coerceIn(6.0f, 60.0f)
                         }
 
 
@@ -392,6 +392,8 @@ fun ViewerScreen(
                                     maxScale = calculatedMaxZoom,
                                     scaleToOriginal = scaleToOriginal,
                                     autoApplyTransformations = true,
+                                    imageWidth = adjustedWidth,
+                                    imageHeight = adjustedHeight,
                                     onTap = {
                                         if (isPlayingMotion) {
                                             isPlayingMotion = false
@@ -460,6 +462,8 @@ fun ViewerScreen(
                                     maxScale = calculatedMaxZoom,
                                     scaleToOriginal = scaleToOriginal,
                                     autoApplyTransformations = false,
+                                    imageWidth = adjustedWidth,
+                                    imageHeight = adjustedHeight,
                                     onTap = {
                                         if (isPlayingMotion) {
                                             isPlayingMotion = false
@@ -822,7 +826,7 @@ fun VideoPlayer(
     val zoomableState = key(uri) {
         rememberZoomableState(
             zoomSpec = ZoomSpec(
-                maxZoomFactor = 3f,
+                maxZoomFactor = 6f,
                 preventOverOrUnderZoom = true
             )
         )
@@ -851,7 +855,7 @@ fun VideoPlayer(
         ZoomableContainer(
             modifier = Modifier.fillMaxSize(),
             minScale = 0.333f,
-            maxScale = 3.0f,
+            maxScale = 6.0f,
             scaleToOriginal = 1.0f,
             autoApplyTransformations = true,
             onTap = onTap

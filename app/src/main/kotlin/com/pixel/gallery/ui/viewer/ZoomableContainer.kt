@@ -50,6 +50,11 @@ fun ZoomableContainer(
     maxScale: Float = 3.0f,
     scaleToOriginal: Float = 1.0f,
     autoApplyTransformations: Boolean = true,
+    // Actual rendered image dimensions (in pixels at scale=1.0).
+    // Used to compute correct pan bounds so the image edge — not the container edge —
+    // is the hard limit. Pass 0f to fall back to container-size clamping (for video etc.).
+    imageWidth: Float = 0f,
+    imageHeight: Float = 0f,
     onTap: () -> Unit = {},
     onTransformChanged: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     content: @Composable () -> Unit
@@ -79,13 +84,22 @@ fun ZoomableContainer(
     /**
      * Clamp offsets so image edges never leave the viewport.
      * When scale <= 1.0, offset is locked to (0, 0).
+     *
+     * X-axis: bounded by the image width rendered at [scale].
+     * Y-axis: bounded by the image height rendered at [scale].
+     * If imageWidth/imageHeight are not provided (0f), falls back to container dimensions.
      */
     fun clampOffset(scale: Float, rawX: Float, rawY: Float): Pair<Float, Float> {
         if (scale <= 1f) return 0f to 0f
         val w = containerSize.width.toFloat()
         val h = containerSize.height.toFloat()
-        val maxX = w * (scale - 1f) / 2f
-        val maxY = h * (scale - 1f) / 2f
+        // Use actual image dimensions if provided; otherwise fall back to container size.
+        val effectiveImgW = if (imageWidth > 0f) imageWidth else w
+        val effectiveImgH = if (imageHeight > 0f) imageHeight else h
+        // At scale s, the image occupies effectiveImgW*s x effectiveImgH*s pixels on screen.
+        // The container occupies w x h. The draggable range is half the overflow on each axis.
+        val maxX = ((effectiveImgW * scale) - w).coerceAtLeast(0f) / 2f
+        val maxY = ((effectiveImgH * scale) - h).coerceAtLeast(0f) / 2f
         return rawX.coerceIn(-maxX, maxX) to rawY.coerceIn(-maxY, maxY)
     }
 
