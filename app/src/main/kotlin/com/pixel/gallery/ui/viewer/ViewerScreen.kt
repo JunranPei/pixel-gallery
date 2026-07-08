@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
@@ -434,13 +435,29 @@ fun ViewerScreen(
                                 transformation = { transformation }
                             )
 
+                            // Fast-loading preview thumbnail (below ZoomableContainer in z-order)
+                            // Auto-hides after SubSamplingImage has time to decode first tiles
+                            var showPreview by remember(media.contentId) { mutableStateOf(true) }
+                            LaunchedEffect(media.contentId) {
+                                delay(500)
+                                showPreview = false
+                            }
+                            if (showPreview) {
+                                GlideImage(
+                                    model = microThumbnailModel,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+
                             key(media.contentId) {
                                 ZoomableContainer(
                                     modifier = Modifier.fillMaxSize(),
                                     minScale = minOf(scaleToOriginal * 0.333f, 0.333f),
                                     maxScale = calculatedMaxZoom,
                                     scaleToOriginal = scaleToOriginal,
-                                    autoApplyTransformations = false, // Tiles are drawn directly at source coordinates, do not graphicsLayer scale
+                                    autoApplyTransformations = false,
                                     onTap = {
                                         if (isPlayingMotion) {
                                             isPlayingMotion = false
@@ -468,14 +485,6 @@ fun ViewerScreen(
                                         )
                                     }
                                 ) {
-                                    // Fast-loading preview thumbnail (shows while tiles decode)
-                                    GlideImage(
-                                        model = microThumbnailModel,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Fit
-                                    )
-                                    // Full-resolution tiled image (draws over preview once ready)
                                     SubSamplingImage(
                                         state = subSamplingState,
                                         contentDescription = null,
