@@ -436,13 +436,12 @@ fun ViewerScreen(
                             )
 
                             // Fast-loading preview thumbnail (below ZoomableContainer in z-order).
-                            // ZoomableContainer has an opaque black background that covers this thumbnail
-                            // the moment it renders, so no timing-based removal is needed for visual
-                            // correctness. The 1000ms timer here only exists to release the GlideImage
-                            // from memory once SubSamplingImage is long established.
+                            // SubSamplingImage naturally covers it at normal zoom.
+                            // When user zooms OUT, the preview is dismissed immediately via onTransformChanged.
+                            // The 500ms timer below is only a memory-cleanup fallback.
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
                             LaunchedEffect(media.contentId) {
-                                delay(1000)
+                                delay(500)
                                 showPreview = false
                             }
                             if (showPreview) {
@@ -456,7 +455,7 @@ fun ViewerScreen(
 
                             key(media.contentId) {
                                 ZoomableContainer(
-                                    modifier = Modifier.fillMaxSize().background(Color.Black),
+                                    modifier = Modifier.fillMaxSize(),
                                     minScale = minOf(scaleToOriginal * 0.333f, 0.333f),
                                     maxScale = calculatedMaxZoom,
                                     scaleToOriginal = scaleToOriginal,
@@ -469,6 +468,9 @@ fun ViewerScreen(
                                         }
                                     },
                                     onTransformChanged = { scale, offsetX, offsetY ->
+                                        // Dismiss preview immediately when user zooms out,
+                                        // so the thumbnail doesn't bleed through behind the shrunken image.
+                                        if (scale < 1.0f) showPreview = false
                                         val totalScale = scaleFit * scale
                                         transformation = CustomZoomableContentTransformation(
                                             isSpecified = true,
