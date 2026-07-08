@@ -74,6 +74,7 @@ android {
 
     buildTypes {
         release {
+            applicationIdSuffix = ".test9"
             val releaseConfig = signingConfigs.getByName("release")
             if (releaseConfig.storeFile != null && releaseConfig.storeFile!!.exists()) {
                 signingConfig = releaseConfig

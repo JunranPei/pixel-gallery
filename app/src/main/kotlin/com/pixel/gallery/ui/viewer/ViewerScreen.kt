@@ -344,28 +344,31 @@ fun ViewerScreen(
                         val containerWidth = constraints.maxWidth.toFloat()
                         val containerHeight = constraints.maxHeight.toFloat()
 
+                        // Rotation-adjusted image dimensions
+                        val isSwapped = media.sourceRotationDegrees == 90 || media.sourceRotationDegrees == 270
+                        val adjustedWidth = remember(media.width, media.height, media.sourceRotationDegrees) {
+                            (if (isSwapped) media.height else media.width).toFloat()
+                        }
+                        val adjustedHeight = remember(media.width, media.height, media.sourceRotationDegrees) {
+                            (if (isSwapped) media.width else media.height).toFloat()
+                        }
+
                         val scaleFit = remember(
-                            media.width,
-                            media.height,
-                            media.sourceRotationDegrees,
+                            adjustedWidth,
+                            adjustedHeight,
                             containerWidth,
                             containerHeight
                         ) {
-                            val rotation = media.sourceRotationDegrees
-                            val isSwapped = rotation == 90 || rotation == 270
-                            val imgWidth = (if (isSwapped) media.height else media.width).toFloat()
-                            val imgHeight = (if (isSwapped) media.width else media.height).toFloat()
-
-                            if (imgWidth <= 0f || imgHeight <= 0f || containerWidth <= 0f || containerHeight <= 0f) {
+                            if (adjustedWidth <= 0f || adjustedHeight <= 0f || containerWidth <= 0f || containerHeight <= 0f) {
                                 1f
                             } else {
-                                val imgRatio = imgWidth / imgHeight
+                                val imgRatio = adjustedWidth / adjustedHeight
                                 val layoutRatio = containerWidth / containerHeight
 
                                 if (imgRatio > layoutRatio) {
-                                    containerWidth / imgWidth
+                                    containerWidth / adjustedWidth
                                 } else {
-                                    containerHeight / imgHeight
+                                    containerHeight / adjustedHeight
                                 }
                             }
                         }
@@ -445,10 +448,13 @@ fun ViewerScreen(
                                 mutableStateOf<ZoomableContentTransformation>(
                                     CustomZoomableContentTransformation(
                                         isSpecified = true,
-                                        contentSize = Size(media.width.toFloat(), media.height.toFloat()),
+                                        contentSize = Size(adjustedWidth, adjustedHeight),
                                         scale = ScaleFactor(scaleFit, scaleFit),
-                                        offset = Offset.Zero,
-                                        transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                        offset = Offset(
+                                            containerWidth / 2f - adjustedWidth * scaleFit / 2f,
+                                            containerHeight / 2f - adjustedHeight * scaleFit / 2f
+                                        ),
+                                        transformOrigin = TransformOrigin(0f, 0f),
                                         centroid = null,
                                         rotationZ = 0f,
                                         scaleMetadata = CustomScaleMetadata(
@@ -479,12 +485,16 @@ fun ViewerScreen(
                                         }
                                     },
                                     onTransformChanged = { scale, offsetX, offsetY ->
+                                        val totalScale = scaleFit * scale
                                         transformation = CustomZoomableContentTransformation(
                                             isSpecified = true,
-                                            contentSize = Size(media.width.toFloat(), media.height.toFloat()),
-                                            scale = ScaleFactor(scaleFit * scale, scaleFit * scale),
-                                            offset = Offset(offsetX, offsetY),
-                                            transformOrigin = TransformOrigin(0.5f, 0.5f),
+                                            contentSize = Size(adjustedWidth, adjustedHeight),
+                                            scale = ScaleFactor(totalScale, totalScale),
+                                            offset = Offset(
+                                                containerWidth / 2f - adjustedWidth * totalScale / 2f + offsetX,
+                                                containerHeight / 2f - adjustedHeight * totalScale / 2f + offsetY
+                                            ),
+                                            transformOrigin = TransformOrigin(0f, 0f),
                                             centroid = null,
                                             rotationZ = 0f,
                                             scaleMetadata = CustomScaleMetadata(
