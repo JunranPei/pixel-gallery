@@ -435,16 +435,15 @@ fun ViewerScreen(
                                 transformation = { transformation }
                             )
 
-                            // Fast-loading preview thumbnail (below ZoomableContainer in z-order)
-                            // Hides once SubSamplingImage has displayed its first frame.
-                            // The 32ms delay (≈2 frames) ensures SubSamplingImage has actually been
-                            // composited to screen before we remove the preview, preventing a 1-frame flash.
+                            // Fast-loading preview thumbnail (below ZoomableContainer in z-order).
+                            // ZoomableContainer has an opaque black background that covers this thumbnail
+                            // the moment it renders, so no timing-based removal is needed for visual
+                            // correctness. The 1000ms timer here only exists to release the GlideImage
+                            // from memory once SubSamplingImage is long established.
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
-                            LaunchedEffect(subSamplingState.isImageDisplayed) {
-                                if (subSamplingState.isImageDisplayed) {
-                                    delay(32)
-                                    showPreview = false
-                                }
+                            LaunchedEffect(media.contentId) {
+                                delay(1000)
+                                showPreview = false
                             }
                             if (showPreview) {
                                 GlideImage(
@@ -457,7 +456,7 @@ fun ViewerScreen(
 
                             key(media.contentId) {
                                 ZoomableContainer(
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier.fillMaxSize().background(Color.Black),
                                     minScale = minOf(scaleToOriginal * 0.333f, 0.333f),
                                     maxScale = calculatedMaxZoom,
                                     scaleToOriginal = scaleToOriginal,
