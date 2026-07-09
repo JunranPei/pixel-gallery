@@ -451,12 +451,24 @@ fun ViewerScreen(
                                 }
                             }
                             if (showPreview) {
-                                GlideImage(
-                                    model = microThumbnailModel,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit
-                                )
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    // 1. Low-res fast placeholder (micro thumbnail)
+                                    GlideImage(
+                                        model = microThumbnailModel,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                    // 2. Medium-res screen-fitting preview (fast preview)
+                                    if (fastPreviewModel != null) {
+                                        GlideImage(
+                                            model = fastPreviewModel,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                }
                             }
 
                             key(media.contentId) {
