@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -104,7 +105,7 @@ fun ZoomableContainer(
 
     Box(
         modifier = modifier
-            .androidx.compose.ui.draw.clipToBounds()
+            .clipToBounds()
             .onSizeChanged { containerSize = it }
             // Tap / double-tap handler (separate pointerInput to avoid interference)
             .pointerInput(scaleToOriginal, safeMinScale, safeMaxScale) {
