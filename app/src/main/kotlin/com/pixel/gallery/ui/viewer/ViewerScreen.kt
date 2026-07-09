@@ -452,15 +452,17 @@ fun ViewerScreen(
                                         false
                                     }
                                 }
-                            }
-                            var showPreview by remember(media.contentId) { mutableStateOf(true) }
+                            }                            var showPreview by remember(media.contentId) { mutableStateOf(true) }
                             LaunchedEffect(isAnyTileLoaded.value) {
                                 if (isAnyTileLoaded.value) {
                                     delay(32)
                                     showPreview = false
                                 }
                             }
-
+ 
+                            // State to track if the second-stage screen-fitting preview has loaded successfully
+                            var isFastPreviewLoaded by remember(media.contentId) { mutableStateOf(false) }
+ 
                             key(media.contentId) {
                                 ZoomableContainer(
                                     modifier = Modifier.fillMaxSize(),
@@ -500,13 +502,52 @@ fun ViewerScreen(
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         // 1. Placeholder preview layer (stacked inside ZoomableContainer for perfect gesture scaling and sync)
                                         if (showPreview) {
-                                            // Low-res fast placeholder (micro thumbnail) - always loaded first instantly, no flicker
-                                            GlideImage(
-                                                model = microThumbnailModel,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Fit
-                                            )
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                // Low-res fast placeholder (micro thumbnail) - always loaded first instantly, no flicker
+                                                GlideImage(
+                                                    model = microThumbnailModel,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                                // Medium-res screen-fitting preview (fast preview) - stays completely invisible (alpha = 0)
+                                                // while loading, then overlays seamlessly onto micro-thumbnail only after decoding succeeds.
+                                                if (fastPreviewModel != null) {
+                                                    GlideImage(
+                                                        model = fastPreviewModel,
+                                                        contentDescription = null,
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .graphicsLayer {
+                                                                alpha = if (isFastPreviewLoaded) 1f else 0f
+                                                            },
+                                                        contentScale = ContentScale.Fit,
+                                                        requestBuilderTransform = { requestBuilder ->
+                                                            requestBuilder.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                                                                override fun onLoadFailed(
+                                                                    e: com.bumptech.glide.load.engine.GlideException?,
+                                                                    model: Any?,
+                                                                    target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>,
+                                                                    isFirstResource: Boolean
+                                                                ): Boolean {
+                                                                    return false
+                                                                }
+
+                                                                override fun onResourceReady(
+                                                                    resource: android.graphics.drawable.Drawable,
+                                                                    model: Any,
+                                                                    target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                                                                    dataSource: com.bumptech.glide.load.DataSource,
+                                                                    isFirstResource: Boolean
+                                                                ): Boolean {
+                                                                    isFastPreviewLoaded = true
+                                                                    return false
+                                                                }
+                                                            })
+                                                        }
+                                                    )
+                                                }
+                                            }
                                         }
                                         
                                         // 2. Full-resolution tiled image (always active, overlays on top once tiles render)
