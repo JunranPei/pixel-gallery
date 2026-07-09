@@ -487,24 +487,30 @@ fun ViewerScreen(
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         // 1. Placeholder preview layer (stacked inside ZoomableContainer for perfect gesture scaling and sync)
                                         if (showPreview) {
-                                            Box(modifier = Modifier.fillMaxSize()) {
-                                                // Low-res fast placeholder (micro thumbnail)
-                                                GlideImage(
-                                                    model = microThumbnailModel,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = ContentScale.Fit
-                                                )
-                                                // Medium-res screen-fitting preview (fast preview)
-                                                if (fastPreviewModel != null) {
-                                                    GlideImage(
-                                                        model = fastPreviewModel,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.fillMaxSize(),
-                                                        contentScale = ContentScale.Fit
-                                                    )
+                                            GlideImage(
+                                                model = fastPreviewModel ?: microThumbnailModel,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Fit,
+                                                requestBuilderTransform = { requestBuilder ->
+                                                    val base = requestBuilder
+                                                        .signature(signatureKey)
+                                                        .dontAnimate()
+                                                    
+                                                    if (fastPreviewModel != null) {
+                                                        base.thumbnail(
+                                                            com.bumptech.glide.Glide.with(context)
+                                                                .asDrawable()
+                                                                .load(microThumbnailModel)
+                                                                .signature(signatureKey)
+                                                                .dontAnimate()
+                                                                .override(512)
+                                                        )
+                                                    } else {
+                                                        base
+                                                    }
                                                 }
-                                            }
+                                            )
                                         }
                                         
                                         // 2. Full-resolution tiled image (always active, overlays on top once tiles render)
