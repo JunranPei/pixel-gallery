@@ -412,27 +412,22 @@ fun ViewerScreen(
                                     )
                                 }
                             }
-                        } else {                            // Rendered size of the image at fit-to-screen (screen pixels).
-                            // Used as contentSize for SubSamplingImage so that scale=1.0 means
-                            // "fit to screen" — matching telephoto's native coordinate system.
-                            val renderedWidth = adjustedWidth * scaleFit
-                            val renderedHeight = adjustedHeight * scaleFit
-
+                        } else {
                             var transformation by remember {
                                 mutableStateOf<ZoomableContentTransformation>(
                                     CustomZoomableContentTransformation(
                                         isSpecified = true,
-                                        contentSize = Size(renderedWidth, renderedHeight),
-                                        scale = ScaleFactor(1f, 1f),
+                                        contentSize = Size(adjustedWidth, adjustedHeight),
+                                        scale = ScaleFactor(scaleFit, scaleFit),
                                         offset = Offset(
-                                            containerWidth / 2f - renderedWidth / 2f,
-                                            containerHeight / 2f - renderedHeight / 2f
+                                            containerWidth / 2f - adjustedWidth * scaleFit / 2f,
+                                            containerHeight / 2f - adjustedHeight * scaleFit / 2f
                                         ),
                                         transformOrigin = TransformOrigin(0f, 0f),
                                         centroid = null,
                                         rotationZ = 0f,
                                         scaleMetadata = CustomScaleMetadata(
-                                            initialScale = ScaleFactor(1f, 1f),
+                                            initialScale = ScaleFactor(scaleFit, scaleFit),
                                             userZoom = 1f
                                         )
                                     )
@@ -444,31 +439,22 @@ fun ViewerScreen(
                                 transformation = { transformation }
                             )
  
-                            // Hides preview only when at least one tiled region is fully decoded and rendered on screen.
-                            // This prevents the preview from being dismissed prematurely (which causes the black screen flash)
-                            // because native isImageDisplayed reports true even when the tile painter is still null.
-                            val isAnyTileLoaded = remember(subSamplingState) {
-                                derivedStateOf {
-                                    val realState = subSamplingState as? RealSubSamplingImageState
-                                    if (realState != null) {
-                                        realState.viewportImageTiles.isNotEmpty() &&
-                                        realState.viewportImageTiles.fastAny { it.painter != null }
-                                    } else {
-                                        false
-                                    }
-                                }
-                            }
+                            // Fast-loading preview thumbnail (below ZoomableContainer in z-order)
+                            // Auto-hides after SubSamplingImage has time to decode first tiles
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
-                            LaunchedEffect(isAnyTileLoaded.value) {
-                                if (isAnyTileLoaded.value) {
-                                    delay(32)
-                                    showPreview = false
-                                }
+                            LaunchedEffect(media.contentId) {
+                                delay(500)
+                                showPreview = false
                             }
-  
-                            // State to track if the second-stage screen-fitting preview has loaded successfully
-                            var isFastPreviewLoaded by remember(media.contentId) { mutableStateOf(false) }
-  
+                            if (showPreview) {
+                                GlideImage(
+                                    model = microThumbnailModel,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+ 
                             key(media.contentId) {
                                 ZoomableContainer(
                                     modifier = Modifier.fillMaxSize(),
@@ -486,85 +472,30 @@ fun ViewerScreen(
                                         }
                                     },
                                     onTransformChanged = { scale, offsetX, offsetY ->
-                                        // contentSize = rendered size (renderedWidth × renderedHeight).
-                                        // scale here is userZoom (1.0 at fit, 2.0 at 2× zoom).
-                                        // offset is in screen pixels relative to screen top-left.
+                                        val totalScale = scaleFit * scale
                                         transformation = CustomZoomableContentTransformation(
                                             isSpecified = true,
-                                            contentSize = Size(renderedWidth, renderedHeight),
-                                            scale = ScaleFactor(scale, scale),
+                                            contentSize = Size(adjustedWidth, adjustedHeight),
+                                            scale = ScaleFactor(totalScale, totalScale),
                                             offset = Offset(
-                                                containerWidth / 2f - renderedWidth * scale / 2f + offsetX,
-                                                containerHeight / 2f - renderedHeight * scale / 2f + offsetY
+                                                containerWidth / 2f - adjustedWidth * totalScale / 2f + offsetX,
+                                                containerHeight / 2f - adjustedHeight * totalScale / 2f + offsetY
                                             ),
                                             transformOrigin = TransformOrigin(0f, 0f),
                                             centroid = null,
                                             rotationZ = 0f,
                                             scaleMetadata = CustomScaleMetadata(
-                                                initialScale = ScaleFactor(1f, 1f),
+                                                initialScale = ScaleFactor(scaleFit, scaleFit),
                                                 userZoom = scale
                                             )
                                         )
                                     }
                                 ) {
-                                    Box(modifier = Modifier.fillMaxSize()) {
-                                        // 1. Placeholder preview layer (stacked inside ZoomableContainer for perfect gesture scaling and sync)
-                                        if (showPreview) {
-                                            Box(modifier = Modifier.fillMaxSize()) {
-                                                // Low-res fast placeholder (micro thumbnail) - always loaded first instantly, no flicker
-                                                GlideImage(
-                                                    model = microThumbnailModel,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = ContentScale.Fit
-                                                )
-                                                // Medium-res screen-fitting preview (fast preview) - stays completely invisible (alpha = 0)
-                                                // while loading, then overlays seamlessly onto micro-thumbnail only after decoding succeeds.
-                                                if (fastPreviewModel != null) {
-                                                    GlideImage(
-                                                        model = fastPreviewModel,
-                                                        contentDescription = null,
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .graphicsLayer {
-                                                                alpha = if (isFastPreviewLoaded) 1f else 0f
-                                                            },
-                                                        contentScale = ContentScale.Fit,
-                                                        requestBuilderTransform = { requestBuilder ->
-                                                            requestBuilder.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
-                                                                override fun onLoadFailed(
-                                                                    e: com.bumptech.glide.load.engine.GlideException?,
-                                                                    model: Any?,
-                                                                    target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>,
-                                                                    isFirstResource: Boolean
-                                                                ): Boolean {
-                                                                    return false
-                                                                }
-
-                                                                override fun onResourceReady(
-                                                                    resource: android.graphics.drawable.Drawable,
-                                                                    model: Any,
-                                                                    target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
-                                                                    dataSource: com.bumptech.glide.load.DataSource,
-                                                                    isFirstResource: Boolean
-                                                                ): Boolean {
-                                                                    isFastPreviewLoaded = true
-                                                                    return false
-                                                                }
-                                                            })
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        
-                                        // 2. Full-resolution tiled image (always active, overlays on top once tiles render)
-                                        SubSamplingImage(
-                                            state = subSamplingState,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
+                                    SubSamplingImage(
+                                        state = subSamplingState,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
                                 }
                             }
                         }

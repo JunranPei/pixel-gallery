@@ -50,7 +50,7 @@ internal class AndroidImageRegionDecoder private constructor(
     )
 
     val tileFileName = "tile_${imageSource.toString().hashCode()}_l${bounds.left}_t${bounds.top}_r${bounds.right}_b${bounds.bottom}_s${region.sampleSize.size}.jpg"
-    val cacheDir = java.io.File(context.cacheDir, "tile_cache")
+    val cacheDir = java.io.File(context.cacheDir, "tile_cache_v2")
     val cacheFile = java.io.File(cacheDir, tileFileName)
  
     val bitmap = withContext(com.pixel.gallery.data.repository.LargeImagePerformanceConfig.decoderDispatcher) {
