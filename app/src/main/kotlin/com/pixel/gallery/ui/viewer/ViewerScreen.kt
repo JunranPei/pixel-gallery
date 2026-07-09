@@ -437,37 +437,11 @@ fun ViewerScreen(
                                 transformation = { transformation }
                             )
 
-                            // Fast-loading preview thumbnail (below ZoomableContainer in z-order).
-                            // SubSamplingImage naturally covers it at normal zoom.
-                            // When user zooms OUT, the preview is dismissed immediately via onTransformChanged.
-                            // Hides once SubSamplingImage has displayed its first frame.
-                            // The 32ms delay (≈2 frames) ensures SubSamplingImage has actually been
-                            // composited to screen before we remove the preview, preventing a 1-frame flash.
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
                             LaunchedEffect(subSamplingState.isImageDisplayed) {
                                 if (subSamplingState.isImageDisplayed) {
                                     delay(32)
                                     showPreview = false
-                                }
-                            }
-                            if (showPreview) {
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    // 1. Low-res fast placeholder (micro thumbnail)
-                                    GlideImage(
-                                        model = microThumbnailModel,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Fit
-                                    )
-                                    // 2. Medium-res screen-fitting preview (fast preview)
-                                    if (fastPreviewModel != null) {
-                                        GlideImage(
-                                            model = fastPreviewModel,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                    }
                                 }
                             }
 
@@ -510,16 +484,47 @@ fun ViewerScreen(
                                         )
                                     }
                                 ) {
-                                    // Only render SubSamplingImage tiles on the settled (current) page.
-                                    // During swipe transitions, adjacent pages show the thumbnail only.
-                                    // This prevents SubSamplingImage tiles from adjacent pages bleeding
-                                    // into the visible area and causing the ghost-image overlap.
-                                    if (pagerState.settledPage == page) {
-                                        SubSamplingImage(
-                                            state = subSamplingState,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
+                                    Box(modifier = Modifier.fillMaxSize()) {
+                                        // 1. Placeholder preview layer (stacked inside ZoomableContainer for perfect gesture scaling and sync)
+                                        if (showPreview) {
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                // Low-res fast placeholder (micro thumbnail)
+                                                GlideImage(
+                                                    model = microThumbnailModel,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                                // Medium-res screen-fitting preview (fast preview)
+                                                if (fastPreviewModel != null) {
+                                                    GlideImage(
+                                                        model = fastPreviewModel,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentScale = ContentScale.Fit
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        
+                                        // 2. Full-resolution tiled image (lays on top of preview once ready)
+                                        if (pagerState.settledPage == page) {
+                                            SubSamplingImage(
+                                                state = subSamplingState,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            // Fallback during swipe transition if adjacent page tiles are not active
+                                            if (!showPreview) {
+                                                GlideImage(
+                                                    model = microThumbnailModel,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
