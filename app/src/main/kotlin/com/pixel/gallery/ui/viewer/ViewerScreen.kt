@@ -500,24 +500,13 @@ fun ViewerScreen(
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         // 1. Placeholder preview layer (stacked inside ZoomableContainer for perfect gesture scaling and sync)
                                         if (showPreview) {
-                                            Box(modifier = Modifier.fillMaxSize()) {
-                                                // Low-res fast placeholder (micro thumbnail) - always loaded first instantly
-                                                GlideImage(
-                                                    model = microThumbnailModel,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = ContentScale.Fit
-                                                )
-                                                // Medium-res screen-fitting preview (fast preview) - loads asynchronously over micro thumbnail
-                                                if (fastPreviewModel != null) {
-                                                    GlideImage(
-                                                        model = fastPreviewModel,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.fillMaxSize(),
-                                                        contentScale = ContentScale.Fit
-                                                    )
-                                                }
-                                            }
+                                            // Low-res fast placeholder (micro thumbnail) - always loaded first instantly, no flicker
+                                            GlideImage(
+                                                model = microThumbnailModel,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Fit
+                                            )
                                         }
                                         
                                         // 2. Full-resolution tiled image (always active, overlays on top once tiles render)
