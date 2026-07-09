@@ -437,9 +437,18 @@ fun ViewerScreen(
                                 transformation = { transformation }
                             )
 
+                            // Hides preview only when at least one tiled region is fully decoded and rendered on screen.
+                            // This prevents the preview from being dismissed prematurely (which causes the black screen flash)
+                            // because native isImageDisplayed reports true even when the tile painter is still null.
+                            val isAnyTileLoaded = remember(subSamplingState) {
+                                derivedStateOf {
+                                    subSamplingState.viewportImageTiles.isNotEmpty() &&
+                                    subSamplingState.viewportImageTiles.fastAny { it.painter != null }
+                                }
+                            }
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
-                            LaunchedEffect(subSamplingState.isImageDisplayed) {
-                                if (subSamplingState.isImageDisplayed) {
+                            LaunchedEffect(isAnyTileLoaded.value) {
+                                if (isAnyTileLoaded.value) {
                                     delay(32)
                                     showPreview = false
                                 }
@@ -462,9 +471,6 @@ fun ViewerScreen(
                                         }
                                     },
                                     onTransformChanged = { scale, offsetX, offsetY ->
-                                        // Dismiss preview immediately when user zooms out,
-                                        // so the thumbnail doesn't bleed through behind the shrunken image.
-                                        if (scale < 1.0f) showPreview = false
                                         val totalScale = scaleFit * scale
                                         transformation = CustomZoomableContentTransformation(
                                             isSpecified = true,
@@ -487,30 +493,24 @@ fun ViewerScreen(
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         // 1. Placeholder preview layer (stacked inside ZoomableContainer for perfect gesture scaling and sync)
                                         if (showPreview) {
-                                            GlideImage(
-                                                model = fastPreviewModel ?: microThumbnailModel,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Fit,
-                                                requestBuilderTransform = { requestBuilder ->
-                                                    val base = requestBuilder
-                                                        .signature(signatureKey)
-                                                        .dontAnimate()
-                                                    
-                                                    if (fastPreviewModel != null) {
-                                                        base.thumbnail(
-                                                            com.bumptech.glide.Glide.with(context)
-                                                                .asDrawable()
-                                                                .load(microThumbnailModel)
-                                                                .signature(signatureKey)
-                                                                .dontAnimate()
-                                                                .override(512)
-                                                        )
-                                                    } else {
-                                                        base
-                                                    }
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                // Low-res fast placeholder (micro thumbnail) - always loaded first instantly
+                                                GlideImage(
+                                                    model = microThumbnailModel,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                                // Medium-res screen-fitting preview (fast preview) - loads asynchronously over micro thumbnail
+                                                if (fastPreviewModel != null) {
+                                                    GlideImage(
+                                                        model = fastPreviewModel,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentScale = ContentScale.Fit
+                                                    )
                                                 }
-                                            )
+                                            }
                                         }
                                         
                                         // 2. Full-resolution tiled image (always active, overlays on top once tiles render)
