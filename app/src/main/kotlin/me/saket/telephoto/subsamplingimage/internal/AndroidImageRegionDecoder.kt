@@ -130,8 +130,12 @@ internal class AndroidImageRegionDecoder private constructor(
       if (decoded != null && com.pixel.gallery.data.repository.LargeImagePerformanceConfig.useHardwareBitmap) {
         try {
           val hardwareCopyStartTime = System.nanoTime()
-          resultBitmap = decoded.copy(android.graphics.Bitmap.Config.HARDWARE, false).also {
+          val copyResult = decoded.copy(android.graphics.Bitmap.Config.HARDWARE, false)
+          if (copyResult != null) {
+            resultBitmap = copyResult
             decoded.recycle()
+          } else {
+            resultBitmap = decoded
           }
           val hardwareCopyDuration = (System.nanoTime() - hardwareCopyStartTime) / 1_000_000.0
           android.util.Log.e("ImageLoadFlow", "[TileDecode] Copy to HARDWARE bitmap took $hardwareCopyDuration ms")
