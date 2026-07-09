@@ -147,32 +147,36 @@ fun ZoomableContainer(
                 )
             }
             // Pinch-zoom and pan handler
-            .pointerInput(safeMinScale, safeMaxScale, containerSize) {
+            .pointerInput(safeMinScale, safeMaxScale, containerSize, imageFitScaleX, imageFitScaleY) {
                 awaitEachGesture {
                     // Wait for the first finger down
                     awaitFirstDown(requireUnconsumed = false)
-
+ 
                     // Touch-slop tracking
                     var pastTouchSlop = false
                     val touchSlop = viewConfiguration.touchSlop
                     var accumulatedZoom = 1f
                     var accumulatedPan = Offset.Zero
-
+ 
+                    // Gesture lock state to prevent mid-gesture control handover to parent Pager
+                    var isGestureLockedToPan = false
+                    var gestureLockChecked = false
+ 
                     // Gesture event loop
                     var gestureActive = true
                     while (gestureActive) {
                         val event = awaitPointerEvent()
-
+ 
                         // If any change was already consumed upstream, bail out
                         if (event.changes.any { it.isConsumed }) {
                             gestureActive = false
                             continue
                         }
-
+ 
                         val zoomChange = event.calculateZoom()
                         val panChange = event.calculatePan()
                         val centroid = event.calculateCentroid(useCurrent = false)
-
+ 
                         if (!pastTouchSlop) {
                             accumulatedZoom *= zoomChange
                             accumulatedPan += panChange
@@ -183,32 +187,42 @@ fun ZoomableContainer(
                                 pastTouchSlop = true
                             }
                         }
-
+ 
                         if (pastTouchSlop) {
                             val isPinching = event.changes.size >= 2
                             val newScale = (gestureScale * zoomChange).coerceIn(safeMinScale, safeMaxScale)
-
-                            // Determine whether we should consume this event or let Pager handle it
+ 
+                            // Lock in the gesture consumer on the very first frame of panning motion
+                            if (!gestureLockChecked && !isPinching) {
+                                gestureLockChecked = true
+                                if (newScale > 1.05f) {
+                                    val w = containerSize.width.toFloat()
+                                    val maxX = (w * imageFitScaleX * newScale - w).coerceAtLeast(0f) / 2f
+                                    val atLeftEdge = gestureOffsetX >= maxX - 1f
+                                    val atRightEdge = gestureOffsetX <= -maxX + 1f
+ 
+                                    val isAtBoundaryForScroll = when {
+                                        atLeftEdge && panChange.x > 0f -> true
+                                        atRightEdge && panChange.x < 0f -> true
+                                        else -> false
+                                    }
+                                    isGestureLockedToPan = !isAtBoundaryForScroll
+                                } else {
+                                    isGestureLockedToPan = false
+                                }
+                            }
+ 
                             val shouldConsume = if (isPinching) {
                                 // Always consume pinch gestures
                                 true
-                            } else if (newScale <= 1f) {
+                            } else if (newScale <= 1.05f) {
                                 // Not zoomed in → let Pager handle horizontal swipes
                                 false
                             } else {
-                                // Zoomed in → check if at horizontal boundary
-                                val w = containerSize.width.toFloat()
-                                val maxX = w * (newScale - 1f) / 2f
-                                val atLeftEdge = gestureOffsetX >= maxX - 1f
-                                val atRightEdge = gestureOffsetX <= -maxX + 1f
-
-                                when {
-                                    atLeftEdge && panChange.x > 0f -> false  // Can't pan further right → Pager
-                                    atRightEdge && panChange.x < 0f -> false // Can't pan further left → Pager
-                                    else -> true  // Still room to pan → consume
-                                }
+                                // Zoomed in → rely strictly on our gesture lock decision made at the start of the stroke
+                                isGestureLockedToPan
                             }
-
+ 
                             if (shouldConsume) {
                                 event.changes.forEach { change ->
                                     if (change.positionChanged()) {
@@ -216,27 +230,27 @@ fun ZoomableContainer(
                                     }
                                 }
                             }
-
+ 
                             // Apply the transform regardless of consumption (so pinch still works visually)
                             if (zoomChange != 1f || panChange != Offset.Zero) {
                                 val prevScale = gestureScale
                                 val scaleRatio = if (prevScale != 0f) newScale / prevScale else 1f
-
+ 
                                 // Focal-point-aware offset calculation
                                 val cx = containerSize.width / 2f
                                 val cy = containerSize.height / 2f
                                 val pivotX = centroid.x - cx
                                 val pivotY = centroid.y - cy
-
+ 
                                 val rawOffsetX = (gestureOffsetX - pivotX) * scaleRatio + pivotX + panChange.x
                                 val rawOffsetY = (gestureOffsetY - pivotY) * scaleRatio + pivotY + panChange.y
-
+ 
                                 val (clampedX, clampedY) = clampOffset(newScale, rawOffsetX, rawOffsetY)
-
+ 
                                 gestureScale = newScale
                                 gestureOffsetX = clampedX
                                 gestureOffsetY = clampedY
-
+ 
                                 // Snap (no animation) during active gesture
                                 scope.launch {
                                     animScale.snapTo(newScale)
@@ -245,7 +259,7 @@ fun ZoomableContainer(
                                 }
                             }
                         }
-
+ 
                         // Continue while any pointer is still down
                         gestureActive = event.changes.any { it.pressed }
                     }
