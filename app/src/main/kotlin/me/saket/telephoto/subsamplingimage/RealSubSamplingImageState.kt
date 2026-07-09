@@ -113,11 +113,7 @@ internal class RealSubSamplingImageState(
     val transformation = contentTransformation()
     val baseSampleSize = tileGrid.base.sampleSize
  
-    // Use userZoom (user's zoom factor relative to fit-to-screen) for tile level selection
-    // instead of transformation.scale which includes scaleFit and yields low-res tiles.
-    // At fit-to-screen userZoom=1.0 → sampleSize=1 (full resolution tiles).
-    val rawZoom = (transformation.scaleMetadata?.userZoom ?: transformation.scale.maxScale)
-        .coerceAtLeast(1f)
+    val rawZoom = transformation.scale.maxScale
     val targetSize = ImageSampleSize.calculateFor(rawZoom).size
     val finalSampleSize = if (targetSize != lastSampleSize) {
         val currentLast = lastSampleSize

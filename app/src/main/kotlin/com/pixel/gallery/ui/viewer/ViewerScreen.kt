@@ -425,7 +425,7 @@ fun ViewerScreen(
                                         centroid = null,
                                         rotationZ = 0f,
                                         scaleMetadata = CustomScaleMetadata(
-                                            initialScale = ScaleFactor(1f, 1f),
+                                            initialScale = ScaleFactor(scaleFit, scaleFit),
                                             userZoom = 1f
                                         )
                                     )
@@ -488,7 +488,7 @@ fun ViewerScreen(
                                             centroid = null,
                                             rotationZ = 0f,
                                             scaleMetadata = CustomScaleMetadata(
-                                                initialScale = ScaleFactor(1f, 1f),
+                                                initialScale = ScaleFactor(scaleFit, scaleFit),
                                                 userZoom = scale
                                             )
                                         )
