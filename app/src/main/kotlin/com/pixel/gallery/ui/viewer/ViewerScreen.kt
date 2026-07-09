@@ -440,11 +440,15 @@ fun ViewerScreen(
                             // Fast-loading preview thumbnail (below ZoomableContainer in z-order).
                             // SubSamplingImage naturally covers it at normal zoom.
                             // When user zooms OUT, the preview is dismissed immediately via onTransformChanged.
-                            // The 500ms timer below is only a memory-cleanup fallback.
+                            // Hides once SubSamplingImage has displayed its first frame.
+                            // The 32ms delay (≈2 frames) ensures SubSamplingImage has actually been
+                            // composited to screen before we remove the preview, preventing a 1-frame flash.
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
-                            LaunchedEffect(media.contentId) {
-                                delay(500)
-                                showPreview = false
+                            LaunchedEffect(subSamplingState.isImageDisplayed) {
+                                if (subSamplingState.isImageDisplayed) {
+                                    delay(32)
+                                    showPreview = false
+                                }
                             }
                             if (showPreview) {
                                 GlideImage(
