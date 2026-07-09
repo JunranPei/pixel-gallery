@@ -121,8 +121,8 @@ fun ZoomableContainer(
                             targetOffsetX = 0f
                             targetOffsetY = 0f
                         } else {
-                            // Currently at fit-screen → zoom to original pixel size (matches non-custom version's calculatedMaxZoom)
-                            targetScale = maxScale
+                            // Currently at fit-screen → zoom to original pixel size
+                            targetScale = scaleToOriginal.coerceIn(safeMinScale, safeMaxScale)
                             val cx = containerSize.width / 2f
                             val cy = containerSize.height / 2f
                             // Offset so the tap point stays visually fixed
