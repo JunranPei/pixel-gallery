@@ -49,7 +49,7 @@ internal class AndroidImageRegionDecoder private constructor(
       unRotatedParent = IntRect(offset = IntOffset.Zero, size = imageSize)
     )
 
-    val tileFileName = "tile_${imageSource.toString().hashCode()}_l${bounds.left}_t${bounds.top}_r${bounds.right}_b${bounds.bottom}_s${region.sampleSize.size}.jpg"
+    val tileFileName = "tile_${imageSource.toString().hashCode()}_l${bounds.left}_t${bounds.top}_r${bounds.right}_b${bounds.bottom}_s${region.sampleSize.size}.png"
     val cacheDir = java.io.File(context.cacheDir, "tile_cache")
     val cacheFile = java.io.File(cacheDir, tileFileName)
  
@@ -116,7 +116,7 @@ internal class AndroidImageRegionDecoder private constructor(
               cacheDir.mkdirs()
             }
             java.io.FileOutputStream(cacheFile).use { out ->
-              decoded.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+              decoded.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
             }
             val cacheSaveDuration = (System.nanoTime() - cacheSaveStartTime) / 1_000_000.0
             android.util.Log.e("ImageLoadFlow", "[TileDecode] Saved tile to cache took $cacheSaveDuration ms")
