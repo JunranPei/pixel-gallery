@@ -507,24 +507,12 @@ fun ViewerScreen(
                                             }
                                         }
                                         
-                                        // 2. Full-resolution tiled image (lays on top of preview once ready)
-                                        if (pagerState.settledPage == page) {
-                                            SubSamplingImage(
-                                                state = subSamplingState,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        } else {
-                                            // Fallback during swipe transition if adjacent page tiles are not active
-                                            if (!showPreview) {
-                                                GlideImage(
-                                                    model = microThumbnailModel,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = ContentScale.Fit
-                                                )
-                                            }
-                                        }
+                                        // 2. Full-resolution tiled image (always active, overlays on top once tiles render)
+                                        SubSamplingImage(
+                                            state = subSamplingState,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
                                     }
                                 }
                             }

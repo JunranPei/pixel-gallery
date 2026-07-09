@@ -104,6 +104,7 @@ fun ZoomableContainer(
 
     Box(
         modifier = modifier
+            .androidx.compose.ui.draw.clipToBounds()
             .onSizeChanged { containerSize = it }
             // Tap / double-tap handler (separate pointerInput to avoid interference)
             .pointerInput(scaleToOriginal, safeMinScale, safeMaxScale) {
