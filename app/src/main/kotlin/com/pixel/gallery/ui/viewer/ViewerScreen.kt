@@ -412,33 +412,38 @@ fun ViewerScreen(
                                     )
                                 }
                             }
-                        } else {
+                        } else {                            // Rendered size of the image at fit-to-screen (screen pixels).
+                            // Used as contentSize for SubSamplingImage so that scale=1.0 means
+                            // "fit to screen" — matching telephoto's native coordinate system.
+                            val renderedWidth = adjustedWidth * scaleFit
+                            val renderedHeight = adjustedHeight * scaleFit
+
                             var transformation by remember {
                                 mutableStateOf<ZoomableContentTransformation>(
                                     CustomZoomableContentTransformation(
                                         isSpecified = true,
-                                        contentSize = Size(adjustedWidth, adjustedHeight),
-                                        scale = ScaleFactor(scaleFit, scaleFit),
+                                        contentSize = Size(renderedWidth, renderedHeight),
+                                        scale = ScaleFactor(1f, 1f),
                                         offset = Offset(
-                                            containerWidth / 2f - adjustedWidth * scaleFit / 2f,
-                                            containerHeight / 2f - adjustedHeight * scaleFit / 2f
+                                            containerWidth / 2f - renderedWidth / 2f,
+                                            containerHeight / 2f - renderedHeight / 2f
                                         ),
                                         transformOrigin = TransformOrigin(0f, 0f),
                                         centroid = null,
                                         rotationZ = 0f,
                                         scaleMetadata = CustomScaleMetadata(
-                                            initialScale = ScaleFactor(scaleFit, scaleFit),
+                                            initialScale = ScaleFactor(1f, 1f),
                                             userZoom = 1f
                                         )
                                     )
                                 )
                             }
-
+ 
                             val subSamplingState = rememberSubSamplingImageState(
                                 imageSource = SubSamplingImageSource.contentUri(Uri.parse(media.uri)),
                                 transformation = { transformation }
                             )
-
+ 
                             // Hides preview only when at least one tiled region is fully decoded and rendered on screen.
                             // This prevents the preview from being dismissed prematurely (which causes the black screen flash)
                             // because native isImageDisplayed reports true even when the tile painter is still null.
@@ -452,17 +457,18 @@ fun ViewerScreen(
                                         false
                                     }
                                 }
-                            }                            var showPreview by remember(media.contentId) { mutableStateOf(true) }
+                            }
+                            var showPreview by remember(media.contentId) { mutableStateOf(true) }
                             LaunchedEffect(isAnyTileLoaded.value) {
                                 if (isAnyTileLoaded.value) {
                                     delay(32)
                                     showPreview = false
                                 }
                             }
- 
+  
                             // State to track if the second-stage screen-fitting preview has loaded successfully
                             var isFastPreviewLoaded by remember(media.contentId) { mutableStateOf(false) }
- 
+  
                             key(media.contentId) {
                                 ZoomableContainer(
                                     modifier = Modifier.fillMaxSize(),
@@ -480,20 +486,22 @@ fun ViewerScreen(
                                         }
                                     },
                                     onTransformChanged = { scale, offsetX, offsetY ->
-                                        val totalScale = scaleFit * scale
+                                        // contentSize = rendered size (renderedWidth × renderedHeight).
+                                        // scale here is userZoom (1.0 at fit, 2.0 at 2× zoom).
+                                        // offset is in screen pixels relative to screen top-left.
                                         transformation = CustomZoomableContentTransformation(
                                             isSpecified = true,
-                                            contentSize = Size(adjustedWidth, adjustedHeight),
-                                            scale = ScaleFactor(totalScale, totalScale),
+                                            contentSize = Size(renderedWidth, renderedHeight),
+                                            scale = ScaleFactor(scale, scale),
                                             offset = Offset(
-                                                containerWidth / 2f - adjustedWidth * totalScale / 2f + offsetX,
-                                                containerHeight / 2f - adjustedHeight * totalScale / 2f + offsetY
+                                                containerWidth / 2f - renderedWidth * scale / 2f + offsetX,
+                                                containerHeight / 2f - renderedHeight * scale / 2f + offsetY
                                             ),
                                             transformOrigin = TransformOrigin(0f, 0f),
                                             centroid = null,
                                             rotationZ = 0f,
                                             scaleMetadata = CustomScaleMetadata(
-                                                initialScale = ScaleFactor(scaleFit, scaleFit),
+                                                initialScale = ScaleFactor(1f, 1f),
                                                 userZoom = scale
                                             )
                                         )
