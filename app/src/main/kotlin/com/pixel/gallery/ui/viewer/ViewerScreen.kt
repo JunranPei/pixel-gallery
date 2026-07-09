@@ -58,6 +58,8 @@ import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import me.saket.telephoto.zoomable.glide.ZoomableGlideImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
+import me.saket.telephoto.subsamplingimage.RealSubSamplingImageState
+import androidx.compose.ui.util.fastAny
 import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.zoomable
@@ -442,8 +444,13 @@ fun ViewerScreen(
                             // because native isImageDisplayed reports true even when the tile painter is still null.
                             val isAnyTileLoaded = remember(subSamplingState) {
                                 derivedStateOf {
-                                    subSamplingState.viewportImageTiles.isNotEmpty() &&
-                                    subSamplingState.viewportImageTiles.fastAny { it.painter != null }
+                                    val realState = subSamplingState as? RealSubSamplingImageState
+                                    if (realState != null) {
+                                        realState.viewportImageTiles.isNotEmpty() &&
+                                        realState.viewportImageTiles.fastAny { it.painter != null }
+                                    } else {
+                                        false
+                                    }
                                 }
                             }
                             var showPreview by remember(media.contentId) { mutableStateOf(true) }
