@@ -16,6 +16,12 @@ import com.bumptech.glide.signature.ObjectKey
 import com.pixel.gallery.utils.BitmapUtils.applyExifOrientation
 import java.io.IOException
 
+import java.io.File
+import java.io.FileOutputStream
+import com.pixel.gallery.utils.UriUtils.tryParseId
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+
 data class FastScreenPreview(
     val uri: Uri,
     val rotationDegrees: Int
@@ -58,6 +64,29 @@ internal class FastScreenPreviewFetcher(
         }
 
         try {
+            val persistentDir = File(context.cacheDir, "persistent_viewer_thumbnails")
+            if (!persistentDir.exists()) {
+                persistentDir.mkdirs()
+            }
+            val contentId = model.uri.tryParseId() ?: model.uri.hashCode()
+            val cacheFileName = "fastpreview_${contentId}_${model.rotationDegrees}.jpg"
+            val persistentFile = File(persistentDir, cacheFileName)
+
+            if (persistentFile.exists()) {
+                try {
+                    val options = BitmapFactory.Options().apply {
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
+                    val cachedBitmap = BitmapFactory.decodeFile(persistentFile.absolutePath, options)
+                    if (cachedBitmap != null) {
+                        callback.onDataReady(cachedBitmap)
+                        return
+                    }
+                } catch (e: Exception) {
+                    // ignore and reload
+                }
+            }
+
             var bitmap: Bitmap? = null
             val resolver = context.contentResolver
 
@@ -100,6 +129,19 @@ internal class FastScreenPreviewFetcher(
             }
 
             if (bitmap != null) {
+                try {
+                    FileOutputStream(persistentFile).use { out ->
+                        bitmap?.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                    }
+                    val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
+                    val limitMb = runBlocking {
+                        settingsRepository.glidePersistentViewerCacheSize.first()
+                    }
+                    val limitBytes = limitMb.toLong() * 1024 * 1024
+                    trimPersistentCache(persistentDir, limitBytes)
+                } catch (e: Exception) {
+                    // ignore save errors
+                }
                 callback.onDataReady(bitmap)
             } else {
                 callback.onLoadFailed(IOException("Failed to fast-decode preview for uri=${model.uri}"))
@@ -112,6 +154,24 @@ internal class FastScreenPreviewFetcher(
             } catch (e: Exception) {
                 // ignore
             }
+        }
+    }
+
+    private fun trimPersistentCache(persistentDir: File, maxSizeBytes: Long) {
+        try {
+            val files = persistentDir.listFiles { _, name -> name.endsWith(".jpg") } ?: return
+            var totalSize = files.sumOf { it.length() }
+            if (totalSize <= maxSizeBytes) return
+            val sortedFiles = files.sortedBy { it.lastModified() }
+            for (file in sortedFiles) {
+                if (totalSize <= maxSizeBytes) break
+                val len = file.length()
+                if (file.delete()) {
+                    totalSize -= len
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
         }
     }
 
