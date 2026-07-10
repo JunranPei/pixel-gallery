@@ -7,6 +7,7 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Build
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -59,6 +60,7 @@ import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.zoomable
+import me.saket.telephoto.zoomable.DoubleClickToZoomListener
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import java.io.File
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -217,9 +219,13 @@ fun ViewerScreen(
                     sizeBytes = media.sizeBytes
                 )
             }
-            val isTargetPage = pagerState.targetPage == page
-            val fastPreviewModel = remember(media.uri, media.sourceMimeType, media.sizeBytes, isTargetPage) {
-                if (isTargetPage) {
+            val needsSecondStagePreview = remember(media.width, media.height, media.sizeBytes) {
+                val sizeBytes = media.sizeBytes ?: 0L
+                val maxDim = maxOf(media.width ?: 0, media.height ?: 0)
+                (sizeBytes > 50L * 1024 * 1024) || (maxDim > 5000 && sizeBytes > 20L * 1024 * 1024)
+            }
+            val fastPreviewModel = remember(media.uri, media.sourceMimeType, media.sizeBytes, needsSecondStagePreview) {
+                if (needsSecondStagePreview) {
                     AvesAppGlideModule.getModel(
                         context = context,
                         uri = Uri.parse(media.uri),
@@ -301,20 +307,30 @@ fun ViewerScreen(
                             }
                         })
                     if (hasThumbnail) {
-                        finalBase.thumbnail(
-                            com.bumptech.glide.Glide.with(context)
-                                .asDrawable()
-                                .load(fastPreviewModel)
-                                .signature(signatureKey)
-                                .override(screenWidth, screenHeight)
-                                .thumbnail(
-                                    com.bumptech.glide.Glide.with(context)
-                                        .asDrawable()
-                                        .load(microThumbnailModel)
-                                        .signature(signatureKey)
-                                        .override(512)
-                                )
-                        )
+                        if (fastPreviewModel != null) {
+                            finalBase.thumbnail(
+                                com.bumptech.glide.Glide.with(context)
+                                    .asDrawable()
+                                    .load(fastPreviewModel)
+                                    .signature(signatureKey)
+                                    .override(screenWidth, screenHeight)
+                                    .thumbnail(
+                                        com.bumptech.glide.Glide.with(context)
+                                            .asDrawable()
+                                            .load(microThumbnailModel)
+                                            .signature(signatureKey)
+                                            .override(512)
+                                    )
+                            )
+                        } else {
+                            finalBase.thumbnail(
+                                com.bumptech.glide.Glide.with(context)
+                                    .asDrawable()
+                                    .load(microThumbnailModel)
+                                    .signature(signatureKey)
+                                    .override(512)
+                            )
+                        }
                     } else {
                         finalBase
                     }
@@ -367,17 +383,43 @@ fun ViewerScreen(
                             if (scaleFit > 0f) 1f / scaleFit else 1f
                         }
 
+                        val minUserZoom = remember(scaleToOriginal) {
+                            minOf(scaleToOriginal * 0.333f, 0.333f).coerceAtLeast(0.05f)
+                        }
+
                         val calculatedMaxZoom = remember(scaleToOriginal) {
                             maxOf(scaleToOriginal * 3.0f, 3.0f).coerceIn(3.0f, 60.0f)
+                        }
+
+                        val targetDoubleTapZoom = remember(scaleToOriginal) {
+                            if (kotlin.math.abs(scaleToOriginal - 1.0f) < 0.05f) 2.0f else scaleToOriginal
+                        }
+
+                        val zoomSpec = remember(calculatedMaxZoom, minUserZoom) {
+                            val spec = ZoomSpec(
+                                maxZoomFactor = calculatedMaxZoom,
+                                preventOverOrUnderZoom = true
+                            )
+                            try {
+                                val zoomRangeClass = Class.forName("me.saket.telephoto.zoomable.ZoomRange")
+                                val customRange = zoomRangeClass
+                                    .getDeclaredConstructor(Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
+                                    .apply { isAccessible = true }
+                                    .newInstance(minUserZoom, calculatedMaxZoom)
+                                val rangeField = ZoomSpec::class.java.declaredFields.firstOrNull {
+                                    it.name == "range" || it.type.name.contains("ZoomRange")
+                                }
+                                rangeField?.apply { isAccessible = true }?.set(spec, customRange)
+                            } catch (e: Exception) {
+                                android.util.Log.e("GalleryCompose", "Failed to patch ZoomSpec range: $e")
+                            }
+                            spec
                         }
 
                         val zoomableState = key(media.contentId) {
                             rememberZoomableImageState(
                                 zoomableState = rememberZoomableState(
-                                    zoomSpec = ZoomSpec(
-                                        maxZoomFactor = calculatedMaxZoom,
-                                        preventOverOrUnderZoom = true
-                                    )
+                                    zoomSpec = zoomSpec
                                 )
                             )
                         }
@@ -391,6 +433,7 @@ fun ViewerScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .zoomable(zoomableState.zoomableState)
                                     .pointerInput(scaleFit, scaleToOriginal) {
                                         detectTapGestures(
                                             onTap = {
@@ -402,20 +445,19 @@ fun ViewerScreen(
                                             },
                                             onDoubleTap = { centroid: Offset ->
                                                 val state = zoomableState.zoomableState
-                                                val currentScale = state.contentTransformation.scale.scaleX
-                                                if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
+                                                val userZoom = state.contentTransformation.scaleMetadata.userZoom
+                                                if (kotlin.math.abs(userZoom - 1f) < 0.05f) {
                                                     coroutineScope.launch {
-                                                        state.resetZoom()
+                                                        state.zoomTo(zoomFactor = targetDoubleTapZoom, centroid = centroid)
                                                     }
                                                 } else {
                                                     coroutineScope.launch {
-                                                        state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
+                                                        state.resetZoom()
                                                     }
                                                 }
                                             }
                                         )
                                     }
-                                    .zoomable(zoomableState.zoomableState)
                                     .graphicsLayer {
                                         val transformation = zoomableState.zoomableState.contentTransformation
                                         scaleX = transformation.scale.scaleX
@@ -449,11 +491,11 @@ fun ViewerScreen(
                                     }
                                 },
                                 onDoubleClick = { state, centroid ->
-                                    val currentScale = state.contentTransformation.scale.scaleX
-                                    if (kotlin.math.abs(currentScale - scaleFit) > 0.005f) {
-                                        state.resetZoom()
+                                    val userZoom = state.contentTransformation.scaleMetadata.userZoom
+                                    if (kotlin.math.abs(userZoom - 1f) < 0.05f) {
+                                        state.zoomTo(zoomFactor = targetDoubleTapZoom, centroid = centroid)
                                     } else {
-                                        state.zoomTo(zoomFactor = scaleToOriginal, centroid = centroid)
+                                        state.resetZoom()
                                     }
                                 }
                             )
@@ -476,8 +518,8 @@ fun ViewerScreen(
         // Top Overlay
         AnimatedVisibility(
             visible = showUI,
-            enter = fadeIn() + slideInVertically { -it },
-            exit = fadeOut() + slideOutVertically { -it },
+            enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { -it },
+            exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { -it },
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
             Box(
@@ -580,8 +622,8 @@ fun ViewerScreen(
         // Bottom Overlay
         AnimatedVisibility(
             visible = showUI,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it },
+            enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { it },
+            exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { it },
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             Box(
@@ -779,12 +821,33 @@ fun VideoPlayer(
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
+    val minUserZoom = 0.333f
+    val maxUserZoom = 10f
+    val zoomSpec = remember {
+        val spec = ZoomSpec(
+            maxZoomFactor = maxUserZoom,
+            preventOverOrUnderZoom = true
+        )
+        try {
+            val zoomRangeClass = Class.forName("me.saket.telephoto.zoomable.ZoomRange")
+            val customRange = zoomRangeClass
+                .getDeclaredConstructor(Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+                .newInstance(minUserZoom, maxUserZoom)
+            val rangeField = ZoomSpec::class.java.declaredFields.firstOrNull {
+                it.name == "range" || it.type.name.contains("ZoomRange")
+            }
+            rangeField?.apply { isAccessible = true }?.set(spec, customRange)
+        } catch (e: Exception) {
+            android.util.Log.e("GalleryCompose", "Failed to patch VideoPlayer ZoomSpec range: $e")
+        }
+        spec
+    }
+
     val zoomableState = key(uri) {
         rememberZoomableState(
-            zoomSpec = ZoomSpec(
-                maxZoomFactor = 3f,
-                preventOverOrUnderZoom = true
-            )
+            zoomSpec = zoomSpec,
+            autoApplyTransformations = false
         )
     }
 
@@ -811,7 +874,15 @@ fun VideoPlayer(
         modifier = modifier
             .zoomable(
                 state = zoomableState,
-                onClick = { _ -> onTap() }
+                onClick = { _ -> onTap() },
+                onDoubleClick = DoubleClickToZoomListener { state, centroid ->
+                    val userZoom = state.contentTransformation.scaleMetadata.userZoom
+                    if (kotlin.math.abs(userZoom - 1f) < 0.05f) {
+                        state.zoomTo(zoomFactor = 2f, centroid = centroid)
+                    } else {
+                        state.resetZoom()
+                    }
+                }
             )
     ) {
         if (exoPlayer != null) {
@@ -850,9 +921,11 @@ fun VideoPlayer(
             }
             
             if (!isMotionPhoto) {
+                val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
                 VideoControls(
                     player = exoPlayer!!,
                     isVisible = showUI,
+                    currentZoom = currentZoom,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -864,6 +937,7 @@ fun VideoPlayer(
 fun VideoControls(
     player: Player,
     isVisible: Boolean,
+    currentZoom: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
@@ -891,11 +965,12 @@ fun VideoControls(
 
     AnimatedVisibility(
         visible = isVisible,
-        enter = fadeIn(),
-        exit = fadeOut(),
+        enter = fadeIn(animationSpec = tween(durationMillis = 150)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 150)),
         modifier = modifier
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            val pauseButtonScale = minOf(currentZoom, 1.0f)
             IconButton(
                 onClick = { 
                     try {
@@ -904,6 +979,10 @@ fun VideoControls(
                 },
                 modifier = Modifier
                     .align(Alignment.Center)
+                    .graphicsLayer {
+                        scaleX = pauseButtonScale
+                        scaleY = pauseButtonScale
+                    }
                     .size(64.dp)
                     .background(Color.Black.copy(alpha = 0.4f), CircleShape)
             ) {
