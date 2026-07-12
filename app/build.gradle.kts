@@ -34,8 +34,8 @@ android {
         applicationId = "com.pixel.gallery.shortcuts"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "4.2.11-multi-entry"
+        versionCode = 26
+        versionName = "4.2.12-multi-entry"
     }
 
     signingConfigs {

@@ -344,6 +344,8 @@ fun ViewerScreen(
                 if (isVideo) {
                     VideoPlayer(
                         uri = media.uri, 
+                        filePath = media.path,
+                        fallbackDurationMillis = media.durationMillis ?: 0L,
                         showUI = showUI, 
                         isActive = pagerState.currentPage == page,
                         onTap = { showUI = !showUI }
@@ -811,6 +813,8 @@ fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String
 @Composable
 fun VideoPlayer(
     uri: String, 
+    filePath: String = "",
+    fallbackDurationMillis: Long = 0L,
     modifier: Modifier = Modifier,
     isMotionPhoto: Boolean = false,
     isActive: Boolean = true,
@@ -819,6 +823,8 @@ fun VideoPlayer(
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    var useNativeFallback by remember(uri) { mutableStateOf(false) }
+    var nativeVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     val minUserZoom = 0.333f
@@ -851,14 +857,41 @@ fun VideoPlayer(
         )
     }
 
-    DisposableEffect(isActive, uri) {
+    DisposableEffect(isActive, uri, filePath) {
         val player = if (isActive) {
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
-                repeatMode = if (isMotionPhoto) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-                prepare()
-                playWhenReady = true
+            val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
+                .setEnableDecoderFallback(true)
+
+            val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory()
+                .setConstantBitrateSeekingEnabled(true)
+                .setMp4ExtractorFlags(
+                    androidx.media3.extractor.mp4.Mp4Extractor.FLAG_READ_MOTION_PHOTO_METADATA
+                )
+
+            val primaryUri = Uri.parse(uri)
+            val fallbackUri = try {
+                val file = java.io.File(filePath)
+                if (filePath.isNotEmpty() && file.exists() && file.canRead()) Uri.fromFile(file) else null
+            } catch (e: Exception) {
+                null
             }
+
+            val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context, extractorsFactory)
+
+            ExoPlayer.Builder(context, renderersFactory)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build()
+                .apply {
+                    setMediaItem(MediaItem.fromUri(primaryUri))
+                    repeatMode = if (isMotionPhoto) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+                    addListener(object : Player.Listener {
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            useNativeFallback = true
+                        }
+                    })
+                    prepare()
+                    playWhenReady = true
+                }
         } else null
         
         exoPlayer = player
@@ -898,46 +931,75 @@ fun VideoPlayer(
                         transformOrigin = transformation.transformOrigin
                     }
             ) {
-                AndroidView(
-                    factory = { ctx ->
-                        object : PlayerView(ctx) {
-                            override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
-                                return false
+                if (useNativeFallback) {
+                    AndroidView(
+                        factory = { ctx ->
+                            android.widget.VideoView(ctx).apply {
+                                setVideoURI(Uri.parse(uri))
+                                setOnPreparedListener { mp ->
+                                    mp.isLooping = !isMotionPhoto
+                                    mp.start()
+                                }
+                                setOnErrorListener { _, _, _ -> true }
+                                nativeVideoView = this
                             }
-                        }.apply {
-                            player = exoPlayer
-                            useController = false
-                            setBackgroundColor(android.graphics.Color.BLACK)
-                        }
-                    },
-                    update = { view ->
-                        view.player = exoPlayer
-                    },
-                    onRelease = { view ->
-                        view.player = null
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                        },
+                        update = { view ->
+                            nativeVideoView = view
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    AndroidView(
+                        factory = { ctx ->
+                            object : PlayerView(ctx) {
+                                override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
+                                    return false
+                                }
+                            }.apply {
+                                setEnableComposeSurfaceSyncWorkaround(true)
+                                player = exoPlayer
+                                useController = false
+                                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                setKeepScreenOn(true)
+                                setBackgroundColor(android.graphics.Color.BLACK)
+                            }
+                        },
+                        update = { view ->
+                            if (view.player != exoPlayer) {
+                                view.player = exoPlayer
+                            }
+                        },
+                        onRelease = { view ->
+                            view.player = null
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
-            
+
             if (!isMotionPhoto) {
                 val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
                 VideoControls(
-                    player = exoPlayer!!,
+                    player = exoPlayer,
+                    nativeVideoView = if (useNativeFallback) nativeVideoView else null,
                     isVisible = showUI,
-                    currentZoom = currentZoom,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+                currentZoom = currentZoom,
+                fallbackDurationMillis = fallbackDurationMillis,
+                modifier = Modifier.fillMaxSize()
+            )
         }
+    }
     }
 }
 
 @Composable
 fun VideoControls(
-    player: Player,
+    player: Player?,
+    nativeVideoView: android.widget.VideoView? = null,
     isVisible: Boolean,
     currentZoom: Float = 1f,
+    fallbackDurationMillis: Long = 0L,
     modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
@@ -948,18 +1010,27 @@ fun VideoControls(
     var duration by remember { mutableLongStateOf(0L) }
     var isDragging by remember { mutableStateOf(false) }
 
-    LaunchedEffect(player, isDragging) {
+    LaunchedEffect(player, nativeVideoView, isDragging, fallbackDurationMillis) {
         while (true) {
             try {
-                isPlaying = player.isPlaying
-                if (!isDragging) {
-                    currentPosition = player.currentPosition
+                if (nativeVideoView != null) {
+                    isPlaying = nativeVideoView.isPlaying
+                    if (!isDragging) {
+                        currentPosition = nativeVideoView.currentPosition.toLong().coerceAtLeast(0L)
+                    }
+                    val nvDuration = nativeVideoView.duration.toLong()
+                    duration = if (nvDuration > 0L) nvDuration else fallbackDurationMillis.coerceAtLeast(0L)
+                } else if (player != null) {
+                    isPlaying = player.isPlaying
+                    if (!isDragging) {
+                        currentPosition = player.currentPosition.coerceAtLeast(0L)
+                    }
+                    val pDuration = player.duration
+                    duration = if (pDuration > 0L) pDuration else fallbackDurationMillis.coerceAtLeast(0L)
                 }
-                duration = player.duration.coerceAtLeast(0L)
             } catch (e: Exception) {
-                break
             }
-            delay(500)
+            delay(300)
         }
     }
 
@@ -974,8 +1045,27 @@ fun VideoControls(
             IconButton(
                 onClick = { 
                     try {
-                        if (player.isPlaying) player.pause() else player.play()
-                    } catch (e: Exception) {}
+                        if (nativeVideoView != null) {
+                            if (nativeVideoView.isPlaying) {
+                                nativeVideoView.pause()
+                            } else {
+                                nativeVideoView.start()
+                            }
+                        } else if (player != null) {
+                            if (player.isPlaying) {
+                                player.pause()
+                            } else {
+                                if (player.playbackState == Player.STATE_ENDED) {
+                                    player.seekTo(0)
+                                } else if (player.playbackState == Player.STATE_IDLE || player.playerError != null) {
+                                    player.prepare()
+                                }
+                                player.play()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("VideoPlayerDiag", "[PlayPauseClick] Exception: $e", e)
+                    }
                 },
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -1010,7 +1100,11 @@ fun VideoControls(
                     onValueChangeFinished = {
                         isDragging = false
                         try {
-                            player.seekTo(currentPosition)
+                            if (nativeVideoView != null) {
+                                nativeVideoView.seekTo(currentPosition.toInt())
+                            } else {
+                                player?.seekTo(currentPosition)
+                            }
                         } catch (e: Exception) {}
                     },
                     valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
