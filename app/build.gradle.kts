@@ -31,11 +31,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pixel.gallery.videotest"
+        applicationId = "com.pixel.gallery.multitask"
         minSdk = 26
         targetSdk = 35
         versionCode = 26
-        versionName = "4.2.12-video-test"
+        versionName = "4.2.12-auto-multitask"
     }
 
     signingConfigs {
