@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Process
+import android.os.SystemClock
+import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import com.bumptech.glide.Priority
 import com.bumptech.glide.load.DataSource
 import com.bumptech.glide.load.Options
@@ -57,6 +59,10 @@ internal class FastScreenPreviewFetcher(
 ) : DataFetcher<Bitmap> {
 
     override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in Bitmap>) {
+        val metricsStartedAt = SystemClock.elapsedRealtimeNanos()
+        var boundsMs = 0L
+        var decodeMs = 0L
+        var writeAndTrimMs = 0L
         val originalPriority = try {
             Process.getThreadPriority(Process.myTid())
         } catch (e: Exception) {
@@ -73,12 +79,21 @@ internal class FastScreenPreviewFetcher(
             val persistentFile = File(persistentDir, cacheFileName)
 
             if (persistentFile.exists()) {
+                val persistentReadStartedAt = SystemClock.elapsedRealtimeNanos()
                 try {
                     val options = BitmapFactory.Options().apply {
                         inPreferredConfig = Bitmap.Config.RGB_565
                     }
                     val cachedBitmap = BitmapFactory.decodeFile(persistentFile.absolutePath, options)
                     if (cachedBitmap != null) {
+                        ViewerLoadMetrics.fastPreview(
+                            imageKey = model.uri.toString(),
+                            cacheHit = true,
+                            boundsMs = 0L,
+                            decodeMs = (SystemClock.elapsedRealtimeNanos() - persistentReadStartedAt) / 1_000_000L,
+                            writeAndTrimMs = 0L,
+                            totalMs = (SystemClock.elapsedRealtimeNanos() - metricsStartedAt) / 1_000_000L
+                        )
                         callback.onDataReady(cachedBitmap)
                         return
                     }
@@ -89,6 +104,7 @@ internal class FastScreenPreviewFetcher(
 
             var bitmap: Bitmap? = null
             val resolver = context.contentResolver
+            val boundsStartedAt = SystemClock.elapsedRealtimeNanos()
 
             // 1. Decode bounds
             resolver.openInputStream(model.uri)?.use { stream ->
@@ -96,6 +112,7 @@ internal class FastScreenPreviewFetcher(
                     inJustDecodeBounds = true
                 }
                 BitmapFactory.decodeStream(stream, null, options)
+                boundsMs = (SystemClock.elapsedRealtimeNanos() - boundsStartedAt) / 1_000_000L
 
                 val srcWidth = options.outWidth
                 val srcHeight = options.outHeight
@@ -105,10 +122,25 @@ internal class FastScreenPreviewFetcher(
                 val targetWidth = if (width > 0 && width != com.bumptech.glide.request.target.Target.SIZE_ORIGINAL) width else 1080
                 val targetHeight = if (height > 0 && height != com.bumptech.glide.request.target.Target.SIZE_ORIGINAL) height else 1920
 
-                if (srcWidth > targetWidth || srcHeight > targetHeight) {
-                    val halfWidth = srcWidth / 2
-                    val halfHeight = srcHeight / 2
-                    while (halfWidth / inSampleSize >= targetWidth && halfHeight / inSampleSize >= targetHeight) {
+if (srcWidth > 0 && srcHeight > 0) {
+                    val sourceAspect = srcWidth.toFloat() / srcHeight
+                    val targetAspect = targetWidth.toFloat() / targetHeight
+                    val visibleWidth: Float
+                    val visibleHeight: Float
+                    if (sourceAspect > targetAspect) {
+                        visibleWidth = targetWidth.toFloat()
+                        visibleHeight = visibleWidth / sourceAspect
+                    } else {
+                        visibleHeight = targetHeight.toFloat()
+                        visibleWidth = visibleHeight * sourceAspect
+                    }
+
+                    // The preview uses fitCenter. Sampling against the whole viewport
+                    // over-decodes letterboxed images (notably square images on a tall phone).
+                    while (
+                        srcWidth / (inSampleSize * 2f) >= visibleWidth &&
+                        srcHeight / (inSampleSize * 2f) >= visibleHeight
+                    ) {
                         inSampleSize *= 2
                     }
                 }
@@ -121,14 +153,17 @@ internal class FastScreenPreviewFetcher(
 
                 // We must open a fresh InputStream because the previous one was consumed by bounds decoding
                 resolver.openInputStream(model.uri)?.use { fallbackStream ->
+                    val decodeStartedAt = SystemClock.elapsedRealtimeNanos()
                     val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
                     if (decoded != null) {
                         bitmap = applyExifOrientation(context, decoded, model.rotationDegrees, false)
+                        decodeMs = (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
                     }
                 }
             }
 
             if (bitmap != null) {
+                val writeStartedAt = SystemClock.elapsedRealtimeNanos()
                 try {
                     FileOutputStream(persistentFile).use { out ->
                         bitmap?.compress(Bitmap.CompressFormat.JPEG, 85, out)
@@ -142,6 +177,15 @@ internal class FastScreenPreviewFetcher(
                 } catch (e: Exception) {
                     // ignore save errors
                 }
+                writeAndTrimMs = (SystemClock.elapsedRealtimeNanos() - writeStartedAt) / 1_000_000L
+                ViewerLoadMetrics.fastPreview(
+                    imageKey = model.uri.toString(),
+                    cacheHit = false,
+                    boundsMs = boundsMs,
+                    decodeMs = decodeMs,
+                    writeAndTrimMs = writeAndTrimMs,
+                    totalMs = (SystemClock.elapsedRealtimeNanos() - metricsStartedAt) / 1_000_000L
+                )
                 callback.onDataReady(bitmap)
             } else {
                 callback.onLoadFailed(IOException("Failed to fast-decode preview for uri=${model.uri}"))

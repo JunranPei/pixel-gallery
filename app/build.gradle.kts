@@ -189,6 +189,7 @@ dependencies {
     implementation("me.saket.telephoto:zoomable-image-glide:0.14.0") {
         exclude(group = "me.saket.telephoto", module = "sub-sampling-image")
     }
+    implementation(project(":ssiv-pixel"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")

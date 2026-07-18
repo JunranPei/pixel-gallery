@@ -140,21 +140,6 @@ class PhotosViewModel @Inject constructor(
     val glidePersistentGridCacheSize: StateFlow<Int> = settingsRepository.glidePersistentGridCacheSize
         .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
 
-    val glidePersistentViewerCacheSize: StateFlow<Int> = settingsRepository.glidePersistentViewerCacheSize
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
-
-    val largeImageTileSize: StateFlow<Int> = settingsRepository.largeImageTileSize
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 1024)
-
-    val largeImageMaxCores: StateFlow<Int> = settingsRepository.largeImageMaxCores
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
-
-    val largeImageDebounceMs: StateFlow<Int> = settingsRepository.largeImageDebounceMs
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 150)
-
-    val largeImageHardwareBitmap: StateFlow<Boolean> = settingsRepository.largeImageHardwareBitmap
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -236,7 +221,6 @@ class PhotosViewModel @Inject constructor(
 
     init {
         registerContentObserver()
-        observeGlideThreadCount()
     }
 
     private fun registerContentObserver() {
@@ -340,8 +324,8 @@ class PhotosViewModel @Inject constructor(
     // --- Metadata ---
     fun getMediaMetadata(path: String) = metadataService.getMetadata(path)
     fun getCoordinates(path: String) = metadataService.getCoordinates(path)
+    fun inspectViewerPhoto(path: String) = metadataService.inspectViewerPhoto(path)
     fun extractMotionVideo(path: String) = metadataService.extractMotionVideo(path)
-    fun isUltraHdr(path: String) = metadataService.isUltraHdr(path)
 
 
     // --- Settings Actions ---
@@ -381,12 +365,6 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun setGlidePersistentViewerCacheSize(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setGlidePersistentViewerCacheSize(value)
-        }
-    }
-
     fun clearAllCaches(context: android.content.Context, onComplete: () -> Unit) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
@@ -404,7 +382,8 @@ class PhotosViewModel @Inject constructor(
                     "persistent_viewer_thumbnails",
                     "persistent_thumbnails",
                     "persistent_thumbnails_v2",
-                    "persistent_thumbnails_v3"
+                    "persistent_thumbnails_v3",
+                    "ssiv_tile_cache"
                 )
                 for (dirName in dirs) {
                     val dir = java.io.File(context.cacheDir, dirName)
@@ -412,6 +391,7 @@ class PhotosViewModel @Inject constructor(
                         dir.deleteRecursively()
                     }
                 }
+                com.pixel.gallery.ui.viewer.decoders.resetSsivTileCacheBudget(context)
             } catch (e: Exception) {
                 // ignore
             }
@@ -474,41 +454,6 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun setLargeImageTileSize(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageTileSize(value)
-        }
-    }
-
-    fun setLargeImageMaxCores(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageMaxCores(value)
-        }
-    }
-
-    fun setLargeImageDebounceMs(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageDebounceMs(value)
-        }
-    }
-
-    fun setLargeImageHardwareBitmap(value: Boolean) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageHardwareBitmap(value)
-        }
-    }
-
-    private fun observeGlideThreadCount() {
-        viewModelScope.launch {
-            settingsRepository.glideThreadCount.collect { threads ->
-                try {
-                    com.pixel.gallery.glide.AvesAppGlideModule.updateThreadCount(threads)
-                } catch (e: Exception) {
-                    android.util.Log.e("PhotosViewModel", "Failed to update Glide thread count", e)
-                }
-            }
-        }
-    }
 }
 
 enum class PhotoSortOrder {

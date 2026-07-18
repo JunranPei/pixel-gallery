@@ -36,6 +36,12 @@ class AvesAppGlideModule : AppGlideModule() {
         // hide noisy warning (e.g. for images that can't be decoded)
         builder.setLogLevel(Log.ERROR)
 
+        // Read settings before creating Glide's immutable executors.
+        val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
+        val sourceThreadCount = kotlinx.coroutines.runBlocking {
+            settingsRepository.glideThreadCount.first()
+        }.coerceIn(1, 8)
+
         // sizing
         val memorySizeCalculator = MemorySizeCalculator.Builder(context).build()
         builder.setMemorySizeCalculator(memorySizeCalculator)
@@ -49,7 +55,6 @@ class AvesAppGlideModule : AppGlideModule() {
         builder.setMemoryCache(LruResourceCache(memorySizeCalculator.memoryCacheSize.toLong()))
 
         // Read custom disk cache size from settings (requires runBlocking for synchronous load during initialization)
-        val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
         val cacheSizeMb = kotlinx.coroutines.runBlocking {
             settingsRepository.glideCacheSize.first()
         }
@@ -57,10 +62,9 @@ class AvesAppGlideModule : AppGlideModule() {
         val internalCacheDiskCacheFactory = InternalCacheDiskCacheFactory(context, DiskCache.Factory.DEFAULT_DISK_CACHE_DIR, diskCacheSize.toLong())
         builder.setDiskCache(internalCacheDiskCacheFactory)
 
-        // Hard-limit background thread count for image decoding to 2 threads and disk cache reading to 1 thread.
-        // This is a direct physical throttle on CPU usage, preventing excessive power draw during rapid scroll.
-        val sourceExec = GlideExecutor.newSourceExecutor(2, "source-throttled", GlideExecutor.UncaughtThrowableStrategy.DEFAULT)
-        _sourceExecutor = sourceExec
+        // Glide executors cannot be safely resized after initialization. Apply the persisted
+        // source-decode setting here; disk-cache I/O remains serialized by design.
+        val sourceExec = GlideExecutor.newSourceExecutor(sourceThreadCount, "source-configured", GlideExecutor.UncaughtThrowableStrategy.DEFAULT)
         builder.setSourceExecutor(sourceExec)
         builder.setDiskCacheExecutor(GlideExecutor.newDiskCacheExecutor(1, "disk-cache-throttled", GlideExecutor.UncaughtThrowableStrategy.DEFAULT))
 
@@ -87,53 +91,18 @@ class AvesAppGlideModule : AppGlideModule() {
 
     companion object {
         private val LOG_TAG = LogUtils.createTag<AvesAppGlideModule>()
-        private var _sourceExecutor: GlideExecutor? = null
-
-        fun updateThreadCount(threads: Int) {
-            val source = _sourceExecutor ?: return
-            
-            // Try updating the delegate ThreadPoolExecutor inside GlideExecutor via reflection
-            try {
-                var updated = false
-                var currentClass: Class<*>? = source.javaClass
-                while (currentClass != null && currentClass != Any::class.java) {
-                    for (field in currentClass.declaredFields) {
-                        try {
-                            field.isAccessible = true
-                            val value = field.get(source)
-                            if (value is java.util.concurrent.ThreadPoolExecutor) {
-                                val currentCore = value.corePoolSize
-                                if (threads > currentCore) {
-                                    value.maximumPoolSize = threads
-                                    value.corePoolSize = threads
-                                } else {
-                                    value.corePoolSize = threads
-                                    value.maximumPoolSize = threads
-                                }
-                                android.util.Log.d("AvesAppGlideModule", "Updated Glide delegate executor ($field) thread count to $threads via reflection")
-                                updated = true
-                                break
-                            }
-                        } catch (e: Exception) {
-                            // ignore security exceptions for individual fields
-                        }
-                    }
-                    if (updated) break
-                    currentClass = currentClass.superclass
-                }
-                if (!updated) {
-                    android.util.Log.e("AvesAppGlideModule", "Could not find ThreadPoolExecutor delegate in GlideExecutor")
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("AvesAppGlideModule", "Failed to update Glide thread count via reflection", e)
-            }
-        }
-
         // request a fresh image with the highest quality format
+        // [Legacy/Original Code commented out per user request]
+        /*
         val uncachedFullImageOptions = RequestOptions()
             .format(DecodeFormat.PREFER_ARGB_8888)
             .diskCacheStrategy(DiskCacheStrategy.NONE)
             .skipMemoryCache(true)
+        */
+        val uncachedFullImageOptions = RequestOptions()
+            .format(DecodeFormat.PREFER_ARGB_8888)
+            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+            .skipMemoryCache(false)
 
         fun getModel(
             context: Context,
