@@ -8,6 +8,14 @@ import java.io.FileOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class ViewerPhotoMetadata(
+    val hasMotionPhoto: Boolean
+) {
+    companion object {
+        val NONE = ViewerPhotoMetadata(hasMotionPhoto = false)
+    }
+}
+
 @Singleton
 class MetadataService @Inject constructor(
     @ApplicationContext private val context: Context
@@ -40,6 +48,23 @@ class MetadataService @Inject constructor(
             }
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /** Reads JPEG XMP once without scanning or extracting embedded media. */
+    fun inspectViewerPhoto(path: String): ViewerPhotoMetadata {
+        if (!path.endsWith(".jpg", ignoreCase = true) &&
+            !path.endsWith(".jpeg", ignoreCase = true)
+        ) return ViewerPhotoMetadata.NONE
+
+        return try {
+            val xmp = ExifInterface(path).getAttribute(ExifInterface.TAG_XMP).orEmpty()
+            ViewerPhotoMetadata(
+                hasMotionPhoto = path.contains(".MP.", ignoreCase = true) ||
+                    xmp.contains("MotionPhoto") || xmp.contains("MicroVideo")
+            )
+        } catch (_: Exception) {
+            ViewerPhotoMetadata.NONE
         }
     }
 
@@ -127,25 +152,4 @@ class MetadataService @Inject constructor(
         return null
     }
 
-    /**
-     * Detects if a JPEG contains Ultra HDR Gainmap metadata (XMP).
-     * Includes namespaces for Adobe, Apple, and Google UltraHDR (parity with main branch).
-     */
-    fun isUltraHdr(path: String): Boolean {
-        if (!path.endsWith(".jpg", ignoreCase = true) && !path.endsWith(".jpeg", ignoreCase = true)) return false
-        return try {
-            val exif = ExifInterface(path)
-            val xmp = exif.getAttribute(ExifInterface.TAG_XMP)
-            xmp != null && (
-                xmp.contains("http://ns.adobe.com/hdr-gain-map/1.0/") ||
-                xmp.contains("http://ns.apple.com/HDRGainMap/1.0/") ||
-                xmp.contains("hdrgm:Version") ||
-                xmp.contains("HDRGainMapVersion") ||
-                xmp.contains("http://ns.google.com/photos/1.0/ultrahighdynamicrange/") ||
-                xmp.contains("HasGainMap=\"True\"")
-            )
-        } catch (e: Exception) {
-            false
-        }
-    }
 }

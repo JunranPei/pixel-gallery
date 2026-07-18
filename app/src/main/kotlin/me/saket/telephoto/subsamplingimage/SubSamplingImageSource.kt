@@ -138,6 +138,9 @@ sealed interface SubSamplingImageSource : Closeable {
     ): SubSamplingImageSource = RawImageSource(source, preview, onClose)
   }
 
+  /** Stable cache key used for tile caching and decoder reuse across sessions. */
+  val cacheKey: String
+
   /** Peeks into the source without consuming its bytes. */
   fun peek(context: Context): BufferedSource
 
@@ -156,6 +159,8 @@ internal data class FileImageSource(
   init {
     check(path.isAbsolute)
   }
+
+  override val cacheKey: String get() = "file_${path}"
 
   @Volatile
   private var safeCopyFile: java.io.File? = null
@@ -219,6 +224,16 @@ internal data class FileImageSource(
       onClose?.close()
     }
   }
+
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is FileImageSource) return false
+    return this.path == other.path
+  }
+
+  override fun hashCode(): Int {
+    return path.hashCode()
+  }
 }
 
 @Immutable
@@ -226,6 +241,8 @@ internal data class AssetImageSource(
   private val asset: AssetPath,
   override val preview: ImageBitmap?
 ) : SubSamplingImageSource {
+
+  override val cacheKey: String get() = "asset_${asset.path}"
 
   override fun peek(context: Context): BufferedSource {
     return inputStream(context).source().buffer()
@@ -251,6 +268,8 @@ internal data class ResourceImageSource(
   @DrawableRes val id: Int,
   override val preview: ImageBitmap?,
 ) : SubSamplingImageSource {
+
+  override val cacheKey: String get() = "res_${id}"
 
   override fun peek(context: Context): BufferedSource {
     return inputStream(context).source().buffer()
@@ -284,6 +303,8 @@ internal data class UriImageSource(
   private val uri: Uri,
   override val preview: ImageBitmap?
 ) : SubSamplingImageSource {
+
+  override val cacheKey: String get() = "uri_${uri}"
 
   @Volatile
   private var tempFile: java.io.File? = null
@@ -383,6 +404,8 @@ internal data class RawImageSource(
   override val preview: ImageBitmap? = null,
   private val onClose: Closeable?
 ) : SubSamplingImageSource {
+
+  override val cacheKey: String get() = "raw_${System.identityHashCode(this)}"
 
   private val bufferedSource: BufferedSource by lazy(NONE) {
     source().buffer()

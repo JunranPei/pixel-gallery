@@ -11,6 +11,7 @@ import java.util.Properties
 import java.io.FileInputStream
 
 val keystoreProperties = Properties()
+val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -31,7 +32,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pixel.gallery.multitask"
+        applicationId = if (officialRelease) {
+            "com.pixel.gallery.multitask"
+        } else {
+            "com.pixel.gallery.simplegallerymerge"
+        }
         minSdk = 26
         targetSdk = 35
         versionCode = 26
@@ -65,10 +70,14 @@ android {
 
     splits {
         abi {
-            isEnable = true
+            isEnable = officialRelease
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
+            if (officialRelease) {
+                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            } else {
+                include("arm64-v8a")
+            }
+            isUniversalApk = officialRelease
         }
     }
 
@@ -189,6 +198,7 @@ dependencies {
     implementation("me.saket.telephoto:zoomable-image-glide:0.14.0") {
         exclude(group = "me.saket.telephoto", module = "sub-sampling-image")
     }
+    implementation(project(":ssiv-pixel"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")

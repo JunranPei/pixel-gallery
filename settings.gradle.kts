@@ -10,3 +10,5 @@ pluginManagement {
 }
 
 include(":app")
+include(":ssiv-pixel")
+project(":ssiv-pixel").projectDir = file("third_party/ssiv-pixel")

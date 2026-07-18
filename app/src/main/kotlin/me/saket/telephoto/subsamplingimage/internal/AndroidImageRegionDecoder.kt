@@ -49,8 +49,8 @@ internal class AndroidImageRegionDecoder private constructor(
       unRotatedParent = IntRect(offset = IntOffset.Zero, size = imageSize)
     )
 
-    val tileFileName = "tile_${imageSource.toString().hashCode()}_l${bounds.left}_t${bounds.top}_r${bounds.right}_b${bounds.bottom}_s${region.sampleSize.size}.jpg"
-    val cacheDir = java.io.File(context.cacheDir, "tile_cache")
+    val cacheDir = java.io.File(context.cacheDir, "telephoto_tiles")
+    val tileFileName = "${imageSource.cacheKey}_${bounds.left}_${bounds.top}_${bounds.right}_${bounds.bottom}_${region.sampleSize.size}.jpg"
     val cacheFile = java.io.File(cacheDir, tileFileName)
  
     val bitmap = withContext(com.pixel.gallery.data.repository.LargeImagePerformanceConfig.decoderDispatcher) {

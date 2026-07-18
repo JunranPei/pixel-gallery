@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.home.PhotosScreen
@@ -78,7 +79,7 @@ sealed class Screen : Parcelable {
     @Parcelize object HiddenAlbums : Screen()
     @Parcelize object LockedFolder : Screen()
     @Parcelize data class Viewer(
-        val initialId: Long, 
+        val initialId: Long,
         val source: ViewerSource = ViewerSource.All,
         val albumName: String? = null,
         val externalUri: String? = null,
@@ -111,17 +112,17 @@ fun MainScaffold(
     val gridColumns by photosViewModel.gridColumns.collectAsState()
     val albumGridColumns by photosViewModel.albumGridColumns.collectAsState()
     val externalMedia by photosViewModel.externalMedia.collectAsState()
-    
+
     val photoSortOrder by photosViewModel.photoSortOrder.collectAsState()
     val albumSortOrder by photosViewModel.albumSortOrder.collectAsState()
-    
+
     var showPhotoSortDialog by remember { mutableStateOf(false) }
     var showAlbumSortDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeletePermanentlyConfirm by remember { mutableStateOf(false) }
-    
+
     // Simple navigation stack
-    var navigationStack by rememberSaveable { 
+    var navigationStack by rememberSaveable {
         mutableStateOf(
             if (initialScreen == Screen.Home) {
                 listOf<Screen>(Screen.Home)
@@ -139,7 +140,7 @@ fun MainScaffold(
     }
 
     val currentScreen = navigationStack.last()
-    
+
     // Hoisted Grid States for persistence
     val recentsGridState = rememberLazyGridState()
     val albumsGridState = rememberLazyGridState()
@@ -147,7 +148,7 @@ fun MainScaffold(
     val trashGridState = rememberLazyGridState()
     val vaultGridState = rememberLazyGridState()
     val albumGridStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
-    
+
     val startupAtAlbums by photosViewModel.startupAtAlbums.collectAsState()
     val homePagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
@@ -167,7 +168,7 @@ fun MainScaffold(
     }
 
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
-    
+
     val toggleSelection = { id: Long ->
         selectedIds = if (selectedIds.contains(id)) {
             selectedIds - id
@@ -210,7 +211,7 @@ fun MainScaffold(
     } else {
         navBarPadding + 16.dp
     }
-    
+
     val colorScheme = MaterialTheme.colorScheme
     val context = androidx.compose.ui.platform.LocalContext.current
     val navigateBack: () -> Unit = {
@@ -241,34 +242,34 @@ fun MainScaffold(
                     },
                     actions = {
                         if (currentScreen == Screen.Trash) {
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 photosViewModel.restoreMediaBulk(selectedEntries.map { it.uri })
                                 selectedIds = emptySet()
                             }) {
                                 Icon(Icons.Outlined.RestoreFromTrash, contentDescription = "Restore")
                             }
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 isDeletePermanentlyConfirm = true
                                 showDeleteConfirmDialog = true
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete permanently")
                             }
                         } else if (currentScreen == Screen.LockedFolder) {
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 selectedEntries.forEach { photosViewModel.restoreFromVault(it.contentId) }
                                 selectedIds = emptySet()
                             }) {
                                 Icon(Icons.Outlined.LockOpen, contentDescription = "Unlock")
                             }
                         } else {
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 selectedEntries.forEach { photosViewModel.moveToVault(it) }
                                 selectedIds = emptySet()
                             }) {
                                 Icon(Icons.Outlined.Lock, contentDescription = "Move to Locked")
                             }
-                            IconButton(onClick = { 
-                                val uris = selectedEntries.map { 
+                            IconButton(onClick = {
+                                val uris = selectedEntries.map {
                                     FileProvider.getUriForFile(context, context.packageName + ".fileprovider", java.io.File(it.path))
                                 }
                                 val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
@@ -281,7 +282,7 @@ fun MainScaffold(
                                 Icon(Icons.Default.Share, contentDescription = "Share")
                             }
 
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 isDeletePermanentlyConfirm = false
                                 showDeleteConfirmDialog = true
                             }) {
@@ -309,43 +310,43 @@ fun MainScaffold(
                             if (homePagerState.currentPage == 0) {
                                 DropdownMenuItem(
                                     text = { Text("Sort Photos") },
-                                    onClick = { 
+                                    onClick = {
                                         showMenu = false
-                                        showPhotoSortDialog = true 
+                                        showPhotoSortDialog = true
                                     },
                                     leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
                                 )
                             } else {
                                 DropdownMenuItem(
                                     text = { Text("Sort Albums") },
-                                    onClick = { 
+                                    onClick = {
                                         showMenu = false
-                                        showAlbumSortDialog = true 
+                                        showAlbumSortDialog = true
                                     },
                                     leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
                                 )
                             }
                             DropdownMenuItem(
                                 text = { Text("Hidden Albums") },
-                                onClick = { 
+                                onClick = {
                                     showMenu = false
-                                    navigationStack = navigationStack + Screen.HiddenAlbums 
+                                    navigationStack = navigationStack + Screen.HiddenAlbums
                                 },
                                 leadingIcon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("Locked Folder") },
-                                onClick = { 
+                                onClick = {
                                     showMenu = false
-                                    navigationStack = navigationStack + Screen.LockedFolder 
+                                    navigationStack = navigationStack + Screen.LockedFolder
                                 },
                                 leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("Settings") },
-                                onClick = { 
+                                onClick = {
                                     showMenu = false
-                                    navigationStack = navigationStack + Screen.Settings 
+                                    navigationStack = navigationStack + Screen.Settings
                                 },
                                 leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) }
                             )
@@ -370,8 +371,16 @@ fun MainScaffold(
                 navigationStack.lastOrNull { it !is Screen.Viewer } ?: Screen.Home
             }
 
-            // Render base screen (Home, Settings, Favourites, Photo Album list, etc.)
-            when (baseScreen) {
+            // Keep the base screen composed so its LazyGridState and loaded thumbnails
+            // survive back navigation, but do not draw it underneath the opaque viewer.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithContent {
+                        if (currentScreen !is Screen.Viewer) drawContent()
+                    }
+            ) {
+                when (baseScreen) {
                 Screen.Home -> {
                     HorizontalPager(
                         state = homePagerState,
@@ -451,8 +460,8 @@ fun MainScaffold(
                     PhotoScreen(
                         albumName = albumName,
                         onBack = navigateBack,
-                        onNavigateToViewer = { id -> 
-                            navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Album, albumName) 
+                        onNavigateToViewer = { id ->
+                            navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Album, albumName)
                         },
                         selectedIds = selectedIds,
                         onSelectionChange = updateSelection,
@@ -465,52 +474,98 @@ fun MainScaffold(
                 }
             }
 
+            }
+
             // Overlay full-screen viewer if active
             if (currentScreen is Screen.Viewer) {
                 val viewer = currentScreen
-                val photosForViewer by remember(viewer, allPhotos, favourites, trash, vault) {
-                    flow {
-                        val result = when (viewer.source) {
-                            Screen.ViewerSource.All -> allPhotos
-                            Screen.ViewerSource.Favourites -> favourites
-                            Screen.ViewerSource.Trash -> trash
-                            Screen.ViewerSource.Vault -> vault
-                            Screen.ViewerSource.Album -> {
-                                allPhotos.filter { 
-                                    val lastSlash = it.path.lastIndexOf('/')
-                                    if (lastSlash <= 0) false
-                                    else {
-                                        val parentPath = it.path.substring(0, lastSlash)
-                                        val prevSlash = parentPath.lastIndexOf('/')
-                                        val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
-                                        parentName == viewer.albumName
-                                    }
+                // [Legacy/Original Code commented out per user request - avoid emptyList() black screen flash on enter]
+                // val photosForViewer by remember(viewer, allPhotos, favourites, trash, vault) {
+                //     flow {
+                //         val result = when (viewer.source) {
+                //             Screen.ViewerSource.All -> allPhotos
+                //             Screen.ViewerSource.Favourites -> favourites
+                //             Screen.ViewerSource.Trash -> trash
+                //             Screen.ViewerSource.Vault -> vault
+                //             Screen.ViewerSource.Album -> {
+                //                 allPhotos.filter {
+                //                     val lastSlash = it.path.lastIndexOf('/')
+                //                     if (lastSlash <= 0) false
+                //                     else {
+                //                         val parentPath = it.path.substring(0, lastSlash)
+                //                         val prevSlash = parentPath.lastIndexOf('/')
+                //                         val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
+                //                         parentName == viewer.albumName
+                //                     }
+                //                 }
+                //             }
+                //             Screen.ViewerSource.External -> {
+                //                 val uri = viewer.externalUri ?: ""
+                //                 val mimeType = viewer.externalMimeType ?: "image/*"
+                //                 listOf(
+                //                     com.pixel.gallery.data.local.entity.MediaEntry(
+                //                         contentId = -1L,
+                //                         path = uri,
+                //                         uri = uri,
+                //                         sourceMimeType = mimeType,
+                //                         width = 0,
+                //                         height = 0,
+                //                         sourceRotationDegrees = 0,
+                //                         sizeBytes = 0,
+                //                         dateAddedSecs = 0,
+                //                         dateModifiedMillis = 0,
+                //                         isTrashed = false,
+                //                         bestTimestamp = 0L
+                //                     )
+                //                 )
+                //             }
+                //         }
+                //         emit(result)
+                //     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+                // }.collectAsState(initial = emptyList())
+                val initialPhotosForViewer = remember(viewer, allPhotos, favourites, trash, vault) {
+                    when (viewer.source) {
+                        Screen.ViewerSource.All -> allPhotos
+                        Screen.ViewerSource.Favourites -> favourites
+                        Screen.ViewerSource.Trash -> trash
+                        Screen.ViewerSource.Vault -> vault
+                        Screen.ViewerSource.Album -> {
+                            allPhotos.filter {
+                                val lastSlash = it.path.lastIndexOf('/')
+                                if (lastSlash <= 0) false
+                                else {
+                                    val parentPath = it.path.substring(0, lastSlash)
+                                    val prevSlash = parentPath.lastIndexOf('/')
+                                    val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
+                                    parentName == viewer.albumName
                                 }
                             }
-                            Screen.ViewerSource.External -> {
-                                val uri = viewer.externalUri ?: ""
-                                val mimeType = viewer.externalMimeType ?: "image/*"
-                                listOf(
-                                    com.pixel.gallery.data.local.entity.MediaEntry(
-                                        contentId = -1L,
-                                        path = uri,
-                                        uri = uri,
-                                        sourceMimeType = mimeType,
-                                        width = 0,
-                                        height = 0,
-                                        sourceRotationDegrees = 0,
-                                        sizeBytes = 0,
-                                        dateAddedSecs = 0,
-                                        dateModifiedMillis = 0,
-                                        isTrashed = false,
-                                        bestTimestamp = 0L
-                                    )
-                                )
-                            }
                         }
-                        emit(result)
-                    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
-                }.collectAsState(initial = emptyList())
+                        Screen.ViewerSource.External -> {
+                            val uri = viewer.externalUri ?: ""
+                            val mimeType = viewer.externalMimeType ?: "image/*"
+                            listOf(
+                                com.pixel.gallery.data.local.entity.MediaEntry(
+                                    contentId = -1L,
+                                    path = uri,
+                                    uri = uri,
+                                    sourceMimeType = mimeType,
+                                    width = 0,
+                                    height = 0,
+                                    sourceRotationDegrees = 0,
+                                    sizeBytes = 0,
+                                    dateAddedSecs = 0,
+                                    dateModifiedMillis = 0,
+                                    isTrashed = false,
+                                    bestTimestamp = 0L
+                                )
+                            )
+                        }
+                    }
+                }
+                val photosForViewer by remember(viewer, initialPhotosForViewer) {
+                    flow { emit(initialPhotosForViewer) }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+                }.collectAsState(initial = initialPhotosForViewer)
 
                 if (photosForViewer.isNotEmpty()) {
                     ViewerScreen(
@@ -547,10 +602,10 @@ fun MainScaffold(
 
                         tabs.forEachIndexed { index, tab ->
                             val isSelected = homePagerState.currentPage == index
-                            
+
                             // Using a pill-shaped item that shows a label when selected
                             Surface(
-                                onClick = { 
+                                onClick = {
                                     scope.launch {
                                         homePagerState.animateScrollToPage(index)
                                     }
@@ -595,7 +650,7 @@ fun MainScaffold(
                 SortCriterion("SIZE", "Size", "Smallest first", "Largest first")
             )
         }
-        
+
         val albumCriteria = remember {
             listOf(
                 SortCriterion("NAME", "Name", "A to Z", "Z to A"),
