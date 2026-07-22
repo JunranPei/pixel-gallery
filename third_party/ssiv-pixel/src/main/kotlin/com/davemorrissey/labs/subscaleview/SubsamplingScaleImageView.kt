@@ -135,6 +135,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var anim: Anim? = null
     private var isReady = false
     private var isImageLoaded = false
+    private var hasDispatchedImageDrawn = false
 
     private var bitmapPaint: Paint? = null
     private var debugTextPaint: Paint? = null
@@ -259,6 +260,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             sOrientation = 0
             isReady = false
             isImageLoaded = false
+            hasDispatchedImageDrawn = false
             bitmap = null
             cos = Math.cos(0.0)
             sin = Math.sin(0.0)
@@ -742,6 +744,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             invalidate()
         }
 
+        var imageDrawnThisFrame = false
         if (tileMap != null && getIsBaseLayerReady()) {
             val sampleSize = min(fullImageSampleSize, calculateInSampleSize(scale))
             var hasMissingTiles = false
@@ -784,6 +787,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             objectMatrix!!.setPolyToPoly(srcArray, 0, dstArray, 0, 4)
                             objectMatrix!!.postRotate(Math.toDegrees(imageRotation).toFloat(), width / 2f, height / 2f)
                             canvas.drawBitmap(tile.bitmap!!, objectMatrix!!, bitmapPaint)
+                            imageDrawnThisFrame = true
                             if (debug) {
                                 canvas.drawRect(tile.vRect!!, debugLinePaint!!)
                             }
@@ -828,6 +832,17 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
 
             canvas.drawBitmap(bitmap!!, objectMatrix!!, bitmapPaint)
+            imageDrawnThisFrame = true
+        }
+
+        if (imageDrawnThisFrame && !hasDispatchedImageDrawn) {
+            hasDispatchedImageDrawn = true
+            val drawnGeneration = imageGeneration
+            post {
+                if (drawnGeneration == imageGeneration && hasDispatchedImageDrawn) {
+                    onImageEventListener?.onImageDrawn()
+                }
+            }
         }
 
         if (debug) {
@@ -1872,6 +1887,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
     interface OnImageEventListener {
         fun onReady()
+        fun onImageDrawn()
         fun onImageLoadError(e: Exception)
         fun onImageRotation(degrees: Int)
         fun onUpEvent()

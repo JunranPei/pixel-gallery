@@ -61,6 +61,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
+import com.bumptech.glide.load.DecodeFormat
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.signature.ObjectKey
 import me.saket.telephoto.zoomable.glide.ZoomableGlideImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.ZoomSpec
@@ -122,7 +125,7 @@ fun ViewerScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var rotationLocked by remember { mutableStateOf(true) }
     var ultraHdrActive by remember { mutableStateOf(false) }
-    
+
     val context = LocalContext.current
     val currentMedia = remember(pagerState.currentPage, photos) {
         if (photos.isNotEmpty()) photos[pagerState.currentPage] else null
@@ -261,6 +264,46 @@ fun ViewerScreen(
                     )
                 } else {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val swipeThumbnailModel = remember(
+                            media.uri,
+                            media.sourceMimeType,
+                            media.sizeBytes,
+                            media.sourceRotationDegrees,
+                            media.dateModifiedMillis
+                        ) {
+                            AvesAppGlideModule.getModel(
+                                context = context,
+                                uri = Uri.parse(media.uri),
+                                mimeType = media.sourceMimeType,
+                                pageId = null,
+                                sizeBytes = media.sizeBytes,
+                                isThumbnail = true,
+                                rotationDegrees = media.sourceRotationDegrees,
+                                dateModifiedMillis = media.dateModifiedMillis
+                            )
+                        }
+                        val swipeThumbnailSignature = remember(media.dateModifiedMillis) {
+                            ObjectKey(media.dateModifiedMillis)
+                        }
+                        val swipeThumbnailTransform = remember(swipeThumbnailSignature) {
+                            { request: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
+                                request
+                                    .format(DecodeFormat.PREFER_RGB_565)
+                                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                    .signature(swipeThumbnailSignature)
+                                    .override(200)
+                                    .thumbnail(request.clone().sizeMultiplier(0.1f))
+                            }
+                        }
+
+                        GlideImage(
+                            model = swipeThumbnailModel,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
+                            requestBuilderTransform = swipeThumbnailTransform
+                        )
+
                         if (isGif) {
                             val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
                                 AvesAppGlideModule.getModel(
@@ -420,16 +463,10 @@ fun ViewerScreen(
                             )
                             */
                             val isActivePage = pagerState.settledPage == page
+                            val isPagerIdle = !pagerState.isScrollInProgress
                             val isPreviewVisible by remember(pagerState, page) {
                                 derivedStateOf {
-                                    if (pagerState.currentPage == page) {
-                                        true
-                                    } else {
-                                        val pageOffset =
-                                            (pagerState.currentPage - page) +
-                                                pagerState.currentPageOffsetFraction
-                                        kotlin.math.abs(pageOffset) < 1f
-                                    }
+                                    kotlin.math.abs(pagerState.settledPage - page) <= 1
                                 }
                             }
                             val metadataPending = isActivePage &&
@@ -485,6 +522,7 @@ fun ViewerScreen(
                                     filePath = media.path,
                                     orientationDegrees = media.sourceRotationDegrees,
                                     isActivePage = isActivePage,
+                                    isPagerIdle = isPagerIdle,
                                     isPreviewVisible = isPreviewVisible,
                                     enableSubsampling = !metadataPending,
                                     dateModifiedMillis = media.dateModifiedMillis,

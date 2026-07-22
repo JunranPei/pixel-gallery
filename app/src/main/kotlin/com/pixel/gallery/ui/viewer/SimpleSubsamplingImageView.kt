@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.Priority
 import com.bumptech.glide.load.DecodeFormat
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.request.RequestOptions
@@ -30,7 +31,9 @@ import com.pixel.gallery.ui.viewer.decoders.RawEmbeddedPreviewRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrAwareFitCenter
 import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.ThreadPoolExecutor
@@ -80,6 +83,28 @@ internal class ViewerTransformStateStore {
 
     fun save(key: String, state: SubsamplingScaleImageView.ViewState) {
         states[key] = state
+    }
+}
+
+private class PreviewRequestGuard {
+    private var target: android.widget.ImageView? = null
+    private var requestKey: String? = null
+
+    fun begin(imageView: android.widget.ImageView, key: String): Boolean {
+        if (target === imageView && requestKey == key) return false
+        clear()
+        target = imageView
+        requestKey = key
+        return true
+    }
+
+    fun isCurrent(imageView: android.widget.ImageView, key: String): Boolean =
+        target === imageView && requestKey == key
+
+    fun clear() {
+        target?.let { imageView -> Glide.with(imageView).clear(imageView) }
+        target = null
+        requestKey = null
     }
 }
 
@@ -141,6 +166,7 @@ internal fun SimpleSubsamplingImageView(
     orientationDegrees: Int = 0,
     modifier: Modifier = Modifier,
     isActivePage: Boolean = true,
+    isPagerIdle: Boolean = true,
     isPreviewVisible: Boolean = isActivePage,
     enableSubsampling: Boolean = true,
     dateModifiedMillis: Long = 0L,
@@ -166,37 +192,87 @@ internal fun SimpleSubsamplingImageView(
 
     // Two lifecycle states representing the two phases of Simple-Gallery:
     // 1. previewLoaded: set when Glide finishes loading the full-screen fitCenter bitmap into gesturesView
-    // 2. subsamplingReady: set when SubsamplingScaleImageView finishes its onReady() event
+    // 2. subsamplingReady: set only after SubsamplingScaleImageView draws its first image frame
     var previewLoaded by remember(uri, filePath) { mutableStateOf(false) }
     var subsamplingReady by remember(uri, filePath) { mutableStateOf(false) }
+    var previewDrawable by remember(uri, filePath) { mutableStateOf<Drawable?>(null) }
+    var imageAssigned by remember(uri, filePath) { mutableStateOf(false) }
+    val previewRequestGuard = remember(transformStateKey) { PreviewRequestGuard() }
     var ssivView by remember { mutableStateOf<SubsamplingScaleImageView?>(null) }
     var imageViewRef by remember { mutableStateOf<android.widget.ImageView?>(null) }
 
-    // Exactly matching Simple-Gallery scheduleZoomableView() (ZOOMABLE_VIEW_LOAD_DELAY = 100ms):
-    LaunchedEffect(isActivePage, enableSubsampling, previewLoaded, ssivView, imagePath) {
+    // Active-page bookkeeping is intentionally separate from preview loading.
+    // A preview that was loaded while swiping must not be restarted on the settle frame.
+    DisposableEffect(isActivePage, transformStateKey) {
+        if (isActivePage) {
+            ViewerLoadMetrics.begin(transformStateKey)
+        }
+        onDispose {
+            if (isActivePage) {
+                ViewerLoadMetrics.end(transformStateKey)
+            }
+        }
+    }
+
+    // Gainmap copying is only allowed for the settled page and runs away from the UI thread.
+    LaunchedEffect(isActivePage, previewLoaded, previewDrawable, transformStateKey) {
+        if (isActivePage && previewLoaded) {
+            val drawable = previewDrawable
+            val hasUltraHdr = if (drawable == null) {
+                false
+            } else {
+                withContext(Dispatchers.Default) {
+                    UltraHdrTileSupport.capture(transformStateKey, drawable)
+                }
+            }
+            onUltraHdrAvailabilityChanged(hasUltraHdr)
+        } else if (!isActivePage) {
+            UltraHdrTileSupport.clear(transformStateKey)
+            onUltraHdrAvailabilityChanged(false)
+        }
+    }
+
+    // Match Simple Gallery's delayed zoomable layer: retain the current layer while a
+    // gesture is in progress, and only start a new tile source after the pager is idle.
+    LaunchedEffect(
+        isActivePage,
+        isPagerIdle,
+        enableSubsampling,
+        previewLoaded,
+        ssivView,
+        imagePath,
+        imageAssigned
+    ) {
         val view = ssivView
-        if (isActivePage && enableSubsampling && previewLoaded && view != null && !subsamplingReady) {
-            delay(100)
-            ViewerLoadMetrics.tilesScheduled("$imagePath:$dateModifiedMillis")
-            // minScaleFactor is relaxed after onReady() so users can shrink below fit-screen.
-            // Restore it before reloading this retained pager view, otherwise SSIV starts
-            // at the stale ~1/3 minimum instead of fit-screen.
-            view.minScaleFactor = 1f
-            view.visibility = View.VISIBLE
-            view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
-            view.setImage(imagePath)
-        } else if ((!isActivePage || !enableSubsampling) && view != null) {
-            view.snapshotViewState()?.let { transformStateStore.save(transformStateKey, it) }
-            view.recycle()
-            view.visibility = View.GONE
-            subsamplingReady = false
+        when {
+            isActivePage && isPagerIdle && enableSubsampling && previewLoaded &&
+                view != null && !imageAssigned -> {
+                delay(100)
+                ViewerLoadMetrics.tilesScheduled(transformStateKey)
+                // minScaleFactor is relaxed after onReady() so users can shrink below fit-screen.
+                // Restore it before reloading this retained pager view, otherwise SSIV starts
+                // at the stale ~1/3 minimum instead of fit-screen.
+                view.minScaleFactor = 1f
+                view.visibility = View.VISIBLE
+                view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                imageAssigned = true
+                view.setImage(imagePath)
+            }
+
+            (!isActivePage || !enableSubsampling) && view != null && imageAssigned -> {
+                view.snapshotViewState()?.let { transformStateStore.save(transformStateKey, it) }
+                tileDecodeExecutor.purgePendingTasks()
+                view.recycle()
+                view.visibility = View.GONE
+                imageAssigned = false
+                subsamplingReady = false
+            }
         }
     }
 
     DisposableEffect(
         uri,
         filePath,
-        isActivePage,
         isPreviewVisible,
         imageViewRef,
         dateModifiedMillis,
@@ -205,98 +281,111 @@ internal fun SimpleSubsamplingImageView(
         val imageView = imageViewRef
         if (imageView != null && isPreviewVisible) {
             val savedTransform = transformStateStore.get(transformStateKey)
-            if (isActivePage) ViewerLoadMetrics.begin("$imagePath:$dateModifiedMillis")
             imageView.visibility = View.VISIBLE
-            imageView.rotation = savedTransform
-                ?.let { Math.toDegrees(it.rotationRadians).toFloat() }
-                ?: 0f
-            imageView.scaleX = 1f
-            imageView.scaleY = 1f
-            imageView.translationX = 0f
-            imageView.translationY = 0f
-            imageView.alpha = if (savedTransform == null) 1f else 0f
+            if (previewRequestGuard.begin(imageView, transformStateKey)) {
+                imageView.rotation = savedTransform
+                    ?.let { Math.toDegrees(it.rotationRadians).toFloat() }
+                    ?: 0f
+                imageView.scaleX = 1f
+                imageView.scaleY = 1f
+                imageView.translationX = 0f
+                imageView.translationY = 0f
+                imageView.alpha = if (savedTransform == null) 1f else 0f
 
-            val requestOptions = RequestOptions()
-                .format(DecodeFormat.PREFER_ARGB_8888)
-                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                .transform(UltraHdrAwareFitCenter)
-                .let { opts ->
-                    if (dateModifiedMillis > 0L) opts.signature(ObjectKey(dateModifiedMillis)) else opts
-                }
-
-            Glide.with(context)
-                // Match Simple Gallery's local-photo path exactly. Going through the
-                // MediaStore URI selects Glide's QMediaStore loader even though SSIV
-                // already proved that the original file is directly readable.
-                .load(previewModel ?: imagePath)
-                .apply(requestOptions)
-                .listener(object : com.bumptech.glide.request.RequestListener<Drawable> {
-                    override fun onLoadFailed(
-                        e: com.bumptech.glide.load.engine.GlideException?,
-                        model: Any?,
-                        target: com.bumptech.glide.request.target.Target<Drawable>,
-                        isFirstResource: Boolean
-                    ): Boolean {
-                        UltraHdrTileSupport.clear(transformStateKey)
-                        onUltraHdrAvailabilityChanged(false)
-                        imageView.alpha = 1f
-                        previewLoaded = true
-                        return false
+                val requestOptions = RequestOptions()
+                    .format(DecodeFormat.PREFER_ARGB_8888)
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .transform(UltraHdrAwareFitCenter)
+                    .priority(if (isActivePage) Priority.IMMEDIATE else Priority.NORMAL)
+                    .let { opts ->
+                        if (dateModifiedMillis > 0L) opts.signature(ObjectKey(dateModifiedMillis)) else opts
                     }
 
-                    override fun onResourceReady(
-                        resource: Drawable,
-                        model: Any,
-                        target: com.bumptech.glide.request.target.Target<Drawable>,
-                        dataSource: com.bumptech.glide.load.DataSource,
-                        isFirstResource: Boolean
-                    ): Boolean {
-                        val hasUltraHdr = isActivePage &&
-                            UltraHdrTileSupport.capture(transformStateKey, resource)
-                        onUltraHdrAvailabilityChanged(hasUltraHdr)
-                        imageView.viewTreeObserver.addOnPreDrawListener(
-                            object : android.view.ViewTreeObserver.OnPreDrawListener {
-                                override fun onPreDraw(): Boolean {
-                                    if (imageView.viewTreeObserver.isAlive) {
-                                        imageView.viewTreeObserver.removeOnPreDrawListener(this)
+                Glide.with(context)
+                    // Match Simple Gallery's local-photo path exactly. Going through the
+                    // MediaStore URI selects Glide's QMediaStore loader even though SSIV
+                    // already proved that the original file is directly readable.
+                    .load(previewModel ?: imagePath)
+                    .apply(requestOptions)
+                    .listener(object : com.bumptech.glide.request.RequestListener<Drawable> {
+                        override fun onLoadFailed(
+                            e: com.bumptech.glide.load.engine.GlideException?,
+                            model: Any?,
+                            target: com.bumptech.glide.request.target.Target<Drawable>,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            if (!previewRequestGuard.isCurrent(imageView, transformStateKey)) return false
+                            previewDrawable = null
+                            imageView.alpha = 1f
+                            previewLoaded = true
+                            android.util.Log.e(
+                                "SimpleSubsampling",
+                                "Preview load failed for $transformStateKey",
+                                e
+                            )
+                            return false
+                        }
+
+                        override fun onResourceReady(
+                            resource: Drawable,
+                            model: Any,
+                            target: com.bumptech.glide.request.target.Target<Drawable>,
+                            dataSource: com.bumptech.glide.load.DataSource,
+                            isFirstResource: Boolean
+                        ): Boolean {
+                            if (!previewRequestGuard.isCurrent(imageView, transformStateKey)) return false
+                            previewDrawable = resource
+                            imageView.viewTreeObserver.addOnPreDrawListener(
+                                object : android.view.ViewTreeObserver.OnPreDrawListener {
+                                    override fun onPreDraw(): Boolean {
+                                        if (imageView.viewTreeObserver.isAlive) {
+                                            imageView.viewTreeObserver.removeOnPreDrawListener(this)
+                                        }
+                                        if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
+                                            applySavedPreviewTransform(
+                                                imageView,
+                                                imageView.drawable ?: resource,
+                                                savedTransform
+                                            )
+                                            imageView.alpha = 1f
+                                        }
+                                        return true
                                     }
+                                }
+                            )
+                            // Never leave a restored preview transparent if a target is detached
+                            // before its pre-draw callback is delivered.
+                            imageView.post {
+                                if (
+                                    previewRequestGuard.isCurrent(imageView, transformStateKey) &&
+                                    imageView.alpha == 0f
+                                ) {
                                     applySavedPreviewTransform(
                                         imageView,
                                         imageView.drawable ?: resource,
                                         savedTransform
                                     )
                                     imageView.alpha = 1f
-                                    return true
                                 }
                             }
-                        )
-                        previewLoaded = true
-                        if (isActivePage) {
-                            ViewerLoadMetrics.previewReady(
-                                "$imagePath:$dateModifiedMillis",
-                                dataSource.name
-                            )
+                            previewLoaded = true
+                            ViewerLoadMetrics.previewReady(transformStateKey, dataSource.name)
+                            return false
                         }
-                        return false
-                    }
-                })
-                .into(imageView)
-        } else if (imageView != null && !isPreviewVisible) {
-            Glide.with(context).clear(imageView)
+                    })
+                    .into(imageView)
+            }
+        } else {
+            previewRequestGuard.clear()
+            previewDrawable = null
             previewLoaded = false
         }
-        onDispose {
-            if (imageView != null && !isPreviewVisible) {
-                Glide.with(context).clear(imageView)
-            }
-            UltraHdrTileSupport.clear(transformStateKey)
-            onUltraHdrAvailabilityChanged(false)
-            if (isActivePage) {
-                ViewerLoadMetrics.end("$imagePath:$dateModifiedMillis")
-            }
-        }
+        onDispose { }
     }
 
+    DisposableEffect(previewRequestGuard) {
+        onDispose { previewRequestGuard.clear() }
+    }
     // Single fixed AndroidView holding FrameLayout matching pager_photo_item.xml exactly
     AndroidView(
         modifier = modifier,
@@ -362,14 +451,19 @@ internal fun SimpleSubsamplingImageView(
                         transformStateStore.get(transformStateKey)?.let {
                             this@ssivView.restoreViewState(it)
                         }
+                        ViewerLoadMetrics.tilesReady(transformStateKey)
+                    }
+
+                    override fun onImageDrawn() {
                         subsamplingReady = true
-                        ViewerLoadMetrics.tilesReady("$imagePath:$dateModifiedMillis")
                         imageView.visibility = View.GONE
                     }
 
                     override fun onImageLoadError(e: Exception) {
                         android.util.Log.e("SimpleSubsampling", "SSIV load error: $e")
+                        subsamplingReady = false
                         visibility = View.GONE
+                        imageView.alpha = 1f
                         imageView.visibility = View.VISIBLE
                     }
 
@@ -410,11 +504,13 @@ internal fun SimpleSubsamplingImageView(
         update = {
             val imageView = imageViewRef
             if (imageView != null) {
-                imageView.visibility = when {
-                    !isPreviewVisible -> View.GONE
-                    isActivePage && subsamplingReady -> View.GONE
-                    else -> View.VISIBLE
+                val layer = when {
+                    !isPreviewVisible -> "HIDDEN"
+                    isActivePage && subsamplingReady -> "TILES"
+                    else -> "PREVIEW"
                 }
+                imageView.visibility = if (layer == "PREVIEW") View.VISIBLE else View.GONE
+
             }
         }
     )
