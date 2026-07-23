@@ -17,6 +17,7 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.Priority
 import com.bumptech.glide.load.DecodeFormat
 import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.load.resource.bitmap.DownsampleStrategy
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.signature.ObjectKey
 import com.davemorrissey.labs.subscaleview.DecoderFactory
@@ -295,6 +296,7 @@ internal fun SimpleSubsamplingImageView(
                 val requestOptions = RequestOptions()
                     .format(DecodeFormat.PREFER_ARGB_8888)
                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .downsample(DownsampleStrategy.FIT_CENTER)
                     .transform(UltraHdrAwareFitCenter)
                     .priority(if (isActivePage) Priority.IMMEDIATE else Priority.NORMAL)
                     .let { opts ->
