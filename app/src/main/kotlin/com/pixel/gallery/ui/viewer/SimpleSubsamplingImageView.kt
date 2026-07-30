@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -262,6 +263,7 @@ internal fun SimpleSubsamplingImageView(
     regionDecoderKind: ViewerRegionDecoderKind = ViewerRegionDecoderKind.PLATFORM,
     decoderSourceKey: String = "",
     transformStateStore: ViewerTransformStateStore,
+    onContentReadyChanged: (Boolean) -> Unit = {},
     onUltraHdrAvailabilityChanged: (Boolean) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
@@ -303,6 +305,7 @@ internal fun SimpleSubsamplingImageView(
     var imageViewRef by remember { mutableStateOf<android.widget.ImageView?>(null) }
     var metricsSessionId by remember(transformStateKey) { mutableStateOf(0L) }
     val renderedLayer = remember(transformStateKey) { AtomicReference("UNSET") }
+    val currentOnContentReadyChanged by rememberUpdatedState(onContentReadyChanged)
 
     // Active-page bookkeeping is intentionally separate from preview loading.
     // A preview that was loaded while swiping must not be restarted on the settle frame.
@@ -518,6 +521,7 @@ internal fun SimpleSubsamplingImageView(
                 model = requestModel,
             )
             if (metricsToken != null) {
+                currentOnContentReadyChanged(false)
                 imageView.rotation = savedTransform
                     ?.let { Math.toDegrees(it.rotationRadians).toFloat() }
                     ?: 0f
@@ -566,6 +570,7 @@ internal fun SimpleSubsamplingImageView(
                             previewDrawable = null
                             imageView.alpha = 1f
                             previewLoaded = true
+                            currentOnContentReadyChanged(false)
                             android.util.Log.e(
                                 "SimpleSubsampling",
                                 "Preview load failed for $transformStateKey",
@@ -617,6 +622,7 @@ internal fun SimpleSubsamplingImageView(
                                 }
                             }
                             previewLoaded = true
+                            currentOnContentReadyChanged(true)
                             ViewerLoadMetrics.previewReady(
                                 token = metricsToken,
                                 source = dataSource.name,
@@ -626,11 +632,16 @@ internal fun SimpleSubsamplingImageView(
                         }
                     })
                     .into(imageView)
+            } else {
+                // The request is deliberately retained across settle/active-page changes.
+                // Do not reveal the 200 px cover when no new preview was started.
+                currentOnContentReadyChanged(previewLoaded)
             }
         } else {
             previewRequestGuard.clear("not-visible")
             previewDrawable = null
             previewLoaded = false
+            currentOnContentReadyChanged(false)
         }
         onDispose { }
     }
@@ -861,7 +872,18 @@ internal fun SimpleSubsamplingImageView(
                         imageKey = transformStateKey,
                     )
                 }
-                imageView.visibility = if (layer == "PREVIEW") View.VISIBLE else View.GONE
+                if (layer == "PREVIEW") {
+                    imageView.visibility = View.VISIBLE
+                    // Preserve the transparent restore handoff until the new drawable has
+                    // received its saved transform. A retained preview returning from tiles
+                    // is already transformed and can be revealed immediately.
+                    if (previousLayer == "TILES" && previewLoaded) {
+                        imageView.alpha = 1f
+                    }
+                } else {
+                    imageView.alpha = 0f
+                    imageView.visibility = View.GONE
+                }
             }
         }
             )

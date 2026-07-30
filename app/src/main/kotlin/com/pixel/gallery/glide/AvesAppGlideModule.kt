@@ -114,7 +114,8 @@ class AvesAppGlideModule : AppGlideModule() {
             isThumbnail: Boolean = false,
             isFastScreenPreview: Boolean = false,
             rotationDegrees: Int = 0,
-            dateModifiedMillis: Long = 0L
+            dateModifiedMillis: Long = 0L,
+            allowPersistentThumbnailCache: Boolean = true,
         ): Any {
             /*if (pageId != null && MultiPageImage.isSupported(mimeType)) {
                 MultiPageImage(context, uri, mimeType, pageId)
@@ -126,7 +127,14 @@ class AvesAppGlideModule : AppGlideModule() {
             } else if (isFastScreenPreview && StorageUtils.isMediaStoreContentUri(uri)) {
                 FastScreenPreview(uri, rotationDegrees)
             } else if (isThumbnail && StorageUtils.isMediaStoreContentUri(uri)) {
-                MediaStoreThumbnail(uri, mimeType, rotationDegrees, dateModifiedMillis, sizeBytes)
+                MediaStoreThumbnail(
+                    uri,
+                    mimeType,
+                    rotationDegrees,
+                    dateModifiedMillis,
+                    sizeBytes,
+                    allowPersistentThumbnailCache,
+                )
             } else if (isVideo(mimeType)) {
                 VideoThumbnail(context, uri)
             } else {
@@ -136,7 +144,8 @@ class AvesAppGlideModule : AppGlideModule() {
                 ViewerLoadMetrics.event(
                     "GLIDE_MODEL_RESOLVED",
                     "mime=$mimeType thumbnail=$isThumbnail fastPreview=$isFastScreenPreview " +
-                        "sizeBytes=$sizeBytes model=${model.javaClass.simpleName}",
+                        "sizeBytes=$sizeBytes persistentThumbnail=$allowPersistentThumbnailCache " +
+                        "model=${model.javaClass.simpleName}",
                     imageKey = "$uri:$dateModifiedMillis",
                 )
             }

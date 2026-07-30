@@ -37,7 +37,8 @@ data class MediaStoreThumbnail(
     val mimeType: String,
     val rotationDegrees: Int,
     val dateModifiedMillis: Long,
-    val sizeBytes: Long? = null
+    val sizeBytes: Long? = null,
+    val allowPersistentCache: Boolean = true,
 )
 
 internal class MediaStoreThumbnailLoader(private val context: Context) : ModelLoader<MediaStoreThumbnail, Bitmap> {
@@ -121,11 +122,13 @@ internal class MediaStoreThumbnailFetcher(
             val isLargeFile = model.sizeBytes != null && model.sizeBytes > 5 * 1024 * 1024
             val isGridView = width < 300 && height < 300
             val isHighResRequest = width >= 200 || height >= 200
-            val usePersistentCache = isLargeFile && isHighResRequest
+            val usePersistentCache =
+                model.allowPersistentCache && isLargeFile && isHighResRequest
             ViewerLoadMetrics.event(
                 "MEDIASTORE_THUMB_POLICY",
                 "requested=${width}x$height large=$isLargeFile grid=$isGridView " +
-                    "highRes=$isHighResRequest persistent=$usePersistentCache",
+                    "highRes=$isHighResRequest allowPersistent=${model.allowPersistentCache} " +
+                    "persistent=$usePersistentCache",
                 imageKey = metricsKey,
             )
 
@@ -146,8 +149,6 @@ internal class MediaStoreThumbnailFetcher(
                             "persistent_thumbnails",
                             "persistent_thumbnails_v2",
                             "persistent_thumbnails_v3",
-                            "persistent_grid_thumbnails",
-                            "persistent_viewer_thumbnails"
                         )
                         for (legacyName in legacyDirs) {
                             val legacyDir = File(context.cacheDir, legacyName)

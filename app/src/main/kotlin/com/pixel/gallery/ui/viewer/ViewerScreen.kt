@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -432,6 +433,7 @@ fun ViewerScreen(
             val swipeMainTokenRef = remember(pageKey) {
                 AtomicReference<ViewerLoadMetrics.WorkToken?>()
             }
+            var fullPreviewReady by remember(pageKey) { mutableStateOf(false) }
             DisposableEffect(pageKey) {
                 ViewerLoadMetrics.event(
                     "PAGER_PAGE_ATTACH",
@@ -494,7 +496,10 @@ fun ViewerScreen(
                                 sizeBytes = media.sizeBytes,
                                 isThumbnail = true,
                                 rotationDegrees = media.sourceRotationDegrees,
-                                dateModifiedMillis = media.dateModifiedMillis
+                                dateModifiedMillis = media.dateModifiedMillis,
+                                // This 200 px image only bridges Grid/pager motion. Persisting it
+                                // causes JPEG writes and cache trimming on viewer entry.
+                                allowPersistentThumbnailCache = false,
                             ).also { model ->
                                 ViewerLoadMetrics.event(
                                     "SWIPE_THUMB_MODEL",
@@ -533,7 +538,9 @@ fun ViewerScreen(
                         GlideImage(
                             model = swipeThumbnailModel,
                             contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(if (fullPreviewReady) 0f else 1f),
                             contentScale = ContentScale.Fit,
                             requestBuilderTransform = swipeThumbnailTransform
                         )
@@ -767,6 +774,7 @@ fun ViewerScreen(
                                     dateModifiedMillis = media.dateModifiedMillis,
                                     isVisiblePage = isPreviewVisible,
                                     modifier = Modifier.fillMaxSize(),
+                                    onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick
                                 )
                             } else if (renderPlan is ViewerRenderPlan.RawEmbeddedPreview) {
@@ -781,6 +789,7 @@ fun ViewerScreen(
                                     isPreviewVisible = isPreviewVisible,
                                     transformStateStore = viewerTransformStateStore,
                                     modifier = Modifier.fillMaxSize(),
+                                    onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick,
                                 )
                             } else {
@@ -817,6 +826,7 @@ fun ViewerScreen(
                                         "motionPending=$metadataPending",
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
                                     transformStateStore = viewerTransformStateStore,
+                                    onContentReadyChanged = { fullPreviewReady = it },
                                     onUltraHdrAvailabilityChanged = { available ->
                                         ViewerLoadMetrics.event(
                                             "ULTRA_HDR_AVAILABILITY",
