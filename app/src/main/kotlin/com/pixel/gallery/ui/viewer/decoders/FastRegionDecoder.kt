@@ -7,12 +7,15 @@ import android.graphics.BitmapRegionDecoder
 import android.graphics.Point
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import com.davemorrissey.labs.subscaleview.ImageRegionDecoder
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -51,7 +54,10 @@ private object SsivTileCacheBudget {
 
         executor.execute {
             try {
-                val files = directory.listFiles()?.filter { it.isFile }?.sortedBy { it.lastModified() }.orEmpty()
+                val files = directory.listFiles()
+                    ?.filter { it.isFile && (it.extension == "jpg" || it.extension == "webp") }
+                    ?.sortedBy { it.lastModified() }
+                    .orEmpty()
                 var actualBytes = files.sumOf { it.length() }
                 for (file in files) {
                     if (actualBytes <= TRIM_TO_BYTES) break
@@ -80,11 +86,97 @@ fun resetSsivTileCacheBudget(context: Context) {
     SsivTileCacheBudget.reset(context.applicationContext)
 }
 
+private object SsivAlphaTileCacheWriter {
+    private val inFlight = ConcurrentHashMap.newKeySet<String>()
+    private val executor = ThreadPoolExecutor(
+        0,
+        1,
+        30L,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue<Runnable>(),
+        { runnable -> Thread(runnable, "ssiv-alpha-cache").apply { priority = Thread.MIN_PRIORITY } }
+    )
+
+    fun schedule(
+        context: Context,
+        directory: File,
+        cacheFile: File,
+        bitmap: Bitmap,
+        imageKey: String,
+        sessionId: Long,
+    ) {
+        if (cacheFile.isFile || !inFlight.add(cacheFile.absolutePath)) return
+        val snapshot = runCatching {
+            bitmap.copy(bitmap.config ?: Bitmap.Config.ARGB_8888, false)
+        }.getOrNull()
+        if (snapshot == null) {
+            inFlight.remove(cacheFile.absolutePath)
+            return
+        }
+
+        executor.execute {
+            val token = ViewerLoadMetrics.workStarted(
+                "ALPHA_TILE_CACHE_WRITE",
+                imageKey,
+                "bitmap=${snapshot.width}x${snapshot.height}",
+            )
+            val startedAt = SystemClock.elapsedRealtimeNanos()
+            val tempFile = File(directory, "${cacheFile.name}.tmp")
+            try {
+                if (!directory.exists() && !directory.mkdirs()) {
+                    throw IllegalStateException("Unable to create tile cache directory")
+                }
+                val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Bitmap.CompressFormat.WEBP_LOSSY
+                } else {
+                    @Suppress("DEPRECATION")
+                    Bitmap.CompressFormat.WEBP
+                }
+                val encoded = FileOutputStream(tempFile).use { output ->
+                    snapshot.compress(format, 90, output)
+                }
+                if (!encoded) throw IllegalStateException("Bitmap compression returned false")
+                if (cacheFile.isFile) {
+                    tempFile.delete()
+                } else if (!tempFile.renameTo(cacheFile)) {
+                    tempFile.copyTo(cacheFile, overwrite = true)
+                    tempFile.delete()
+                }
+                val bytes = cacheFile.length()
+                SsivTileCacheBudget.recordWrite(context, directory, bytes)
+                if (ViewerLoadMetrics.currentSessionId(imageKey) == sessionId) {
+                    ViewerLoadMetrics.tileWritten(
+                        imageKey = imageKey,
+                        sessionId = sessionId,
+                        durationMs = (SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L,
+                        bytes = bytes,
+                    )
+                }
+                ViewerLoadMetrics.workReady(
+                    token,
+                    source = "WEBP_ALPHA_DISK_CACHE",
+                    detail = "bytes=$bytes",
+                )
+            } catch (error: Exception) {
+                tempFile.delete()
+                cacheFile.delete()
+                ViewerLoadMetrics.workFailed(token, error.javaClass.simpleName)
+            } finally {
+                snapshot.recycle()
+                inFlight.remove(cacheFile.absolutePath)
+            }
+        }
+    }
+}
+
 class FastRegionDecoder(
     private val minTileDpi: Int,
-    private val imageVersion: String
+    private val imageVersion: String,
+    private val knownSourceWidth: Int = 0,
+    private val knownSourceHeight: Int = 0,
 ) : ImageRegionDecoder {
     private var decoder: BitmapRegionDecoder? = null
+    private var decoderInputStream: InputStream? = null
     private val decoderLock = Any()
     private var screenWidth = 1080
     private var screenHeight = 2400
@@ -92,30 +184,53 @@ class FastRegionDecoder(
     private var sourceHeight = 0
     private lateinit var tileCacheDir: File
     private lateinit var appContext: Context
+    private lateinit var sourceUri: Uri
+    private var initialized = false
     private var metricsKey: String = ""
+    private var metricsSessionId: Long = 0L
 
     override fun init(context: Context, uri: Uri): Point {
+        val initToken = ViewerLoadMetrics.workStarted(
+            "REGION_DECODER_INIT",
+            imageVersion,
+            "uriScheme=${uri.scheme} minTileDpi=$minTileDpi",
+        )
         appContext = context.applicationContext
+        sourceUri = uri
         metricsKey = imageVersion
+        metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
         screenWidth = displayMetrics.widthPixels
         screenHeight = displayMetrics.heightPixels
         tileCacheDir = File(context.cacheDir, "ssiv_tile_cache")
 
-        val inputStream = if (uri.scheme == "file" || uri.scheme == null) {
-            val path = uri.path ?: uri.toString()
-            File(path).inputStream()
+        sourceWidth = knownSourceWidth
+        sourceHeight = knownSourceHeight
+        val source = if (sourceWidth > 0 && sourceHeight > 0) {
+            "MEDIA_METADATA_LAZY"
         } else {
-            context.contentResolver.openInputStream(uri)
+            val opened = openDecoder("metadata-missing")
+            sourceWidth = opened.width
+            sourceHeight = opened.height
+            "BITMAP_REGION_DECODER"
         }
-        decoder = BitmapRegionDecoder.newInstance(inputStream!!, false)
-        sourceWidth = decoder!!.width
-        sourceHeight = decoder!!.height
+        initialized = true
+        ViewerLoadMetrics.workReady(
+            initToken,
+            source = source,
+            detail = "source=${sourceWidth}x$sourceHeight screen=${screenWidth}x$screenHeight " +
+                "session=$metricsSessionId",
+        )
         return Point(sourceWidth, sourceHeight)
     }
 
     override fun decodeRegion(rect: Rect, sampleSize: Int): Bitmap {
         synchronized(decoderLock) {
+            val decodeToken = ViewerLoadMetrics.workStarted(
+                "REGION_TILE_REQUEST",
+                imageVersion,
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+            )
             var newSampleSize = sampleSize
             if (minTileDpi <= 160) {
                 if ((rect.width() > rect.height() && screenWidth > screenHeight) || (rect.height() > rect.width() && screenHeight > screenWidth)) {
@@ -128,39 +243,49 @@ class FastRegionDecoder(
             val options = BitmapFactory.Options()
             options.inSampleSize = newSampleSize
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
-            val cacheFile = tileCacheFile(rect, newSampleSize)
+            val cacheFiles = tileCacheFiles(rect, newSampleSize)
             val metricsEnabled = ViewerLoadMetrics.isEnabled
             val cacheReadStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            decodeCachedTile(cacheFile)?.let {
+            decodeCachedTile(cacheFiles)?.let { (cacheFile, cachedBitmap) ->
                 if (metricsEnabled) {
                     ViewerLoadMetrics.cacheRead(
                         imageKey = metricsKey,
+                        sessionId = metricsSessionId,
                         hit = true,
                         durationMs = (SystemClock.elapsedRealtimeNanos() - cacheReadStartedAt) / 1_000_000L
                     )
                 }
-                return UltraHdrTileSupport.attach(
+                val attached = UltraHdrTileSupport.attach(
                     imageKey = imageVersion,
-                    baseTile = it,
+                    baseTile = cachedBitmap,
                     sourceRect = rect,
                     sourceWidth = sourceWidth,
                     sourceHeight = sourceHeight,
                 )
+                ViewerLoadMetrics.workReady(
+                    decodeToken,
+                    source = "TILE_DISK_CACHE",
+                    detail = "actualSample=$newSampleSize bitmap=${attached.width}x${attached.height} " +
+                        "config=${attached.config} bytes=${cacheFile.length()}",
+                )
+                return attached
             }
             if (metricsEnabled) {
                 ViewerLoadMetrics.cacheRead(
                     imageKey = metricsKey,
+                    sessionId = metricsSessionId,
                     hit = false,
                     durationMs = (SystemClock.elapsedRealtimeNanos() - cacheReadStartedAt) / 1_000_000L
                 )
             }
 
             val decodeStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            val bitmap = decoder?.decodeRegion(rect, options)
+            val bitmap = openDecoder("tile-cache-miss").decodeRegion(rect, options)
                 ?: throw RuntimeException("Region decoder returned null bitmap")
             if (metricsEnabled) {
                 ViewerLoadMetrics.regionDecoded(
                     imageKey = metricsKey,
+                    sessionId = metricsSessionId,
                     rect = "${rect.left},${rect.top}-${rect.right},${rect.bottom}",
                     requestedSample = sampleSize,
                     actualSample = newSampleSize,
@@ -169,61 +294,149 @@ class FastRegionDecoder(
                 )
             }
             val writeStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            saveCachedTile(cacheFile, bitmap)
-            if (metricsEnabled) {
+            val writtenFile = saveCachedTile(cacheFiles, bitmap)
+            if (metricsEnabled && writtenFile != null) {
                 ViewerLoadMetrics.tileWritten(
                     imageKey = metricsKey,
-                    durationMs = (SystemClock.elapsedRealtimeNanos() - writeStartedAt) / 1_000_000L
+                    sessionId = metricsSessionId,
+                    durationMs = (SystemClock.elapsedRealtimeNanos() - writeStartedAt) / 1_000_000L,
+                    bytes = writtenFile.length(),
                 )
             }
-            return UltraHdrTileSupport.attach(
+            val attached = UltraHdrTileSupport.attach(
                 imageKey = imageVersion,
                 baseTile = bitmap,
                 sourceRect = rect,
                 sourceWidth = sourceWidth,
                 sourceHeight = sourceHeight,
             )
+            ViewerLoadMetrics.workReady(
+                decodeToken,
+                source = "SOURCE_REGION_DECODE",
+                detail = "actualSample=$newSampleSize bitmap=${attached.width}x${attached.height} " +
+                    "config=${attached.config} cacheWrite=" +
+                    if (bitmap.hasAlpha()) "ASYNC_ALPHA" else "${writtenFile?.length() ?: 0L}B",
+            )
+            return attached
         }
     }
 
-    override fun isReady() = decoder != null && !decoder!!.isRecycled
+    override fun isReady() = initialized && decoder?.isRecycled != true
 
     override fun recycle() {
-        decoder?.recycle()
+        val token = ViewerLoadMetrics.workStarted(
+            "REGION_DECODER_RECYCLE",
+            imageVersion,
+            "ready=${isReady()}",
+        )
+        synchronized(decoderLock) {
+            decoder?.recycle()
+            decoder = null
+            decoderInputStream?.close()
+            decoderInputStream = null
+            initialized = false
+        }
+        ViewerLoadMetrics.workReady(token)
     }
-    private fun tileCacheFile(rect: Rect, sampleSize: Int): File {
+
+    private fun openDecoder(reason: String): BitmapRegionDecoder {
+        decoder?.takeIf { !it.isRecycled }?.let { return it }
+        val token = ViewerLoadMetrics.workStarted(
+            "REGION_DECODER_OPEN",
+            imageVersion,
+            "reason=$reason uriScheme=${sourceUri.scheme}",
+        )
+        try {
+            val inputStream = if (sourceUri.scheme == "file" || sourceUri.scheme == null) {
+                val path = sourceUri.path ?: sourceUri.toString()
+                File(path).inputStream()
+            } else {
+                appContext.contentResolver.openInputStream(sourceUri)
+                    ?: throw IllegalStateException("Unable to open source URI")
+            }
+            decoderInputStream = inputStream
+            val opened = BitmapRegionDecoder.newInstance(inputStream, false)
+                ?: throw IllegalStateException("Unable to create region decoder")
+            decoder = opened
+            if (sourceWidth <= 0 || sourceHeight <= 0) {
+                sourceWidth = opened.width
+                sourceHeight = opened.height
+            } else if (sourceWidth != opened.width || sourceHeight != opened.height) {
+                ViewerLoadMetrics.event(
+                    "REGION_SOURCE_DIMENSION_MISMATCH",
+                    "metadata=${sourceWidth}x$sourceHeight decoder=${opened.width}x${opened.height}",
+                    imageKey = imageVersion,
+                )
+            }
+            ViewerLoadMetrics.workReady(
+                token,
+                source = "BITMAP_REGION_DECODER",
+                detail = "source=${opened.width}x${opened.height}",
+            )
+            return opened
+        } catch (error: Exception) {
+            decoderInputStream?.close()
+            decoderInputStream = null
+            ViewerLoadMetrics.workFailed(token, error.javaClass.simpleName)
+            throw error
+        }
+    }
+
+    private data class TileCacheFiles(val jpeg: File, val webp: File)
+
+    private fun tileCacheFiles(rect: Rect, sampleSize: Int): TileCacheFiles {
         val key = "$imageVersion:${rect.left}:${rect.top}:${rect.right}:${rect.bottom}:$sampleSize"
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(key.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-        return File(tileCacheDir, "$digest.jpg")
+        return TileCacheFiles(
+            jpeg = File(tileCacheDir, "$digest.jpg"),
+            webp = File(tileCacheDir, "$digest.webp"),
+        )
     }
 
-    private fun decodeCachedTile(cacheFile: File): Bitmap? {
-        if (!cacheFile.isFile) return null
-        return try {
-            BitmapFactory.decodeFile(cacheFile.absolutePath) ?: run {
+    private fun decodeCachedTile(cacheFiles: TileCacheFiles): Pair<File, Bitmap>? {
+        for (cacheFile in listOf(cacheFiles.jpeg, cacheFiles.webp)) {
+            if (!cacheFile.isFile) continue
+            val decoded = try {
+                BitmapFactory.decodeFile(cacheFile.absolutePath) ?: run {
+                    cacheFile.delete()
+                    null
+                }
+            } catch (_: Exception) {
                 cacheFile.delete()
                 null
             }
-        } catch (_: Exception) {
-            cacheFile.delete()
-            null
+            if (decoded != null) {
+                cacheFile.setLastModified(System.currentTimeMillis())
+                return cacheFile to decoded
+            }
         }
+        return null
     }
 
-    private fun saveCachedTile(cacheFile: File, bitmap: Bitmap) {
-        // JPEG cannot preserve alpha. Keep transparent tiles in memory instead of
-        // corrupting PNG/WebP content or paying for expensive PNG compression.
-        if (bitmap.hasAlpha()) return
+    private fun saveCachedTile(cacheFiles: TileCacheFiles, bitmap: Bitmap): File? {
+        if (bitmap.hasAlpha()) {
+            SsivAlphaTileCacheWriter.schedule(
+                context = appContext,
+                directory = tileCacheDir,
+                cacheFile = cacheFiles.webp,
+                bitmap = bitmap,
+                imageKey = metricsKey,
+                sessionId = metricsSessionId,
+            )
+            return null
+        }
         try {
-            if (!tileCacheDir.exists() && !tileCacheDir.mkdirs()) return
-            FileOutputStream(cacheFile).use { output ->
+            if (!tileCacheDir.exists() && !tileCacheDir.mkdirs()) return null
+            FileOutputStream(cacheFiles.jpeg).use { output ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
             }
-            SsivTileCacheBudget.recordWrite(appContext, tileCacheDir, cacheFile.length())
+            SsivTileCacheBudget.recordWrite(appContext, tileCacheDir, cacheFiles.jpeg.length())
+            return cacheFiles.jpeg
         } catch (_: Exception) {
-            cacheFile.delete()
+            cacheFiles.jpeg.delete()
+            return null
         }
     }
 }

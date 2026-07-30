@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.WallpaperManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -51,18 +52,26 @@ import com.pixel.gallery.glide.TiffImage
 import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
 import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
 import com.pixel.gallery.ui.viewer.formats.ViewerRenderPlan
+import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.engine.GlideException
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import com.bumptech.glide.load.DecodeFormat
 import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.request.RequestListener
+import com.bumptech.glide.request.target.Target
 import com.bumptech.glide.signature.ObjectKey
 import me.saket.telephoto.zoomable.glide.ZoomableGlideImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
@@ -73,6 +82,7 @@ import me.saket.telephoto.zoomable.DoubleClickToZoomListener
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
@@ -104,6 +114,46 @@ private fun MediaEntry.canContainMotionPhoto(): Boolean =
         path.endsWith(".jpg", ignoreCase = true) ||
         path.endsWith(".jpeg", ignoreCase = true)
 
+private fun trackedDrawableListener(
+    token: ViewerLoadMetrics.WorkToken,
+    tokenRef: AtomicReference<ViewerLoadMetrics.WorkToken?>,
+) = object : RequestListener<Drawable> {
+    override fun onLoadFailed(
+        e: GlideException?,
+        model: Any?,
+        target: Target<Drawable>,
+        isFirstResource: Boolean,
+    ): Boolean {
+        if (tokenRef.compareAndSet(token, null)) {
+            ViewerLoadMetrics.workFailed(
+                token,
+                e?.rootCauses?.firstOrNull()?.javaClass?.simpleName
+                    ?: e?.javaClass?.simpleName
+                    ?: "unknown",
+            )
+        }
+        return false
+    }
+
+    override fun onResourceReady(
+        resource: Drawable,
+        model: Any,
+        target: Target<Drawable>,
+        dataSource: DataSource,
+        isFirstResource: Boolean,
+    ): Boolean {
+        if (tokenRef.compareAndSet(token, null)) {
+            ViewerLoadMetrics.workReady(
+                token,
+                source = dataSource.name,
+                detail = "drawable=${resource.intrinsicWidth}x${resource.intrinsicHeight} " +
+                    "model=${model.javaClass.simpleName} first=$isFirstResource",
+            )
+        }
+        return false
+    }
+}
+
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
@@ -111,10 +161,27 @@ fun ViewerScreen(
     initialId: Long,
     photos: List<MediaEntry>,
     onBack: () -> Unit,
+    enableUltraHdr: Boolean = false,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val initialIndex = remember(initialId, photos) {
-        photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0)
+        val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
+        photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0).also { index ->
+            ViewerLoadMetrics.event(
+                "INITIAL_INDEX_RESOLVED",
+                "initialId=$initialId index=$index count=${photos.size} " +
+                    "duration=${(android.os.SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+            )
+        }
+    }
+    val entryId = remember(initialId) {
+        ViewerLoadMetrics.ensureEntry(
+            context.applicationContext,
+            initialId,
+            source = "ViewerScreen",
+            sourceItems = photos.size,
+        )
     }
     
     val pagerState = rememberPagerState(initialPage = initialIndex) { photos.size }
@@ -126,9 +193,43 @@ fun ViewerScreen(
     var rotationLocked by remember { mutableStateOf(true) }
     var ultraHdrActive by remember { mutableStateOf(false) }
 
-    val context = LocalContext.current
     val currentMedia = remember(pagerState.currentPage, photos) {
         if (photos.isNotEmpty()) photos[pagerState.currentPage] else null
+    }
+
+    DisposableEffect(entryId) {
+        val activity = context as? Activity
+        ViewerLoadMetrics.event(
+            "VIEWER_ATTACH",
+            "initialId=$initialId initialIndex=$initialIndex count=${photos.size}",
+            entryId = entryId,
+        )
+        val frameListener = activity?.let { ViewerLoadMetrics.attachFrameMetrics(it, entryId) }
+        onDispose {
+            ViewerLoadMetrics.event("VIEWER_DISPOSE", entryId = entryId)
+            if (activity != null) {
+                ViewerLoadMetrics.detachFrameMetrics(activity, entryId, frameListener)
+            }
+            ViewerLoadMetrics.entryEnded(context.applicationContext, entryId, "viewer-dispose")
+        }
+    }
+
+    LaunchedEffect(entryId) {
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "viewer-compose")
+        delay(50)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "50ms")
+        delay(50)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "100ms")
+        delay(150)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "250ms")
+        delay(250)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "500ms")
+        delay(500)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "1000ms")
+        delay(1000)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "2000ms")
+        delay(1000)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "3000ms")
     }
 
     // Entering a camera JPEG only reads XMP. Embedded Motion Photo video is
@@ -144,14 +245,29 @@ fun ViewerScreen(
     val settledMediaCacheKey = remember(pagerState.settledPage, photos) {
         photos.getOrNull(pagerState.settledPage)?.viewerCacheKey()
     }
-    LaunchedEffect(settledMediaCacheKey) {
+    LaunchedEffect(settledMediaCacheKey, enableUltraHdr) {
+        ViewerLoadMetrics.event(
+            "HDR_STATE_RESET",
+            "settledKey=$settledMediaCacheKey enabled=$enableUltraHdr previous=$ultraHdrActive",
+            imageKey = settledMediaCacheKey,
+        )
         ultraHdrActive = false
+        if (!enableUltraHdr) {
+            UltraHdrTileSupport.clearAll()
+        }
     }
-    DisposableEffect(context, ultraHdrActive) {
+    DisposableEffect(context, enableUltraHdr, ultraHdrActive) {
         val activity = context as? Activity
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && activity != null) {
             val powerManager = context.getSystemService(PowerManager::class.java)
-            val enableHdr = ultraHdrActive && powerManager?.isPowerSaveMode != true
+            val enableHdr =
+                enableUltraHdr && ultraHdrActive && powerManager?.isPowerSaveMode != true
+            ViewerLoadMetrics.event(
+                "WINDOW_COLOR_MODE_SET",
+                "requested=${if (enableHdr) "HDR" else "DEFAULT"} " +
+                    "ultraHdrActive=$ultraHdrActive powerSave=${powerManager?.isPowerSaveMode}",
+                imageKey = settledMediaCacheKey,
+            )
             activity.window.colorMode = if (enableHdr) {
                 ActivityInfo.COLOR_MODE_HDR
             } else {
@@ -160,6 +276,11 @@ fun ViewerScreen(
         }
         onDispose {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ViewerLoadMetrics.event(
+                    "WINDOW_COLOR_MODE_DISPOSE",
+                    "requested=DEFAULT",
+                    imageKey = settledMediaCacheKey,
+                )
                 activity?.window?.colorMode = ActivityInfo.COLOR_MODE_DEFAULT
             }
         }
@@ -170,23 +291,50 @@ fun ViewerScreen(
     }
 
     LaunchedEffect(currentMediaCacheKey) {
+        val metadataToken = ViewerLoadMetrics.workStarted(
+            type = "MOTION_METADATA",
+            imageKey = currentMediaCacheKey ?: "none",
+            detail = "mime=${currentMedia?.sourceMimeType}",
+        )
         isPlayingMotion = false
         val oldFile = motionVideoFile
         motionVideoFile = null
         isExtractingMotion = false
         if (oldFile != null) {
-            withContext(Dispatchers.IO) { oldFile.delete() }
+            val deleteToken = ViewerLoadMetrics.workStarted(
+                "MOTION_TEMP_DELETE",
+                currentMediaCacheKey ?: "none",
+                "path=${oldFile.name}",
+            )
+            val deleted = withContext(Dispatchers.IO) { oldFile.delete() }
+            ViewerLoadMetrics.workReady(deleteToken, detail = "deleted=$deleted")
         }
 
         val media = currentMedia
         viewerPhotoMetadata = if (media == null || !media.canContainMotionPhoto()) {
+            ViewerLoadMetrics.workReady(metadataToken, source = "NOT_APPLICABLE")
             ViewerPhotoMetadata.NONE
         } else {
-            withContext(Dispatchers.IO) {
-                viewerPhotoMetadataCache[media.viewerCacheKey()]
-                    ?: viewModel.inspectViewerPhoto(media.path).also {
-                        viewerPhotoMetadataCache[media.viewerCacheKey()] = it
-                    }
+            val cacheKey = media.viewerCacheKey()
+            val cached = viewerPhotoMetadataCache[cacheKey]
+            if (cached != null) {
+                ViewerLoadMetrics.workReady(
+                    metadataToken,
+                    source = "MEMORY_CACHE",
+                    detail = "hasMotion=${cached.hasMotionPhoto}",
+                )
+                cached
+            } else {
+                withContext(Dispatchers.IO) {
+                    viewModel.inspectViewerPhoto(media.path)
+                }.also {
+                    viewerPhotoMetadataCache[cacheKey] = it
+                    ViewerLoadMetrics.workReady(
+                        metadataToken,
+                        source = "EXIF_XMP",
+                        detail = "hasMotion=${it.hasMotionPhoto} cacheSize=${viewerPhotoMetadataCache.size}",
+                    )
+                }
             }
         }
     }
@@ -208,9 +356,14 @@ fun ViewerScreen(
 
     // Auto-hide UI timer
     LaunchedEffect(showUI, pagerState.currentPage, isPlayingMotion) {
+        ViewerLoadMetrics.event(
+            "UI_AUTO_HIDE_SCHEDULE",
+            "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
+        )
         if (showUI && !isPlayingMotion) {
             delay(3000)
             showUI = false
+            ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
         }
     }
 
@@ -218,6 +371,11 @@ fun ViewerScreen(
     LaunchedEffect(showUI) {
         val window = (context as? Activity)?.window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, window.decorView)
+        ViewerLoadMetrics.event(
+            "SYSTEM_BARS_SET",
+            "visible=$showUI",
+            imageKey = currentMediaCacheKey,
+        )
         if (showUI) {
             controller.show(WindowInsetsCompat.Type.systemBars())
         } else {
@@ -226,8 +384,33 @@ fun ViewerScreen(
         }
     }
 
-    val isFavourite by (currentMedia?.let { viewModel.isFavourite(it.contentId) } ?: flowOf(false))
-        .collectAsState(initial = false)
+    val favouriteFlow = remember(currentMedia?.contentId) {
+        currentMedia?.let { media ->
+            viewModel.isFavourite(media.contentId)
+                .onStart {
+                    ViewerLoadMetrics.event(
+                        "FAVOURITE_QUERY_START",
+                        "contentId=${media.contentId}",
+                        imageKey = media.viewerCacheKey(),
+                    )
+                }
+                .onEach { value ->
+                    ViewerLoadMetrics.event(
+                        "FAVOURITE_QUERY_EMIT",
+                        "contentId=${media.contentId} value=$value",
+                        imageKey = media.viewerCacheKey(),
+                    )
+                }
+                .onCompletion { error ->
+                    ViewerLoadMetrics.event(
+                        "FAVOURITE_QUERY_END",
+                        "contentId=${media.contentId} error=${error?.javaClass?.simpleName ?: "none"}",
+                        imageKey = media.viewerCacheKey(),
+                    )
+                }
+        } ?: flowOf(false)
+    }
+    val isFavourite by favouriteFlow.collectAsState(initial = false)
     
     Box(
         modifier = Modifier
@@ -243,6 +426,44 @@ fun ViewerScreen(
             key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
+            val pageKey = remember(media.contentId, media.dateModifiedMillis) {
+                media.viewerCacheKey()
+            }
+            val swipeMainTokenRef = remember(pageKey) {
+                AtomicReference<ViewerLoadMetrics.WorkToken?>()
+            }
+            val swipeTinyTokenRef = remember(pageKey) {
+                AtomicReference<ViewerLoadMetrics.WorkToken?>()
+            }
+            DisposableEffect(pageKey) {
+                ViewerLoadMetrics.event(
+                    "PAGER_PAGE_ATTACH",
+                    "page=$page current=${pagerState.currentPage} settled=${pagerState.settledPage} " +
+                        "distance=${kotlin.math.abs(initialIndex - page)} mime=${media.sourceMimeType}",
+                    imageKey = pageKey,
+                )
+                onDispose {
+                    swipeMainTokenRef.getAndSet(null)?.let {
+                        ViewerLoadMetrics.workCleared(it, "page-dispose")
+                    }
+                    swipeTinyTokenRef.getAndSet(null)?.let {
+                        ViewerLoadMetrics.workCleared(it, "page-dispose")
+                    }
+                    ViewerLoadMetrics.event(
+                        "PAGER_PAGE_DISPOSE",
+                        "page=$page current=${pagerState.currentPage} settled=${pagerState.settledPage}",
+                        imageKey = pageKey,
+                    )
+                }
+            }
+            LaunchedEffect(page, pagerState.currentPage, pagerState.settledPage, pagerState.isScrollInProgress) {
+                ViewerLoadMetrics.event(
+                    "PAGER_PAGE_STATE",
+                    "page=$page current=${pagerState.currentPage} settled=${pagerState.settledPage} " +
+                        "scrolling=${pagerState.isScrollInProgress}",
+                    imageKey = pageKey,
+                )
+            }
             val isVideo = media.sourceMimeType.startsWith("video/")
             val context = LocalContext.current
             val isGif = remember(media.sourceMimeType, media.path) {
@@ -280,19 +501,51 @@ fun ViewerScreen(
                                 isThumbnail = true,
                                 rotationDegrees = media.sourceRotationDegrees,
                                 dateModifiedMillis = media.dateModifiedMillis
-                            )
+                            ).also { model ->
+                                ViewerLoadMetrics.event(
+                                    "SWIPE_THUMB_MODEL",
+                                    "page=$page model=${model.javaClass.simpleName}",
+                                    imageKey = pageKey,
+                                )
+                            }
                         }
                         val swipeThumbnailSignature = remember(media.dateModifiedMillis) {
                             ObjectKey(media.dateModifiedMillis)
                         }
-                        val swipeThumbnailTransform = remember(swipeThumbnailSignature) {
+                        val swipeThumbnailTransform = remember(
+                            swipeThumbnailSignature,
+                            pageKey,
+                            page,
+                        ) {
                             { request: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
-                                request
+                                val configured = request
                                     .format(DecodeFormat.PREFER_RGB_565)
                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                     .signature(swipeThumbnailSignature)
                                     .override(200)
-                                    .thumbnail(request.clone().sizeMultiplier(0.1f))
+                                val tinyToken = ViewerLoadMetrics.workStarted(
+                                    "SWIPE_THUMB_20PX",
+                                    pageKey,
+                                    "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
+                                )
+                                swipeTinyTokenRef.getAndSet(tinyToken)?.let {
+                                    ViewerLoadMetrics.workCleared(it, "request-replaced")
+                                }
+                                val tinyRequest = configured.clone()
+                                    .sizeMultiplier(0.1f)
+                                    .listener(trackedDrawableListener(tinyToken, swipeTinyTokenRef))
+
+                                val mainToken = ViewerLoadMetrics.workStarted(
+                                    "SWIPE_THUMB_200PX",
+                                    pageKey,
+                                    "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
+                                )
+                                swipeMainTokenRef.getAndSet(mainToken)?.let {
+                                    ViewerLoadMetrics.workCleared(it, "request-replaced")
+                                }
+                                configured
+                                    .thumbnail(tinyRequest)
+                                    .listener(trackedDrawableListener(mainToken, swipeMainTokenRef))
                             }
                         }
 
@@ -473,7 +726,13 @@ fun ViewerScreen(
                                 pagerState.currentPage == page &&
                                 media.canContainMotionPhoto() && viewerPhotoMetadata == null
                             val renderPlan = remember(media.contentId, media.dateModifiedMillis) {
-                                ViewerFormatRegistry.resolve(media)
+                                ViewerFormatRegistry.resolve(media).also {
+                                    ViewerLoadMetrics.event(
+                                        "RENDER_PLAN_RESOLVED",
+                                        "page=$page plan=$it",
+                                        imageKey = pageKey,
+                                    )
+                                }
                             }
                             val onImageClick = {
                                 if (isPlayingMotion) isPlayingMotion = false else showUI = !showUI
@@ -526,11 +785,26 @@ fun ViewerScreen(
                                     isPreviewVisible = isPreviewVisible,
                                     enableSubsampling = !metadataPending,
                                     dateModifiedMillis = media.dateModifiedMillis,
+                                    sourceWidth = media.width,
+                                    sourceHeight = media.height,
+                                    enableUltraHdr = enableUltraHdr,
                                     previewModel = previewModel,
+                                    metricsDetail = "id=${media.contentId} mime=${media.sourceMimeType} " +
+                                        "bytes=${media.sizeBytes} source=${media.width}x${media.height} " +
+                                        "rotation=${media.sourceRotationDegrees} modified=${media.dateModifiedMillis} " +
+                                        "preview=${tiledPlan.previewKind} decoder=${tiledPlan.regionDecoderKind} " +
+                                        "motionPending=$metadataPending",
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
                                     transformStateStore = viewerTransformStateStore,
                                     onUltraHdrAvailabilityChanged = { available ->
-                                        if (pagerState.settledPage == page) ultraHdrActive = available
+                                        ViewerLoadMetrics.event(
+                                            "ULTRA_HDR_AVAILABILITY",
+                                            "page=$page available=$available settled=${pagerState.settledPage}",
+                                            imageKey = pageKey,
+                                        )
+                                        if (enableUltraHdr && pagerState.settledPage == page) {
+                                            ultraHdrActive = available
+                                        }
                                     },
                                     modifier = Modifier.fillMaxSize(),
                                     onClick = onImageClick

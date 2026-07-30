@@ -1,6 +1,8 @@
 package com.pixel.gallery.ui.viewer
 
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.runtime.Composable
@@ -39,6 +41,7 @@ import java.io.File
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 // Custom LIFO (Last-In-First-Out) Queue to prioritize newly submitted active page tasks
 class LIFOLinkedBlockingDeque<T> : LinkedBlockingDeque<T>() {
@@ -63,8 +66,10 @@ class LIFOLinkedBlockingDeque<T> : LinkedBlockingDeque<T>() {
 class LIFOThreadPoolExecutor(corePoolSize: Int, maximumPoolSize: Int, keepAliveTime: Long, unit: TimeUnit) :
     ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, unit, LIFOLinkedBlockingDeque<Runnable>()) {
 
-    fun purgePendingTasks() {
+    fun purgePendingTasks(): Int {
+        val count = queue.size
         queue.clear()
+        return count
     }
 }
 
@@ -90,23 +95,48 @@ internal class ViewerTransformStateStore {
 private class PreviewRequestGuard {
     private var target: android.widget.ImageView? = null
     private var requestKey: String? = null
+    private var metricsToken: ViewerLoadMetrics.PreviewToken? = null
 
-    fun begin(imageView: android.widget.ImageView, key: String): Boolean {
-        if (target === imageView && requestKey == key) return false
-        clear()
+    fun begin(
+        imageView: android.widget.ImageView,
+        key: String,
+        detail: String,
+        activeAtStart: Boolean,
+        model: Any,
+    ): ViewerLoadMetrics.PreviewToken? {
+        if (target === imageView && requestKey == key) return null
+        clear("replaced")
         target = imageView
         requestKey = key
-        return true
+        return ViewerLoadMetrics.previewStarted(
+            imageKey = key,
+            activeAtStart = activeAtStart,
+            viewWidth = imageView.width,
+            viewHeight = imageView.height,
+            modelType = model.javaClass.simpleName.ifEmpty { model.javaClass.name },
+            detail = detail,
+        ).also { metricsToken = it }
     }
 
     fun isCurrent(imageView: android.widget.ImageView, key: String): Boolean =
         target === imageView && requestKey == key
 
-    fun clear() {
+    fun clear(reason: String) {
+        metricsToken?.let { ViewerLoadMetrics.previewCleared(it, reason) }
         target?.let { imageView -> Glide.with(imageView).clear(imageView) }
         target = null
         requestKey = null
+        metricsToken = null
     }
+}
+
+private fun drawableMetrics(drawable: Drawable): String {
+    val bitmap = (drawable as? BitmapDrawable)?.bitmap
+        ?: return "drawable=${drawable.intrinsicWidth}x${drawable.intrinsicHeight} bitmap=none"
+    val hasGainmap = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && bitmap.hasGainmap()
+    return "drawable=${drawable.intrinsicWidth}x${drawable.intrinsicHeight} " +
+        "bitmap=${bitmap.width}x${bitmap.height} config=${bitmap.config} " +
+        "bytes=${bitmap.allocationByteCount} gainmap=$hasGainmap"
 }
 
 private fun applySavedPreviewTransform(
@@ -171,7 +201,11 @@ internal fun SimpleSubsamplingImageView(
     isPreviewVisible: Boolean = isActivePage,
     enableSubsampling: Boolean = true,
     dateModifiedMillis: Long = 0L,
+    sourceWidth: Int = 0,
+    sourceHeight: Int = 0,
+    enableUltraHdr: Boolean = false,
     previewModel: Any? = null,
+    metricsDetail: String = "",
     regionDecoderKind: ViewerRegionDecoderKind = ViewerRegionDecoderKind.PLATFORM,
     decoderSourceKey: String = "",
     transformStateStore: ViewerTransformStateStore,
@@ -201,24 +235,61 @@ internal fun SimpleSubsamplingImageView(
     val previewRequestGuard = remember(transformStateKey) { PreviewRequestGuard() }
     var ssivView by remember { mutableStateOf<SubsamplingScaleImageView?>(null) }
     var imageViewRef by remember { mutableStateOf<android.widget.ImageView?>(null) }
+    var metricsSessionId by remember(transformStateKey) { mutableStateOf(0L) }
+    val renderedLayer = remember(transformStateKey) { AtomicReference("UNSET") }
 
     // Active-page bookkeeping is intentionally separate from preview loading.
     // A preview that was loaded while swiping must not be restarted on the settle frame.
     DisposableEffect(isActivePage, transformStateKey) {
-        if (isActivePage) {
-            ViewerLoadMetrics.begin(transformStateKey)
-        }
+        val startedSessionId = if (isActivePage) {
+            ViewerLoadMetrics.begin(context.applicationContext, transformStateKey, metricsDetail)
+        } else 0L
+        ViewerLoadMetrics.event(
+            "IMAGE_ACTIVE_STATE",
+            "active=$isActivePage session=$startedSessionId previewVisible=$isPreviewVisible " +
+                "pagerIdle=$isPagerIdle subsampling=$enableSubsampling",
+            imageKey = transformStateKey,
+        )
+        metricsSessionId = startedSessionId
         onDispose {
-            if (isActivePage) {
-                ViewerLoadMetrics.end(transformStateKey)
+            if (startedSessionId != 0L) {
+                ViewerLoadMetrics.end(context.applicationContext, transformStateKey, startedSessionId)
+            }
+            if (metricsSessionId == startedSessionId) {
+                metricsSessionId = 0L
             }
         }
     }
 
+    LaunchedEffect(metricsSessionId, transformStateKey) {
+        val sessionId = metricsSessionId
+        if (sessionId == 0L) return@LaunchedEffect
+        delay(250)
+        ViewerLoadMetrics.powerSample(context.applicationContext, transformStateKey, sessionId, "250ms")
+        delay(750)
+        ViewerLoadMetrics.powerSample(context.applicationContext, transformStateKey, sessionId, "1000ms")
+        delay(2000)
+        ViewerLoadMetrics.powerSample(context.applicationContext, transformStateKey, sessionId, "3000ms")
+    }
+
     // Gainmap copying is only allowed for the settled page and runs away from the UI thread.
-    LaunchedEffect(isActivePage, previewLoaded, previewDrawable, transformStateKey) {
-        if (isActivePage && previewLoaded) {
+    LaunchedEffect(
+        enableUltraHdr,
+        isActivePage,
+        previewLoaded,
+        previewDrawable,
+        transformStateKey,
+    ) {
+        if (!enableUltraHdr) {
+            UltraHdrTileSupport.clear(transformStateKey)
+            onUltraHdrAvailabilityChanged(false)
+        } else if (isActivePage && previewLoaded) {
             val drawable = previewDrawable
+            val token = ViewerLoadMetrics.workStarted(
+                "GAINMAP_CAPTURE",
+                transformStateKey,
+                "drawable=${drawable?.javaClass?.simpleName ?: "none"}",
+            )
             val hasUltraHdr = if (drawable == null) {
                 false
             } else {
@@ -226,8 +297,17 @@ internal fun SimpleSubsamplingImageView(
                     UltraHdrTileSupport.capture(transformStateKey, drawable)
                 }
             }
+            ViewerLoadMetrics.workReady(
+                token,
+                source = if (hasUltraHdr) "GAINMAP_PRESENT" else "NO_GAINMAP",
+            )
             onUltraHdrAvailabilityChanged(hasUltraHdr)
         } else if (!isActivePage) {
+            ViewerLoadMetrics.event(
+                "GAINMAP_CLEAR_REQUEST",
+                "reason=inactive",
+                imageKey = transformStateKey,
+            )
             UltraHdrTileSupport.clear(transformStateKey)
             onUltraHdrAvailabilityChanged(false)
         }
@@ -248,25 +328,54 @@ internal fun SimpleSubsamplingImageView(
         when {
             isActivePage && isPagerIdle && enableSubsampling && previewLoaded &&
                 view != null && !imageAssigned -> {
-                delay(100)
-                ViewerLoadMetrics.tilesScheduled(transformStateKey)
-                // minScaleFactor is relaxed after onReady() so users can shrink below fit-screen.
-                // Restore it before reloading this retained pager view, otherwise SSIV starts
-                // at the stale ~1/3 minimum instead of fit-screen.
-                view.minScaleFactor = 1f
-                view.visibility = View.VISIBLE
-                view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
-                imageAssigned = true
-                view.setImage(imagePath)
+                val token = ViewerLoadMetrics.workStarted(
+                    "SSIV_ASSIGN_IMAGE",
+                    transformStateKey,
+                    "delay=100ms executorActive=${tileDecodeExecutor.activeCount} " +
+                        "executorQueued=${tileDecodeExecutor.queue.size}",
+                )
+                var tokenFinished = false
+                try {
+                    delay(100)
+                    ViewerLoadMetrics.tilesScheduled(transformStateKey)
+                    // minScaleFactor is relaxed after onReady() so users can shrink below fit-screen.
+                    // Restore it before reloading this retained pager view, otherwise SSIV starts
+                    // at the stale ~1/3 minimum instead of fit-screen.
+                    view.minScaleFactor = 1f
+                    view.visibility = View.VISIBLE
+                    view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                    imageAssigned = true
+                    view.setImage(imagePath)
+                    ViewerLoadMetrics.workReady(
+                        token,
+                        source = "SET_IMAGE_RETURNED",
+                        detail = "executorActive=${tileDecodeExecutor.activeCount} " +
+                            "executorQueued=${tileDecodeExecutor.queue.size}",
+                    )
+                    tokenFinished = true
+                } finally {
+                    if (!tokenFinished) {
+                        ViewerLoadMetrics.workCleared(token, "effect-cancelled")
+                    }
+                }
             }
 
             (!isActivePage || !enableSubsampling) && view != null && imageAssigned -> {
+                val recycleToken = ViewerLoadMetrics.workStarted(
+                    "SSIV_RECYCLE",
+                    transformStateKey,
+                    "reason=${if (!isActivePage) "inactive" else "subsampling-disabled"}",
+                )
                 view.snapshotViewState()?.let { transformStateStore.save(transformStateKey, it) }
-                tileDecodeExecutor.purgePendingTasks()
+                val purged = tileDecodeExecutor.purgePendingTasks()
                 view.recycle()
                 view.visibility = View.GONE
                 imageAssigned = false
                 subsamplingReady = false
+                ViewerLoadMetrics.workReady(
+                    recycleToken,
+                    detail = "purged=$purged executorActive=${tileDecodeExecutor.activeCount}",
+                )
             }
         }
     }
@@ -277,13 +386,22 @@ internal fun SimpleSubsamplingImageView(
         isPreviewVisible,
         imageViewRef,
         dateModifiedMillis,
-        previewModel
+        previewModel,
+        enableUltraHdr,
     ) {
         val imageView = imageViewRef
         if (imageView != null && isPreviewVisible) {
             val savedTransform = transformStateStore.get(transformStateKey)
             imageView.visibility = View.VISIBLE
-            if (previewRequestGuard.begin(imageView, transformStateKey)) {
+            val requestModel = previewModel ?: imagePath
+            val metricsToken = previewRequestGuard.begin(
+                imageView = imageView,
+                key = transformStateKey,
+                detail = metricsDetail,
+                activeAtStart = isActivePage,
+                model = requestModel,
+            )
+            if (metricsToken != null) {
                 imageView.rotation = savedTransform
                     ?.let { Math.toDegrees(it.rotationRadians).toFloat() }
                     ?: 0f
@@ -297,8 +415,14 @@ internal fun SimpleSubsamplingImageView(
                     .format(DecodeFormat.PREFER_ARGB_8888)
                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                     .downsample(DownsampleStrategy.FIT_CENTER)
-                    .transform(UltraHdrAwareFitCenter)
                     .priority(if (isActivePage) Priority.IMMEDIATE else Priority.NORMAL)
+                    .let { opts ->
+                        if (enableUltraHdr) {
+                            opts.transform(UltraHdrAwareFitCenter)
+                        } else {
+                            opts.fitCenter()
+                        }
+                    }
                     .let { opts ->
                         if (dateModifiedMillis > 0L) opts.signature(ObjectKey(dateModifiedMillis)) else opts
                     }
@@ -317,6 +441,12 @@ internal fun SimpleSubsamplingImageView(
                             isFirstResource: Boolean
                         ): Boolean {
                             if (!previewRequestGuard.isCurrent(imageView, transformStateKey)) return false
+                            ViewerLoadMetrics.previewFailed(
+                                metricsToken,
+                                e?.rootCauses?.firstOrNull()?.javaClass?.simpleName
+                                    ?: e?.javaClass?.simpleName
+                                    ?: "unknown",
+                            )
                             previewDrawable = null
                             imageView.alpha = 1f
                             previewLoaded = true
@@ -371,14 +501,18 @@ internal fun SimpleSubsamplingImageView(
                                 }
                             }
                             previewLoaded = true
-                            ViewerLoadMetrics.previewReady(transformStateKey, dataSource.name)
+                            ViewerLoadMetrics.previewReady(
+                                token = metricsToken,
+                                source = dataSource.name,
+                                detail = "view=${imageView.width}x${imageView.height} ${drawableMetrics(resource)}",
+                            )
                             return false
                         }
                     })
                     .into(imageView)
             }
         } else {
-            previewRequestGuard.clear()
+            previewRequestGuard.clear("not-visible")
             previewDrawable = null
             previewLoaded = false
         }
@@ -386,12 +520,17 @@ internal fun SimpleSubsamplingImageView(
     }
 
     DisposableEffect(previewRequestGuard) {
-        onDispose { previewRequestGuard.clear() }
+        onDispose { previewRequestGuard.clear("dispose") }
     }
     // Single fixed AndroidView holding FrameLayout matching pager_photo_item.xml exactly
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
+            ViewerLoadMetrics.event(
+                "ANDROID_VIEW_FACTORY",
+                "previewVisible=$isPreviewVisible active=$isActivePage decoder=$regionDecoderKind",
+                imageKey = transformStateKey,
+            )
             val frameLayout = android.widget.FrameLayout(ctx)
             val imageView = android.widget.ImageView(ctx).apply {
                 layoutParams = android.widget.FrameLayout.LayoutParams(
@@ -427,7 +566,9 @@ internal fun SimpleSubsamplingImageView(
                     override fun make(): ImageRegionDecoder = when (regionDecoderKind) {
                         ViewerRegionDecoderKind.PLATFORM -> FastRegionDecoder(
                             minTileDpi = minTileDpi,
-                            imageVersion = "$imagePath:$dateModifiedMillis"
+                            imageVersion = "$imagePath:$dateModifiedMillis",
+                            knownSourceWidth = sourceWidth,
+                            knownSourceHeight = sourceHeight,
                         )
                         ViewerRegionDecoderKind.TIFF -> TiffRegionDecoder()
                         ViewerRegionDecoderKind.SVG -> SvgRegionDecoder()
@@ -454,14 +595,31 @@ internal fun SimpleSubsamplingImageView(
                             this@ssivView.restoreViewState(it)
                         }
                         ViewerLoadMetrics.tilesReady(transformStateKey)
+                        ViewerLoadMetrics.event(
+                            "SSIV_READY",
+                            "source=${sWidth}x${sHeight} scale=$scale minScaleFactor=$minScaleFactor " +
+                                "maxScale=$maxScale executorActive=${tileDecodeExecutor.activeCount} " +
+                                "executorQueued=${tileDecodeExecutor.queue.size}",
+                            imageKey = transformStateKey,
+                        )
                     }
 
                     override fun onImageDrawn() {
                         subsamplingReady = true
                         imageView.visibility = View.GONE
+                        ViewerLoadMetrics.event(
+                            "SSIV_FIRST_DRAWN",
+                            "scale=$scale center=${snapshotViewState()?.sourceCenter}",
+                            imageKey = transformStateKey,
+                        )
                     }
 
                     override fun onImageLoadError(e: Exception) {
+                        ViewerLoadMetrics.event(
+                            "SSIV_LOAD_ERROR",
+                            "error=${e.javaClass.simpleName}:${e.message}",
+                            imageKey = transformStateKey,
+                        )
                         android.util.Log.e("SimpleSubsampling", "SSIV load error: $e")
                         subsamplingReady = false
                         visibility = View.GONE
@@ -487,12 +645,22 @@ internal fun SimpleSubsamplingImageView(
                 }
 
                 addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                    override fun onViewAttachedToWindow(v: View) {}
+                    override fun onViewAttachedToWindow(v: View) {
+                        ViewerLoadMetrics.event(
+                            "SSIV_VIEW_ATTACHED",
+                            imageKey = transformStateKey,
+                        )
+                    }
                     override fun onViewDetachedFromWindow(v: View) {
+                        val token = ViewerLoadMetrics.workStarted(
+                            "SSIV_DETACH_RECYCLE",
+                            transformStateKey,
+                        )
                         this@ssivView.snapshotViewState()?.let {
                             transformStateStore.save(transformStateKey, it)
                         }
                         recycle()
+                        ViewerLoadMetrics.workReady(token)
                     }
                 })
             }
@@ -511,8 +679,17 @@ internal fun SimpleSubsamplingImageView(
                     isActivePage && subsamplingReady -> "TILES"
                     else -> "PREVIEW"
                 }
+                val previousLayer = renderedLayer.getAndSet(layer)
+                if (previousLayer != layer) {
+                    ViewerLoadMetrics.event(
+                        "VIEWER_LAYER_CHANGE",
+                        "from=$previousLayer to=$layer active=$isActivePage " +
+                            "previewVisible=$isPreviewVisible previewLoaded=$previewLoaded " +
+                            "tilesReady=$subsamplingReady",
+                        imageKey = transformStateKey,
+                    )
+                }
                 imageView.visibility = if (layer == "PREVIEW") View.VISIBLE else View.GONE
-
             }
         }
     )

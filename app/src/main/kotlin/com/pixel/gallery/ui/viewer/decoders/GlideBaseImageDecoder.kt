@@ -10,10 +10,17 @@ import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.request.target.Target
 import com.bumptech.glide.signature.ObjectKey
 import com.davemorrissey.labs.subscaleview.ImageDecoder
+import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import java.io.File
 
 class GlideBaseImageDecoder(private val dateModifiedMillis: Long) : ImageDecoder {
     override fun decode(context: Context, uri: Uri): Bitmap {
+        val imageKey = "${uri}:$dateModifiedMillis"
+        val token = ViewerLoadMetrics.workStarted(
+            "SSIV_BASE_GLIDE_DECODE",
+            imageKey,
+            "uriScheme=${uri.scheme} requested=SIZE_ORIGINAL",
+        )
         val options = RequestOptions()
             .format(DecodeFormat.PREFER_ARGB_8888)
             .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
@@ -36,6 +43,18 @@ class GlideBaseImageDecoder(private val dateModifiedMillis: Long) : ImageDecoder
             .apply(options)
             .into(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL)
 
-        return builder.get()
+        return try {
+            builder.get().also { bitmap ->
+                ViewerLoadMetrics.workReady(
+                    token,
+                    source = "GLIDE_BLOCKING_GET",
+                    detail = "bitmap=${bitmap.width}x${bitmap.height} config=${bitmap.config} " +
+                        "allocation=${bitmap.allocationByteCount}",
+                )
+            }
+        } catch (error: Exception) {
+            ViewerLoadMetrics.workFailed(token, error.javaClass.simpleName)
+            throw error
+        }
     }
 }

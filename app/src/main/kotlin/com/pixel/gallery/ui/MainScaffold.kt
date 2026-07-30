@@ -30,6 +30,7 @@ import com.pixel.gallery.ui.gallery.TrashScreen
 import com.pixel.gallery.ui.gallery.HiddenAlbumsScreen
 import com.pixel.gallery.ui.gallery.PhotoScreen
 import com.pixel.gallery.ui.locked.LockedFolderScreen
+import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import com.pixel.gallery.ui.viewer.ViewerScreen
 import com.pixel.gallery.ui.settings.ExcludedFoldersScreen
 import com.pixel.gallery.ui.settings.LicensesScreen
@@ -100,6 +101,7 @@ fun MainScaffold(
     initialHomeTab: Int = -1,
     photosViewModel: PhotosViewModel = hiltViewModel()
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val allPhotos by photosViewModel.photos.collectAsState()
     val groupedPhotos by photosViewModel.groupedPhotos.collectAsState()
     val favourites by photosViewModel.favourites.collectAsState()
@@ -134,12 +136,53 @@ fun MainScaffold(
 
     LaunchedEffect(externalMedia) {
         externalMedia?.let { media ->
+            ViewerLoadMetrics.entryRequested(
+                context = context.applicationContext,
+                contentId = -1L,
+                source = Screen.ViewerSource.External.name,
+                sourceItems = 1,
+                detail = "externalUri=${media.uri}",
+            )
             navigationStack = listOf(Screen.Home, Screen.Viewer(initialId = -1L, source = Screen.ViewerSource.External, externalUri = media.uri, externalMimeType = media.mimeType))
             photosViewModel.clearExternalMediaUri()
         }
     }
 
     val currentScreen = navigationStack.last()
+
+    LaunchedEffect(allPhotos) {
+        if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            ViewerLoadMetrics.event(
+                "SOURCE_FLOW_EMIT",
+                "flow=allPhotos count=${allPhotos.size} screen=${currentScreen.javaClass.simpleName}",
+            )
+        }
+    }
+    LaunchedEffect(favourites) {
+        if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            ViewerLoadMetrics.event("SOURCE_FLOW_EMIT", "flow=favourites count=${favourites.size}")
+        }
+    }
+    LaunchedEffect(trash) {
+        if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            ViewerLoadMetrics.event("SOURCE_FLOW_EMIT", "flow=trash count=${trash.size}")
+        }
+    }
+    LaunchedEffect(vault) {
+        if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            ViewerLoadMetrics.event("SOURCE_FLOW_EMIT", "flow=vault count=${vault.size}")
+        }
+    }
+    LaunchedEffect(groupedPhotos) {
+        if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            ViewerLoadMetrics.event("SOURCE_FLOW_EMIT", "flow=groupedPhotos groups=${groupedPhotos.size}")
+        }
+    }
+    LaunchedEffect(albums) {
+        if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            ViewerLoadMetrics.event("SOURCE_FLOW_EMIT", "flow=albums count=${albums.size}")
+        }
+    }
 
     // Hoisted Grid States for persistence
     val recentsGridState = rememberLazyGridState()
@@ -148,6 +191,9 @@ fun MainScaffold(
     val trashGridState = rememberLazyGridState()
     val vaultGridState = rememberLazyGridState()
     val albumGridStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
+    val albumPhotoLists = remember {
+        mutableStateMapOf<String, List<com.pixel.gallery.data.local.entity.MediaEntry>>()
+    }
 
     val startupAtAlbums by photosViewModel.startupAtAlbums.collectAsState()
     val homePagerState = rememberPagerState(pageCount = { 2 })
@@ -195,6 +241,12 @@ fun MainScaffold(
 
     // Reset selection when navigating
     LaunchedEffect(currentScreen) {
+        if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            ViewerLoadMetrics.event(
+                "NAVIGATION_SCREEN",
+                "screen=$currentScreen baseGridRetained=${currentScreen is Screen.Viewer}",
+            )
+        }
         selectedIds = emptySet()
     }
 
@@ -213,7 +265,6 @@ fun MainScaffold(
     }
 
     val colorScheme = MaterialTheme.colorScheme
-    val context = androidx.compose.ui.platform.LocalContext.current
     val navigateBack: () -> Unit = {
         if (navigationStack.size > 1) {
             navigationStack = navigationStack.dropLast(1)
@@ -390,7 +441,15 @@ fun MainScaffold(
                         when (page) {
                             0 -> PhotosScreen(
                                 items = groupedPhotos,
-                                onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.All) },
+                                onNavigateToViewer = { id ->
+                                    ViewerLoadMetrics.entryRequested(
+                                        context.applicationContext,
+                                        id,
+                                        Screen.ViewerSource.All.name,
+                                        allPhotos.size,
+                                    )
+                                    navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.All)
+                                },
                                 selectedIds = selectedIds,
                                 onSelectionChange = updateSelection,
                                 onToggleSelection = toggleSelection,
@@ -425,7 +484,15 @@ fun MainScaffold(
                 )
                 Screen.Favourites -> FavouritesScreen(
                     onBack = navigateBack,
-                    onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Favourites) },
+                    onNavigateToViewer = { id ->
+                        ViewerLoadMetrics.entryRequested(
+                            context.applicationContext,
+                            id,
+                            Screen.ViewerSource.Favourites.name,
+                            favourites.size,
+                        )
+                        navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Favourites)
+                    },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
                     onToggleSelection = toggleSelection,
@@ -434,7 +501,15 @@ fun MainScaffold(
                 )
                 Screen.Trash -> TrashScreen(
                     onBack = navigateBack,
-                    onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Trash) },
+                    onNavigateToViewer = { id ->
+                        ViewerLoadMetrics.entryRequested(
+                            context.applicationContext,
+                            id,
+                            Screen.ViewerSource.Trash.name,
+                            trash.size,
+                        )
+                        navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Trash)
+                    },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
                     onToggleSelection = toggleSelection,
@@ -444,7 +519,15 @@ fun MainScaffold(
                 Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = navigateBack)
                 Screen.LockedFolder -> LockedFolderScreen(
                     onBack = navigateBack,
-                    onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Vault) },
+                    onNavigateToViewer = { id ->
+                        ViewerLoadMetrics.entryRequested(
+                            context.applicationContext,
+                            id,
+                            Screen.ViewerSource.Vault.name,
+                            vault.size,
+                        )
+                        navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Vault)
+                    },
                     selectedIds = selectedIds,
                     onSelectionChange = updateSelection,
                     onToggleSelection = toggleSelection,
@@ -461,11 +544,21 @@ fun MainScaffold(
                         albumName = albumName,
                         onBack = navigateBack,
                         onNavigateToViewer = { id ->
+                            ViewerLoadMetrics.entryRequested(
+                                context.applicationContext,
+                                id,
+                                Screen.ViewerSource.Album.name,
+                                allPhotos.size,
+                                detail = "album=$albumName",
+                            )
                             navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Album, albumName)
                         },
                         selectedIds = selectedIds,
                         onSelectionChange = updateSelection,
                         onToggleSelection = toggleSelection,
+                        onAlbumPhotosChanged = { photos ->
+                            albumPhotoLists[albumName] = photos
+                        },
                         gridState = albumState
                     )
                 }
@@ -479,6 +572,7 @@ fun MainScaffold(
             // Overlay full-screen viewer if active
             if (currentScreen is Screen.Viewer) {
                 val viewer = currentScreen
+                val cachedAlbumPhotos = viewer.albumName?.let(albumPhotoLists::get)
                 // [Legacy/Original Code commented out per user request - avoid emptyList() black screen flash on enter]
                 // val photosForViewer by remember(viewer, allPhotos, favourites, trash, vault) {
                 //     flow {
@@ -523,21 +617,33 @@ fun MainScaffold(
                 //         emit(result)
                 //     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
                 // }.collectAsState(initial = emptyList())
-                val initialPhotosForViewer = remember(viewer, allPhotos, favourites, trash, vault) {
-                    when (viewer.source) {
+                val initialPhotosForViewer = remember(
+                    viewer,
+                    allPhotos,
+                    favourites,
+                    trash,
+                    vault,
+                    cachedAlbumPhotos,
+                ) {
+                    val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
+                    var listSource = "DIRECT"
+                    val result = when (viewer.source) {
                         Screen.ViewerSource.All -> allPhotos
                         Screen.ViewerSource.Favourites -> favourites
                         Screen.ViewerSource.Trash -> trash
                         Screen.ViewerSource.Vault -> vault
                         Screen.ViewerSource.Album -> {
-                            allPhotos.filter {
-                                val lastSlash = it.path.lastIndexOf('/')
-                                if (lastSlash <= 0) false
-                                else {
-                                    val parentPath = it.path.substring(0, lastSlash)
-                                    val prevSlash = parentPath.lastIndexOf('/')
-                                    val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
-                                    parentName == viewer.albumName
+                            cachedAlbumPhotos ?: run {
+                                listSource = "FALLBACK_SCAN"
+                                allPhotos.filter {
+                                    val lastSlash = it.path.lastIndexOf('/')
+                                    if (lastSlash <= 0) false
+                                    else {
+                                        val parentPath = it.path.substring(0, lastSlash)
+                                        val prevSlash = parentPath.lastIndexOf('/')
+                                        val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
+                                        parentName == viewer.albumName
+                                    }
                                 }
                             }
                         }
@@ -562,9 +668,25 @@ fun MainScaffold(
                             )
                         }
                     }
+                    ViewerLoadMetrics.event(
+                        name = "VIEWER_LIST_READY",
+                        detail = "source=${viewer.source} listSource=$listSource count=${result.size} " +
+                            "duration=${(android.os.SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                    )
+                    result
                 }
                 val photosForViewer by remember(viewer, initialPhotosForViewer) {
-                    flow { emit(initialPhotosForViewer) }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+                    flow { emit(initialPhotosForViewer) }
+                        .onStart {
+                            ViewerLoadMetrics.event(
+                                "VIEWER_LIST_FLOW_START",
+                                "count=${initialPhotosForViewer.size}",
+                            )
+                        }
+                        .onEach {
+                            ViewerLoadMetrics.event("VIEWER_LIST_FLOW_EMIT", "count=${it.size}")
+                        }
+                        .flowOn(kotlinx.coroutines.Dispatchers.Default)
                 }.collectAsState(initial = initialPhotosForViewer)
 
                 if (photosForViewer.isNotEmpty()) {

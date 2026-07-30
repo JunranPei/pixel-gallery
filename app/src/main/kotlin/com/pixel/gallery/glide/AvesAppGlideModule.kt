@@ -27,6 +27,7 @@ import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.utils.MimeTypes.isVideo
 import com.bumptech.glide.load.engine.executor.GlideExecutor
 import com.pixel.gallery.utils.StorageUtils
+import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import kotlinx.coroutines.flow.first
 // import com.pixel.gallery.utils.compatRemoveIf // Helper missing in Lumina, using inline logic or manual loop
 
@@ -120,7 +121,7 @@ class AvesAppGlideModule : AppGlideModule() {
             } else if (mimeType == MimeTypes.TIFF) {
                 TiffImage(context, uri, pageId)
             } else*/ 
-            return if (mimeType == MimeTypes.SVG) {
+            val model = if (mimeType == MimeTypes.SVG) {
                 SvgImage(context, uri)
             } else if (isFastScreenPreview && StorageUtils.isMediaStoreContentUri(uri)) {
                 FastScreenPreview(uri, rotationDegrees)
@@ -131,6 +132,15 @@ class AvesAppGlideModule : AppGlideModule() {
             } else {
                 StorageUtils.getGlideSafeUri(context, uri, mimeType, sizeBytes)
             }
+            if (ViewerLoadMetrics.currentEntryId() != 0L) {
+                ViewerLoadMetrics.event(
+                    "GLIDE_MODEL_RESOLVED",
+                    "mime=$mimeType thumbnail=$isThumbnail fastPreview=$isFastScreenPreview " +
+                        "sizeBytes=$sizeBytes model=${model.javaClass.simpleName}",
+                    imageKey = "$uri:$dateModifiedMillis",
+                )
+            }
+            return model
         }
     }
 }
