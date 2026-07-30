@@ -2,13 +2,17 @@ package com.pixel.gallery.ui.viewer
 
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.PointF
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -190,6 +194,55 @@ private fun applySavedPreviewTransform(
     imageView.translationY = -rotatedOffsetY.toFloat()
 }
 
+private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boolean {
+    if (state == null || state.baseFitScale <= 0f) return false
+    val relativeScale = state.scale / state.baseFitScale
+    val centeredX = state.sourceWidth / 2f
+    val centeredY = state.sourceHeight / 2f
+    return kotlin.math.abs(relativeScale - 1f) > 0.02f ||
+        kotlin.math.abs(state.sourceCenter.x - centeredX) > 1f ||
+        kotlin.math.abs(state.sourceCenter.y - centeredY) > 1f ||
+        kotlin.math.abs(state.rotationRadians) > 0.001
+}
+
+private fun previewTransformState(
+    userScale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    viewWidth: Int,
+    viewHeight: Int,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    orientationDegrees: Int,
+): SubsamplingScaleImageView.ViewState? {
+    if (
+        viewWidth <= 0 || viewHeight <= 0 ||
+        sourceWidth <= 0 || sourceHeight <= 0 ||
+        userScale <= 0f
+    ) return null
+
+    val swapped = orientationDegrees == 90 || orientationDegrees == 270
+    val orientedWidth = if (swapped) sourceHeight else sourceWidth
+    val orientedHeight = if (swapped) sourceWidth else sourceHeight
+    val baseFitScale = minOf(
+        viewWidth / orientedWidth.toFloat(),
+        viewHeight / orientedHeight.toFloat(),
+    ).coerceAtLeast(0.0001f)
+    val absoluteScale = (baseFitScale * userScale).coerceAtLeast(0.0001f)
+    val sourceCenter = PointF(
+        (orientedWidth / 2f - offsetX / absoluteScale).coerceIn(0f, orientedWidth.toFloat()),
+        (orientedHeight / 2f - offsetY / absoluteScale).coerceIn(0f, orientedHeight.toFloat()),
+    )
+    return SubsamplingScaleImageView.ViewState(
+        scale = absoluteScale,
+        baseFitScale = baseFitScale,
+        sourceCenter = sourceCenter,
+        sourceWidth = orientedWidth,
+        sourceHeight = orientedHeight,
+        rotationRadians = 0.0,
+    )
+}
+
 @Composable
 internal fun SimpleSubsamplingImageView(
     uri: String,
@@ -232,6 +285,19 @@ internal fun SimpleSubsamplingImageView(
     var subsamplingReady by remember(uri, filePath) { mutableStateOf(false) }
     var previewDrawable by remember(uri, filePath) { mutableStateOf<Drawable?>(null) }
     var imageAssigned by remember(uri, filePath) { mutableStateOf(false) }
+    val savedTransformAtAttach = remember(transformStateKey) {
+        transformStateStore.get(transformStateKey)
+    }
+    var deepZoomRequested by remember(transformStateKey) {
+        mutableStateOf(requiresDeepZoom(savedTransformAtAttach))
+    }
+    val previewOwnsTransform = remember(transformStateKey) {
+        !requiresDeepZoom(savedTransformAtAttach)
+    }
+    var previewUserScale by remember(transformStateKey) { mutableFloatStateOf(1f) }
+    var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(0f) }
+    var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(0f) }
+    var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
     val previewRequestGuard = remember(transformStateKey) { PreviewRequestGuard() }
     var ssivView by remember { mutableStateOf<SubsamplingScaleImageView?>(null) }
     var imageViewRef by remember { mutableStateOf<android.widget.ImageView?>(null) }
@@ -320,6 +386,7 @@ internal fun SimpleSubsamplingImageView(
         isPagerIdle,
         enableSubsampling,
         previewLoaded,
+        deepZoomRequested,
         ssivView,
         imagePath,
         imageAssigned
@@ -327,22 +394,24 @@ internal fun SimpleSubsamplingImageView(
         val view = ssivView
         when {
             isActivePage && isPagerIdle && enableSubsampling && previewLoaded &&
+                deepZoomRequested &&
                 view != null && !imageAssigned -> {
                 val token = ViewerLoadMetrics.workStarted(
                     "SSIV_ASSIGN_IMAGE",
                     transformStateKey,
-                    "delay=100ms executorActive=${tileDecodeExecutor.activeCount} " +
+                    "trigger=on-demand delay=0ms executorActive=${tileDecodeExecutor.activeCount} " +
                         "executorQueued=${tileDecodeExecutor.queue.size}",
                 )
                 var tokenFinished = false
                 try {
-                    delay(100)
                     ViewerLoadMetrics.tilesScheduled(transformStateKey)
                     // minScaleFactor is relaxed after onReady() so users can shrink below fit-screen.
                     // Restore it before reloading this retained pager view, otherwise SSIV starts
                     // at the stale ~1/3 minimum instead of fit-screen.
                     view.minScaleFactor = 1f
                     view.visibility = View.VISIBLE
+                    view.alpha = 0f
+                    ssivBaseDrawn = false
                     view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
                     imageAssigned = true
                     view.setImage(imagePath)
@@ -370,13 +439,60 @@ internal fun SimpleSubsamplingImageView(
                 val purged = tileDecodeExecutor.purgePendingTasks()
                 view.recycle()
                 view.visibility = View.GONE
+                view.alpha = 0f
                 imageAssigned = false
                 subsamplingReady = false
+                ssivBaseDrawn = false
                 ViewerLoadMetrics.workReady(
                     recycleToken,
                     detail = "purged=$purged executorActive=${tileDecodeExecutor.activeCount}",
                 )
             }
+        }
+    }
+
+    // Keep the transformed preview visible until the user's zoom animation has settled.
+    // Then transfer the exact scale/center into SSIV and reveal the clear layer in one handoff.
+    LaunchedEffect(
+        ssivBaseDrawn,
+        previewUserScale,
+        previewOffsetX,
+        previewOffsetY,
+        isActivePage,
+        imageAssigned,
+        subsamplingReady,
+    ) {
+        if (
+            !ssivBaseDrawn || !isActivePage || !imageAssigned || subsamplingReady
+        ) return@LaunchedEffect
+
+        delay(120)
+        val view = ssivView ?: return@LaunchedEffect
+        val handoffState = if (previewOwnsTransform) {
+            previewTransformState(
+                userScale = previewUserScale,
+                offsetX = previewOffsetX,
+                offsetY = previewOffsetY,
+                viewWidth = view.width,
+                viewHeight = view.height,
+                sourceWidth = sourceWidth,
+                sourceHeight = sourceHeight,
+                orientationDegrees = orientationDegrees,
+            )?.also { transformStateStore.save(transformStateKey, it) }
+        } else {
+            transformStateStore.get(transformStateKey)
+        }
+        handoffState?.let(view::restoreViewState)
+        delay(16)
+        if (isActivePage && imageAssigned && ssivBaseDrawn) {
+            view.alpha = 1f
+            subsamplingReady = true
+            ViewerLoadMetrics.event(
+                "DEEP_ZOOM_HANDOFF",
+                "scale=${handoffState?.scale ?: view.scale} " +
+                    "center=${handoffState?.sourceCenter ?: "none"}",
+                imageKey = transformStateKey,
+            )
         }
     }
 
@@ -522,9 +638,64 @@ internal fun SimpleSubsamplingImageView(
     DisposableEffect(previewRequestGuard) {
         onDispose { previewRequestGuard.clear("dispose") }
     }
-    // Single fixed AndroidView holding FrameLayout matching pager_photo_item.xml exactly
-    AndroidView(
-        modifier = modifier,
+    BoxWithConstraints(modifier = modifier) {
+        val normalizedOrientation = ((orientationDegrees % 360) + 360) % 360
+        val swapped = normalizedOrientation == 90 || normalizedOrientation == 270
+        val orientedWidth = (if (swapped) sourceHeight else sourceWidth).coerceAtLeast(1)
+        val orientedHeight = (if (swapped) sourceWidth else sourceHeight).coerceAtLeast(1)
+        val containerWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+        val containerHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val previewFitScale = minOf(
+            containerWidth / orientedWidth,
+            containerHeight / orientedHeight,
+        ).coerceAtLeast(0.0001f)
+        val scaleToOriginal = 1f / previewFitScale
+        val previewMinScale = minOf(scaleToOriginal / 3f, 1f / 3f).coerceAtLeast(0.01f)
+        val previewMaxScale = maxOf(scaleToOriginal * 3f, 3f).coerceAtMost(60f)
+        val fitWidthFraction = (orientedWidth * previewFitScale / containerWidth).coerceIn(0f, 1f)
+        val fitHeightFraction = (orientedHeight * previewFitScale / containerHeight).coerceIn(0f, 1f)
+
+        ZoomableContainer(
+            modifier = Modifier.fillMaxSize(),
+            minScale = previewMinScale,
+            maxScale = previewMaxScale,
+            scaleToOriginal = scaleToOriginal,
+            enabled = isActivePage && !subsamplingReady,
+            autoApplyTransformations = !subsamplingReady,
+            imageFitScaleX = fitWidthFraction,
+            imageFitScaleY = fitHeightFraction,
+            onTap = onClick,
+            onZoomGestureStarted = {
+                if (!deepZoomRequested && enableSubsampling) {
+                    ViewerLoadMetrics.event(
+                        "DEEP_ZOOM_REQUEST",
+                        "reason=user-gesture previewLoaded=$previewLoaded pagerIdle=$isPagerIdle",
+                        imageKey = transformStateKey,
+                    )
+                    deepZoomRequested = true
+                }
+            },
+            onTransformChanged = { scale, offsetX, offsetY ->
+                if (!subsamplingReady && previewOwnsTransform) {
+                    previewUserScale = scale
+                    previewOffsetX = offsetX
+                    previewOffsetY = offsetY
+                    previewTransformState(
+                        userScale = scale,
+                        offsetX = offsetX,
+                        offsetY = offsetY,
+                        viewWidth = constraints.maxWidth,
+                        viewHeight = constraints.maxHeight,
+                        sourceWidth = sourceWidth,
+                        sourceHeight = sourceHeight,
+                        orientationDegrees = normalizedOrientation,
+                    )?.let { transformStateStore.save(transformStateKey, it) }
+                }
+            },
+        ) {
+            // Single fixed AndroidView holding the preview and deferred SSIV clear layer.
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             ViewerLoadMetrics.event(
                 "ANDROID_VIEW_FACTORY",
@@ -605,11 +776,11 @@ internal fun SimpleSubsamplingImageView(
                     }
 
                     override fun onImageDrawn() {
-                        subsamplingReady = true
-                        imageView.visibility = View.GONE
+                        ssivBaseDrawn = true
                         ViewerLoadMetrics.event(
-                            "SSIV_FIRST_DRAWN",
-                            "scale=$scale center=${snapshotViewState()?.sourceCenter}",
+                            "SSIV_BASE_DRAWN",
+                            "scale=$scale center=${snapshotViewState()?.sourceCenter} " +
+                                "previewScale=$previewUserScale",
                             imageKey = transformStateKey,
                         )
                     }
@@ -622,6 +793,7 @@ internal fun SimpleSubsamplingImageView(
                         )
                         android.util.Log.e("SimpleSubsampling", "SSIV load error: $e")
                         subsamplingReady = false
+                        ssivBaseDrawn = false
                         visibility = View.GONE
                         imageView.alpha = 1f
                         imageView.visibility = View.VISIBLE
@@ -692,5 +864,7 @@ internal fun SimpleSubsamplingImageView(
                 imageView.visibility = if (layer == "PREVIEW") View.VISIBLE else View.GONE
             }
         }
-    )
+            )
+        }
+    }
 }

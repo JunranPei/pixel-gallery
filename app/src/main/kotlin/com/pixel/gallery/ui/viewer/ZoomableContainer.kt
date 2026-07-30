@@ -50,6 +50,7 @@ fun ZoomableContainer(
     minScale: Float = 0.333f,
     maxScale: Float = 3.0f,
     scaleToOriginal: Float = 1.0f,
+    enabled: Boolean = true,
     autoApplyTransformations: Boolean = true,
     // The fraction of container size the image occupies at userScale=1.0 (fit-to-screen).
     // e.g. for a landscape photo on a portrait screen: imageFitScaleX=1.0, imageFitScaleY=0.5
@@ -57,6 +58,7 @@ fun ZoomableContainer(
     imageFitScaleX: Float = 1.0f,
     imageFitScaleY: Float = 1.0f,
     onTap: () -> Unit = {},
+    onZoomGestureStarted: () -> Unit = {},
     onTransformChanged: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     content: @Composable () -> Unit
 ) {
@@ -108,7 +110,8 @@ fun ZoomableContainer(
             .clipToBounds()
             .onSizeChanged { containerSize = it }
             // Tap / double-tap handler (separate pointerInput to avoid interference)
-            .pointerInput(scaleToOriginal, safeMinScale, safeMaxScale) {
+            .pointerInput(enabled, scaleToOriginal, safeMinScale, safeMaxScale) {
+                if (!enabled) return@pointerInput
                 detectTapGestures(
                     onTap = { onTap() },
                     onDoubleTap = { tapPosition ->
@@ -125,6 +128,9 @@ fun ZoomableContainer(
                         } else {
                             // Currently at fit-screen → zoom to original pixel size
                             targetScale = scaleToOriginal.coerceIn(safeMinScale, safeMaxScale)
+                            if (targetScale > 1.01f) {
+                                onZoomGestureStarted()
+                            }
                             val cx = containerSize.width / 2f
                             val cy = containerSize.height / 2f
                             // Offset so the tap point stays visually fixed
@@ -147,7 +153,15 @@ fun ZoomableContainer(
                 )
             }
             // Pinch-zoom and pan handler
-            .pointerInput(safeMinScale, safeMaxScale, containerSize, imageFitScaleX, imageFitScaleY) {
+            .pointerInput(
+                enabled,
+                safeMinScale,
+                safeMaxScale,
+                containerSize,
+                imageFitScaleX,
+                imageFitScaleY
+            ) {
+                if (!enabled) return@pointerInput
                 awaitEachGesture {
                     // Wait for the first finger down
                     awaitFirstDown(requireUnconsumed = false)
@@ -161,6 +175,7 @@ fun ZoomableContainer(
                     // Gesture lock state to prevent mid-gesture control handover to parent Pager
                     var isGestureLockedToPan = false
                     var gestureLockChecked = false
+                    var zoomIntentDispatched = false
 
                     // Gesture event loop
                     var gestureActive = true
@@ -190,6 +205,10 @@ fun ZoomableContainer(
 
                         if (pastTouchSlop) {
                             val isPinching = event.changes.size >= 2
+                            if (isPinching && !zoomIntentDispatched) {
+                                zoomIntentDispatched = true
+                                onZoomGestureStarted()
+                            }
                             val newScale = (gestureScale * zoomChange).coerceIn(safeMinScale, safeMaxScale)
 
                             // Lock in the gesture consumer on the very first frame of panning motion

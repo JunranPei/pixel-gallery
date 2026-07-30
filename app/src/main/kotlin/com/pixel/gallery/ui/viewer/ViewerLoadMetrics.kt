@@ -361,6 +361,19 @@ internal object ViewerLoadMetrics {
         it.firstRegion.compareAndSet(null, "$rect sample=$requestedSample->$actualSample output=${outputPixels}px")
     }
 
+    fun baseImageDecoded(
+        imageKey: String,
+        sessionId: Long,
+        durationMs: Long,
+        outputPixels: Long,
+        allocationBytes: Long,
+    ) = session(imageKey, sessionId, "baseImageDecoded")?.let {
+        it.baseDecodes.incrementAndGet()
+        it.baseDecodeMs.addAndGet(durationMs)
+        it.baseOutputPixels.addAndGet(outputPixels)
+        it.baseAllocationBytes.addAndGet(allocationBytes)
+    }
+
     fun tileWritten(imageKey: String, sessionId: Long, durationMs: Long, bytes: Long) =
         session(imageKey, sessionId, "tileWritten")?.let {
             it.tileWrites.incrementAndGet()
@@ -384,6 +397,8 @@ internal object ViewerLoadMetrics {
                 "cache=${current.cacheHits.get()}H/${current.cacheMisses.get()}M read=${current.cacheReadMs.get()}ms " +
                 "region=${current.regionDecodes.get()}x/${current.regionDecodeMs.get()}ms " +
                 "pixels=${current.regionOutputPixels.get()} first=[${current.firstRegion.get() ?: "none"}] " +
+                "base=${current.baseDecodes.get()}x/${current.baseDecodeMs.get()}ms/" +
+                "${current.baseOutputPixels.get()}px/${current.baseAllocationBytes.get()}B " +
                 "write=${current.tileWrites.get()}x/${current.tileWriteMs.get()}ms/${current.tileWriteBytes.get()}B " +
                 "javaHeap=${memory.javaUsed}(delta=${memory.javaUsed - current.startMemory.javaUsed}) " +
                 "nativeHeap=${memory.nativeUsed}(delta=${memory.nativeUsed - current.startMemory.nativeUsed}) " +
@@ -522,6 +537,10 @@ internal object ViewerLoadMetrics {
         val regionDecodeMs = AtomicLong()
         val regionOutputPixels = AtomicLong()
         val firstRegion = AtomicReference<String?>(null)
+        val baseDecodes = AtomicInteger()
+        val baseDecodeMs = AtomicLong()
+        val baseOutputPixels = AtomicLong()
+        val baseAllocationBytes = AtomicLong()
         val tileWrites = AtomicInteger()
         val tileWriteMs = AtomicLong()
         val tileWriteBytes = AtomicLong()

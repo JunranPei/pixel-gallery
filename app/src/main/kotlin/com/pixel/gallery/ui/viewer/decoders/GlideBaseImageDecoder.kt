@@ -3,6 +3,7 @@ package com.pixel.gallery.ui.viewer.decoders
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.SystemClock
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DecodeFormat
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -16,6 +17,8 @@ import java.io.File
 class GlideBaseImageDecoder(private val dateModifiedMillis: Long) : ImageDecoder {
     override fun decode(context: Context, uri: Uri): Bitmap {
         val imageKey = "${uri}:$dateModifiedMillis"
+        val sessionId = ViewerLoadMetrics.currentSessionId(imageKey)
+        val startedAt = SystemClock.elapsedRealtimeNanos()
         val token = ViewerLoadMetrics.workStarted(
             "SSIV_BASE_GLIDE_DECODE",
             imageKey,
@@ -45,6 +48,13 @@ class GlideBaseImageDecoder(private val dateModifiedMillis: Long) : ImageDecoder
 
         return try {
             builder.get().also { bitmap ->
+                ViewerLoadMetrics.baseImageDecoded(
+                    imageKey = imageKey,
+                    sessionId = sessionId,
+                    durationMs = (SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L,
+                    outputPixels = bitmap.width.toLong() * bitmap.height.toLong(),
+                    allocationBytes = bitmap.allocationByteCount.toLong(),
+                )
                 ViewerLoadMetrics.workReady(
                     token,
                     source = "GLIDE_BLOCKING_GET",

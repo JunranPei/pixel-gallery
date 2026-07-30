@@ -432,9 +432,6 @@ fun ViewerScreen(
             val swipeMainTokenRef = remember(pageKey) {
                 AtomicReference<ViewerLoadMetrics.WorkToken?>()
             }
-            val swipeTinyTokenRef = remember(pageKey) {
-                AtomicReference<ViewerLoadMetrics.WorkToken?>()
-            }
             DisposableEffect(pageKey) {
                 ViewerLoadMetrics.event(
                     "PAGER_PAGE_ATTACH",
@@ -444,9 +441,6 @@ fun ViewerScreen(
                 )
                 onDispose {
                     swipeMainTokenRef.getAndSet(null)?.let {
-                        ViewerLoadMetrics.workCleared(it, "page-dispose")
-                    }
-                    swipeTinyTokenRef.getAndSet(null)?.let {
                         ViewerLoadMetrics.workCleared(it, "page-dispose")
                     }
                     ViewerLoadMetrics.event(
@@ -523,18 +517,6 @@ fun ViewerScreen(
                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                     .signature(swipeThumbnailSignature)
                                     .override(200)
-                                val tinyToken = ViewerLoadMetrics.workStarted(
-                                    "SWIPE_THUMB_20PX",
-                                    pageKey,
-                                    "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
-                                )
-                                swipeTinyTokenRef.getAndSet(tinyToken)?.let {
-                                    ViewerLoadMetrics.workCleared(it, "request-replaced")
-                                }
-                                val tinyRequest = configured.clone()
-                                    .sizeMultiplier(0.1f)
-                                    .listener(trackedDrawableListener(tinyToken, swipeTinyTokenRef))
-
                                 val mainToken = ViewerLoadMetrics.workStarted(
                                     "SWIPE_THUMB_200PX",
                                     pageKey,
@@ -544,7 +526,6 @@ fun ViewerScreen(
                                     ViewerLoadMetrics.workCleared(it, "request-replaced")
                                 }
                                 configured
-                                    .thumbnail(tinyRequest)
                                     .listener(trackedDrawableListener(mainToken, swipeMainTokenRef))
                             }
                         }
@@ -717,11 +698,51 @@ fun ViewerScreen(
                             */
                             val isActivePage = pagerState.settledPage == page
                             val isPagerIdle = !pagerState.isScrollInProgress
-                            val isPreviewVisible by remember(pagerState, page) {
+                            val isNearSettledPage by remember(pagerState, page) {
                                 derivedStateOf {
                                     kotlin.math.abs(pagerState.settledPage - page) <= 1
                                 }
                             }
+                            val isPageActuallyVisible by remember(pagerState, page) {
+                                derivedStateOf {
+                                    pagerState.layoutInfo.visiblePagesInfo.any { it.index == page }
+                                }
+                            }
+                            var allowIdleNeighborPreview by remember(pageKey) {
+                                mutableStateOf(false)
+                            }
+                            LaunchedEffect(
+                                isActivePage,
+                                isPagerIdle,
+                                isNearSettledPage,
+                                pagerState.currentPage,
+                                pagerState.settledPage,
+                            ) {
+                                when {
+                                    isActivePage -> allowIdleNeighborPreview = true
+                                    !isNearSettledPage -> allowIdleNeighborPreview = false
+                                    !isPagerIdle -> allowIdleNeighborPreview = false
+                                    else -> {
+                                        allowIdleNeighborPreview = false
+                                        // The previous parity-based delay gave both neighbors the same
+                                        // delay, so two fit previews still decoded as one power burst.
+                                        // Prefer the usual forward page and keep the opposite side later.
+                                        val staggerMs =
+                                            if (page > pagerState.settledPage) 450L else 1_200L
+                                        delay(staggerMs)
+                                        allowIdleNeighborPreview = true
+                                        ViewerLoadMetrics.event(
+                                            "NEIGHBOR_PREVIEW_PROMOTE",
+                                            "page=$page settled=${pagerState.settledPage} delay=${staggerMs}ms",
+                                            imageKey = pageKey,
+                                        )
+                                    }
+                                }
+                            }
+                            val isPreviewVisible =
+                                isActivePage ||
+                                    (pagerState.isScrollInProgress && isPageActuallyVisible) ||
+                                    (isPagerIdle && isNearSettledPage && allowIdleNeighborPreview)
                             val metadataPending = isActivePage &&
                                 pagerState.currentPage == page &&
                                 media.canContainMotionPhoto() && viewerPhotoMetadata == null
