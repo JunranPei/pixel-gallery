@@ -265,9 +265,15 @@ class FastRegionDecoder(
             options.inSampleSize = newSampleSize
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
             val cacheFiles = tileCacheFiles(rect, newSampleSize)
+            // The disk cache is intentionally lossy to keep background writes and
+            // repeat-entry reads cheap. Never use it as the final 1:1 source tile:
+            // JPEG/WebP artifacts become visible as soon as that tile is enlarged.
+            // Lower-resolution tiles are still cached, so fit-screen entry keeps its
+            // low-power path while deep zoom always comes from the original source.
+            val allowLossyDiskCache = newSampleSize > 1
             val metricsEnabled = ViewerLoadMetrics.isEnabled
             val cacheReadStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            decodeCachedTile(cacheFiles)?.let { (cacheFile, cachedBitmap) ->
+            if (allowLossyDiskCache) decodeCachedTile(cacheFiles)?.let { (cacheFile, cachedBitmap) ->
                 if (metricsEnabled) {
                     ViewerLoadMetrics.cacheRead(
                         imageKey = metricsKey,
@@ -292,6 +298,13 @@ class FastRegionDecoder(
                 return attached
             }
             if (metricsEnabled) {
+                if (!allowLossyDiskCache) {
+                    ViewerLoadMetrics.event(
+                        "TILE_DISK_CACHE_BYPASS",
+                        "actualSample=$newSampleSize reason=full-resolution-quality",
+                        imageKey = metricsKey,
+                    )
+                }
                 ViewerLoadMetrics.cacheRead(
                     imageKey = metricsKey,
                     sessionId = metricsSessionId,
@@ -301,7 +314,9 @@ class FastRegionDecoder(
             }
 
             val decodeStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            val bitmap = openDecoder("tile-cache-miss").decodeRegion(rect, options)
+            val bitmap = openDecoder(
+                if (allowLossyDiskCache) "tile-cache-miss" else "full-resolution-quality"
+            ).decodeRegion(rect, options)
                 ?: throw RuntimeException("Region decoder returned null bitmap")
             if (metricsEnabled) {
                 ViewerLoadMetrics.regionDecoded(
@@ -314,7 +329,7 @@ class FastRegionDecoder(
                     durationMs = (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
                 )
             }
-            val cacheWriteScheduled = saveCachedTile(cacheFiles, bitmap)
+            val cacheWriteScheduled = allowLossyDiskCache && saveCachedTile(cacheFiles, bitmap)
             val attached = UltraHdrTileSupport.attach(
                 imageKey = imageVersion,
                 baseTile = bitmap,
