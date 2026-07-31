@@ -50,6 +50,9 @@ internal object ViewerLoadMetrics {
     private val powerTimelineStarted = AtomicBoolean()
     private val powerTimelineLock = Any()
     private val powerTimeline = ArrayDeque<ContinuousPowerSample>()
+    private val batteryBroadcastTimelineLock = Any()
+    private val batteryBroadcastTimeline = ArrayDeque<BatteryBroadcastSample>()
+    private val nextBatteryBroadcastId = AtomicLong()
     private val latestBatteryState = AtomicReference(BatteryState())
     private val latestContinuousPower = AtomicReference<ContinuousPowerSample?>()
     @Volatile private var timelineBatteryManager: BatteryManager? = null
@@ -72,7 +75,7 @@ internal object ViewerLoadMetrics {
     }
     private val batteryStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent != null) updateBatteryState(intent)
+            if (intent != null) recordBatteryBroadcast(intent)
         }
     }
 
@@ -661,6 +664,50 @@ internal object ViewerLoadMetrics {
         )
     }
 
+    /**
+     * Battery Guru refreshes its live reading from the same sticky battery broadcast
+     * stream. Keep this clock separate from the 100 ms polling clock so a test can
+     * distinguish real Viewer work from whether the system happened to publish a
+     * battery update while that short work was running.
+     */
+    private fun recordBatteryBroadcast(intent: Intent) {
+        val sampledAtNanos = SystemClock.elapsedRealtimeNanos()
+        updateBatteryState(intent)
+        val rawCurrent = timelineBatteryManager
+            ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+        val state = latestBatteryState.get()
+        val sample = BatteryBroadcastSample(
+            id = nextBatteryBroadcastId.incrementAndGet(),
+            sampledAtNanos = sampledAtNanos,
+            currentUa = rawCurrent?.takeUnless { it == Int.MIN_VALUE },
+            voltageMv = state.voltageMv,
+            plugged = state.plugged,
+            status = state.status,
+        )
+        synchronized(batteryBroadcastTimelineLock) {
+            batteryBroadcastTimeline.addLast(sample)
+            val cutoffNanos = sampledAtNanos -
+                TimeUnit.MILLISECONDS.toNanos(powerTimelineRetentionMs)
+            while (
+                batteryBroadcastTimeline.firstOrNull()
+                    ?.sampledAtNanos
+                    ?.let { it < cutoffNanos } == true
+            ) {
+                batteryBroadcastTimeline.removeFirst()
+            }
+        }
+        Log.i(
+            tag,
+            "BATTERY_BROADCAST id=${sample.id} clockMs=${sample.sampledAtNanos / 1_000_000L} " +
+                "currentUa=${sample.currentUa ?: "unsupported"} " +
+                "voltageMv=${sample.voltageMv ?: "unsupported"} " +
+                "signedDischargeMw=${sample.signedDischargeMw()?.let {
+                    String.format(Locale.US, "%.1f", it)
+                } ?: "unsupported"} plugged=${sample.plugged ?: "unsupported"} " +
+                "status=${sample.status ?: "unsupported"}",
+        )
+    }
+
     private fun sampleAgeMs(sample: PowerSample): Long =
         (SystemClock.elapsedRealtimeNanos() - sample.sampledAtNanos).coerceAtLeast(0L) / 1_000_000L
 
@@ -704,12 +751,14 @@ internal object ViewerLoadMetrics {
         val lines = entry.snapshotLines()
         if (lines.isEmpty()) return
         val timeline = snapshotPowerTimeline(entry.requestedAtNanos)
+        val batteryBroadcasts = snapshotBatteryBroadcastTimeline(entry.requestedAtNanos)
         val persistedEntry = PersistedEntry(
             id = entry.id,
             contentId = entry.contentId,
             requestedAtNanos = entry.requestedAtNanos,
             lines = lines,
             powerTimeline = timeline,
+            batteryBroadcasts = batteryBroadcasts,
         )
         Log.i(
             tag,
@@ -765,6 +814,7 @@ internal object ViewerLoadMetrics {
                             append('\n')
                         }
                         appendPowerTimeline(entry)
+                        appendBatteryBroadcastTimeline(entry)
                     }
                 },
             )
@@ -782,6 +832,16 @@ internal object ViewerLoadMetrics {
         val endNanos = requestedAtNanos + TimeUnit.MILLISECONDS.toNanos(entryTimelineAfterMs)
         return synchronized(powerTimelineLock) {
             powerTimeline.filter { it.sampledAtNanos in startNanos..endNanos }
+        }
+    }
+
+    private fun snapshotBatteryBroadcastTimeline(
+        requestedAtNanos: Long,
+    ): List<BatteryBroadcastSample> {
+        val startNanos = requestedAtNanos - TimeUnit.MILLISECONDS.toNanos(entryTimelineBeforeMs)
+        val endNanos = requestedAtNanos + TimeUnit.MILLISECONDS.toNanos(entryTimelineAfterMs)
+        return synchronized(batteryBroadcastTimelineLock) {
+            batteryBroadcastTimeline.filter { it.sampledAtNanos in startNanos..endNanos }
         }
     }
 
@@ -822,6 +882,67 @@ internal object ViewerLoadMetrics {
             append('\n')
         }
         appendPowerTimelineSummary(entry)
+    }
+
+    private fun StringBuilder.appendBatteryBroadcastTimeline(entry: PersistedEntry) {
+        append("BATTERY_BROADCAST_TIMELINE entry=")
+        append(entry.id)
+        append(" sampleCount=")
+        append(entry.batteryBroadcasts.size)
+        append(" beforeMs=")
+        append(entryTimelineBeforeMs)
+        append(" afterMs=")
+        append(entryTimelineAfterMs)
+        append('\n')
+        entry.batteryBroadcasts.forEach { sample ->
+            val relativeMs = TimeUnit.NANOSECONDS.toMillis(
+                sample.sampledAtNanos - entry.requestedAtNanos,
+            )
+            append("BATTERY_BROADCAST entry=")
+            append(entry.id)
+            append(" id=")
+            append(sample.id)
+            append(" relativeMs=")
+            append(relativeMs)
+            append(" clockMs=")
+            append(sample.sampledAtNanos / 1_000_000L)
+            append(" currentUa=")
+            append(sample.currentUa ?: "unsupported")
+            append(" voltageMv=")
+            append(sample.voltageMv ?: "unsupported")
+            append(" signedDischargeMw=")
+            append(
+                sample.signedDischargeMw()
+                    ?.let { String.format(Locale.US, "%.1f", it) }
+                    ?: "unsupported",
+            )
+            append(" plugged=")
+            append(sample.plugged ?: "unsupported")
+            append(" status=")
+            append(sample.status ?: "unsupported")
+            append('\n')
+        }
+        val firstSecond = entry.batteryBroadcasts.mapNotNull { sample ->
+            val relativeMs = TimeUnit.NANOSECONDS.toMillis(
+                sample.sampledAtNanos - entry.requestedAtNanos,
+            )
+            if (relativeMs in 0L..1_000L) {
+                sample.signedDischargeMw()?.let { relativeMs to it }
+            } else {
+                null
+            }
+        }
+        append("BATTERY_BROADCAST_SUMMARY entry=")
+        append(entry.id)
+        append(" firstAfterClickMs=")
+        append(firstSecond.firstOrNull()?.first ?: "none")
+        append(" firstAfterClickMw=")
+        append(formatMetric(firstSecond.firstOrNull()?.second))
+        append(" first1sCount=")
+        append(firstSecond.size)
+        append(" first1sPeakMw=")
+        append(formatMetric(firstSecond.maxOfOrNull { it.second }))
+        append('\n')
     }
 
     private fun StringBuilder.appendPowerTimelineSummary(entry: PersistedEntry) {
@@ -911,6 +1032,20 @@ internal object ViewerLoadMetrics {
             return -current.toDouble() * voltage / 1_000_000.0
         }
     }
+    private data class BatteryBroadcastSample(
+        val id: Long,
+        val sampledAtNanos: Long,
+        val currentUa: Int?,
+        val voltageMv: Int?,
+        val plugged: Int?,
+        val status: Int?,
+    ) {
+        fun signedDischargeMw(): Double? {
+            val current = currentUa ?: return null
+            val voltage = voltageMv ?: return null
+            return -current.toDouble() * voltage / 1_000_000.0
+        }
+    }
     private data class PowerSample(
         val currentUa: Int?,
         val voltageMv: Int?,
@@ -926,6 +1061,7 @@ internal object ViewerLoadMetrics {
         val requestedAtNanos: Long,
         val lines: List<String>,
         val powerTimeline: List<ContinuousPowerSample>,
+        val batteryBroadcasts: List<BatteryBroadcastSample>,
     )
     private class Entry(
         val id: Long,
