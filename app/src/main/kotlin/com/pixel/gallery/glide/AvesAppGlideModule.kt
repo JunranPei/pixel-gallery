@@ -26,6 +26,7 @@ import com.pixel.gallery.utils.LogUtils
 import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.utils.MimeTypes.isVideo
 import com.bumptech.glide.load.engine.executor.GlideExecutor
+import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.utils.StorageUtils
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import kotlinx.coroutines.flow.first
@@ -39,9 +40,17 @@ class AvesAppGlideModule : AppGlideModule() {
 
         // Read settings before creating Glide's immutable executors.
         val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
-        val sourceThreadCount = kotlinx.coroutines.runBlocking {
+        val configuredSourceThreadCount = kotlinx.coroutines.runBlocking {
             settingsRepository.glideThreadCount.first()
         }.coerceIn(1, 8)
+        // Test-only variant: keep the same current/left/right preview workload, but give
+        // all three requests enough executor slots to finish in a single short burst.
+        val sourceThreadCount = if (BuildConfig.VIEWER_TASK_COMPRESSION_EXPERIMENT) {
+            maxOf(configuredSourceThreadCount, 4)
+        } else {
+            configuredSourceThreadCount
+        }
+        val diskCacheThreadCount = if (BuildConfig.VIEWER_TASK_COMPRESSION_EXPERIMENT) 3 else 1
 
         // sizing
         val memorySizeCalculator = MemorySizeCalculator.Builder(context).build()
@@ -67,14 +76,23 @@ class AvesAppGlideModule : AppGlideModule() {
         // source-decode setting here; disk-cache I/O remains serialized by design.
         val sourceExec = GlideExecutor.newSourceExecutor(sourceThreadCount, "source-configured", GlideExecutor.UncaughtThrowableStrategy.DEFAULT)
         builder.setSourceExecutor(sourceExec)
-        builder.setDiskCacheExecutor(GlideExecutor.newDiskCacheExecutor(1, "disk-cache-throttled", GlideExecutor.UncaughtThrowableStrategy.DEFAULT))
+        builder.setDiskCacheExecutor(
+            GlideExecutor.newDiskCacheExecutor(
+                diskCacheThreadCount,
+                "disk-cache-configured",
+                GlideExecutor.UncaughtThrowableStrategy.DEFAULT,
+            ),
+        )
 
         fun toMb(bytes: Int) = Formatter.formatFileSize(context, bytes.toLong())
         Log.d(
             LOG_TAG, "Glide disk cache size=${toMb(diskCacheSize)}" +
                     ", memory cache size=${toMb(memorySizeCalculator.memoryCacheSize)}" +
                     ", bitmap pool size=${toMb(memorySizeCalculator.bitmapPoolSize)}" +
-                    ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}"
+                    ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}" +
+                    ", source threads=$sourceThreadCount" +
+                    ", disk cache threads=$diskCacheThreadCount" +
+                    ", task compression experiment=${BuildConfig.VIEWER_TASK_COMPRESSION_EXPERIMENT}"
         )
     }
 

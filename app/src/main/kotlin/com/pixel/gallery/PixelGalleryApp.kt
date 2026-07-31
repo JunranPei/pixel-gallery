@@ -17,6 +17,7 @@ class PixelGalleryApp : Application() {
         // Initialize Logger
         com.pixel.gallery.utils.AppLogger.init(this)
         com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Application onCreate, initialization complete.")
+        com.pixel.gallery.ui.viewer.ViewerLoadMetrics.startContinuousPowerTimeline(this)
 
         // OSMdroid Configuration
         Configuration.getInstance().userAgentValue = packageName
