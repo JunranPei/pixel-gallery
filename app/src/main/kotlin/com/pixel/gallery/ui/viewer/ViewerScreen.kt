@@ -500,6 +500,7 @@ fun ViewerScreen(
                                 // This 200 px image only bridges Grid/pager motion. Persisting it
                                 // causes JPEG writes and cache trimming on viewer entry.
                                 allowPersistentThumbnailCache = false,
+                                traceViewerLoad = true,
                             ).also { model ->
                                 ViewerLoadMetrics.event(
                                     "SWIPE_THUMB_MODEL",
@@ -705,51 +706,11 @@ fun ViewerScreen(
                             */
                             val isActivePage = pagerState.settledPage == page
                             val isPagerIdle = !pagerState.isScrollInProgress
-                            val isNearSettledPage by remember(pagerState, page) {
+                            val isPreviewVisible by remember(pagerState, page) {
                                 derivedStateOf {
                                     kotlin.math.abs(pagerState.settledPage - page) <= 1
                                 }
                             }
-                            val isPageActuallyVisible by remember(pagerState, page) {
-                                derivedStateOf {
-                                    pagerState.layoutInfo.visiblePagesInfo.any { it.index == page }
-                                }
-                            }
-                            var allowIdleNeighborPreview by remember(pageKey) {
-                                mutableStateOf(false)
-                            }
-                            LaunchedEffect(
-                                isActivePage,
-                                isPagerIdle,
-                                isNearSettledPage,
-                                pagerState.currentPage,
-                                pagerState.settledPage,
-                            ) {
-                                when {
-                                    isActivePage -> allowIdleNeighborPreview = true
-                                    !isNearSettledPage -> allowIdleNeighborPreview = false
-                                    !isPagerIdle -> allowIdleNeighborPreview = false
-                                    else -> {
-                                        allowIdleNeighborPreview = false
-                                        // The previous parity-based delay gave both neighbors the same
-                                        // delay, so two fit previews still decoded as one power burst.
-                                        // Prefer the usual forward page and keep the opposite side later.
-                                        val staggerMs =
-                                            if (page > pagerState.settledPage) 450L else 1_200L
-                                        delay(staggerMs)
-                                        allowIdleNeighborPreview = true
-                                        ViewerLoadMetrics.event(
-                                            "NEIGHBOR_PREVIEW_PROMOTE",
-                                            "page=$page settled=${pagerState.settledPage} delay=${staggerMs}ms",
-                                            imageKey = pageKey,
-                                        )
-                                    }
-                                }
-                            }
-                            val isPreviewVisible =
-                                isActivePage ||
-                                    (pagerState.isScrollInProgress && isPageActuallyVisible) ||
-                                    (isPagerIdle && isNearSettledPage && allowIdleNeighborPreview)
                             val metadataPending = isActivePage &&
                                 pagerState.currentPage == page &&
                                 media.canContainMotionPhoto() && viewerPhotoMetadata == null

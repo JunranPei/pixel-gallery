@@ -29,6 +29,8 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 import kotlin.math.abs
 
 /**
@@ -59,6 +61,7 @@ fun ZoomableContainer(
     imageFitScaleY: Float = 1.0f,
     onTap: () -> Unit = {},
     onZoomGestureStarted: () -> Unit = {},
+    onZoomGestureEnded: () -> Unit = {},
     onTransformChanged: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     content: @Composable () -> Unit
 ) {
@@ -73,15 +76,25 @@ fun ZoomableContainer(
     val animScale = remember { Animatable(1f) }
     val animOffsetX = remember { Animatable(0f) }
     val animOffsetY = remember { Animatable(0f) }
+    var animationJob by remember { mutableStateOf<Job?>(null) }
+    var renderScale by remember { mutableFloatStateOf(1f) }
+    var renderOffsetX by remember { mutableFloatStateOf(0f) }
+    var renderOffsetY by remember { mutableFloatStateOf(0f) }
 
     // Immediate tracking values used during gesture processing
     var gestureScale by remember { mutableFloatStateOf(1f) }
     var gestureOffsetX by remember { mutableFloatStateOf(0f) }
     var gestureOffsetY by remember { mutableFloatStateOf(0f) }
 
-    // Report transformation changes to the parent
+    // Double-tap animation values update one render state. Pointer gestures write the
+    // render state directly so no per-event coroutine can overtake a newer touch sample.
     LaunchedEffect(animScale.value, animOffsetX.value, animOffsetY.value) {
-        onTransformChanged(animScale.value, animOffsetX.value, animOffsetY.value)
+        renderScale = animScale.value
+        renderOffsetX = animOffsetX.value
+        renderOffsetY = animOffsetY.value
+    }
+    LaunchedEffect(renderScale, renderOffsetX, renderOffsetY) {
+        onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
     }
 
     /**
@@ -116,6 +129,8 @@ fun ZoomableContainer(
                     onTap = { onTap() },
                     onDoubleTap = { tapPosition ->
                         val currentScale = gestureScale
+                        val currentOffsetX = gestureOffsetX
+                        val currentOffsetY = gestureOffsetY
                         val targetScale: Float
                         val targetOffsetX: Float
                         val targetOffsetY: Float
@@ -146,9 +161,21 @@ fun ZoomableContainer(
                         gestureOffsetY = targetOffsetY
 
                         val animSpec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
-                        scope.launch { animScale.animateTo(targetScale, animSpec) }
-                        scope.launch { animOffsetX.animateTo(targetOffsetX, animSpec) }
-                        scope.launch { animOffsetY.animateTo(targetOffsetY, animSpec) }
+                        animationJob?.cancel()
+                        animationJob = scope.launch {
+                            try {
+                                animScale.snapTo(currentScale)
+                                animOffsetX.snapTo(currentOffsetX)
+                                animOffsetY.snapTo(currentOffsetY)
+                                coroutineScope {
+                                    launch { animScale.animateTo(targetScale, animSpec) }
+                                    launch { animOffsetX.animateTo(targetOffsetX, animSpec) }
+                                    launch { animOffsetY.animateTo(targetOffsetY, animSpec) }
+                                }
+                            } finally {
+                                onZoomGestureEnded()
+                            }
+                        }
                     }
                 )
             }
@@ -165,6 +192,7 @@ fun ZoomableContainer(
                 awaitEachGesture {
                     // Wait for the first finger down
                     awaitFirstDown(requireUnconsumed = false)
+                    animationJob?.cancel()
 
                     // Touch-slop tracking
                     var pastTouchSlop = false
@@ -271,25 +299,26 @@ fun ZoomableContainer(
                                 gestureOffsetY = clampedY
 
                                 // Snap (no animation) during active gesture
-                                scope.launch {
-                                    animScale.snapTo(newScale)
-                                    animOffsetX.snapTo(clampedX)
-                                    animOffsetY.snapTo(clampedY)
-                                }
+                                renderScale = newScale
+                                renderOffsetX = clampedX
+                                renderOffsetY = clampedY
                             }
                         }
 
                         // Continue while any pointer is still down
                         gestureActive = event.changes.any { it.pressed }
                     }
+                    if (zoomIntentDispatched) {
+                        onZoomGestureEnded()
+                    }
                 }
             }
             .graphicsLayer {
                 if (autoApplyTransformations) {
-                    scaleX = animScale.value
-                    scaleY = animScale.value
-                    translationX = animOffsetX.value
-                    translationY = animOffsetY.value
+                    scaleX = renderScale
+                    scaleY = renderScale
+                    translationX = renderOffsetX
+                    translationY = renderOffsetY
                 }
             },
         contentAlignment = Alignment.Center

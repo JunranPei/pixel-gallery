@@ -18,6 +18,9 @@ import android.view.Window
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -37,6 +40,17 @@ internal object ViewerLoadMetrics {
     private val nextSessionId = AtomicLong()
     private val nextPreviewId = AtomicLong()
     private val nextWorkId = AtomicLong()
+    private val persistenceLock = Any()
+    private val pendingPersistence = ArrayDeque<PersistedEntry>()
+    private var pendingPersistenceTask: ScheduledFuture<*>? = null
+    private val persistenceExecutor = ScheduledThreadPoolExecutor(
+        1,
+        { runnable -> Thread(runnable, "viewer-metrics-persist").apply { priority = Thread.MIN_PRIORITY } },
+    ).apply {
+        removeOnCancelPolicy = true
+        setKeepAliveTime(30L, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
 
     data class PreviewToken(
         val id: Long,
@@ -61,6 +75,7 @@ internal object ViewerLoadMetrics {
         detail: String = "",
     ): Long {
         if (!isEnabled) return 0L
+        pausePersistence()
         val entry = Entry(
             id = nextEntryId.incrementAndGet(),
             requestedAtNanos = SystemClock.elapsedRealtimeNanos(),
@@ -72,8 +87,8 @@ internal object ViewerLoadMetrics {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Trace.beginAsyncSection("ViewerEntry:$contentId", entry.id.toInt())
         }
-        Log.i(
-            tag,
+        emit(
+            entry.id,
             "ENTRY_REQUEST entry=${entry.id} contentId=$contentId source=$source items=$sourceItems " +
                 "thread=${threadLabel()} $detail ${snapshotDetail()}"
         )
@@ -101,8 +116,8 @@ internal object ViewerLoadMetrics {
         entryId: Long = currentEntryId(),
     ) {
         if (!isEnabled) return
-        Log.i(
-            tag,
+        emit(
+            entryId,
             "EVENT entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms name=$name " +
                 "key=${imageKey ?: "none"} thread=${threadLabel()} $detail"
         )
@@ -110,8 +125,8 @@ internal object ViewerLoadMetrics {
 
     fun checkpoint(context: Context, entryId: Long, label: String) {
         if (!isEnabled) return
-        Log.i(
-            tag,
+        emit(
+            entryId,
             "CHECKPOINT entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms at=$label " +
                 snapshotDetail()
         )
@@ -130,8 +145,8 @@ internal object ViewerLoadMetrics {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Trace.beginAsyncSection("Viewer:${token.type}", token.id.toInt())
         }
-        Log.i(
-            tag,
+        emit(
+            token.entryId,
             "WORK_START entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
                 "work=${token.id} type=$type key=$imageKey thread=${threadLabel()} $detail"
         )
@@ -157,8 +172,8 @@ internal object ViewerLoadMetrics {
         detail: String,
     ) {
         if (!activeWorks.remove(token.id, token)) {
-            Log.i(
-                tag,
+            emit(
+                token.entryId,
                 "WORK_DUPLICATE_FINISH entry=${token.entryId} work=${token.id} type=${token.type} " +
                     "duration=${elapsedMs(token.startedAtNanos)}ms outcome=$outcome source=$source detail=$detail"
             )
@@ -167,8 +182,8 @@ internal object ViewerLoadMetrics {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Trace.endAsyncSection("Viewer:${token.type}", token.id.toInt())
         }
-        Log.i(
-            tag,
+        emit(
+            token.entryId,
             "WORK_$outcome entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
                 "work=${token.id} type=${token.type} key=${token.imageKey} " +
                 "duration=${elapsedMs(token.startedAtNanos)}ms source=$source thread=${threadLabel()} $detail"
@@ -188,8 +203,8 @@ internal object ViewerLoadMetrics {
             stats.maxNs.updateAndGet { old -> maxOf(old, totalNs) }
             if (totalMs >= 24L) {
                 stats.slowFrames.incrementAndGet()
-                Log.i(
-                    tag,
+                emit(
+                    entryId,
                     "FRAME_SLOW entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms total=${totalMs}ms " +
                         "layout=${metricMs(metrics, FrameMetrics.LAYOUT_MEASURE_DURATION)}ms " +
                         "draw=${metricMs(metrics, FrameMetrics.DRAW_DURATION)}ms " +
@@ -228,12 +243,12 @@ internal object ViewerLoadMetrics {
 
     fun entryEnded(context: Context, entryId: Long, reason: String) {
         checkpoint(context, entryId, "entry-end:$reason")
-        val entry = entries.remove(entryId)
+        val entry = entries[entryId]
         if (entry != null) {
             val remaining = activeWorks.values.filter { it.entryId == entryId }
             if (remaining.isNotEmpty()) {
-                Log.i(
-                    tag,
+                emit(
+                    entryId,
                     "WORK_STILL_ACTIVE entry=$entryId count=${remaining.size} " +
                         "items=${remaining.joinToString(limit = 20) { "${it.id}:${it.type}:${it.imageKey}" }}"
                 )
@@ -242,11 +257,13 @@ internal object ViewerLoadMetrics {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 Trace.endAsyncSection("ViewerEntry:${entry.contentId}", entry.id.toInt())
             }
-            Log.i(
-                tag,
+            emit(
+                entryId,
                 "ENTRY_END entry=$entryId total=${elapsedMs(entry.requestedAtNanos)}ms " +
                     "contentId=${entry.contentId} source=${entry.source} reason=$reason ${snapshotDetail()}"
             )
+            entries.remove(entryId, entry)
+            queueEntryForPersistence(context.applicationContext, entry)
         }
     }
 
@@ -256,8 +273,8 @@ internal object ViewerLoadMetrics {
         val memory = memorySnapshot()
         val entryId = currentEntryId()
         sessions[imageKey] = Session(id, entryId, SystemClock.elapsedRealtimeNanos(), memory)
-        Log.i(
-            tag,
+        emit(
+            entryId,
             "BEGIN entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms session=$id key=$imageKey " +
                 "$detail javaHeap=${memory.javaUsed} nativeHeap=${memory.nativeUsed}"
         )
@@ -270,8 +287,9 @@ internal object ViewerLoadMetrics {
     fun powerSample(context: Context, imageKey: String, sessionId: Long, label: String) {
         if (sessions[imageKey]?.id != sessionId) return
         val sample = readPower(context)
-        Log.i(
-            tag,
+        val entryId = sessions[imageKey]?.entryId ?: currentEntryId()
+        emit(
+            entryId,
             "POWER session=$sessionId key=$imageKey at=$label currentUa=${sample.currentUa ?: "unsupported"} " +
                 "voltageMv=${sample.voltageMv ?: "unsupported"} estimatedMw=${sample.estimatedMw ?: "unsupported"}"
         )
@@ -292,8 +310,8 @@ internal object ViewerLoadMetrics {
             startedAtNanos = SystemClock.elapsedRealtimeNanos(),
             entryId = entryId,
         )
-        Log.i(
-            tag,
+        emit(
+            entryId,
             "PREVIEW_START entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms request=${token.id} " +
                 "key=$imageKey active=$activeAtStart view=${viewWidth}x$viewHeight model=$modelType " +
                 "thread=${threadLabel()} $detail"
@@ -306,8 +324,8 @@ internal object ViewerLoadMetrics {
             it.previewMs.compareAndSet(-1L, elapsedMs(it.startedAtNanos))
             it.previewSource = source
         }
-        Log.i(
-            tag,
+        emit(
+            token.entryId,
             "PREVIEW_READY entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
                 "request=${token.id} key=${token.imageKey} source=$source " +
                 "duration=${elapsedMs(token.startedAtNanos)}ms thread=${threadLabel()} $detail"
@@ -315,8 +333,8 @@ internal object ViewerLoadMetrics {
     }
 
     fun previewFailed(token: PreviewToken, error: String) {
-        Log.i(
-            tag,
+        emit(
+            token.entryId,
             "PREVIEW_FAILED entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
                 "request=${token.id} key=${token.imageKey} duration=${elapsedMs(token.startedAtNanos)}ms " +
                 "thread=${threadLabel()} error=$error"
@@ -324,8 +342,8 @@ internal object ViewerLoadMetrics {
     }
 
     fun previewCleared(token: PreviewToken, reason: String) {
-        Log.i(
-            tag,
+        emit(
+            token.entryId,
             "PREVIEW_CLEAR entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
                 "request=${token.id} key=${token.imageKey} duration=${elapsedMs(token.startedAtNanos)}ms " +
                 "thread=${threadLabel()} reason=$reason"
@@ -384,13 +402,16 @@ internal object ViewerLoadMetrics {
     fun end(context: Context, imageKey: String, sessionId: Long) {
         val current = sessions[imageKey]
         if (current == null || current.id != sessionId || !sessions.remove(imageKey, current)) {
-            Log.i(tag, "STALE_END session=$sessionId key=$imageKey current=${current?.id ?: 0}")
+            emit(
+                current?.entryId ?: currentEntryId(),
+                "STALE_END session=$sessionId key=$imageKey current=${current?.id ?: 0}",
+            )
             return
         }
         val memory = memorySnapshot()
         val power = readPower(context)
-        Log.i(
-            tag,
+        emit(
+            current.entryId,
             "END entry=${current.entryId} session=${current.id} key=$imageKey total=${elapsedMs(current.startedAtNanos)}ms " +
                 "preview=${current.previewMs.get()}ms(${current.previewSource}) " +
                 "tilesScheduled=${current.tilesScheduledMs.get()}ms tilesReady=${current.tilesReadyMs.get()}ms " +
@@ -415,9 +436,10 @@ internal object ViewerLoadMetrics {
         totalMs: Long,
     ) {
         if (!isEnabled) return
-        Log.i(
-            tag,
-            "FAST_PREVIEW entry=${currentEntryId()} key=$imageKey " +
+        val entryId = currentEntryId()
+        emit(
+            entryId,
+            "FAST_PREVIEW entry=$entryId key=$imageKey " +
                 "cache=${if (cacheHit) "HIT" else "MISS"} bounds=${boundsMs}ms decode=${decodeMs}ms " +
                 "writeAndTrim=${writeAndTrimMs}ms total=${totalMs}ms"
         )
@@ -426,8 +448,8 @@ internal object ViewerLoadMetrics {
     private fun session(imageKey: String, expectedId: Long, event: String): Session? {
         val current = sessions[imageKey]
         if (current != null && current.id == expectedId) return current
-        Log.i(
-            tag,
+        emit(
+            current?.entryId ?: currentEntryId(),
             "STALE_TASK event=$event session=$expectedId key=$imageKey " +
                 "current=${current?.id ?: 0} thread=${Thread.currentThread().name}"
         )
@@ -472,8 +494,8 @@ internal object ViewerLoadMetrics {
 
     private fun powerSampleForEntry(context: Context, entryId: Long, label: String) {
         val sample = readPower(context)
-        Log.i(
-            tag,
+        emit(
+            entryId,
             "ENTRY_POWER entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms at=$label " +
                 "currentUa=${sample.currentUa ?: "unsupported"} voltageMv=${sample.voltageMv ?: "unsupported"} " +
                 "estimatedMw=${sample.estimatedMw ?: "unsupported"}"
@@ -505,14 +527,112 @@ internal object ViewerLoadMetrics {
         return PowerSample(currentUa, voltageMv, estimatedMw)
     }
 
+    private fun emit(entryId: Long, line: String) {
+        Log.i(tag, line)
+        if (entryId != 0L) {
+            entries[entryId]?.record(line)
+        }
+    }
+
+    private fun pausePersistence() {
+        synchronized(persistenceLock) {
+            pendingPersistenceTask?.cancel(false)
+            pendingPersistenceTask = null
+        }
+    }
+
+    private fun queueEntryForPersistence(context: Context, entry: Entry) {
+        val lines = entry.snapshotLines()
+        if (lines.isEmpty()) return
+        synchronized(persistenceLock) {
+            pendingPersistence.addLast(
+                PersistedEntry(
+                    id = entry.id,
+                    contentId = entry.contentId,
+                    lines = lines,
+                ),
+            )
+            pendingPersistenceTask?.cancel(false)
+            // Persist only after the user has stopped entering Viewer for a while. Writing
+            // every entry a few seconds after exit can overlap the next entry and corrupt
+            // the very power trace this diagnostic build is meant to capture.
+            pendingPersistenceTask = persistenceExecutor.schedule({
+                persistPendingEntries(context)
+            }, 15L, TimeUnit.SECONDS)
+        }
+    }
+
+    private fun persistPendingEntries(context: Context) {
+        if (activeEntry.get() != null) return
+        val batch = synchronized(persistenceLock) {
+            pendingPersistenceTask = null
+            if (pendingPersistence.isEmpty()) {
+                emptyList()
+            } else {
+                pendingPersistence.toList().also { pendingPersistence.clear() }
+            }
+        }
+        if (batch.isEmpty()) return
+        try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
+        } catch (_: Exception) {
+        }
+        runCatching {
+            val directory = context.getExternalFilesDir("viewer_metrics")
+                ?: File(context.filesDir, "viewer_metrics")
+            if (!directory.exists() && !directory.mkdirs()) return@runCatching
+            val current = File(directory, "viewer-entries.log")
+            val previous = File(directory, "viewer-entries.previous.log")
+            if (current.length() >= 4L * 1024L * 1024L) {
+                previous.delete()
+                current.renameTo(previous)
+            }
+            current.appendText(
+                buildString {
+                    batch.forEach { entry ->
+                        append("=== entry=")
+                        append(entry.id)
+                        append(" contentId=")
+                        append(entry.contentId)
+                        append(" ===\n")
+                        entry.lines.forEach {
+                            append(it)
+                            append('\n')
+                        }
+                    }
+                },
+            )
+        }.onFailure {
+            // Keep the batch available for a later idle flush if storage was transiently
+            // unavailable.
+            synchronized(persistenceLock) {
+                batch.asReversed().forEach(pendingPersistence::addFirst)
+            }
+        }
+    }
+
     private data class MemorySnapshot(val javaUsed: Long, val nativeUsed: Long)
     private data class PowerSample(val currentUa: Int?, val voltageMv: Int?, val estimatedMw: String?)
-    private data class Entry(
+    private data class PersistedEntry(
+        val id: Long,
+        val contentId: Long,
+        val lines: List<String>,
+    )
+    private class Entry(
         val id: Long,
         val requestedAtNanos: Long,
         val contentId: Long,
         val source: String,
-    )
+    ) {
+        private val lines = ArrayDeque<String>()
+
+        fun record(line: String) = synchronized(lines) {
+            if (lines.size >= 2048) lines.removeFirst()
+            lines.addLast(line)
+        }
+
+        fun snapshotLines(): List<String> = synchronized(lines) { lines.toList() }
+    }
 
     private class FrameStats {
         val frames = AtomicInteger()

@@ -17,6 +17,7 @@ import java.io.InputStream
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -86,16 +87,20 @@ fun resetSsivTileCacheBudget(context: Context) {
     SsivTileCacheBudget.reset(context.applicationContext)
 }
 
-private object SsivAlphaTileCacheWriter {
+private object SsivTileCacheWriter {
+    private const val WRITE_DELAY_MS = 250L
+    private const val MAX_PENDING_WRITES = 4
+    private const val MAX_SNAPSHOT_PIXELS = 6_000_000L
+
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
-    private val executor = ThreadPoolExecutor(
-        0,
+    private val executor = ScheduledThreadPoolExecutor(
         1,
-        30L,
-        TimeUnit.SECONDS,
-        LinkedBlockingQueue<Runnable>(),
-        { runnable -> Thread(runnable, "ssiv-alpha-cache").apply { priority = Thread.MIN_PRIORITY } }
-    )
+        { runnable -> Thread(runnable, "ssiv-tile-cache").apply { priority = Thread.MIN_PRIORITY } },
+    ).apply {
+        removeOnCancelPolicy = true
+        setKeepAliveTime(30L, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
 
     fun schedule(
         context: Context,
@@ -104,21 +109,32 @@ private object SsivAlphaTileCacheWriter {
         bitmap: Bitmap,
         imageKey: String,
         sessionId: Long,
-    ) {
-        if (cacheFile.isFile || !inFlight.add(cacheFile.absolutePath)) return
+    ): Boolean {
+        if (
+            cacheFile.isFile ||
+            bitmap.width.toLong() * bitmap.height.toLong() > MAX_SNAPSHOT_PIXELS ||
+            executor.queue.size >= MAX_PENDING_WRITES ||
+            !inFlight.add(cacheFile.absolutePath)
+        ) {
+            return false
+        }
         val snapshot = runCatching {
             bitmap.copy(bitmap.config ?: Bitmap.Config.ARGB_8888, false)
         }.getOrNull()
         if (snapshot == null) {
             inFlight.remove(cacheFile.absolutePath)
-            return
+            return false
         }
 
-        executor.execute {
+        executor.schedule({
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
+            } catch (_: Exception) {
+            }
             val token = ViewerLoadMetrics.workStarted(
-                "ALPHA_TILE_CACHE_WRITE",
+                "TILE_CACHE_WRITE",
                 imageKey,
-                "bitmap=${snapshot.width}x${snapshot.height}",
+                "bitmap=${snapshot.width}x${snapshot.height} alpha=${snapshot.hasAlpha()}",
             )
             val startedAt = SystemClock.elapsedRealtimeNanos()
             val tempFile = File(directory, "${cacheFile.name}.tmp")
@@ -126,11 +142,15 @@ private object SsivAlphaTileCacheWriter {
                 if (!directory.exists() && !directory.mkdirs()) {
                     throw IllegalStateException("Unable to create tile cache directory")
                 }
-                val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    Bitmap.CompressFormat.WEBP_LOSSY
+                val format = if (snapshot.hasAlpha()) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        Bitmap.CompressFormat.WEBP_LOSSY
+                    } else {
+                        @Suppress("DEPRECATION")
+                        Bitmap.CompressFormat.WEBP
+                    }
                 } else {
-                    @Suppress("DEPRECATION")
-                    Bitmap.CompressFormat.WEBP
+                    Bitmap.CompressFormat.JPEG
                 }
                 val encoded = FileOutputStream(tempFile).use { output ->
                     snapshot.compress(format, 90, output)
@@ -154,7 +174,7 @@ private object SsivAlphaTileCacheWriter {
                 }
                 ViewerLoadMetrics.workReady(
                     token,
-                    source = "WEBP_ALPHA_DISK_CACHE",
+                    source = if (snapshot.hasAlpha()) "WEBP_ALPHA_DISK_CACHE" else "JPEG_DISK_CACHE",
                     detail = "bytes=$bytes",
                 )
             } catch (error: Exception) {
@@ -165,7 +185,8 @@ private object SsivAlphaTileCacheWriter {
                 snapshot.recycle()
                 inFlight.remove(cacheFile.absolutePath)
             }
-        }
+        }, WRITE_DELAY_MS, TimeUnit.MILLISECONDS)
+        return true
     }
 }
 
@@ -293,16 +314,7 @@ class FastRegionDecoder(
                     durationMs = (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
                 )
             }
-            val writeStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            val writtenFile = saveCachedTile(cacheFiles, bitmap)
-            if (metricsEnabled && writtenFile != null) {
-                ViewerLoadMetrics.tileWritten(
-                    imageKey = metricsKey,
-                    sessionId = metricsSessionId,
-                    durationMs = (SystemClock.elapsedRealtimeNanos() - writeStartedAt) / 1_000_000L,
-                    bytes = writtenFile.length(),
-                )
-            }
+            val cacheWriteScheduled = saveCachedTile(cacheFiles, bitmap)
             val attached = UltraHdrTileSupport.attach(
                 imageKey = imageVersion,
                 baseTile = bitmap,
@@ -315,7 +327,7 @@ class FastRegionDecoder(
                 source = "SOURCE_REGION_DECODE",
                 detail = "actualSample=$newSampleSize bitmap=${attached.width}x${attached.height} " +
                     "config=${attached.config} cacheWrite=" +
-                    if (bitmap.hasAlpha()) "ASYNC_ALPHA" else "${writtenFile?.length() ?: 0L}B",
+                    if (cacheWriteScheduled) "DEFERRED" else "SKIPPED",
             )
             return attached
         }
@@ -415,28 +427,13 @@ class FastRegionDecoder(
         return null
     }
 
-    private fun saveCachedTile(cacheFiles: TileCacheFiles, bitmap: Bitmap): File? {
-        if (bitmap.hasAlpha()) {
-            SsivAlphaTileCacheWriter.schedule(
-                context = appContext,
-                directory = tileCacheDir,
-                cacheFile = cacheFiles.webp,
-                bitmap = bitmap,
-                imageKey = metricsKey,
-                sessionId = metricsSessionId,
-            )
-            return null
-        }
-        try {
-            if (!tileCacheDir.exists() && !tileCacheDir.mkdirs()) return null
-            FileOutputStream(cacheFiles.jpeg).use { output ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
-            }
-            SsivTileCacheBudget.recordWrite(appContext, tileCacheDir, cacheFiles.jpeg.length())
-            return cacheFiles.jpeg
-        } catch (_: Exception) {
-            cacheFiles.jpeg.delete()
-            return null
-        }
-    }
+    private fun saveCachedTile(cacheFiles: TileCacheFiles, bitmap: Bitmap): Boolean =
+        SsivTileCacheWriter.schedule(
+            context = appContext,
+            directory = tileCacheDir,
+            cacheFile = if (bitmap.hasAlpha()) cacheFiles.webp else cacheFiles.jpeg,
+            bitmap = bitmap,
+            imageKey = metricsKey,
+            sessionId = metricsSessionId,
+        )
 }

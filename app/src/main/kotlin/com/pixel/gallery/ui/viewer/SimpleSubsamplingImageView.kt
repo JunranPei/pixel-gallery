@@ -1,8 +1,8 @@
 package com.pixel.gallery.ui.viewer
 
+import android.graphics.PointF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.graphics.PointF
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
@@ -215,6 +215,7 @@ private fun previewTransformState(
     sourceWidth: Int,
     sourceHeight: Int,
     orientationDegrees: Int,
+    baseFitScaleOverride: Float? = null,
 ): SubsamplingScaleImageView.ViewState? {
     if (
         viewWidth <= 0 || viewHeight <= 0 ||
@@ -225,14 +226,18 @@ private fun previewTransformState(
     val swapped = orientationDegrees == 90 || orientationDegrees == 270
     val orientedWidth = if (swapped) sourceHeight else sourceWidth
     val orientedHeight = if (swapped) sourceWidth else sourceHeight
-    val baseFitScale = minOf(
-        viewWidth / orientedWidth.toFloat(),
-        viewHeight / orientedHeight.toFloat(),
-    ).coerceAtLeast(0.0001f)
+    val baseFitScale = baseFitScaleOverride
+        ?.takeIf { it > 0f }
+        ?: minOf(
+            viewWidth / orientedWidth.toFloat(),
+            viewHeight / orientedHeight.toFloat(),
+        ).coerceAtLeast(0.0001f)
     val absoluteScale = (baseFitScale * userScale).coerceAtLeast(0.0001f)
     val sourceCenter = PointF(
-        (orientedWidth / 2f - offsetX / absoluteScale).coerceIn(0f, orientedWidth.toFloat()),
-        (orientedHeight / 2f - offsetY / absoluteScale).coerceIn(0f, orientedHeight.toFloat()),
+        (orientedWidth / 2f - offsetX / absoluteScale)
+            .coerceIn(0f, orientedWidth.toFloat()),
+        (orientedHeight / 2f - offsetY / absoluteScale)
+            .coerceIn(0f, orientedHeight.toFloat()),
     )
     return SubsamplingScaleImageView.ViewState(
         scale = absoluteScale,
@@ -299,6 +304,7 @@ internal fun SimpleSubsamplingImageView(
     var previewUserScale by remember(transformStateKey) { mutableFloatStateOf(1f) }
     var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(0f) }
     var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(0f) }
+    var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
     val previewRequestGuard = remember(transformStateKey) { PreviewRequestGuard() }
     var ssivView by remember { mutableStateOf<SubsamplingScaleImageView?>(null) }
@@ -464,13 +470,16 @@ internal fun SimpleSubsamplingImageView(
         isActivePage,
         imageAssigned,
         subsamplingReady,
+        previewGestureInProgress,
     ) {
         if (
-            !ssivBaseDrawn || !isActivePage || !imageAssigned || subsamplingReady
+            !ssivBaseDrawn || !isActivePage || !imageAssigned || subsamplingReady ||
+            previewGestureInProgress
         ) return@LaunchedEffect
 
         delay(120)
         val view = ssivView ?: return@LaunchedEffect
+        val liveSsivState = view.snapshotViewState()
         val handoffState = if (previewOwnsTransform) {
             previewTransformState(
                 userScale = previewUserScale,
@@ -478,9 +487,10 @@ internal fun SimpleSubsamplingImageView(
                 offsetY = previewOffsetY,
                 viewWidth = view.width,
                 viewHeight = view.height,
-                sourceWidth = sourceWidth,
-                sourceHeight = sourceHeight,
-                orientationDegrees = orientationDegrees,
+                sourceWidth = liveSsivState?.sourceWidth ?: sourceWidth,
+                sourceHeight = liveSsivState?.sourceHeight ?: sourceHeight,
+                orientationDegrees = if (liveSsivState != null) 0 else orientationDegrees,
+                baseFitScaleOverride = liveSsivState?.baseFitScale,
             )?.also { transformStateStore.save(transformStateKey, it) }
         } else {
             transformStateStore.get(transformStateKey)
@@ -493,7 +503,10 @@ internal fun SimpleSubsamplingImageView(
             ViewerLoadMetrics.event(
                 "DEEP_ZOOM_HANDOFF",
                 "scale=${handoffState?.scale ?: view.scale} " +
-                    "center=${handoffState?.sourceCenter ?: "none"}",
+                    "center=${handoffState?.sourceCenter ?: "none"} " +
+                    "previewScale=$previewUserScale previewOffset=${previewOffsetX},${previewOffsetY} " +
+                    "view=${view.width}x${view.height} liveBase=${liveSsivState?.baseFitScale ?: -1f} " +
+                    "liveSource=${liveSsivState?.sourceWidth ?: -1}x${liveSsivState?.sourceHeight ?: -1}",
                 imageKey = transformStateKey,
             )
         }
@@ -677,6 +690,7 @@ internal fun SimpleSubsamplingImageView(
             imageFitScaleY = fitHeightFraction,
             onTap = onClick,
             onZoomGestureStarted = {
+                previewGestureInProgress = true
                 if (!deepZoomRequested && enableSubsampling) {
                     ViewerLoadMetrics.event(
                         "DEEP_ZOOM_REQUEST",
@@ -685,6 +699,14 @@ internal fun SimpleSubsamplingImageView(
                     )
                     deepZoomRequested = true
                 }
+            },
+            onZoomGestureEnded = {
+                previewGestureInProgress = false
+                ViewerLoadMetrics.event(
+                    "DEEP_ZOOM_GESTURE_END",
+                    "previewScale=$previewUserScale previewOffset=${previewOffsetX},${previewOffsetY}",
+                    imageKey = transformStateKey,
+                )
             },
             onTransformChanged = { scale, offsetX, offsetY ->
                 if (!subsamplingReady && previewOwnsTransform) {

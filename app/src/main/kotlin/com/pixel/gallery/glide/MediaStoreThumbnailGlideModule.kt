@@ -39,6 +39,7 @@ data class MediaStoreThumbnail(
     val dateModifiedMillis: Long,
     val sizeBytes: Long? = null,
     val allowPersistentCache: Boolean = true,
+    val traceViewerLoad: Boolean = false,
 )
 
 internal class MediaStoreThumbnailLoader(private val context: Context) : ModelLoader<MediaStoreThumbnail, Bitmap> {
@@ -73,18 +74,24 @@ internal class MediaStoreThumbnailFetcher(
 
     override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in Bitmap>) {
         val metricsKey = "${model.uri}:${model.dateModifiedMillis}"
-        val metricsToken = ViewerLoadMetrics.workStarted(
-            type = "MEDIASTORE_THUMB_FETCH",
-            imageKey = metricsKey,
-            detail = "requested=${width}x$height priority=$priority bytes=${model.sizeBytes} " +
-                "rotation=${model.rotationDegrees}",
-        )
-        activeMetricsToken.getAndSet(metricsToken)?.let {
-            ViewerLoadMetrics.workCleared(it, "fetch-replaced")
+        val metricsToken = if (model.traceViewerLoad) {
+            ViewerLoadMetrics.workStarted(
+                type = "MEDIASTORE_THUMB_FETCH",
+                imageKey = metricsKey,
+                detail = "requested=${width}x$height priority=$priority bytes=${model.sizeBytes} " +
+                    "rotation=${model.rotationDegrees}",
+            )
+        } else {
+            null
+        }
+        if (metricsToken != null) {
+            activeMetricsToken.getAndSet(metricsToken)?.let {
+                ViewerLoadMetrics.workCleared(it, "fetch-replaced")
+            }
         }
         var metricsCompleted = false
         fun metricsReady(source: String, bitmap: Bitmap, detail: String = "") {
-            if (metricsCompleted) return
+            if (metricsCompleted || metricsToken == null) return
             metricsCompleted = true
             activeMetricsToken.compareAndSet(metricsToken, null)
             ViewerLoadMetrics.workReady(
@@ -95,7 +102,7 @@ internal class MediaStoreThumbnailFetcher(
             )
         }
         fun metricsFailed(error: String) {
-            if (metricsCompleted) return
+            if (metricsCompleted || metricsToken == null) return
             metricsCompleted = true
             activeMetricsToken.compareAndSet(metricsToken, null)
             ViewerLoadMetrics.workFailed(metricsToken, error)
@@ -124,13 +131,15 @@ internal class MediaStoreThumbnailFetcher(
             val isHighResRequest = width >= 200 || height >= 200
             val usePersistentCache =
                 model.allowPersistentCache && isLargeFile && isHighResRequest
-            ViewerLoadMetrics.event(
-                "MEDIASTORE_THUMB_POLICY",
-                "requested=${width}x$height large=$isLargeFile grid=$isGridView " +
-                    "highRes=$isHighResRequest allowPersistent=${model.allowPersistentCache} " +
-                    "persistent=$usePersistentCache",
-                imageKey = metricsKey,
-            )
+            if (model.traceViewerLoad) {
+                ViewerLoadMetrics.event(
+                    "MEDIASTORE_THUMB_POLICY",
+                    "requested=${width}x$height large=$isLargeFile grid=$isGridView " +
+                        "highRes=$isHighResRequest allowPersistent=${model.allowPersistentCache} " +
+                        "persistent=$usePersistentCache",
+                    imageKey = metricsKey,
+                )
+            }
 
             var persistentFile: File? = null
             var dirName: String? = null
@@ -140,10 +149,14 @@ internal class MediaStoreThumbnailFetcher(
                 
                 if (!hasCleanedLegacyCaches) {
                     hasCleanedLegacyCaches = true
-                    val cleanupToken = ViewerLoadMetrics.workStarted(
-                        "THUMB_LEGACY_CACHE_CLEANUP",
-                        metricsKey,
-                    )
+                    val cleanupToken = if (model.traceViewerLoad) {
+                        ViewerLoadMetrics.workStarted(
+                            "THUMB_LEGACY_CACHE_CLEANUP",
+                            metricsKey,
+                        )
+                    } else {
+                        null
+                    }
                     try {
                         val legacyDirs = listOf(
                             "persistent_thumbnails",
@@ -153,20 +166,22 @@ internal class MediaStoreThumbnailFetcher(
                         for (legacyName in legacyDirs) {
                             val legacyDir = File(context.cacheDir, legacyName)
                             if (legacyDir.exists()) {
-                                val bytes = legacyDir.walkTopDown()
-                                    .filter { it.isFile }
-                                    .sumOf { it.length() }
-                                ViewerLoadMetrics.event(
-                                    "THUMB_LEGACY_CACHE_DELETE",
-                                    "directory=$legacyName bytes=$bytes",
-                                    imageKey = metricsKey,
-                                )
+                                if (model.traceViewerLoad) {
+                                    val bytes = legacyDir.walkTopDown()
+                                        .filter { it.isFile }
+                                        .sumOf { it.length() }
+                                    ViewerLoadMetrics.event(
+                                        "THUMB_LEGACY_CACHE_DELETE",
+                                        "directory=$legacyName bytes=$bytes",
+                                        imageKey = metricsKey,
+                                    )
+                                }
                                 legacyDir.deleteRecursively()
                             }
                         }
-                        ViewerLoadMetrics.workReady(cleanupToken)
+                        cleanupToken?.let { ViewerLoadMetrics.workReady(it) }
                     } catch (e: Exception) {
-                        ViewerLoadMetrics.workFailed(cleanupToken, e.javaClass.simpleName)
+                        cleanupToken?.let { ViewerLoadMetrics.workFailed(it, e.javaClass.simpleName) }
                     }
                 }
 
@@ -179,7 +194,8 @@ internal class MediaStoreThumbnailFetcher(
                 persistentFile = File(persistentDir, cacheFileName)
 
                 if (persistentFile.exists()) {
-                    val readStartedAt = SystemClock.elapsedRealtimeNanos()
+                    val readStartedAt =
+                        if (model.traceViewerLoad) SystemClock.elapsedRealtimeNanos() else 0L
                     try {
                         val options = BitmapFactory.Options().apply {
                             inPreferredConfig = Bitmap.Config.RGB_565
@@ -196,11 +212,13 @@ internal class MediaStoreThumbnailFetcher(
                             return
                         }
                     } catch (e: Exception) {
-                        ViewerLoadMetrics.event(
-                            "PERSISTENT_THUMB_READ_FAILED",
-                            "error=${e.javaClass.simpleName}",
-                            imageKey = metricsKey,
-                        )
+                        if (model.traceViewerLoad) {
+                            ViewerLoadMetrics.event(
+                                "PERSISTENT_THUMB_READ_FAILED",
+                                "error=${e.javaClass.simpleName}",
+                                imageKey = metricsKey,
+                            )
+                        }
                     }
                 }
             }
@@ -211,23 +229,28 @@ internal class MediaStoreThumbnailFetcher(
                     if (width > 0) minOf(width, 512) else 512,
                     if (height > 0) minOf(height, 512) else 512
                 )
-                val loadThumbnailStartedAt = SystemClock.elapsedRealtimeNanos()
+                val loadThumbnailStartedAt =
+                    if (model.traceViewerLoad) SystemClock.elapsedRealtimeNanos() else 0L
                 try {
                     bitmap = resolver.loadThumbnail(model.uri, targetSize, null)
                 } catch (e: Exception) {
+                    if (model.traceViewerLoad) {
+                        ViewerLoadMetrics.event(
+                            "MEDIASTORE_LOAD_THUMBNAIL_FAILED",
+                            "target=${targetSize.width}x${targetSize.height} error=${e.javaClass.simpleName}",
+                            imageKey = metricsKey,
+                        )
+                    }
+                }
+                if (model.traceViewerLoad) {
                     ViewerLoadMetrics.event(
-                        "MEDIASTORE_LOAD_THUMBNAIL_FAILED",
-                        "target=${targetSize.width}x${targetSize.height} error=${e.javaClass.simpleName}",
+                        "MEDIASTORE_LOAD_THUMBNAIL_DONE",
+                        "target=${targetSize.width}x${targetSize.height} " +
+                            "result=${bitmap?.width ?: 0}x${bitmap?.height ?: 0} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - loadThumbnailStartedAt) / 1_000_000L}ms",
                         imageKey = metricsKey,
                     )
                 }
-                ViewerLoadMetrics.event(
-                    "MEDIASTORE_LOAD_THUMBNAIL_DONE",
-                    "target=${targetSize.width}x${targetSize.height} " +
-                        "result=${bitmap?.width ?: 0}x${bitmap?.height ?: 0} " +
-                        "duration=${(SystemClock.elapsedRealtimeNanos() - loadThumbnailStartedAt) / 1_000_000L}ms",
-                    imageKey = metricsKey,
-                )
 
                 if (bitmap != null && needRotationAfterContentResolverThumbnail(model.mimeType)) {
                     bitmap = applyExifOrientation(context, bitmap, model.rotationDegrees, false)
@@ -265,11 +288,13 @@ internal class MediaStoreThumbnailFetcher(
 
             // If system thumbnail loading fails, perform a fallback manual decode
             if (bitmap == null) {
-                ViewerLoadMetrics.event(
-                    "MEDIASTORE_THUMB_FALLBACK_START",
-                    "video=${isVideo(model.mimeType)}",
-                    imageKey = metricsKey,
-                )
+                if (model.traceViewerLoad) {
+                    ViewerLoadMetrics.event(
+                        "MEDIASTORE_THUMB_FALLBACK_START",
+                        "video=${isVideo(model.mimeType)}",
+                        imageKey = metricsKey,
+                    )
+                }
                 bitmap = if (isVideo(model.mimeType)) {
                     decodeVideoFallback()
                 } else {
@@ -279,11 +304,15 @@ internal class MediaStoreThumbnailFetcher(
 
             if (bitmap != null) {
                 if (usePersistentCache && persistentFile != null) {
-                    val writeToken = ViewerLoadMetrics.workStarted(
-                        "PERSISTENT_THUMB_WRITE_TRIM",
-                        metricsKey,
-                        "directory=$dirName",
-                    )
+                    val writeToken = if (model.traceViewerLoad) {
+                        ViewerLoadMetrics.workStarted(
+                            "PERSISTENT_THUMB_WRITE_TRIM",
+                            metricsKey,
+                            "directory=$dirName",
+                        )
+                    } else {
+                        null
+                    }
                     try {
                         FileOutputStream(persistentFile).use { out ->
                             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
@@ -302,12 +331,14 @@ internal class MediaStoreThumbnailFetcher(
                         persistentFile.parentFile?.let {
                             trimPersistentCache(it, limitBytes)
                         }
-                        ViewerLoadMetrics.workReady(
-                            writeToken,
-                            detail = "fileBytes=${persistentFile.length()} limitBytes=$limitBytes",
-                        )
+                        writeToken?.let {
+                            ViewerLoadMetrics.workReady(
+                                it,
+                                detail = "fileBytes=${persistentFile.length()} limitBytes=$limitBytes",
+                            )
+                        }
                     } catch (e: Exception) {
-                        ViewerLoadMetrics.workFailed(writeToken, e.javaClass.simpleName)
+                        writeToken?.let { ViewerLoadMetrics.workFailed(it, e.javaClass.simpleName) }
                     }
                 }
                 metricsReady(
@@ -379,7 +410,11 @@ internal class MediaStoreThumbnailFetcher(
         val metricsKey = "${model.uri}:${model.dateModifiedMillis}"
         
         // 1. Try extracting EXIF thumbnail directly (extremely fast and low-power)
-        val exifToken = ViewerLoadMetrics.workStarted("EXIF_THUMBNAIL_READ", metricsKey)
+        val exifToken = if (model.traceViewerLoad) {
+            ViewerLoadMetrics.workStarted("EXIF_THUMBNAIL_READ", metricsKey)
+        } else {
+            null
+        }
         try {
             resolver.openInputStream(model.uri)?.use { stream ->
                 val exifInterface = ExifInterface(stream)
@@ -394,11 +429,13 @@ internal class MediaStoreThumbnailFetcher(
                             }
                             val decoded = BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size, options)
                             if (decoded != null) {
-                                ViewerLoadMetrics.workReady(
-                                    exifToken,
-                                    source = "EXIF_EMBEDDED",
-                                    detail = "bytes=${thumbnailBytes.size} bitmap=${decoded.width}x${decoded.height}",
-                                )
+                                exifToken?.let {
+                                    ViewerLoadMetrics.workReady(
+                                        it,
+                                        source = "EXIF_EMBEDDED",
+                                        detail = "bytes=${thumbnailBytes.size} bitmap=${decoded.width}x${decoded.height}",
+                                    )
+                                }
                                 return applyExifOrientation(context, decoded, model.rotationDegrees, false)
                             }
                         }
@@ -406,16 +443,20 @@ internal class MediaStoreThumbnailFetcher(
                 }
             }
         } catch (e: Exception) {
-            ViewerLoadMetrics.workFailed(exifToken, e.javaClass.simpleName)
+            exifToken?.let { ViewerLoadMetrics.workFailed(it, e.javaClass.simpleName) }
         }
-        ViewerLoadMetrics.workCleared(exifToken, "missing-or-too-small")
+        exifToken?.let { ViewerLoadMetrics.workCleared(it, "missing-or-too-small") }
 
         // 2. Full downsampled decode fallback
-        val streamToken = ViewerLoadMetrics.workStarted(
-            "THUMB_STREAM_BOUNDS_AND_DECODE",
-            metricsKey,
-            "requested=${width}x$height",
-        )
+        val streamToken = if (model.traceViewerLoad) {
+            ViewerLoadMetrics.workStarted(
+                "THUMB_STREAM_BOUNDS_AND_DECODE",
+                metricsKey,
+                "requested=${width}x$height",
+            )
+        } else {
+            null
+        }
         return try {
             resolver.openInputStream(model.uri)?.use { stream ->
                 val options = BitmapFactory.Options().apply {
@@ -461,15 +502,17 @@ internal class MediaStoreThumbnailFetcher(
                     resolver.openInputStream(model.uri)?.use { fallbackStream ->
                         val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
                         if (decoded != null) {
-                            ViewerLoadMetrics.workReady(
-                                streamToken,
-                                source = "STREAM_DECODE",
-                                detail = "source=${srcWidth}x$srcHeight sample=$inSampleSize " +
-                                    "bitmap=${decoded.width}x${decoded.height} inBitmap=${decodeOptions.inBitmap != null}",
-                            )
+                            streamToken?.let {
+                                ViewerLoadMetrics.workReady(
+                                    it,
+                                    source = "STREAM_DECODE",
+                                    detail = "source=${srcWidth}x$srcHeight sample=$inSampleSize " +
+                                        "bitmap=${decoded.width}x${decoded.height} inBitmap=${decodeOptions.inBitmap != null}",
+                                )
+                            }
                             applyExifOrientation(context, decoded, model.rotationDegrees, false)
                         } else {
-                            ViewerLoadMetrics.workFailed(streamToken, "decode-null")
+                            streamToken?.let { ViewerLoadMetrics.workFailed(it, "decode-null") }
                             null
                         }
                     }
@@ -479,22 +522,24 @@ internal class MediaStoreThumbnailFetcher(
                     resolver.openInputStream(model.uri)?.use { fallbackStream ->
                         val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
                         if (decoded != null) {
-                            ViewerLoadMetrics.workReady(
-                                streamToken,
-                                source = "STREAM_DECODE_RETRY",
-                                detail = "source=${srcWidth}x$srcHeight sample=$inSampleSize " +
-                                    "bitmap=${decoded.width}x${decoded.height}",
-                            )
+                            streamToken?.let {
+                                ViewerLoadMetrics.workReady(
+                                    it,
+                                    source = "STREAM_DECODE_RETRY",
+                                    detail = "source=${srcWidth}x$srcHeight sample=$inSampleSize " +
+                                        "bitmap=${decoded.width}x${decoded.height}",
+                                )
+                            }
                             applyExifOrientation(context, decoded, model.rotationDegrees, false)
                         } else {
-                            ViewerLoadMetrics.workFailed(streamToken, "retry-decode-null")
+                            streamToken?.let { ViewerLoadMetrics.workFailed(it, "retry-decode-null") }
                             null
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            ViewerLoadMetrics.workFailed(streamToken, e.javaClass.simpleName)
+            streamToken?.let { ViewerLoadMetrics.workFailed(it, e.javaClass.simpleName) }
             null
         }
     }
@@ -527,11 +572,13 @@ internal class MediaStoreThumbnailFetcher(
             val beforeSize = currentSize
             var deletedFiles = 0
             if (currentSize <= maxSizeBytes) {
-                ViewerLoadMetrics.event(
-                    "PERSISTENT_THUMB_TRIM_SKIP",
-                    "directory=${persistentDir.name} files=${files.size} bytes=$currentSize limit=$maxSizeBytes",
-                    imageKey = "${model.uri}:${model.dateModifiedMillis}",
-                )
+                if (model.traceViewerLoad) {
+                    ViewerLoadMetrics.event(
+                        "PERSISTENT_THUMB_TRIM_SKIP",
+                        "directory=${persistentDir.name} files=${files.size} bytes=$currentSize limit=$maxSizeBytes",
+                        imageKey = "${model.uri}:${model.dateModifiedMillis}",
+                    )
+                }
                 return
             }
 
@@ -547,18 +594,22 @@ internal class MediaStoreThumbnailFetcher(
                     }
                 }
             }
-            ViewerLoadMetrics.event(
-                "PERSISTENT_THUMB_TRIM_DONE",
-                "directory=${persistentDir.name} files=${files.size} before=$beforeSize " +
-                    "after=$currentSize deleted=$deletedFiles limit=$maxSizeBytes",
-                imageKey = "${model.uri}:${model.dateModifiedMillis}",
-            )
+            if (model.traceViewerLoad) {
+                ViewerLoadMetrics.event(
+                    "PERSISTENT_THUMB_TRIM_DONE",
+                    "directory=${persistentDir.name} files=${files.size} before=$beforeSize " +
+                        "after=$currentSize deleted=$deletedFiles limit=$maxSizeBytes",
+                    imageKey = "${model.uri}:${model.dateModifiedMillis}",
+                )
+            }
         } catch (e: Exception) {
-            ViewerLoadMetrics.event(
-                "PERSISTENT_THUMB_TRIM_FAILED",
-                "error=${e.javaClass.simpleName}",
-                imageKey = "${model.uri}:${model.dateModifiedMillis}",
-            )
+            if (model.traceViewerLoad) {
+                ViewerLoadMetrics.event(
+                    "PERSISTENT_THUMB_TRIM_FAILED",
+                    "error=${e.javaClass.simpleName}",
+                    imageKey = "${model.uri}:${model.dateModifiedMillis}",
+                )
+            }
         }
     }
 }

@@ -116,6 +116,7 @@ class AvesAppGlideModule : AppGlideModule() {
             rotationDegrees: Int = 0,
             dateModifiedMillis: Long = 0L,
             allowPersistentThumbnailCache: Boolean = true,
+            traceViewerLoad: Boolean = false,
         ): Any {
             /*if (pageId != null && MultiPageImage.isSupported(mimeType)) {
                 MultiPageImage(context, uri, mimeType, pageId)
@@ -134,13 +135,14 @@ class AvesAppGlideModule : AppGlideModule() {
                     dateModifiedMillis,
                     sizeBytes,
                     allowPersistentThumbnailCache,
+                    traceViewerLoad,
                 )
             } else if (isVideo(mimeType)) {
                 VideoThumbnail(context, uri)
             } else {
                 StorageUtils.getGlideSafeUri(context, uri, mimeType, sizeBytes)
             }
-            if (ViewerLoadMetrics.currentEntryId() != 0L) {
+            if (traceViewerLoad && ViewerLoadMetrics.currentEntryId() != 0L) {
                 ViewerLoadMetrics.event(
                     "GLIDE_MODEL_RESOLVED",
                     "mime=$mimeType thumbnail=$isThumbnail fastPreview=$isFastScreenPreview " +
