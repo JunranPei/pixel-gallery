@@ -255,6 +255,7 @@ fun ZoomableContainer(
                     var zoomIntentDispatched = false
                     var sample = 0
                     var endedBecauseConsumed = false
+                    var lastSampleTraceTime = Long.MIN_VALUE
 
                     // Gesture event loop
                     var gestureActive = true
@@ -352,14 +353,18 @@ fun ZoomableContainer(
                                 val (clampedX, clampedY) = clampOffset(newScale, rawOffsetX, rawOffsetY)
 
                                 sample += 1
-                                trace(
-                                    "ZOOM_PREVIEW_SAMPLE",
-                                    "sample=$sample pointers=${event.changes.size} pinch=$isPinching consume=$shouldConsume " +
-                                        "centroid=${centroid.x},${centroid.y} zoomChange=$zoomChange " +
-                                        "pan=${panChange.x},${panChange.y} scale=$prevScale->$newScale " +
-                                        "offset=$gestureOffsetX,$gestureOffsetY raw=$rawOffsetX,$rawOffsetY " +
-                                        "clamped=$clampedX,$clampedY",
-                                )
+                                val sampleTime = event.changes.firstOrNull()?.uptimeMillis ?: 0L
+                                if (sample == 1 || sampleTime - lastSampleTraceTime >= 80L) {
+                                    lastSampleTraceTime = sampleTime
+                                    trace(
+                                        "ZOOM_PREVIEW_SAMPLE",
+                                        "sample=$sample pointers=${event.changes.size} pinch=$isPinching consume=$shouldConsume " +
+                                            "centroid=${centroid.x},${centroid.y} zoomChange=$zoomChange " +
+                                            "pan=${panChange.x},${panChange.y} scale=$prevScale->$newScale " +
+                                            "offset=$gestureOffsetX,$gestureOffsetY raw=$rawOffsetX,$rawOffsetY " +
+                                            "clamped=$clampedX,$clampedY",
+                                    )
+                                }
                                 gestureScale = newScale
                                 gestureOffsetX = clampedX
                                 gestureOffsetY = clampedY
