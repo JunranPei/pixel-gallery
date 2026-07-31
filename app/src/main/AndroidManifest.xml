@@ -12,7 +12,7 @@
 
     <application
         android:name=".PixelGalleryApp"
-        android:label="Pixel Power Trace"
+        android:label="${appLabel}"
         tools:replace="android:label"
         android:largeHeap="true"
         android:icon="@mipmap/ic_launcher"

@@ -59,6 +59,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     var eagerLoadingEnabled = false
     var debug = false
     var onImageEventListener: OnImageEventListener? = null
+    var diagnosticsListener: ((String) -> Unit)? = null
     var doubleTapZoomScale = 1f
 
     /**
@@ -425,7 +426,31 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
 
         vTranslateBefore!!.set(vTranslate!!)
-        return onTouchEventInternal(event) || super.onTouchEvent(event)
+        val beforeScale = scale
+        val beforeTranslate = PointF(vTranslate!!.x, vTranslate!!.y)
+        val beforeCenter = getCenter()
+        val pointerDetail = buildString {
+            for (index in 0 until event.pointerCount) {
+                if (index > 0) append(';')
+                append(event.getPointerId(index))
+                append('@')
+                append(event.getX(index))
+                append(',')
+                append(event.getY(index))
+            }
+        }
+        val handled = onTouchEventInternal(event) || super.onTouchEvent(event)
+        diagnosticsListener?.invoke(
+            "action=${MotionEvent.actionToString(event.actionMasked)} index=${event.actionIndex} " +
+                "pointers=$pointerDetail handled=$handled " +
+                "beforeScale=$beforeScale beforeTranslate=${beforeTranslate.x},${beforeTranslate.y} " +
+                "beforeCenter=${beforeCenter?.x},${beforeCenter?.y} " +
+                "afterScale=$scale afterTranslate=${vTranslate?.x},${vTranslate?.y} " +
+                "afterCenter=${getCenter()?.let { "${it.x},${it.y}" }} " +
+                "zooming=$isZooming panning=$isPanning quick=$isQuickScaling " +
+                "maxTouch=$maxTouchCount anim=${anim != null}",
+        )
+        return handled
     }
 
     private fun onTouchEventInternal(event: MotionEvent): Boolean {

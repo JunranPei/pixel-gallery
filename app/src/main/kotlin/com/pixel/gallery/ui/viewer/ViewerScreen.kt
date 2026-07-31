@@ -110,6 +110,13 @@ private val viewerPhotoMetadataCache = ConcurrentHashMap<String, ViewerPhotoMeta
 
 private fun MediaEntry.viewerCacheKey(): String = "$contentId:$dateModifiedMillis"
 
+private fun MediaEntry.viewerMetricsDescriptor(role: String): String {
+    val fileName = Uri.encode(File(path).name)
+    return "$role={id=$contentId name=$fileName mime=$sourceMimeType bytes=$sizeBytes " +
+        "dimensions=${width}x$height rotation=$sourceRotationDegrees " +
+        "dateTaken=${sourceDateTakenMillis ?: 0L} modified=$dateModifiedMillis added=$dateAddedSecs}"
+}
+
 private fun MediaEntry.canContainMotionPhoto(): Boolean =
     sourceMimeType.equals("image/jpeg", ignoreCase = true) ||
         path.endsWith(".jpg", ignoreCase = true) ||
@@ -216,6 +223,25 @@ fun ViewerScreen(
     }
 
     LaunchedEffect(entryId) {
+        val current = photos.getOrNull(initialIndex)
+        val left = photos.getOrNull(initialIndex - 1)
+        val right = photos.getOrNull(initialIndex + 1)
+        val triplet = listOfNotNull(left, current, right)
+        ViewerLoadMetrics.event(
+            "ENTRY_NEIGHBOR_CONTEXT",
+            buildString {
+                append("index=$initialIndex count=${photos.size} ")
+                append(left?.viewerMetricsDescriptor("left") ?: "left={none}")
+                append(' ')
+                append(current?.viewerMetricsDescriptor("current") ?: "current={none}")
+                append(' ')
+                append(right?.viewerMetricsDescriptor("right") ?: "right={none}")
+                append(" tripletBytes=${triplet.sumOf { it.sizeBytes.coerceAtLeast(0L) }}")
+                append(" tripletPixels=${triplet.sumOf { it.width.toLong() * it.height.toLong() }}")
+            },
+            imageKey = current?.viewerCacheKey(),
+            entryId = entryId,
+        )
         ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "viewer-compose")
         delay(50)
         ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "50ms")
@@ -500,7 +526,7 @@ fun ViewerScreen(
                                 // This 200 px image only bridges Grid/pager motion. Persisting it
                                 // causes JPEG writes and cache trimming on viewer entry.
                                 allowPersistentThumbnailCache = false,
-                                traceViewerLoad = true,
+                                traceViewerLoad = ViewerLoadMetrics.isEnabled,
                             ).also { model ->
                                 ViewerLoadMetrics.event(
                                     "SWIPE_THUMB_MODEL",
@@ -523,16 +549,21 @@ fun ViewerScreen(
                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                     .signature(swipeThumbnailSignature)
                                     .override(200)
-                                val mainToken = ViewerLoadMetrics.workStarted(
-                                    "SWIPE_THUMB_200PX",
-                                    pageKey,
-                                    "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
-                                )
-                                swipeMainTokenRef.getAndSet(mainToken)?.let {
-                                    ViewerLoadMetrics.workCleared(it, "request-replaced")
+                                if (ViewerLoadMetrics.isEnabled) {
+                                    val mainToken = ViewerLoadMetrics.workStarted(
+                                        "SWIPE_THUMB_200PX",
+                                        pageKey,
+                                        "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
+                                    )
+                                    swipeMainTokenRef.getAndSet(mainToken)?.let {
+                                        ViewerLoadMetrics.workCleared(it, "request-replaced")
+                                    }
+                                    configured.listener(
+                                        trackedDrawableListener(mainToken, swipeMainTokenRef),
+                                    )
+                                } else {
+                                    configured
                                 }
-                                configured
-                                    .listener(trackedDrawableListener(mainToken, swipeMainTokenRef))
                             }
                         }
 

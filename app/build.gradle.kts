@@ -12,6 +12,8 @@ import java.io.FileInputStream
 
 val keystoreProperties = Properties()
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
+val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
+val viewerMetricsEnabled = viewerTestVariant != "clean"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -32,11 +34,21 @@ android {
     }
 
     defaultConfig {
-        applicationId = if (officialRelease) {
-            "com.pixel.gallery.multitask"
-        } else {
-            "com.pixel.gallery.simplegallerymerge"
+        applicationId = when (viewerTestVariant) {
+            "trace" -> "com.pixel.gallery.codextrace"
+            "clean" -> "com.pixel.gallery.codexclean"
+            else -> if (officialRelease) {
+                "com.pixel.gallery.multitask"
+            } else {
+                "com.pixel.gallery.simplegallerymerge"
+            }
         }
+        manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
+            "trace" -> "Pixel Trace"
+            "clean" -> "Pixel Clean"
+            else -> "Pixel Power Trace"
+        }
+        buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         minSdk = 26
         targetSdk = 35
         versionCode = 26
@@ -97,6 +109,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     dependenciesInfo {

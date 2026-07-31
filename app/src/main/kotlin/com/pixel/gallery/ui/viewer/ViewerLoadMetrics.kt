@@ -15,6 +15,7 @@ import android.os.Trace
 import android.util.Log
 import android.view.FrameMetrics
 import android.view.Window
+import com.pixel.gallery.BuildConfig
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -29,7 +30,7 @@ import kotlin.math.abs
 /** Low-overhead, per-entry diagnostics used by the power comparison build. */
 internal object ViewerLoadMetrics {
     private const val tag = "ViewerLoadMetrics"
-    const val isEnabled: Boolean = true
+    const val isEnabled: Boolean = BuildConfig.VIEWER_METRICS_ENABLED
 
     private val sessions = ConcurrentHashMap<String, Session>()
     private val entries = ConcurrentHashMap<Long, Entry>()
@@ -134,6 +135,7 @@ internal object ViewerLoadMetrics {
     }
 
     fun workStarted(type: String, imageKey: String, detail: String = ""): WorkToken {
+        if (!isEnabled) return WorkToken(0L, type, imageKey, 0L, 0L)
         val token = WorkToken(
             id = nextWorkId.incrementAndGet(),
             type = type,
@@ -171,6 +173,7 @@ internal object ViewerLoadMetrics {
         source: String,
         detail: String,
     ) {
+        if (!isEnabled) return
         if (!activeWorks.remove(token.id, token)) {
             emit(
                 token.entryId,
@@ -224,6 +227,7 @@ internal object ViewerLoadMetrics {
         entryId: Long,
         listener: Window.OnFrameMetricsAvailableListener?,
     ) {
+        if (!isEnabled) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && listener != null) {
             activity.window.removeOnFrameMetricsAvailableListener(listener)
         }
@@ -242,6 +246,7 @@ internal object ViewerLoadMetrics {
     }
 
     fun entryEnded(context: Context, entryId: Long, reason: String) {
+        if (!isEnabled) return
         checkpoint(context, entryId, "entry-end:$reason")
         val entry = entries[entryId]
         if (entry != null) {
@@ -285,6 +290,7 @@ internal object ViewerLoadMetrics {
     fun currentSessionId(imageKey: String): Long = sessions[imageKey]?.id ?: 0L
 
     fun powerSample(context: Context, imageKey: String, sessionId: Long, label: String) {
+        if (!isEnabled) return
         if (sessions[imageKey]?.id != sessionId) return
         val sample = readPower(context)
         val entryId = sessions[imageKey]?.entryId ?: currentEntryId()
@@ -303,6 +309,7 @@ internal object ViewerLoadMetrics {
         modelType: String,
         detail: String,
     ): PreviewToken {
+        if (!isEnabled) return PreviewToken(0L, imageKey, 0L, 0L)
         val entryId = currentEntryId()
         val token = PreviewToken(
             id = nextPreviewId.incrementAndGet(),
@@ -320,6 +327,7 @@ internal object ViewerLoadMetrics {
     }
 
     fun previewReady(token: PreviewToken, source: String, detail: String) {
+        if (!isEnabled) return
         sessions[token.imageKey]?.let {
             it.previewMs.compareAndSet(-1L, elapsedMs(it.startedAtNanos))
             it.previewSource = source
@@ -333,6 +341,7 @@ internal object ViewerLoadMetrics {
     }
 
     fun previewFailed(token: PreviewToken, error: String) {
+        if (!isEnabled) return
         emit(
             token.entryId,
             "PREVIEW_FAILED entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
@@ -342,6 +351,7 @@ internal object ViewerLoadMetrics {
     }
 
     fun previewCleared(token: PreviewToken, reason: String) {
+        if (!isEnabled) return
         emit(
             token.entryId,
             "PREVIEW_CLEAR entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
@@ -400,6 +410,7 @@ internal object ViewerLoadMetrics {
         }
 
     fun end(context: Context, imageKey: String, sessionId: Long) {
+        if (!isEnabled) return
         val current = sessions[imageKey]
         if (current == null || current.id != sessionId || !sessions.remove(imageKey, current)) {
             emit(

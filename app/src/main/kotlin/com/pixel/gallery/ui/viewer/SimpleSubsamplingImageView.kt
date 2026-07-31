@@ -495,15 +495,37 @@ internal fun SimpleSubsamplingImageView(
         } else {
             transformStateStore.get(transformStateKey)
         }
+        ViewerLoadMetrics.event(
+            "DEEP_ZOOM_HANDOFF_BEFORE_RESTORE",
+            "intendedScale=${handoffState?.scale ?: -1f} " +
+                "intendedCenter=${handoffState?.sourceCenter ?: "none"} " +
+                "liveScale=${liveSsivState?.scale ?: -1f} " +
+                "liveCenter=${liveSsivState?.sourceCenter ?: "none"} " +
+                "previewScale=$previewUserScale previewOffset=${previewOffsetX},${previewOffsetY} " +
+                "view=${view.width}x${view.height}",
+            imageKey = transformStateKey,
+        )
         handoffState?.let(view::restoreViewState)
+        val immediateState = view.snapshotViewState()
+        val intendedCenterInView = handoffState?.sourceCenter?.let(view::sourceToViewCoord)
+        ViewerLoadMetrics.event(
+            "DEEP_ZOOM_HANDOFF_AFTER_RESTORE",
+            "actualScale=${immediateState?.scale ?: -1f} " +
+                "actualCenter=${immediateState?.sourceCenter ?: "none"} " +
+                "intendedCenterInView=${intendedCenterInView ?: "none"}",
+            imageKey = transformStateKey,
+        )
         delay(16)
         if (isActivePage && imageAssigned && ssivBaseDrawn) {
+            val frameState = view.snapshotViewState()
             view.alpha = 1f
             subsamplingReady = true
             ViewerLoadMetrics.event(
                 "DEEP_ZOOM_HANDOFF",
-                "scale=${handoffState?.scale ?: view.scale} " +
-                    "center=${handoffState?.sourceCenter ?: "none"} " +
+                "intendedScale=${handoffState?.scale ?: -1f} " +
+                    "intendedCenter=${handoffState?.sourceCenter ?: "none"} " +
+                    "frameScale=${frameState?.scale ?: view.scale} " +
+                    "frameCenter=${frameState?.sourceCenter ?: "none"} " +
                     "previewScale=$previewUserScale previewOffset=${previewOffsetX},${previewOffsetY} " +
                     "view=${view.width}x${view.height} liveBase=${liveSsivState?.baseFitScale ?: -1f} " +
                     "liveSource=${liveSsivState?.sourceWidth ?: -1}x${liveSsivState?.sourceHeight ?: -1}",
@@ -681,6 +703,7 @@ internal fun SimpleSubsamplingImageView(
 
         ZoomableContainer(
             modifier = Modifier.fillMaxSize(),
+            diagnosticsKey = if (ViewerLoadMetrics.isEnabled) transformStateKey else "",
             minScale = previewMinScale,
             maxScale = previewMaxScale,
             scaleToOriginal = scaleToOriginal,
@@ -784,6 +807,17 @@ internal fun SimpleSubsamplingImageView(
 
                 doubleTapZoomScale = 1f
                 visibility = View.GONE
+                diagnosticsListener = if (ViewerLoadMetrics.isEnabled) {
+                    { detail ->
+                        ViewerLoadMetrics.event(
+                            "SSIV_TOUCH_SAMPLE",
+                            detail,
+                            imageKey = transformStateKey,
+                        )
+                    }
+                } else {
+                    null
+                }
 
                 setOnClickListener {
                     onClick()
@@ -839,11 +873,24 @@ internal fun SimpleSubsamplingImageView(
                     }
 
                     override fun onUpEvent() {
+                        val immediateState = this@ssivView.snapshotViewState()
+                        ViewerLoadMetrics.event(
+                            "SSIV_TOUCH_UP",
+                            "immediateScale=${immediateState?.scale ?: -1f} " +
+                                "immediateCenter=${immediateState?.sourceCenter ?: "none"}",
+                            imageKey = transformStateKey,
+                        )
                         // SSIV may spend 200 ms snapping scale/rotation to bounds after
                         // the fingers lift. Save once after that animation, never per frame.
                         this@ssivView.postDelayed({
-                            this@ssivView.snapshotViewState()?.let {
-                                transformStateStore.save(transformStateKey, it)
+                            this@ssivView.snapshotViewState()?.let { state ->
+                                transformStateStore.save(transformStateKey, state)
+                                ViewerLoadMetrics.event(
+                                    "SSIV_TOUCH_SETTLED",
+                                    "scale=${state.scale} center=${state.sourceCenter} " +
+                                        "base=${state.baseFitScale} rotation=${state.rotationRadians}",
+                                    imageKey = transformStateKey,
+                                )
                             }
                         }, 220L)
                     }

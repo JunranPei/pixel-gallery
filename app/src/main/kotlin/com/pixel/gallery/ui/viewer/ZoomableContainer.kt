@@ -49,6 +49,7 @@ import kotlin.math.abs
 @Composable
 fun ZoomableContainer(
     modifier: Modifier = Modifier,
+    diagnosticsKey: String = "",
     minScale: Float = 0.333f,
     maxScale: Float = 3.0f,
     scaleToOriginal: Float = 1.0f,
@@ -66,32 +67,47 @@ fun ZoomableContainer(
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var containerSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
 
     // Ensure minScale <= maxScale to prevent coerceIn crashes
     val safeMinScale = minOf(minScale, maxScale)
     val safeMaxScale = maxOf(minScale, maxScale)
 
     // Animated values for smooth double-tap transitions
-    val animScale = remember { Animatable(1f) }
-    val animOffsetX = remember { Animatable(0f) }
-    val animOffsetY = remember { Animatable(0f) }
-    var animationJob by remember { mutableStateOf<Job?>(null) }
-    var renderScale by remember { mutableFloatStateOf(1f) }
-    var renderOffsetX by remember { mutableFloatStateOf(0f) }
-    var renderOffsetY by remember { mutableFloatStateOf(0f) }
+    val animScale = remember(diagnosticsKey) { Animatable(1f) }
+    val animOffsetX = remember(diagnosticsKey) { Animatable(0f) }
+    val animOffsetY = remember(diagnosticsKey) { Animatable(0f) }
+    var animationJob by remember(diagnosticsKey) { mutableStateOf<Job?>(null) }
+    var renderScale by remember(diagnosticsKey) { mutableFloatStateOf(1f) }
+    var renderOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var renderOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var pointerGestureInProgress by remember(diagnosticsKey) { mutableStateOf(false) }
 
     // Immediate tracking values used during gesture processing
-    var gestureScale by remember { mutableFloatStateOf(1f) }
-    var gestureOffsetX by remember { mutableFloatStateOf(0f) }
-    var gestureOffsetY by remember { mutableFloatStateOf(0f) }
+    var gestureScale by remember(diagnosticsKey) { mutableFloatStateOf(1f) }
+    var gestureOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var gestureOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+
+    fun trace(name: String, detail: String) {
+        if (diagnosticsKey.isNotEmpty()) {
+            ViewerLoadMetrics.event(name, detail, imageKey = diagnosticsKey)
+        }
+    }
 
     // Double-tap animation values update one render state. Pointer gestures write the
     // render state directly so no per-event coroutine can overtake a newer touch sample.
     LaunchedEffect(animScale.value, animOffsetX.value, animOffsetY.value) {
-        renderScale = animScale.value
-        renderOffsetX = animOffsetX.value
-        renderOffsetY = animOffsetY.value
+        if (!pointerGestureInProgress) {
+            renderScale = animScale.value
+            renderOffsetX = animOffsetX.value
+            renderOffsetY = animOffsetY.value
+        } else {
+            trace(
+                "ZOOM_PREVIEW_STALE_ANIMATION_IGNORED",
+                "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                    "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY",
+            )
+        }
     }
     LaunchedEffect(renderScale, renderOffsetX, renderOffsetY) {
         onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
@@ -121,7 +137,14 @@ fun ZoomableContainer(
     Box(
         modifier = modifier
             .clipToBounds()
-            .onSizeChanged { containerSize = it }
+            .onSizeChanged {
+                containerSize = it
+                trace(
+                    "ZOOM_PREVIEW_SIZE",
+                    "container=${it.width}x${it.height} fit=$imageFitScaleX,$imageFitScaleY " +
+                        "range=$safeMinScale..$safeMaxScale original=$scaleToOriginal",
+                )
+            }
             // Tap / double-tap handler (separate pointerInput to avoid interference)
             .pointerInput(enabled, scaleToOriginal, safeMinScale, safeMaxScale) {
                 if (!enabled) return@pointerInput
@@ -156,6 +179,13 @@ fun ZoomableContainer(
                             targetOffsetY = clampedY
                         }
 
+                        trace(
+                            "ZOOM_PREVIEW_DOUBLE_TAP",
+                            "tap=${tapPosition.x},${tapPosition.y} container=${containerSize.width}x${containerSize.height} " +
+                                "from=$currentScale,$currentOffsetX,$currentOffsetY " +
+                                "to=$targetScale,$targetOffsetX,$targetOffsetY " +
+                                "fit=$imageFitScaleX,$imageFitScaleY",
+                        )
                         gestureScale = targetScale
                         gestureOffsetX = targetOffsetX
                         gestureOffsetY = targetOffsetY
@@ -164,6 +194,11 @@ fun ZoomableContainer(
                         animationJob?.cancel()
                         animationJob = scope.launch {
                             try {
+                                trace(
+                                    "ZOOM_PREVIEW_ANIMATION_START",
+                                    "from=$currentScale,$currentOffsetX,$currentOffsetY " +
+                                        "to=$targetScale,$targetOffsetX,$targetOffsetY",
+                                )
                                 animScale.snapTo(currentScale)
                                 animOffsetX.snapTo(currentOffsetX)
                                 animOffsetY.snapTo(currentOffsetY)
@@ -173,6 +208,12 @@ fun ZoomableContainer(
                                     launch { animOffsetY.animateTo(targetOffsetY, animSpec) }
                                 }
                             } finally {
+                                trace(
+                                    "ZOOM_PREVIEW_ANIMATION_END",
+                                    "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                                        "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                                        "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                                )
                                 onZoomGestureEnded()
                             }
                         }
@@ -191,8 +232,16 @@ fun ZoomableContainer(
                 if (!enabled) return@pointerInput
                 awaitEachGesture {
                     // Wait for the first finger down
-                    awaitFirstDown(requireUnconsumed = false)
+                    val firstDown = awaitFirstDown(requireUnconsumed = false)
+                    pointerGestureInProgress = true
                     animationJob?.cancel()
+                    trace(
+                        "ZOOM_PREVIEW_POINTER_DOWN",
+                        "pointer=${firstDown.id.value} at=${firstDown.position.x},${firstDown.position.y} " +
+                            "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                            "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                            "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                    )
 
                     // Touch-slop tracking
                     var pastTouchSlop = false
@@ -204,6 +253,8 @@ fun ZoomableContainer(
                     var isGestureLockedToPan = false
                     var gestureLockChecked = false
                     var zoomIntentDispatched = false
+                    var sample = 0
+                    var endedBecauseConsumed = false
 
                     // Gesture event loop
                     var gestureActive = true
@@ -212,6 +263,7 @@ fun ZoomableContainer(
 
                         // If any change was already consumed upstream, bail out
                         if (event.changes.any { it.isConsumed }) {
+                            endedBecauseConsumed = true
                             gestureActive = false
                             continue
                         }
@@ -228,6 +280,11 @@ fun ZoomableContainer(
                             val panMotion = accumulatedPan.getDistance()
                             if (zoomMotion > touchSlop || panMotion > touchSlop) {
                                 pastTouchSlop = true
+                                trace(
+                                    "ZOOM_PREVIEW_SLOP_CROSSED",
+                                    "zoomMotion=$zoomMotion panMotion=$panMotion touchSlop=$touchSlop " +
+                                        "pointers=${event.changes.size} centroid=${centroid.x},${centroid.y}",
+                                )
                             }
                         }
 
@@ -294,6 +351,15 @@ fun ZoomableContainer(
 
                                 val (clampedX, clampedY) = clampOffset(newScale, rawOffsetX, rawOffsetY)
 
+                                sample += 1
+                                trace(
+                                    "ZOOM_PREVIEW_SAMPLE",
+                                    "sample=$sample pointers=${event.changes.size} pinch=$isPinching consume=$shouldConsume " +
+                                        "centroid=${centroid.x},${centroid.y} zoomChange=$zoomChange " +
+                                        "pan=${panChange.x},${panChange.y} scale=$prevScale->$newScale " +
+                                        "offset=$gestureOffsetX,$gestureOffsetY raw=$rawOffsetX,$rawOffsetY " +
+                                        "clamped=$clampedX,$clampedY",
+                                )
                                 gestureScale = newScale
                                 gestureOffsetX = clampedX
                                 gestureOffsetY = clampedY
@@ -311,6 +377,13 @@ fun ZoomableContainer(
                     if (zoomIntentDispatched) {
                         onZoomGestureEnded()
                     }
+                    pointerGestureInProgress = false
+                    trace(
+                        "ZOOM_PREVIEW_POINTER_END",
+                        "samples=$sample consumed=$endedBecauseConsumed zoomIntent=$zoomIntentDispatched " +
+                            "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                            "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                    )
                 }
             }
             .graphicsLayer {
