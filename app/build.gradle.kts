@@ -11,6 +11,11 @@ import java.util.Properties
 import java.io.FileInputStream
 
 val keystoreProperties = Properties()
+// Controls release APK splitting only. Viewer behaviour is no longer selected
+// by a build-wide experiment flag.
+val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
+val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
+val viewerMetricsEnabled = viewerTestVariant == "trace" || viewerTestVariant == "compressed"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -31,11 +36,23 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pixel.gallery.multitask"
+        applicationId = when (viewerTestVariant) {
+            "trace" -> "com.pixel.gallery.codextrace"
+            "clean" -> "com.pixel.gallery.codexclean"
+            "compressed" -> "com.pixel.gallery.codexcompressed"
+            else -> "com.pixel.gallery.multitask"
+        }
+        manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
+            "trace" -> "Pixel Trace"
+            "clean" -> "Pixel Clean"
+            "compressed" -> "Pixel Compressed"
+            else -> "Gallery"
+        }
+        buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "4.2.12-auto-multitask"
+        versionCode = 27
+        versionName = "4.2.13-auto-multitask"
     }
 
     signingConfigs {
@@ -65,10 +82,14 @@ android {
 
     splits {
         abi {
-            isEnable = true
+            isEnable = officialRelease
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
+            if (officialRelease) {
+                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            } else {
+                include("arm64-v8a")
+            }
+            isUniversalApk = officialRelease
         }
     }
 
@@ -88,6 +109,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     dependenciesInfo {

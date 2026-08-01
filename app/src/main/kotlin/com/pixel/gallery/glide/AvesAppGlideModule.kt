@@ -27,6 +27,7 @@ import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.utils.MimeTypes.isVideo
 import com.bumptech.glide.load.engine.executor.GlideExecutor
 import com.pixel.gallery.utils.StorageUtils
+import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import kotlinx.coroutines.flow.first
 // import com.pixel.gallery.utils.compatRemoveIf // Helper missing in Lumina, using inline logic or manual loop
 
@@ -38,9 +39,14 @@ class AvesAppGlideModule : AppGlideModule() {
 
         // Read settings before creating Glide's immutable executors.
         val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
-        val sourceThreadCount = kotlinx.coroutines.runBlocking {
+        val configuredSourceThreadCount = kotlinx.coroutines.runBlocking {
             settingsRepository.glideThreadCount.first()
         }.coerceIn(1, 8)
+        // Keep Glide's shared executors governed by the user's setting. Viewer requests
+        // opt into their own source-task pool, so the low-latency viewer policy cannot
+        // raise Grid scrolling concurrency or power usage.
+        val sourceThreadCount = configuredSourceThreadCount
+        val diskCacheThreadCount = 1
 
         // sizing
         val memorySizeCalculator = MemorySizeCalculator.Builder(context).build()
@@ -66,14 +72,23 @@ class AvesAppGlideModule : AppGlideModule() {
         // source-decode setting here; disk-cache I/O remains serialized by design.
         val sourceExec = GlideExecutor.newSourceExecutor(sourceThreadCount, "source-configured", GlideExecutor.UncaughtThrowableStrategy.DEFAULT)
         builder.setSourceExecutor(sourceExec)
-        builder.setDiskCacheExecutor(GlideExecutor.newDiskCacheExecutor(1, "disk-cache-throttled", GlideExecutor.UncaughtThrowableStrategy.DEFAULT))
+        builder.setDiskCacheExecutor(
+            GlideExecutor.newDiskCacheExecutor(
+                diskCacheThreadCount,
+                "disk-cache-configured",
+                GlideExecutor.UncaughtThrowableStrategy.DEFAULT,
+            ),
+        )
 
         fun toMb(bytes: Int) = Formatter.formatFileSize(context, bytes.toLong())
         Log.d(
             LOG_TAG, "Glide disk cache size=${toMb(diskCacheSize)}" +
                     ", memory cache size=${toMb(memorySizeCalculator.memoryCacheSize)}" +
                     ", bitmap pool size=${toMb(memorySizeCalculator.bitmapPoolSize)}" +
-                    ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}"
+                    ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}" +
+                    ", source threads=$sourceThreadCount" +
+                    ", disk cache threads=$diskCacheThreadCount" +
+                    ", viewer task compression=request scoped"
         )
     }
 
@@ -113,24 +128,44 @@ class AvesAppGlideModule : AppGlideModule() {
             isThumbnail: Boolean = false,
             isFastScreenPreview: Boolean = false,
             rotationDegrees: Int = 0,
-            dateModifiedMillis: Long = 0L
+            dateModifiedMillis: Long = 0L,
+            allowPersistentThumbnailCache: Boolean = true,
+            traceViewerLoad: Boolean = false,
         ): Any {
             /*if (pageId != null && MultiPageImage.isSupported(mimeType)) {
                 MultiPageImage(context, uri, mimeType, pageId)
             } else if (mimeType == MimeTypes.TIFF) {
                 TiffImage(context, uri, pageId)
             } else*/ 
-            return if (mimeType == MimeTypes.SVG) {
+            val model = if (mimeType == MimeTypes.SVG) {
                 SvgImage(context, uri)
             } else if (isFastScreenPreview && StorageUtils.isMediaStoreContentUri(uri)) {
                 FastScreenPreview(uri, rotationDegrees)
             } else if (isThumbnail && StorageUtils.isMediaStoreContentUri(uri)) {
-                MediaStoreThumbnail(uri, mimeType, rotationDegrees, dateModifiedMillis, sizeBytes)
+                MediaStoreThumbnail(
+                    uri,
+                    mimeType,
+                    rotationDegrees,
+                    dateModifiedMillis,
+                    sizeBytes,
+                    allowPersistentThumbnailCache,
+                    traceViewerLoad,
+                )
             } else if (isVideo(mimeType)) {
                 VideoThumbnail(context, uri)
             } else {
                 StorageUtils.getGlideSafeUri(context, uri, mimeType, sizeBytes)
             }
+            if (traceViewerLoad && ViewerLoadMetrics.currentEntryId() != 0L) {
+                ViewerLoadMetrics.event(
+                    "GLIDE_MODEL_RESOLVED",
+                    "mime=$mimeType thumbnail=$isThumbnail fastPreview=$isFastScreenPreview " +
+                        "sizeBytes=$sizeBytes persistentThumbnail=$allowPersistentThumbnailCache " +
+                        "model=${model.javaClass.simpleName}",
+                    imageKey = "$uri:$dateModifiedMillis",
+                )
+            }
+            return model
         }
     }
 }

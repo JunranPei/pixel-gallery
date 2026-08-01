@@ -28,6 +28,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
+import com.pixel.gallery.data.local.entity.MediaEntry
 import kotlinx.coroutines.flow.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,6 +40,7 @@ fun PhotoScreen(
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
+    onAlbumPhotosChanged: (List<MediaEntry>) -> Unit = {},
     gridState: LazyGridState = rememberLazyGridState(),
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
@@ -69,6 +71,13 @@ fun PhotoScreen(
             viewModel.groupMedia(sorted, gridColumns, photoSortOrder)
         }.flowOn(kotlinx.coroutines.Dispatchers.Default)
     }.collectAsState(initial = emptyList())
+
+    val albumPhotos = remember(albumItems) {
+        albumItems.mapNotNull { (it as? GridItem.Photo)?.entry }
+    }
+    LaunchedEffect(albumName, albumPhotos) {
+        onAlbumPhotosChanged(albumPhotos)
+    }
 
     val photoCount = remember(albumItems) {
         albumItems.count { it is GridItem.Photo }

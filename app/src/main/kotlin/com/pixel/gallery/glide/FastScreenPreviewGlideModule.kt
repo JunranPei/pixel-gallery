@@ -23,6 +23,7 @@ import java.io.FileOutputStream
 import com.pixel.gallery.utils.UriUtils.tryParseId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.atomic.AtomicReference
 
 data class FastScreenPreview(
     val uri: Uri,
@@ -57,8 +58,18 @@ internal class FastScreenPreviewFetcher(
     private val width: Int,
     private val height: Int
 ) : DataFetcher<Bitmap> {
+    private val activeMetricsToken = AtomicReference<ViewerLoadMetrics.WorkToken?>()
 
     override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in Bitmap>) {
+        val metricsToken = ViewerLoadMetrics.workStarted(
+            "FAST_SCREEN_PREVIEW_FETCH",
+            model.uri.toString(),
+            "requested=${width}x$height priority=$priority rotation=${model.rotationDegrees}",
+        )
+        activeMetricsToken.getAndSet(metricsToken)?.let {
+            ViewerLoadMetrics.workCleared(it, "fetch-replaced")
+        }
+        var metricsCompleted = false
         val metricsStartedAt = SystemClock.elapsedRealtimeNanos()
         var boundsMs = 0L
         var decodeMs = 0L
@@ -93,6 +104,14 @@ internal class FastScreenPreviewFetcher(
                             decodeMs = (SystemClock.elapsedRealtimeNanos() - persistentReadStartedAt) / 1_000_000L,
                             writeAndTrimMs = 0L,
                             totalMs = (SystemClock.elapsedRealtimeNanos() - metricsStartedAt) / 1_000_000L
+                        )
+                        metricsCompleted = true
+                        activeMetricsToken.compareAndSet(metricsToken, null)
+                        ViewerLoadMetrics.workReady(
+                            metricsToken,
+                            source = "PERSISTENT_JPEG",
+                            detail = "bitmap=${cachedBitmap.width}x${cachedBitmap.height} " +
+                                "config=${cachedBitmap.config} bytes=${persistentFile.length()}",
                         )
                         callback.onDataReady(cachedBitmap)
                         return
@@ -186,13 +205,30 @@ if (srcWidth > 0 && srcHeight > 0) {
                     writeAndTrimMs = writeAndTrimMs,
                     totalMs = (SystemClock.elapsedRealtimeNanos() - metricsStartedAt) / 1_000_000L
                 )
+                metricsCompleted = true
+                activeMetricsToken.compareAndSet(metricsToken, null)
+                ViewerLoadMetrics.workReady(
+                    metricsToken,
+                    source = "SOURCE_DECODE",
+                    detail = "bitmap=${bitmap?.width ?: 0}x${bitmap?.height ?: 0} " +
+                        "bounds=${boundsMs}ms decode=${decodeMs}ms writeAndTrim=${writeAndTrimMs}ms",
+                )
                 callback.onDataReady(bitmap)
             } else {
+                metricsCompleted = true
+                activeMetricsToken.compareAndSet(metricsToken, null)
+                ViewerLoadMetrics.workFailed(metricsToken, "decode-null")
                 callback.onLoadFailed(IOException("Failed to fast-decode preview for uri=${model.uri}"))
             }
         } catch (e: Exception) {
+            metricsCompleted = true
+            activeMetricsToken.compareAndSet(metricsToken, null)
+            ViewerLoadMetrics.workFailed(metricsToken, e.javaClass.simpleName)
             callback.onLoadFailed(e)
         } finally {
+            if (!metricsCompleted) {
+                ViewerLoadMetrics.workCleared(metricsToken, "fetch-finally-without-result")
+            }
             try {
                 Process.setThreadPriority(originalPriority)
             } catch (e: Exception) {
@@ -219,9 +255,17 @@ if (srcWidth > 0 && srcHeight > 0) {
         }
     }
 
-    override fun cleanup() {}
+    override fun cleanup() {
+        activeMetricsToken.getAndSet(null)?.let {
+            ViewerLoadMetrics.workCleared(it, "datafetcher-cleanup")
+        }
+    }
 
-    override fun cancel() {}
+    override fun cancel() {
+        activeMetricsToken.getAndSet(null)?.let {
+            ViewerLoadMetrics.workCleared(it, "datafetcher-cancel")
+        }
+    }
 
     override fun getDataClass(): Class<Bitmap> = Bitmap::class.java
 

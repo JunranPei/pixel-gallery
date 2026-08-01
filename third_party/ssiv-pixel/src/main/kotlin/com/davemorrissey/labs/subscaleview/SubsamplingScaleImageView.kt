@@ -59,6 +59,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     var eagerLoadingEnabled = false
     var debug = false
     var onImageEventListener: OnImageEventListener? = null
+    var diagnosticsListener: ((String) -> Unit)? = null
     var doubleTapZoomScale = 1f
 
     /**
@@ -135,6 +136,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var anim: Anim? = null
     private var isReady = false
     private var isImageLoaded = false
+    private var hasDispatchedImageDrawn = false
+    private var lastDiagnosticsMoveEventTime = Long.MIN_VALUE
 
     private var bitmapPaint: Paint? = null
     private var debugTextPaint: Paint? = null
@@ -259,6 +262,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             sOrientation = 0
             isReady = false
             isImageLoaded = false
+            hasDispatchedImageDrawn = false
             bitmap = null
             cos = Math.cos(0.0)
             sin = Math.sin(0.0)
@@ -423,7 +427,41 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
 
         vTranslateBefore!!.set(vTranslate!!)
-        return onTouchEventInternal(event) || super.onTouchEvent(event)
+        val shouldTraceTouch = diagnosticsListener != null && (
+            event.actionMasked != MotionEvent.ACTION_MOVE ||
+                lastDiagnosticsMoveEventTime == Long.MIN_VALUE ||
+                event.eventTime - lastDiagnosticsMoveEventTime >= 80L
+            )
+        if (shouldTraceTouch && event.actionMasked == MotionEvent.ACTION_MOVE) {
+            lastDiagnosticsMoveEventTime = event.eventTime
+        }
+        val beforeScale = if (shouldTraceTouch) scale else 0f
+        val beforeTranslate = if (shouldTraceTouch) PointF(vTranslate!!.x, vTranslate!!.y) else null
+        val beforeCenter = if (shouldTraceTouch) getCenter() else null
+        val handled = onTouchEventInternal(event) || super.onTouchEvent(event)
+        if (shouldTraceTouch) {
+            val pointerDetail = buildString {
+                for (index in 0 until event.pointerCount) {
+                    if (index > 0) append(';')
+                    append(event.getPointerId(index))
+                    append('@')
+                    append(event.getX(index))
+                    append(',')
+                    append(event.getY(index))
+                }
+            }
+            diagnosticsListener?.invoke(
+                "action=${MotionEvent.actionToString(event.actionMasked)} index=${event.actionIndex} " +
+                    "pointers=$pointerDetail handled=$handled " +
+                    "beforeScale=$beforeScale beforeTranslate=${beforeTranslate?.x},${beforeTranslate?.y} " +
+                    "beforeCenter=${beforeCenter?.x},${beforeCenter?.y} " +
+                    "afterScale=$scale afterTranslate=${vTranslate?.x},${vTranslate?.y} " +
+                    "afterCenter=${getCenter()?.let { "${it.x},${it.y}" }} " +
+                    "zooming=$isZooming panning=$isPanning quick=$isQuickScaling " +
+                    "maxTouch=$maxTouchCount anim=${anim != null}",
+            )
+        }
+        return handled
     }
 
     private fun onTouchEventInternal(event: MotionEvent): Boolean {
@@ -595,7 +633,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     if (quickScaleMoved) {
                         animateToBounds()
                     } else {
-                        doubleTapZoom(quickScaleSCenter)
+                        doubleTapZoom(quickScaleSCenter, quickScaleVStart)
                     }
                 }
 
@@ -648,14 +686,24 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
     private fun getClosestRightAngle(degrees: Double) = Math.round(degrees / 90f) * 90.0
 
-    private fun doubleTapZoom(sCenter: PointF?) {
+    private fun doubleTapZoom(sCenter: PointF?, vFocus: PointF?) {
+        if (sCenter == null) return
         val doubleTapZoomScale = min(maxScale, doubleTapZoomScale)
         if (doubleTapReturnsToFit) {
             val fullScale = getFullScale()
             val isAtFitScale = abs(scale / fullScale - 1f) < 0.05f
-            val targetCenter = if (isAtFitScale) sCenter!! else PointF(sWidth / 2f, sHeight / 2f)
+            val targetCenter = if (isAtFitScale) sCenter else PointF(sWidth / 2f, sHeight / 2f)
             val targetScale = if (isAtFitScale) doubleTapZoomScale else fullScale
-            AnimationBuilder(targetCenter, targetScale).start()
+            diagnosticsListener?.invoke(
+                "gesture=DOUBLE_TAP source=${sCenter.x},${sCenter.y} " +
+                    "view=${vFocus?.x},${vFocus?.y} fromScale=$scale targetScale=$targetScale " +
+                    "fitScale=$fullScale fixedFocus=$isAtFitScale",
+            )
+            if (isAtFitScale && vFocus != null) {
+                AnimationBuilder(targetCenter, targetScale, vFocus).start()
+            } else {
+                AnimationBuilder(targetCenter, targetScale).start()
+            }
             invalidate()
             return
         }
@@ -663,17 +711,29 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val zoomIn = scale <= doubleTapZoomScale * 0.9 || isZoomedOut()
         if (sWidth == sHeight || !isOneToOneZoomEnabled) {
             val targetScale = if (zoomIn) doubleTapZoomScale else getFullScale()
-            AnimationBuilder(sCenter!!, targetScale).start()
+            if (zoomIn && vFocus != null) {
+                AnimationBuilder(sCenter, targetScale, vFocus).start()
+            } else {
+                AnimationBuilder(sCenter, targetScale).start()
+            }
         } else {
             val targetScale = if (zoomIn && scale != 1f) doubleTapZoomScale else getFullScale()
             if (scale != 1f) {
                 if (zoomIn) {
-                    AnimationBuilder(sCenter!!, targetScale).start()
+                    if (vFocus != null) {
+                        AnimationBuilder(sCenter, targetScale, vFocus).start()
+                    } else {
+                        AnimationBuilder(sCenter, targetScale).start()
+                    }
                 } else {
-                    AnimationBuilder(sCenter!!, 1f).start()
+                    AnimationBuilder(sCenter, 1f).start()
                 }
             } else {
-                AnimationBuilder(sCenter!!, targetScale).start()
+                if (zoomIn && vFocus != null) {
+                    AnimationBuilder(sCenter, targetScale, vFocus).start()
+                } else {
+                    AnimationBuilder(sCenter, targetScale).start()
+                }
             }
         }
         invalidate()
@@ -742,6 +802,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             invalidate()
         }
 
+        var imageDrawnThisFrame = false
         if (tileMap != null && getIsBaseLayerReady()) {
             val sampleSize = min(fullImageSampleSize, calculateInSampleSize(scale))
             var hasMissingTiles = false
@@ -784,6 +845,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             objectMatrix!!.setPolyToPoly(srcArray, 0, dstArray, 0, 4)
                             objectMatrix!!.postRotate(Math.toDegrees(imageRotation).toFloat(), width / 2f, height / 2f)
                             canvas.drawBitmap(tile.bitmap!!, objectMatrix!!, bitmapPaint)
+                            imageDrawnThisFrame = true
                             if (debug) {
                                 canvas.drawRect(tile.vRect!!, debugLinePaint!!)
                             }
@@ -828,6 +890,17 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
 
             canvas.drawBitmap(bitmap!!, objectMatrix!!, bitmapPaint)
+            imageDrawnThisFrame = true
+        }
+
+        if (imageDrawnThisFrame && !hasDispatchedImageDrawn) {
+            hasDispatchedImageDrawn = true
+            val drawnGeneration = imageGeneration
+            post {
+                if (drawnGeneration == imageGeneration && hasDispatchedImageDrawn) {
+                    onImageEventListener?.onImageDrawn()
+                }
+            }
         }
 
         if (debug) {
@@ -1684,7 +1757,50 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         satTemp!!.rotate = imageRotation.toFloat()
         satTemp!!.vTranslate.set(vxCenter - sCenterX * scale, vyCenter - sCenterY * scale)
         fitToBounds(satTemp!!)
-        return satTemp!!.vTranslate
+        // Never expose the mutable scratch point. restoreViewState used to retain this
+        // exact instance as the live translation, so a later animation endpoint
+        // calculation overwrote the visible position before the animation had started.
+        return PointF(satTemp!!.vTranslate.x, satTemp!!.vTranslate.y)
+    }
+
+    /**
+     * Returns the closest in-bounds view focus for a source point at [targetScale].
+     *
+     * Double-tap zoom uses this to keep the tapped source pixel under the user's
+     * finger. If an image edge makes that geometrically impossible, only the
+     * constrained axis is adjusted.
+     */
+    private fun limitedVFocus(
+        sFocus: PointF,
+        requestedVFocus: PointF,
+        targetScale: Float,
+    ): PointF {
+        val viewCenterX = width / 2f
+        val viewCenterY = height / 2f
+        val focusDeltaX = requestedVFocus.x - viewCenterX
+        val focusDeltaY = requestedVFocus.y - viewCenterY
+        val preRotatedFocusX =
+            viewCenterX + (focusDeltaX * cos + focusDeltaY * sin).toFloat()
+        val preRotatedFocusY =
+            viewCenterY + (-focusDeltaX * sin + focusDeltaY * cos).toFloat()
+        val target = ScaleTranslateRotate(
+            scale = targetScale,
+            vTranslate = PointF(
+                preRotatedFocusX - sFocus.x * targetScale,
+                preRotatedFocusY - sFocus.y * targetScale,
+            ),
+            rotate = imageRotation.toFloat(),
+        )
+        fitToBounds(target)
+
+        val boundedPreRotatedX = sFocus.x * target.scale + target.vTranslate.x
+        val boundedPreRotatedY = sFocus.y * target.scale + target.vTranslate.y
+        val boundedDeltaX = boundedPreRotatedX - viewCenterX
+        val boundedDeltaY = boundedPreRotatedY - viewCenterY
+        return PointF(
+            viewCenterX + (boundedDeltaX * cos - boundedDeltaY * sin).toFloat(),
+            viewCenterY + (boundedDeltaX * sin + boundedDeltaY * cos).toFloat(),
+        )
     }
 
     private fun limitedSCenter(sCenterX: Float, sCenterY: Float, scale: Float, sTarget: PointF): PointF {
@@ -1782,6 +1898,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     inner class AnimationBuilder {
         private val targetScale: Float
         private var targetSCenter: PointF?
+        private var targetVFocus: PointF? = null
         private var targetRotation = imageRotation
         var duration = ANIMATION_DURATION
         var easing = EASE_IN_OUT_QUAD
@@ -1795,6 +1912,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         constructor(sCenter: PointF, scale: Float) {
             targetScale = scale
             targetSCenter = sCenter
+        }
+
+        constructor(sCenter: PointF, scale: Float, vFocus: PointF) {
+            targetScale = scale
+            targetSCenter = sCenter
+            targetVFocus = PointF(vFocus.x, vFocus.y)
         }
 
         constructor(sCenter: PointF, degrees: Double) {
@@ -1813,8 +1936,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             val vxCenter = width / 2
             val vyCenter = height / 2
 
-            if (!skipCenterLimiting) {
+            if (!skipCenterLimiting && targetVFocus == null) {
                 targetSCenter = limitedSCenter(targetSCenter!!.x, targetSCenter!!.y, targetScale, PointF())
+            }
+            val boundedVFocus = targetVFocus?.let {
+                limitedVFocus(targetSCenter!!, it, targetScale)
             }
 
             anim = Anim().apply {
@@ -1827,9 +1953,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 sCenterStart = getCenter()
                 sCenterEnd = targetSCenter
                 vFocusStart = sourceToViewCoord(targetSCenter!!)
-                vFocusEnd = PointF(
+                vFocusEnd = boundedVFocus ?: PointF(
                     vxCenter.toFloat(),
-                    vyCenter.toFloat()
+                    vyCenter.toFloat(),
                 )
                 time = System.currentTimeMillis()
             }
@@ -1872,6 +1998,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
     interface OnImageEventListener {
         fun onReady()
+        fun onImageDrawn()
         fun onImageLoadError(e: Exception)
         fun onImageRotation(degrees: Int)
         fun onUpEvent()

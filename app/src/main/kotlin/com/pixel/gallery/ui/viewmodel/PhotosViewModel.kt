@@ -63,8 +63,8 @@ class PhotosViewModel @Inject constructor(
             !hidden.any { entry.path.startsWith(it) }
         }
         when (sort) {
-            PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
-            PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
+            PhotoSortOrder.DATE_DESC -> filtered.sortedWith(MEDIA_DATE_DESCENDING)
+            PhotoSortOrder.DATE_ASC -> filtered.sortedWith(MEDIA_DATE_ASCENDING)
             PhotoSortOrder.NAME_ASC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
             PhotoSortOrder.NAME_DESC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
             PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
@@ -79,10 +79,10 @@ class PhotosViewModel @Inject constructor(
         val items = mutableListOf<GridItem>()
         var lastHeader = ""
         val format = if (columns >= 6) "MMMM yyyy" else "MMMM d, yyyy"
-        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.getDefault())
+        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.US)
         
         entries.forEach { entry ->
-            val timestamp = entry.bestTimestamp
+            val timestamp = entry.chronologicalTimestamp()
             val date = java.util.Date(timestamp)
             val header = sdf.format(date)
             if (header != lastHeader) {
@@ -166,7 +166,7 @@ class PhotosViewModel @Inject constructor(
         }.map { (name, entries) ->
             val firstEntry = entries.first()
             val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
-            val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
+            val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
         when (sort) {
@@ -193,7 +193,7 @@ class PhotosViewModel @Inject constructor(
         }.map { (name, entries) ->
             val firstEntry = entries.first()
             val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
-            val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
+            val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
         when (sort) {
@@ -493,3 +493,24 @@ private val CASE_INSENSITIVE_NATURAL_ORDER = Comparator<String> { s1, s2 ->
     }
     len1.compareTo(len2)
 }
+
+private fun MediaEntry.chronologicalTimestamp(): Long {
+    val addedMillis = dateAddedSecs.takeIf { it > 0L }?.times(1000L) ?: 0L
+    val scannedTimestamp = bestTimestamp.takeIf {
+        it > 0L && (addedMillis == 0L || it != addedMillis)
+    }
+    return sourceDateTakenMillis?.takeIf { it > 0L }
+        ?: scannedTimestamp
+        ?: dateModifiedMillis.takeIf { it > 0L }
+        ?: addedMillis
+}
+
+private val MEDIA_DATE_DESCENDING =
+    compareByDescending<MediaEntry> { it.chronologicalTimestamp() }
+        .thenByDescending { it.dateModifiedMillis }
+        .thenByDescending { it.contentId }
+
+private val MEDIA_DATE_ASCENDING =
+    compareBy<MediaEntry> { it.chronologicalTimestamp() }
+        .thenBy { it.dateModifiedMillis }
+        .thenBy { it.contentId }

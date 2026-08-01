@@ -9,6 +9,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
@@ -25,6 +26,7 @@ fun GlideViewerFallback(
     dateModifiedMillis: Long,
     isVisiblePage: Boolean,
     modifier: Modifier = Modifier,
+    onContentReadyChanged: (Boolean) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
     BoxWithConstraints(modifier = modifier) {
@@ -41,14 +43,39 @@ fun GlideViewerFallback(
         val fitWidthFraction = (imageWidth * fitScale / containerWidth).coerceIn(0f, 1f)
         val fitHeightFraction = (imageHeight * fitScale / containerHeight).coerceIn(0f, 1f)
         var imageView by remember { mutableStateOf<ImageView?>(null) }
+        val currentOnContentReadyChanged by rememberUpdatedState(onContentReadyChanged)
 
         DisposableEffect(imagePath, dateModifiedMillis, isVisiblePage, imageView) {
             val view = imageView
             if (view != null && isVisiblePage) {
+                currentOnContentReadyChanged(false)
                 val request = Glide.with(view)
                     .load(imagePath)
+                    .withViewerTaskCompression()
                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                     .fitCenter()
+                    .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                        override fun onLoadFailed(
+                            e: com.bumptech.glide.load.engine.GlideException?,
+                            model: Any?,
+                            target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>,
+                            isFirstResource: Boolean,
+                        ): Boolean {
+                            currentOnContentReadyChanged(false)
+                            return false
+                        }
+
+                        override fun onResourceReady(
+                            resource: android.graphics.drawable.Drawable,
+                            model: Any,
+                            target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>,
+                            dataSource: com.bumptech.glide.load.DataSource,
+                            isFirstResource: Boolean,
+                        ): Boolean {
+                            currentOnContentReadyChanged(true)
+                            return false
+                        }
+                    })
                 val signedRequest = if (dateModifiedMillis > 0L) {
                     request.signature(ObjectKey(dateModifiedMillis))
                 } else {
@@ -57,6 +84,7 @@ fun GlideViewerFallback(
                 signedRequest.into(view)
             } else if (view != null) {
                 Glide.with(view).clear(view)
+                currentOnContentReadyChanged(false)
             }
             onDispose {
                 if (view != null) Glide.with(view).clear(view)

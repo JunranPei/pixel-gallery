@@ -29,6 +29,8 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 import kotlin.math.abs
 
 /**
@@ -47,9 +49,11 @@ import kotlin.math.abs
 @Composable
 fun ZoomableContainer(
     modifier: Modifier = Modifier,
+    diagnosticsKey: String = "",
     minScale: Float = 0.333f,
     maxScale: Float = 3.0f,
     scaleToOriginal: Float = 1.0f,
+    enabled: Boolean = true,
     autoApplyTransformations: Boolean = true,
     // The fraction of container size the image occupies at userScale=1.0 (fit-to-screen).
     // e.g. for a landscape photo on a portrait screen: imageFitScaleX=1.0, imageFitScaleY=0.5
@@ -57,29 +61,56 @@ fun ZoomableContainer(
     imageFitScaleX: Float = 1.0f,
     imageFitScaleY: Float = 1.0f,
     onTap: () -> Unit = {},
+    onZoomGestureStarted: () -> Unit = {},
+    onZoomGestureEnded: () -> Unit = {},
     onTransformChanged: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var containerSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
 
     // Ensure minScale <= maxScale to prevent coerceIn crashes
     val safeMinScale = minOf(minScale, maxScale)
     val safeMaxScale = maxOf(minScale, maxScale)
 
     // Animated values for smooth double-tap transitions
-    val animScale = remember { Animatable(1f) }
-    val animOffsetX = remember { Animatable(0f) }
-    val animOffsetY = remember { Animatable(0f) }
+    val animScale = remember(diagnosticsKey) { Animatable(1f) }
+    val animOffsetX = remember(diagnosticsKey) { Animatable(0f) }
+    val animOffsetY = remember(diagnosticsKey) { Animatable(0f) }
+    var animationJob by remember(diagnosticsKey) { mutableStateOf<Job?>(null) }
+    var renderScale by remember(diagnosticsKey) { mutableFloatStateOf(1f) }
+    var renderOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var renderOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var pointerGestureInProgress by remember(diagnosticsKey) { mutableStateOf(false) }
 
     // Immediate tracking values used during gesture processing
-    var gestureScale by remember { mutableFloatStateOf(1f) }
-    var gestureOffsetX by remember { mutableFloatStateOf(0f) }
-    var gestureOffsetY by remember { mutableFloatStateOf(0f) }
+    var gestureScale by remember(diagnosticsKey) { mutableFloatStateOf(1f) }
+    var gestureOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var gestureOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
 
-    // Report transformation changes to the parent
+    fun trace(name: String, detail: String) {
+        if (diagnosticsKey.isNotEmpty()) {
+            ViewerLoadMetrics.event(name, detail, imageKey = diagnosticsKey)
+        }
+    }
+
+    // Double-tap animation values update one render state. Pointer gestures write the
+    // render state directly so no per-event coroutine can overtake a newer touch sample.
     LaunchedEffect(animScale.value, animOffsetX.value, animOffsetY.value) {
-        onTransformChanged(animScale.value, animOffsetX.value, animOffsetY.value)
+        if (!pointerGestureInProgress) {
+            renderScale = animScale.value
+            renderOffsetX = animOffsetX.value
+            renderOffsetY = animOffsetY.value
+        } else {
+            trace(
+                "ZOOM_PREVIEW_STALE_ANIMATION_IGNORED",
+                "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                    "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY",
+            )
+        }
+    }
+    LaunchedEffect(renderScale, renderOffsetX, renderOffsetY) {
+        onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
     }
 
     /**
@@ -106,13 +137,23 @@ fun ZoomableContainer(
     Box(
         modifier = modifier
             .clipToBounds()
-            .onSizeChanged { containerSize = it }
+            .onSizeChanged {
+                containerSize = it
+                trace(
+                    "ZOOM_PREVIEW_SIZE",
+                    "container=${it.width}x${it.height} fit=$imageFitScaleX,$imageFitScaleY " +
+                        "range=$safeMinScale..$safeMaxScale original=$scaleToOriginal",
+                )
+            }
             // Tap / double-tap handler (separate pointerInput to avoid interference)
-            .pointerInput(scaleToOriginal, safeMinScale, safeMaxScale) {
+            .pointerInput(enabled, scaleToOriginal, safeMinScale, safeMaxScale) {
+                if (!enabled) return@pointerInput
                 detectTapGestures(
                     onTap = { onTap() },
                     onDoubleTap = { tapPosition ->
                         val currentScale = gestureScale
+                        val currentOffsetX = gestureOffsetX
+                        val currentOffsetY = gestureOffsetY
                         val targetScale: Float
                         val targetOffsetX: Float
                         val targetOffsetY: Float
@@ -125,6 +166,9 @@ fun ZoomableContainer(
                         } else {
                             // Currently at fit-screen → zoom to original pixel size
                             targetScale = scaleToOriginal.coerceIn(safeMinScale, safeMaxScale)
+                            if (targetScale > 1.01f) {
+                                onZoomGestureStarted()
+                            }
                             val cx = containerSize.width / 2f
                             val cy = containerSize.height / 2f
                             // Offset so the tap point stays visually fixed
@@ -135,22 +179,69 @@ fun ZoomableContainer(
                             targetOffsetY = clampedY
                         }
 
+                        trace(
+                            "ZOOM_PREVIEW_DOUBLE_TAP",
+                            "tap=${tapPosition.x},${tapPosition.y} container=${containerSize.width}x${containerSize.height} " +
+                                "from=$currentScale,$currentOffsetX,$currentOffsetY " +
+                                "to=$targetScale,$targetOffsetX,$targetOffsetY " +
+                                "fit=$imageFitScaleX,$imageFitScaleY",
+                        )
                         gestureScale = targetScale
                         gestureOffsetX = targetOffsetX
                         gestureOffsetY = targetOffsetY
 
                         val animSpec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
-                        scope.launch { animScale.animateTo(targetScale, animSpec) }
-                        scope.launch { animOffsetX.animateTo(targetOffsetX, animSpec) }
-                        scope.launch { animOffsetY.animateTo(targetOffsetY, animSpec) }
+                        animationJob?.cancel()
+                        animationJob = scope.launch {
+                            try {
+                                trace(
+                                    "ZOOM_PREVIEW_ANIMATION_START",
+                                    "from=$currentScale,$currentOffsetX,$currentOffsetY " +
+                                        "to=$targetScale,$targetOffsetX,$targetOffsetY",
+                                )
+                                animScale.snapTo(currentScale)
+                                animOffsetX.snapTo(currentOffsetX)
+                                animOffsetY.snapTo(currentOffsetY)
+                                coroutineScope {
+                                    launch { animScale.animateTo(targetScale, animSpec) }
+                                    launch { animOffsetX.animateTo(targetOffsetX, animSpec) }
+                                    launch { animOffsetY.animateTo(targetOffsetY, animSpec) }
+                                }
+                            } finally {
+                                trace(
+                                    "ZOOM_PREVIEW_ANIMATION_END",
+                                    "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                                        "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                                        "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                                )
+                                onZoomGestureEnded()
+                            }
+                        }
                     }
                 )
             }
             // Pinch-zoom and pan handler
-            .pointerInput(safeMinScale, safeMaxScale, containerSize, imageFitScaleX, imageFitScaleY) {
+            .pointerInput(
+                enabled,
+                safeMinScale,
+                safeMaxScale,
+                containerSize,
+                imageFitScaleX,
+                imageFitScaleY
+            ) {
+                if (!enabled) return@pointerInput
                 awaitEachGesture {
                     // Wait for the first finger down
-                    awaitFirstDown(requireUnconsumed = false)
+                    val firstDown = awaitFirstDown(requireUnconsumed = false)
+                    pointerGestureInProgress = true
+                    animationJob?.cancel()
+                    trace(
+                        "ZOOM_PREVIEW_POINTER_DOWN",
+                        "pointer=${firstDown.id.value} at=${firstDown.position.x},${firstDown.position.y} " +
+                            "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                            "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                            "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                    )
 
                     // Touch-slop tracking
                     var pastTouchSlop = false
@@ -161,6 +252,10 @@ fun ZoomableContainer(
                     // Gesture lock state to prevent mid-gesture control handover to parent Pager
                     var isGestureLockedToPan = false
                     var gestureLockChecked = false
+                    var zoomIntentDispatched = false
+                    var sample = 0
+                    var endedBecauseConsumed = false
+                    var lastSampleTraceTime = Long.MIN_VALUE
 
                     // Gesture event loop
                     var gestureActive = true
@@ -169,6 +264,7 @@ fun ZoomableContainer(
 
                         // If any change was already consumed upstream, bail out
                         if (event.changes.any { it.isConsumed }) {
+                            endedBecauseConsumed = true
                             gestureActive = false
                             continue
                         }
@@ -185,11 +281,20 @@ fun ZoomableContainer(
                             val panMotion = accumulatedPan.getDistance()
                             if (zoomMotion > touchSlop || panMotion > touchSlop) {
                                 pastTouchSlop = true
+                                trace(
+                                    "ZOOM_PREVIEW_SLOP_CROSSED",
+                                    "zoomMotion=$zoomMotion panMotion=$panMotion touchSlop=$touchSlop " +
+                                        "pointers=${event.changes.size} centroid=${centroid.x},${centroid.y}",
+                                )
                             }
                         }
 
                         if (pastTouchSlop) {
                             val isPinching = event.changes.size >= 2
+                            if (isPinching && !zoomIntentDispatched) {
+                                zoomIntentDispatched = true
+                                onZoomGestureStarted()
+                            }
                             val newScale = (gestureScale * zoomChange).coerceIn(safeMinScale, safeMaxScale)
 
                             // Lock in the gesture consumer on the very first frame of panning motion
@@ -247,30 +352,51 @@ fun ZoomableContainer(
 
                                 val (clampedX, clampedY) = clampOffset(newScale, rawOffsetX, rawOffsetY)
 
+                                sample += 1
+                                val sampleTime = event.changes.firstOrNull()?.uptimeMillis ?: 0L
+                                if (sample == 1 || sampleTime - lastSampleTraceTime >= 80L) {
+                                    lastSampleTraceTime = sampleTime
+                                    trace(
+                                        "ZOOM_PREVIEW_SAMPLE",
+                                        "sample=$sample pointers=${event.changes.size} pinch=$isPinching consume=$shouldConsume " +
+                                            "centroid=${centroid.x},${centroid.y} zoomChange=$zoomChange " +
+                                            "pan=${panChange.x},${panChange.y} scale=$prevScale->$newScale " +
+                                            "offset=$gestureOffsetX,$gestureOffsetY raw=$rawOffsetX,$rawOffsetY " +
+                                            "clamped=$clampedX,$clampedY",
+                                    )
+                                }
                                 gestureScale = newScale
                                 gestureOffsetX = clampedX
                                 gestureOffsetY = clampedY
 
                                 // Snap (no animation) during active gesture
-                                scope.launch {
-                                    animScale.snapTo(newScale)
-                                    animOffsetX.snapTo(clampedX)
-                                    animOffsetY.snapTo(clampedY)
-                                }
+                                renderScale = newScale
+                                renderOffsetX = clampedX
+                                renderOffsetY = clampedY
                             }
                         }
 
                         // Continue while any pointer is still down
                         gestureActive = event.changes.any { it.pressed }
                     }
+                    if (zoomIntentDispatched) {
+                        onZoomGestureEnded()
+                    }
+                    pointerGestureInProgress = false
+                    trace(
+                        "ZOOM_PREVIEW_POINTER_END",
+                        "samples=$sample consumed=$endedBecauseConsumed zoomIntent=$zoomIntentDispatched " +
+                            "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                            "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                    )
                 }
             }
             .graphicsLayer {
                 if (autoApplyTransformations) {
-                    scaleX = animScale.value
-                    scaleY = animScale.value
-                    translationX = animOffsetX.value
-                    translationY = animOffsetY.value
+                    scaleX = renderScale
+                    scaleY = renderScale
+                    translationX = renderOffsetX
+                    translationY = renderOffsetY
                 }
             },
         contentAlignment = Alignment.Center
