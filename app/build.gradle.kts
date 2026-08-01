@@ -11,6 +11,8 @@ import java.util.Properties
 import java.io.FileInputStream
 
 val keystoreProperties = Properties()
+val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
+val viewerMetricsEnabled = viewerTestVariant == "trace" || viewerTestVariant == "compressed"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -31,11 +33,23 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.pixel.gallery"
+        applicationId = when (viewerTestVariant) {
+            "trace" -> "com.pixel.gallery.main.codextrace"
+            "clean" -> "com.pixel.gallery.main.codexclean"
+            "compressed" -> "com.pixel.gallery.main.codexcompressed"
+            else -> "com.pixel.gallery"
+        }
+        manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
+            "trace" -> "Pixel Main Trace"
+            "clean" -> "Pixel Main Clean"
+            "compressed" -> "Pixel Main Compressed"
+            else -> "Gallery"
+        }
+        buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "4.2.12-main"
+        versionCode = 27
+        versionName = "4.2.13-main"
     }
 
     signingConfigs {
@@ -89,6 +103,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     dependenciesInfo {
@@ -190,6 +205,7 @@ dependencies {
     implementation("me.saket.telephoto:zoomable-image-glide:0.14.0") {
         exclude(group = "me.saket.telephoto", module = "sub-sampling-image")
     }
+    implementation(project(":ssiv-pixel"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")

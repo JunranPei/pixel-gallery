@@ -99,6 +99,21 @@ fun PhotosScreen(
 
     val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
     val context = LocalContext.current
+    val scrollbarPositionLabels = remember(items) {
+        var currentDateLabel: String? = null
+        List(items.size) { index ->
+            when (val item = items[index]) {
+                is GridItem.Header -> {
+                    currentDateLabel = item.title
+                    item.title
+                }
+                is GridItem.Photo -> currentDateLabel
+            }
+        }
+    }
+    val scrollbarPositionLabelProvider = remember(scrollbarPositionLabels) {
+        { index: Int -> scrollbarPositionLabels.getOrNull(index) }
+    }
 
     LaunchedEffect(firstVisibleIndex, items, isFastScrolling, isScrollbarDragging) {
         if (!isFastScrolling && !isScrollbarDragging) {
@@ -241,6 +256,7 @@ fun PhotosScreen(
             layoutModifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(bottom = bottomPadding),
+            positionLabelProvider = scrollbarPositionLabelProvider,
             onDragStateChanged = { isScrollbarDragging = it }
         )
     }
@@ -664,11 +680,11 @@ fun AlbumCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .graphicsLayer {
-                    clip = true
-                    shape = RoundedCornerShape(24.dp)
-                }
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = ExpressiveShapes.ExtraLargeIncreased
+                )
+                .clip(ExpressiveShapes.ExtraLargeIncreased),
             contentAlignment = Alignment.Center
         ) {
             GlideImage(

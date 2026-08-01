@@ -11,8 +11,8 @@
       "type": "UNIVERSAL",
       "filters": [],
       "attributes": [],
-      "versionCode": 26,
-      "versionName": "4.2.12-main",
+      "versionCode": 27,
+      "versionName": "4.2.13-main",
       "outputFile": "app-universal-release.apk"
     },
     {
@@ -20,13 +20,13 @@
       "filters": [
         {
           "filterType": "ABI",
-          "value": "armeabi-v7a"
+          "value": "x86"
         }
       ],
       "attributes": [],
-      "versionCode": 1026,
-      "versionName": "4.2.12-main",
-      "outputFile": "app-armeabi-v7a-release.apk"
+      "versionCode": 3027,
+      "versionName": "4.2.13-main",
+      "outputFile": "app-x86-release.apk"
     },
     {
       "type": "ONE_OF_MANY",
@@ -37,8 +37,8 @@
         }
       ],
       "attributes": [],
-      "versionCode": 2026,
-      "versionName": "4.2.12-main",
+      "versionCode": 2027,
+      "versionName": "4.2.13-main",
       "outputFile": "app-arm64-v8a-release.apk"
     },
     {
@@ -50,8 +50,8 @@
         }
       ],
       "attributes": [],
-      "versionCode": 4026,
-      "versionName": "4.2.12-main",
+      "versionCode": 4027,
+      "versionName": "4.2.13-main",
       "outputFile": "app-x86_64-release.apk"
     },
     {
@@ -59,13 +59,13 @@
       "filters": [
         {
           "filterType": "ABI",
-          "value": "x86"
+          "value": "armeabi-v7a"
         }
       ],
       "attributes": [],
-      "versionCode": 3026,
-      "versionName": "4.2.12-main",
-      "outputFile": "app-x86-release.apk"
+      "versionCode": 1027,
+      "versionName": "4.2.13-main",
+      "outputFile": "app-armeabi-v7a-release.apk"
     }
   ],
   "elementType": "File",
@@ -75,10 +75,10 @@
       "maxApi": 30,
       "baselineProfiles": [
         "baselineProfiles/1/app-universal-release.dm",
-        "baselineProfiles/1/app-armeabi-v7a-release.dm",
+        "baselineProfiles/1/app-x86-release.dm",
         "baselineProfiles/1/app-arm64-v8a-release.dm",
         "baselineProfiles/1/app-x86_64-release.dm",
-        "baselineProfiles/1/app-x86-release.dm"
+        "baselineProfiles/1/app-armeabi-v7a-release.dm"
       ]
     },
     {
@@ -86,10 +86,10 @@
       "maxApi": 2147483647,
       "baselineProfiles": [
         "baselineProfiles/0/app-universal-release.dm",
-        "baselineProfiles/0/app-armeabi-v7a-release.dm",
+        "baselineProfiles/0/app-x86-release.dm",
         "baselineProfiles/0/app-arm64-v8a-release.dm",
         "baselineProfiles/0/app-x86_64-release.dm",
-        "baselineProfiles/0/app-x86-release.dm"
+        "baselineProfiles/0/app-armeabi-v7a-release.dm"
       ]
     }
   ],

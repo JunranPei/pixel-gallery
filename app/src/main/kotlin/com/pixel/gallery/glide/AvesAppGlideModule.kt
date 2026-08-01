@@ -27,6 +27,7 @@ import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.utils.MimeTypes.isVideo
 import com.bumptech.glide.load.engine.executor.GlideExecutor
 import com.pixel.gallery.utils.StorageUtils
+import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import kotlinx.coroutines.flow.first
 // import com.pixel.gallery.utils.compatRemoveIf // Helper missing in Lumina, using inline logic or manual loop
 
@@ -35,6 +36,17 @@ class AvesAppGlideModule : AppGlideModule() {
     override fun applyOptions(context: Context, builder: GlideBuilder) {
         // hide noisy warning (e.g. for images that can't be decoded)
         builder.setLogLevel(Log.ERROR)
+
+        // Read settings before creating Glide's immutable executors.
+        val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
+        val configuredSourceThreadCount = kotlinx.coroutines.runBlocking {
+            settingsRepository.glideThreadCount.first()
+        }.coerceIn(1, 8)
+        // Keep Glide's shared executors governed by the user's setting. Viewer requests
+        // opt into their own source-task pool, so the low-latency viewer policy cannot
+        // raise Grid scrolling concurrency or power usage.
+        val sourceThreadCount = configuredSourceThreadCount
+        val diskCacheThreadCount = 1
 
         // sizing
         val memorySizeCalculator = MemorySizeCalculator.Builder(context).build()
@@ -49,7 +61,6 @@ class AvesAppGlideModule : AppGlideModule() {
         builder.setMemoryCache(LruResourceCache(memorySizeCalculator.memoryCacheSize.toLong()))
 
         // Read custom disk cache size from settings (requires runBlocking for synchronous load during initialization)
-        val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
         val cacheSizeMb = kotlinx.coroutines.runBlocking {
             settingsRepository.glideCacheSize.first()
         }
@@ -57,19 +68,27 @@ class AvesAppGlideModule : AppGlideModule() {
         val internalCacheDiskCacheFactory = InternalCacheDiskCacheFactory(context, DiskCache.Factory.DEFAULT_DISK_CACHE_DIR, diskCacheSize.toLong())
         builder.setDiskCache(internalCacheDiskCacheFactory)
 
-        // Hard-limit background thread count for image decoding to 2 threads and disk cache reading to 1 thread.
-        // This is a direct physical throttle on CPU usage, preventing excessive power draw during rapid scroll.
-        val sourceExec = GlideExecutor.newSourceExecutor(2, "source-throttled", GlideExecutor.UncaughtThrowableStrategy.DEFAULT)
-        _sourceExecutor = sourceExec
+        // Glide executors cannot be safely resized after initialization. Apply the persisted
+        // source-decode setting here; disk-cache I/O remains serialized by design.
+        val sourceExec = GlideExecutor.newSourceExecutor(sourceThreadCount, "source-configured", GlideExecutor.UncaughtThrowableStrategy.DEFAULT)
         builder.setSourceExecutor(sourceExec)
-        builder.setDiskCacheExecutor(GlideExecutor.newDiskCacheExecutor(1, "disk-cache-throttled", GlideExecutor.UncaughtThrowableStrategy.DEFAULT))
+        builder.setDiskCacheExecutor(
+            GlideExecutor.newDiskCacheExecutor(
+                diskCacheThreadCount,
+                "disk-cache-configured",
+                GlideExecutor.UncaughtThrowableStrategy.DEFAULT,
+            ),
+        )
 
         fun toMb(bytes: Int) = Formatter.formatFileSize(context, bytes.toLong())
         Log.d(
             LOG_TAG, "Glide disk cache size=${toMb(diskCacheSize)}" +
                     ", memory cache size=${toMb(memorySizeCalculator.memoryCacheSize)}" +
                     ", bitmap pool size=${toMb(memorySizeCalculator.bitmapPoolSize)}" +
-                    ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}"
+                    ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}" +
+                    ", source threads=$sourceThreadCount" +
+                    ", disk cache threads=$diskCacheThreadCount" +
+                    ", viewer task compression=request scoped"
         )
     }
 
@@ -87,53 +106,18 @@ class AvesAppGlideModule : AppGlideModule() {
 
     companion object {
         private val LOG_TAG = LogUtils.createTag<AvesAppGlideModule>()
-        private var _sourceExecutor: GlideExecutor? = null
-
-        fun updateThreadCount(threads: Int) {
-            val source = _sourceExecutor ?: return
-            
-            // Try updating the delegate ThreadPoolExecutor inside GlideExecutor via reflection
-            try {
-                var updated = false
-                var currentClass: Class<*>? = source.javaClass
-                while (currentClass != null && currentClass != Any::class.java) {
-                    for (field in currentClass.declaredFields) {
-                        try {
-                            field.isAccessible = true
-                            val value = field.get(source)
-                            if (value is java.util.concurrent.ThreadPoolExecutor) {
-                                val currentCore = value.corePoolSize
-                                if (threads > currentCore) {
-                                    value.maximumPoolSize = threads
-                                    value.corePoolSize = threads
-                                } else {
-                                    value.corePoolSize = threads
-                                    value.maximumPoolSize = threads
-                                }
-                                android.util.Log.d("AvesAppGlideModule", "Updated Glide delegate executor ($field) thread count to $threads via reflection")
-                                updated = true
-                                break
-                            }
-                        } catch (e: Exception) {
-                            // ignore security exceptions for individual fields
-                        }
-                    }
-                    if (updated) break
-                    currentClass = currentClass.superclass
-                }
-                if (!updated) {
-                    android.util.Log.e("AvesAppGlideModule", "Could not find ThreadPoolExecutor delegate in GlideExecutor")
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("AvesAppGlideModule", "Failed to update Glide thread count via reflection", e)
-            }
-        }
-
         // request a fresh image with the highest quality format
+        // [Legacy/Original Code commented out per user request]
+        /*
         val uncachedFullImageOptions = RequestOptions()
             .format(DecodeFormat.PREFER_ARGB_8888)
             .diskCacheStrategy(DiskCacheStrategy.NONE)
             .skipMemoryCache(true)
+        */
+        val uncachedFullImageOptions = RequestOptions()
+            .format(DecodeFormat.PREFER_ARGB_8888)
+            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+            .skipMemoryCache(false)
 
         fun getModel(
             context: Context,
@@ -144,24 +128,44 @@ class AvesAppGlideModule : AppGlideModule() {
             isThumbnail: Boolean = false,
             isFastScreenPreview: Boolean = false,
             rotationDegrees: Int = 0,
-            dateModifiedMillis: Long = 0L
+            dateModifiedMillis: Long = 0L,
+            allowPersistentThumbnailCache: Boolean = true,
+            traceViewerLoad: Boolean = false,
         ): Any {
             /*if (pageId != null && MultiPageImage.isSupported(mimeType)) {
                 MultiPageImage(context, uri, mimeType, pageId)
             } else if (mimeType == MimeTypes.TIFF) {
                 TiffImage(context, uri, pageId)
             } else*/ 
-            return if (mimeType == MimeTypes.SVG) {
+            val model = if (mimeType == MimeTypes.SVG) {
                 SvgImage(context, uri)
             } else if (isFastScreenPreview && StorageUtils.isMediaStoreContentUri(uri)) {
                 FastScreenPreview(uri, rotationDegrees)
             } else if (isThumbnail && StorageUtils.isMediaStoreContentUri(uri)) {
-                MediaStoreThumbnail(uri, mimeType, rotationDegrees, dateModifiedMillis, sizeBytes)
+                MediaStoreThumbnail(
+                    uri,
+                    mimeType,
+                    rotationDegrees,
+                    dateModifiedMillis,
+                    sizeBytes,
+                    allowPersistentThumbnailCache,
+                    traceViewerLoad,
+                )
             } else if (isVideo(mimeType)) {
                 VideoThumbnail(context, uri)
             } else {
                 StorageUtils.getGlideSafeUri(context, uri, mimeType, sizeBytes)
             }
+            if (traceViewerLoad && ViewerLoadMetrics.currentEntryId() != 0L) {
+                ViewerLoadMetrics.event(
+                    "GLIDE_MODEL_RESOLVED",
+                    "mime=$mimeType thumbnail=$isThumbnail fastPreview=$isFastScreenPreview " +
+                        "sizeBytes=$sizeBytes persistentThumbnail=$allowPersistentThumbnailCache " +
+                        "model=${model.javaClass.simpleName}",
+                    imageKey = "$uri:$dateModifiedMillis",
+                )
+            }
+            return model
         }
     }
 }
