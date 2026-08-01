@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -47,6 +49,7 @@ import kotlinx.coroutines.launch
 fun GalleryScrollbar(
     lazyGridState: LazyGridState,
     layoutModifier: Modifier = Modifier,
+    positionLabelProvider: ((Int) -> String?)? = null,
     onDragStateChanged: (Boolean) -> Unit = {}
 ) {
     val scrollbarScope = rememberCoroutineScope()
@@ -116,6 +119,22 @@ fun GalleryScrollbar(
         }
     }
 
+    val currentItemIndex by remember {
+        derivedStateOf {
+            val allItemsCount = lazyGridState.layoutInfo.totalItemsCount
+            if (allItemsCount <= 0) {
+                0
+            } else if (dragActive) {
+                (dragFraction * (allItemsCount - 1))
+                    .toInt()
+                    .coerceIn(0, allItemsCount - 1)
+            } else {
+                lazyGridState.firstVisibleItemIndex.coerceIn(0, allItemsCount - 1)
+            }
+        }
+    }
+    val currentPositionLabel = positionLabelProvider?.invoke(currentItemIndex)
+
     val tapGestureModifier = if (scrollbarVisible) {
         Modifier.pointerInput(effectiveTrackPx) {
             detectTapGestures(
@@ -154,11 +173,40 @@ fun GalleryScrollbar(
     Box(
         modifier = layoutModifier
             .fillMaxHeight()
-            .width(36.dp)
+            .width(if (positionLabelProvider == null) 36.dp else 180.dp)
             .alpha(scrollbarAlpha)
             .onSizeChanged { parentHeightPx = it.height.toFloat() }
-            .then(tapGestureModifier)
     ) {
+        if (!currentPositionLabel.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset { IntOffset(x = 0, y = sliderOffsetPx.toInt()) }
+                    .height(barHeightDp)
+                    .padding(end = 32.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text(
+                    text = currentPositionLabel,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .fillMaxHeight()
+                .width(36.dp)
+                .then(tapGestureModifier)
+        )
+
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
