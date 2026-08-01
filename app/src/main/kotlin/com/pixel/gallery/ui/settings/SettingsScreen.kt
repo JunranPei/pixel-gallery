@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,7 +93,7 @@ fun SettingsScreen(
             item {
                 SettingsClickItem(
                     title = "About",
-                    description = "Pixel Gallery v4.2.12-auto-multitask",
+                    description = "Pixel Gallery v${BuildConfig.VERSION_NAME}",
                     icon = Icons.Outlined.Info,
                     onClick = onNavigateToLicenses
                 )

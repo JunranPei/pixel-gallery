@@ -58,16 +58,20 @@ fun GalleryScrollbar(
     var dragActive by remember { mutableStateOf(false) }
     var dragFraction by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var touchActive by remember { mutableStateOf(false) }
+    var trackJumpLabelVisible by remember { mutableStateOf(false) }
+    var trackJumpFraction by remember { mutableFloatStateOf(0f) }
+    var trackJumpItemIndex by remember { mutableStateOf(0) }
     var scrollbarVisible by remember { mutableStateOf(false) }
     var activeScrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var trackJumpLabelJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     LaunchedEffect(dragActive) {
         onDragStateChanged(dragActive)
     }
 
     // Visibility control
-    LaunchedEffect(lazyGridState.isScrollInProgress, dragActive, touchActive) {
-        if (lazyGridState.isScrollInProgress || dragActive || touchActive) {
+    LaunchedEffect(lazyGridState.isScrollInProgress, dragActive, touchActive, trackJumpLabelVisible) {
+        if (lazyGridState.isScrollInProgress || dragActive || touchActive || trackJumpLabelVisible) {
             scrollbarVisible = true
         } else {
             delay(1500)
@@ -114,7 +118,11 @@ fun GalleryScrollbar(
 
     val sliderOffsetPx by remember {
         derivedStateOf {
-            val fraction = if (dragActive) dragFraction else scrollFraction
+            val fraction = when {
+                dragActive -> dragFraction
+                trackJumpLabelVisible -> trackJumpFraction
+                else -> scrollFraction
+            }
             fraction * effectiveTrackPx
         }
     }
@@ -124,16 +132,17 @@ fun GalleryScrollbar(
             val allItemsCount = lazyGridState.layoutInfo.totalItemsCount
             if (allItemsCount <= 0) {
                 0
-            } else if (dragActive) {
-                (dragFraction * (allItemsCount - 1))
-                    .toInt()
-                    .coerceIn(0, allItemsCount - 1)
             } else {
-                lazyGridState.firstVisibleItemIndex.coerceIn(0, allItemsCount - 1)
+                when {
+                    dragActive -> (dragFraction * (allItemsCount - 1)).toInt()
+                    trackJumpLabelVisible -> trackJumpItemIndex
+                    else -> lazyGridState.firstVisibleItemIndex
+                }.coerceIn(0, allItemsCount - 1)
             }
         }
     }
     val currentPositionLabel = positionLabelProvider?.invoke(currentItemIndex)
+    val scrollbarColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
 
     val tapGestureModifier = if (scrollbarVisible) {
         Modifier.pointerInput(effectiveTrackPx) {
@@ -156,6 +165,14 @@ fun GalleryScrollbar(
                             val allItemsCount = gridInfo.totalItemsCount
                             if (allItemsCount > 0) {
                                 val targetScrollIdx = (jumpPercentage * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
+                                trackJumpLabelJob?.cancel()
+                                trackJumpFraction = jumpPercentage
+                                trackJumpItemIndex = targetScrollIdx
+                                trackJumpLabelVisible = true
+                                trackJumpLabelJob = scrollbarScope.launch {
+                                    delay(1000)
+                                    trackJumpLabelVisible = false
+                                }
                                 activeScrollJob?.cancel()
                                 activeScrollJob = scrollbarScope.launch {
                                     lazyGridState.scrollToItem(targetScrollIdx)
@@ -177,7 +194,7 @@ fun GalleryScrollbar(
             .alpha(scrollbarAlpha)
             .onSizeChanged { parentHeightPx = it.height.toFloat() }
     ) {
-        if (!currentPositionLabel.isNullOrBlank()) {
+        if ((dragActive || trackJumpLabelVisible) && !currentPositionLabel.isNullOrBlank()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -190,9 +207,9 @@ fun GalleryScrollbar(
                     text = currentPositionLabel,
                     modifier = Modifier
                         .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f))
+                        .background(scrollbarColor)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     style = MaterialTheme.typography.labelLarge,
                     maxLines = 1
                 )
@@ -205,44 +222,44 @@ fun GalleryScrollbar(
                 .fillMaxHeight()
                 .width(36.dp)
                 .then(tapGestureModifier)
-        )
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset { IntOffset(x = 0, y = sliderOffsetPx.toInt()) } // Offset first!
-                .padding(end = 4.dp)
-                .width(sliderWidth)
-                .height(barHeightDp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                .draggable(
-                    orientation = Orientation.Vertical,
-                    state = rememberDraggableState { dragDelta ->
-                        if (effectiveTrackPx > 0f) {
-                            dragActive = true
-                            dragFraction = (dragFraction + dragDelta / effectiveTrackPx).coerceIn(0f, 1f)
-                            val gridInfo = lazyGridState.layoutInfo
-                            val allItemsCount = gridInfo.totalItemsCount
-                            if (allItemsCount > 0) {
-                                val targetScrollIdx = (dragFraction * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
-                                if (targetScrollIdx != lazyGridState.firstVisibleItemIndex) {
-                                    activeScrollJob?.cancel()
-                                    activeScrollJob = scrollbarScope.launch {
-                                        lazyGridState.scrollToItem(targetScrollIdx)
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset { IntOffset(x = 0, y = sliderOffsetPx.toInt()) }
+                    .padding(end = 4.dp)
+                    .width(sliderWidth)
+                    .height(barHeightDp)
+                    .clip(CircleShape)
+                    .background(scrollbarColor)
+                    .draggable(
+                        orientation = Orientation.Vertical,
+                        state = rememberDraggableState { dragDelta ->
+                            if (effectiveTrackPx > 0f) {
+                                dragActive = true
+                                dragFraction = (dragFraction + dragDelta / effectiveTrackPx).coerceIn(0f, 1f)
+                                val gridInfo = lazyGridState.layoutInfo
+                                val allItemsCount = gridInfo.totalItemsCount
+                                if (allItemsCount > 0) {
+                                    val targetScrollIdx = (dragFraction * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
+                                    if (targetScrollIdx != lazyGridState.firstVisibleItemIndex) {
+                                        activeScrollJob?.cancel()
+                                        activeScrollJob = scrollbarScope.launch {
+                                            lazyGridState.scrollToItem(targetScrollIdx)
+                                        }
                                     }
                                 }
                             }
+                        },
+                        onDragStarted = {
+                            dragActive = true
+                            dragFraction = scrollFraction
+                        },
+                        onDragStopped = {
+                            dragActive = false
                         }
-                    },
-                    onDragStarted = { startedPosition ->
-                        dragActive = true
-                        dragFraction = scrollFraction
-                    },
-                    onDragStopped = { velocity ->
-                        dragActive = false
-                    }
-                )
-        )
+                    )
+            )
+        }
     }
 }

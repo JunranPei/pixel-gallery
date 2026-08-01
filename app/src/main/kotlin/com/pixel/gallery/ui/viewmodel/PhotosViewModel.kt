@@ -79,7 +79,7 @@ class PhotosViewModel @Inject constructor(
         val items = mutableListOf<GridItem>()
         var lastHeader = ""
         val format = if (columns >= 6) "MMMM yyyy" else "MMMM d, yyyy"
-        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.getDefault())
+        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.US)
         
         entries.forEach { entry ->
             val timestamp = entry.chronologicalTimestamp()
