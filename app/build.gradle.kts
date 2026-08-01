@@ -11,10 +11,11 @@ import java.util.Properties
 import java.io.FileInputStream
 
 val keystoreProperties = Properties()
+// Controls release APK splitting only. Viewer behaviour is no longer selected
+// by a build-wide experiment flag.
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
-val viewerMetricsEnabled = viewerTestVariant != "clean"
-val viewerTaskCompressionExperiment = viewerTestVariant == "compressed"
+val viewerMetricsEnabled = viewerTestVariant == "trace" || viewerTestVariant == "compressed"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -39,24 +40,15 @@ android {
             "trace" -> "com.pixel.gallery.codextrace"
             "clean" -> "com.pixel.gallery.codexclean"
             "compressed" -> "com.pixel.gallery.codexcompressed"
-            else -> if (officialRelease) {
-                "com.pixel.gallery.multitask"
-            } else {
-                "com.pixel.gallery.simplegallerymerge"
-            }
+            else -> "com.pixel.gallery.multitask"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "trace" -> "Pixel Trace"
             "clean" -> "Pixel Clean"
             "compressed" -> "Pixel Compressed"
-            else -> "Pixel Power Trace"
+            else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
-        buildConfigField(
-            "boolean",
-            "VIEWER_TASK_COMPRESSION_EXPERIMENT",
-            viewerTaskCompressionExperiment.toString(),
-        )
         minSdk = 26
         targetSdk = 35
         versionCode = 27

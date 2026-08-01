@@ -545,6 +545,7 @@ fun ViewerScreen(
                         ) {
                             { request: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
                                 val configured = request
+                                    .withViewerTaskCompression()
                                     .format(DecodeFormat.PREFER_RGB_565)
                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                     .signature(swipeThumbnailSignature)
@@ -705,7 +706,10 @@ fun ViewerScreen(
                                     model = model,
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit
+                                    contentScale = ContentScale.Fit,
+                                    requestBuilderTransform = { request ->
+                                        request.withViewerTaskCompression()
+                                    },
                                 )
                             }
                         } else {

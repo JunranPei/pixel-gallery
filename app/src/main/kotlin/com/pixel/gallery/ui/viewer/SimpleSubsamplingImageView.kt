@@ -567,6 +567,7 @@ internal fun SimpleSubsamplingImageView(
                 imageView.alpha = if (savedTransform == null) 1f else 0f
 
                 val requestOptions = RequestOptions()
+                    .withViewerTaskCompression()
                     .format(DecodeFormat.PREFER_ARGB_8888)
                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                     .downsample(DownsampleStrategy.FIT_CENTER)

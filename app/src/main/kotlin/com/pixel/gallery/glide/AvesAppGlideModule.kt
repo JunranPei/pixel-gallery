@@ -26,7 +26,6 @@ import com.pixel.gallery.utils.LogUtils
 import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.utils.MimeTypes.isVideo
 import com.bumptech.glide.load.engine.executor.GlideExecutor
-import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.utils.StorageUtils
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import kotlinx.coroutines.flow.first
@@ -43,14 +42,11 @@ class AvesAppGlideModule : AppGlideModule() {
         val configuredSourceThreadCount = kotlinx.coroutines.runBlocking {
             settingsRepository.glideThreadCount.first()
         }.coerceIn(1, 8)
-        // Test-only variant: keep the same current/left/right preview workload, but give
-        // all three requests enough executor slots to finish in a single short burst.
-        val sourceThreadCount = if (BuildConfig.VIEWER_TASK_COMPRESSION_EXPERIMENT) {
-            maxOf(configuredSourceThreadCount, 4)
-        } else {
-            configuredSourceThreadCount
-        }
-        val diskCacheThreadCount = if (BuildConfig.VIEWER_TASK_COMPRESSION_EXPERIMENT) 3 else 1
+        // Keep Glide's shared executors governed by the user's setting. Viewer requests
+        // opt into their own source-task pool, so the low-latency viewer policy cannot
+        // raise Grid scrolling concurrency or power usage.
+        val sourceThreadCount = configuredSourceThreadCount
+        val diskCacheThreadCount = 1
 
         // sizing
         val memorySizeCalculator = MemorySizeCalculator.Builder(context).build()
@@ -92,7 +88,7 @@ class AvesAppGlideModule : AppGlideModule() {
                     ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}" +
                     ", source threads=$sourceThreadCount" +
                     ", disk cache threads=$diskCacheThreadCount" +
-                    ", task compression experiment=${BuildConfig.VIEWER_TASK_COMPRESSION_EXPERIMENT}"
+                    ", viewer task compression=request scoped"
         )
     }
 

@@ -51,6 +51,7 @@ fun GlideViewerFallback(
                 currentOnContentReadyChanged(false)
                 val request = Glide.with(view)
                     .load(imagePath)
+                    .withViewerTaskCompression()
                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                     .fitCenter()
                     .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {

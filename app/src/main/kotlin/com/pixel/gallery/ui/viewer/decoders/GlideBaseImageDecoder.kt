@@ -12,6 +12,7 @@ import com.bumptech.glide.request.target.Target
 import com.bumptech.glide.signature.ObjectKey
 import com.davemorrissey.labs.subscaleview.ImageDecoder
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
+import com.pixel.gallery.ui.viewer.withViewerTaskCompression
 import java.io.File
 
 class GlideBaseImageDecoder(private val dateModifiedMillis: Long) : ImageDecoder {
@@ -25,6 +26,7 @@ class GlideBaseImageDecoder(private val dateModifiedMillis: Long) : ImageDecoder
             "uriScheme=${uri.scheme} requested=SIZE_ORIGINAL",
         )
         val options = RequestOptions()
+            .withViewerTaskCompression()
             .format(DecodeFormat.PREFER_ARGB_8888)
             .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
             .fitCenter()
