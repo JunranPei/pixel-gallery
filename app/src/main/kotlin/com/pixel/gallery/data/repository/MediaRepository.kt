@@ -411,12 +411,22 @@ class MediaRepository @Inject constructor(
                 if (knownEntry?.dateModifiedMillis != modified || knownEntry.isTrashed != queryTrashed) {
                     val mediaStoreTaken = if (takenColumn != -1) cursor.getLong(takenColumn) else 0L
                     
-                    // DEEP SCAN: If mediaStore report "today" but it's an image, check EXIF
-                    var bestTime = if (mediaStoreTaken > 0) mediaStoreTaken else (cursor.getLong(addedColumn) * 1000)
-                    
-                    val isRecentlyAdded = Math.abs(System.currentTimeMillis() - bestTime) < 600000 // 10 mins
-                    
-                    if (bestTime == 0L || isRecentlyAdded) { 
+                    val addedMillis = cursor.getLong(addedColumn) * 1000
+                    // Match normal gallery chronology: capture time first, then the
+                    // file's modification time, and only then the MediaStore import time.
+                    // DATE_ADDED is often identical for a whole imported batch and cannot
+                    // provide a meaningful or deterministic photo order.
+                    var bestTime = when {
+                        mediaStoreTaken > 0L -> mediaStoreTaken
+                        modified > 0L -> modified
+                        else -> addedMillis
+                    }
+
+                    val isRecentlyAdded =
+                        addedMillis > 0L &&
+                            Math.abs(System.currentTimeMillis() - addedMillis) < 600000
+
+                    if (mediaStoreTaken <= 0L && (bestTime == 0L || isRecentlyAdded)) {
                         var foundExif = false
                         if (mimeType.startsWith("image/") && path.isNotEmpty()) {
                             try {

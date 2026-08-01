@@ -12,7 +12,7 @@
 
     <application
         android:name=".PixelGalleryApp"
-        android:label="Gallery"
+        android:label="${appLabel}"
         tools:replace="android:label"
         android:largeHeap="true"
         android:icon="@mipmap/ic_launcher"

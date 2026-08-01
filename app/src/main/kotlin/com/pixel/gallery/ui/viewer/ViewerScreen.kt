@@ -4,8 +4,10 @@ import android.app.Activity
 import android.app.WallpaperManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -25,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -44,17 +47,33 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.pixel.gallery.data.local.entity.MediaEntry
-import com.bumptech.glide.signature.ObjectKey
 import com.pixel.gallery.glide.AvesAppGlideModule
+import com.pixel.gallery.glide.SvgImage
+import com.pixel.gallery.glide.TiffImage
+import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
+import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
+import com.pixel.gallery.ui.viewer.formats.ViewerRenderPlan
+import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
+import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.engine.GlideException
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
+import com.bumptech.glide.load.DecodeFormat
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.request.RequestListener
+import com.bumptech.glide.request.target.Target
+import com.bumptech.glide.signature.ObjectKey
 import me.saket.telephoto.zoomable.glide.ZoomableGlideImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.ZoomSpec
@@ -63,6 +82,8 @@ import me.saket.telephoto.zoomable.zoomable
 import me.saket.telephoto.zoomable.DoubleClickToZoomListener
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
@@ -85,62 +106,291 @@ private val MapnikHttps = XYTileSource(
     "© OpenStreetMap contributors"
 )
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
+private val viewerPhotoMetadataCache = ConcurrentHashMap<String, ViewerPhotoMetadata>()
+
+private fun MediaEntry.viewerCacheKey(): String = "$contentId:$dateModifiedMillis"
+
+private fun MediaEntry.viewerMetricsDescriptor(role: String): String {
+    val fileName = Uri.encode(File(path).name)
+    return "$role={id=$contentId name=$fileName mime=$sourceMimeType bytes=$sizeBytes " +
+        "dimensions=${width}x$height rotation=$sourceRotationDegrees " +
+        "dateTaken=${sourceDateTakenMillis ?: 0L} modified=$dateModifiedMillis added=$dateAddedSecs}"
+}
+
+private fun MediaEntry.canContainMotionPhoto(): Boolean =
+    sourceMimeType.equals("image/jpeg", ignoreCase = true) ||
+        path.endsWith(".jpg", ignoreCase = true) ||
+        path.endsWith(".jpeg", ignoreCase = true)
+
+private fun trackedDrawableListener(
+    token: ViewerLoadMetrics.WorkToken,
+    tokenRef: AtomicReference<ViewerLoadMetrics.WorkToken?>,
+) = object : RequestListener<Drawable> {
+    override fun onLoadFailed(
+        e: GlideException?,
+        model: Any?,
+        target: Target<Drawable>,
+        isFirstResource: Boolean,
+    ): Boolean {
+        if (tokenRef.compareAndSet(token, null)) {
+            ViewerLoadMetrics.workFailed(
+                token,
+                e?.rootCauses?.firstOrNull()?.javaClass?.simpleName
+                    ?: e?.javaClass?.simpleName
+                    ?: "unknown",
+            )
+        }
+        return false
+    }
+
+    override fun onResourceReady(
+        resource: Drawable,
+        model: Any,
+        target: Target<Drawable>,
+        dataSource: DataSource,
+        isFirstResource: Boolean,
+    ): Boolean {
+        if (tokenRef.compareAndSet(token, null)) {
+            ViewerLoadMetrics.workReady(
+                token,
+                source = dataSource.name,
+                detail = "drawable=${resource.intrinsicWidth}x${resource.intrinsicHeight} " +
+                    "model=${model.javaClass.simpleName} first=$isFirstResource",
+            )
+        }
+        return false
+    }
+}
+
+
 @Composable
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
 fun ViewerScreen(
     initialId: Long,
     photos: List<MediaEntry>,
     onBack: () -> Unit,
+    enableUltraHdr: Boolean = false,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val initialIndex = remember(initialId, photos) {
-        photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0)
+        val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
+        photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0).also { index ->
+            ViewerLoadMetrics.event(
+                "INITIAL_INDEX_RESOLVED",
+                "initialId=$initialId index=$index count=${photos.size} " +
+                    "duration=${(android.os.SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+            )
+        }
+    }
+    val entryId = remember(initialId) {
+        ViewerLoadMetrics.ensureEntry(
+            context.applicationContext,
+            initialId,
+            source = "ViewerScreen",
+            sourceItems = photos.size,
+        )
     }
     
     val pagerState = rememberPagerState(initialPage = initialIndex) { photos.size }
+    val viewerTransformStateStore = remember { ViewerTransformStateStore() }
     var showUI by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var rotationLocked by remember { mutableStateOf(true) }
-    
-    val context = LocalContext.current
+    var ultraHdrActive by remember { mutableStateOf(false) }
+
     val currentMedia = remember(pagerState.currentPage, photos) {
         if (photos.isNotEmpty()) photos[pagerState.currentPage] else null
     }
 
-    // Motion Photo State
-    var motionVideoFile by remember(currentMedia?.contentId) { mutableStateOf<File?>(null) }
-    var isPlayingMotion by remember { mutableStateOf(false) }
-
-    LaunchedEffect(currentMedia) {
-        isPlayingMotion = false
-        val file = withContext(Dispatchers.IO) {
-            currentMedia?.let { viewModel.extractMotionVideo(it.path) }
-        }
-        val oldFile = motionVideoFile
-        motionVideoFile = file
-        
-        // Clean up old temp file after new one is ready
-        if (oldFile != null && oldFile != motionVideoFile) {
-            try { 
-                withContext(Dispatchers.IO) { oldFile.delete() }
-            } catch (e: Exception) {}
+    DisposableEffect(entryId) {
+        val activity = context as? Activity
+        ViewerLoadMetrics.event(
+            "VIEWER_ATTACH",
+            "initialId=$initialId initialIndex=$initialIndex count=${photos.size}",
+            entryId = entryId,
+        )
+        val frameListener = activity?.let { ViewerLoadMetrics.attachFrameMetrics(it, entryId) }
+        onDispose {
+            ViewerLoadMetrics.event("VIEWER_DISPOSE", entryId = entryId)
+            if (activity != null) {
+                ViewerLoadMetrics.detachFrameMetrics(activity, entryId, frameListener)
+            }
+            ViewerLoadMetrics.entryEnded(context.applicationContext, entryId, "viewer-dispose")
         }
     }
 
-    // Comprehensive cleanup on exit
+    LaunchedEffect(entryId) {
+        val current = photos.getOrNull(initialIndex)
+        val left = photos.getOrNull(initialIndex - 1)
+        val right = photos.getOrNull(initialIndex + 1)
+        val triplet = listOfNotNull(left, current, right)
+        ViewerLoadMetrics.event(
+            "ENTRY_NEIGHBOR_CONTEXT",
+            buildString {
+                append("index=$initialIndex count=${photos.size} ")
+                append(left?.viewerMetricsDescriptor("left") ?: "left={none}")
+                append(' ')
+                append(current?.viewerMetricsDescriptor("current") ?: "current={none}")
+                append(' ')
+                append(right?.viewerMetricsDescriptor("right") ?: "right={none}")
+                append(" tripletBytes=${triplet.sumOf { it.sizeBytes.coerceAtLeast(0L) }}")
+                append(" tripletPixels=${triplet.sumOf { it.width.toLong() * it.height.toLong() }}")
+            },
+            imageKey = current?.viewerCacheKey(),
+            entryId = entryId,
+        )
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "viewer-compose")
+        delay(50)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "50ms")
+        delay(50)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "100ms")
+        delay(150)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "250ms")
+        delay(250)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "500ms")
+        delay(500)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "1000ms")
+        delay(1000)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "2000ms")
+        delay(1000)
+        ViewerLoadMetrics.checkpoint(context.applicationContext, entryId, "3000ms")
+    }
+
+    // Entering a camera JPEG only reads XMP. Embedded Motion Photo video is
+    // extracted lazily when the user explicitly requests playback.
+    var motionVideoFile by remember { mutableStateOf<File?>(null) }
+    var isPlayingMotion by remember { mutableStateOf(false) }
+    var isExtractingMotion by remember { mutableStateOf(false) }
+    val viewerScope = rememberCoroutineScope()
+
+    val currentMediaCacheKey = remember(currentMedia?.contentId, currentMedia?.dateModifiedMillis) {
+        currentMedia?.viewerCacheKey()
+    }
+    val settledMediaCacheKey = remember(pagerState.settledPage, photos) {
+        photos.getOrNull(pagerState.settledPage)?.viewerCacheKey()
+    }
+    LaunchedEffect(settledMediaCacheKey, enableUltraHdr) {
+        ViewerLoadMetrics.event(
+            "HDR_STATE_RESET",
+            "settledKey=$settledMediaCacheKey enabled=$enableUltraHdr previous=$ultraHdrActive",
+            imageKey = settledMediaCacheKey,
+        )
+        ultraHdrActive = false
+        if (!enableUltraHdr) {
+            UltraHdrTileSupport.clearAll()
+        }
+    }
+    DisposableEffect(context, enableUltraHdr, ultraHdrActive) {
+        val activity = context as? Activity
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && activity != null) {
+            val powerManager = context.getSystemService(PowerManager::class.java)
+            val enableHdr =
+                enableUltraHdr && ultraHdrActive && powerManager?.isPowerSaveMode != true
+            ViewerLoadMetrics.event(
+                "WINDOW_COLOR_MODE_SET",
+                "requested=${if (enableHdr) "HDR" else "DEFAULT"} " +
+                    "ultraHdrActive=$ultraHdrActive powerSave=${powerManager?.isPowerSaveMode}",
+                imageKey = settledMediaCacheKey,
+            )
+            activity.window.colorMode = if (enableHdr) {
+                ActivityInfo.COLOR_MODE_HDR
+            } else {
+                ActivityInfo.COLOR_MODE_DEFAULT
+            }
+        }
+        onDispose {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ViewerLoadMetrics.event(
+                    "WINDOW_COLOR_MODE_DISPOSE",
+                    "requested=DEFAULT",
+                    imageKey = settledMediaCacheKey,
+                )
+                activity?.window?.colorMode = ActivityInfo.COLOR_MODE_DEFAULT
+            }
+        }
+    }
+    val latestMediaCacheKey = rememberUpdatedState(currentMediaCacheKey)
+    var viewerPhotoMetadata by remember(currentMediaCacheKey) {
+        mutableStateOf<ViewerPhotoMetadata?>(null)
+    }
+
+    LaunchedEffect(currentMediaCacheKey) {
+        val metadataToken = ViewerLoadMetrics.workStarted(
+            type = "MOTION_METADATA",
+            imageKey = currentMediaCacheKey ?: "none",
+            detail = "mime=${currentMedia?.sourceMimeType}",
+        )
+        isPlayingMotion = false
+        val oldFile = motionVideoFile
+        motionVideoFile = null
+        isExtractingMotion = false
+        if (oldFile != null) {
+            val deleteToken = ViewerLoadMetrics.workStarted(
+                "MOTION_TEMP_DELETE",
+                currentMediaCacheKey ?: "none",
+                "path=${oldFile.name}",
+            )
+            val deleted = withContext(Dispatchers.IO) { oldFile.delete() }
+            ViewerLoadMetrics.workReady(deleteToken, detail = "deleted=$deleted")
+        }
+
+        val media = currentMedia
+        viewerPhotoMetadata = if (media == null || !media.canContainMotionPhoto()) {
+            ViewerLoadMetrics.workReady(metadataToken, source = "NOT_APPLICABLE")
+            ViewerPhotoMetadata.NONE
+        } else {
+            val cacheKey = media.viewerCacheKey()
+            val cached = viewerPhotoMetadataCache[cacheKey]
+            if (cached != null) {
+                ViewerLoadMetrics.workReady(
+                    metadataToken,
+                    source = "MEMORY_CACHE",
+                    detail = "hasMotion=${cached.hasMotionPhoto}",
+                )
+                cached
+            } else {
+                withContext(Dispatchers.IO) {
+                    viewModel.inspectViewerPhoto(media.path)
+                }.also {
+                    viewerPhotoMetadataCache[cacheKey] = it
+                    ViewerLoadMetrics.workReady(
+                        metadataToken,
+                        source = "EXIF_XMP",
+                        detail = "hasMotion=${it.hasMotionPhoto} cacheSize=${viewerPhotoMetadataCache.size}",
+                    )
+                }
+            }
+        }
+    }
+
+    val hasMotionPhoto = viewerPhotoMetadata?.hasMotionPhoto == true
+
     DisposableEffect(Unit) {
+        val activity = context as? Activity
         onDispose {
             motionVideoFile?.delete()
+            val window = activity?.window
+            if (window != null) {
+                WindowCompat.getInsetsController(window, window.decorView)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 
     // Auto-hide UI timer
     LaunchedEffect(showUI, pagerState.currentPage, isPlayingMotion) {
+        ViewerLoadMetrics.event(
+            "UI_AUTO_HIDE_SCHEDULE",
+            "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
+        )
         if (showUI && !isPlayingMotion) {
             delay(3000)
             showUI = false
+            ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
         }
     }
 
@@ -148,6 +398,11 @@ fun ViewerScreen(
     LaunchedEffect(showUI) {
         val window = (context as? Activity)?.window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, window.decorView)
+        ViewerLoadMetrics.event(
+            "SYSTEM_BARS_SET",
+            "visible=$showUI",
+            imageKey = currentMediaCacheKey,
+        )
         if (showUI) {
             controller.show(WindowInsetsCompat.Type.systemBars())
         } else {
@@ -156,40 +411,33 @@ fun ViewerScreen(
         }
     }
 
-    // Selective HDR support
-    val isUltraHdr = remember(currentMedia) {
-        currentMedia?.let { viewModel.isUltraHdr(it.path) } ?: false
-    }
-
-    DisposableEffect(isUltraHdr) {
-        val activity = context as? Activity
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && activity != null) {
-            try {
-                activity.window?.colorMode = if (isUltraHdr) {
-                    ActivityInfo.COLOR_MODE_HDR
-                } else {
-                    ActivityInfo.COLOR_MODE_DEFAULT
+    val favouriteFlow = remember(currentMedia?.contentId) {
+        currentMedia?.let { media ->
+            viewModel.isFavourite(media.contentId)
+                .onStart {
+                    ViewerLoadMetrics.event(
+                        "FAVOURITE_QUERY_START",
+                        "contentId=${media.contentId}",
+                        imageKey = media.viewerCacheKey(),
+                    )
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-        onDispose {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                try {
-                    activity?.window?.colorMode = ActivityInfo.COLOR_MODE_DEFAULT
-                } catch (e: Exception) {}
-            }
-            val window = activity?.window
-            if (window != null) {
-                WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
-            }
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
+                .onEach { value ->
+                    ViewerLoadMetrics.event(
+                        "FAVOURITE_QUERY_EMIT",
+                        "contentId=${media.contentId} value=$value",
+                        imageKey = media.viewerCacheKey(),
+                    )
+                }
+                .onCompletion { error ->
+                    ViewerLoadMetrics.event(
+                        "FAVOURITE_QUERY_END",
+                        "contentId=${media.contentId} error=${error?.javaClass?.simpleName ?: "none"}",
+                        imageKey = media.viewerCacheKey(),
+                    )
+                }
+        } ?: flowOf(false)
     }
-
-    val isFavourite by (currentMedia?.let { viewModel.isFavourite(it.contentId) } ?: flowOf(false))
-        .collectAsState(initial = false)
+    val isFavourite by favouriteFlow.collectAsState(initial = false)
     
     Box(
         modifier = Modifier
@@ -205,138 +453,45 @@ fun ViewerScreen(
             key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
+            val pageKey = remember(media.contentId, media.dateModifiedMillis) {
+                media.viewerCacheKey()
+            }
+            val swipeMainTokenRef = remember(pageKey) {
+                AtomicReference<ViewerLoadMetrics.WorkToken?>()
+            }
+            var fullPreviewReady by remember(pageKey) { mutableStateOf(false) }
+            DisposableEffect(pageKey) {
+                ViewerLoadMetrics.event(
+                    "PAGER_PAGE_ATTACH",
+                    "page=$page current=${pagerState.currentPage} settled=${pagerState.settledPage} " +
+                        "distance=${kotlin.math.abs(initialIndex - page)} mime=${media.sourceMimeType}",
+                    imageKey = pageKey,
+                )
+                onDispose {
+                    swipeMainTokenRef.getAndSet(null)?.let {
+                        ViewerLoadMetrics.workCleared(it, "page-dispose")
+                    }
+                    ViewerLoadMetrics.event(
+                        "PAGER_PAGE_DISPOSE",
+                        "page=$page current=${pagerState.currentPage} settled=${pagerState.settledPage}",
+                        imageKey = pageKey,
+                    )
+                }
+            }
+            LaunchedEffect(page, pagerState.currentPage, pagerState.settledPage, pagerState.isScrollInProgress) {
+                ViewerLoadMetrics.event(
+                    "PAGER_PAGE_STATE",
+                    "page=$page current=${pagerState.currentPage} settled=${pagerState.settledPage} " +
+                        "scrolling=${pagerState.isScrollInProgress}",
+                    imageKey = pageKey,
+                )
+            }
             val isVideo = media.sourceMimeType.startsWith("video/")
             val context = LocalContext.current
-            val displayMetrics = context.resources.displayMetrics
-            val screenWidth = displayMetrics.widthPixels
-            val screenHeight = displayMetrics.heightPixels
-            val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
-                AvesAppGlideModule.getModel(
-                    context = context,
-                    uri = Uri.parse(media.uri),
-                    mimeType = media.sourceMimeType,
-                    pageId = null,
-                    sizeBytes = media.sizeBytes
-                )
-            }
-            val needsSecondStagePreview = remember(media.width, media.height, media.sizeBytes) {
-                val sizeBytes = media.sizeBytes ?: 0L
-                val maxDim = maxOf(media.width ?: 0, media.height ?: 0)
-                (sizeBytes > 50L * 1024 * 1024) || (maxDim > 5000 && sizeBytes > 20L * 1024 * 1024)
-            }
-            val fastPreviewModel = remember(media.uri, media.sourceMimeType, media.sizeBytes, needsSecondStagePreview) {
-                if (needsSecondStagePreview) {
-                    AvesAppGlideModule.getModel(
-                        context = context,
-                        uri = Uri.parse(media.uri),
-                        mimeType = media.sourceMimeType,
-                        pageId = null,
-                        sizeBytes = media.sizeBytes,
-                        isThumbnail = false,
-                        isFastScreenPreview = true,
-                        rotationDegrees = media.sourceRotationDegrees,
-                        dateModifiedMillis = media.dateModifiedMillis
-                    )
-                } else {
-                    null
-                }
-            }
-            val microThumbnailModel = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
-                AvesAppGlideModule.getModel(
-                    context = context,
-                    uri = Uri.parse(media.uri),
-                    mimeType = media.sourceMimeType,
-                    pageId = null,
-                    sizeBytes = media.sizeBytes,
-                    isThumbnail = true,
-                    isFastScreenPreview = false,
-                    rotationDegrees = media.sourceRotationDegrees,
-                    dateModifiedMillis = media.dateModifiedMillis
-                )
-            }
-            val signatureKey = remember(media.dateModifiedMillis) {
-                ObjectKey(media.dateModifiedMillis)
-            }
             val isGif = remember(media.sourceMimeType, media.path) {
                 media.sourceMimeType.equals("image/gif", ignoreCase = true) ||
-                media.path.endsWith(".gif", ignoreCase = true)
+                    media.path.endsWith(".gif", ignoreCase = true)
             }
-            val hasThumbnail = remember(media.width, media.height, isGif) {
-                if (isGif) {
-                    false
-                } else {
-                    val w = media.width ?: 0
-                    val h = media.height ?: 0
-                    w > 512 || h > 512
-                }
-            }
-            val transform = remember(signatureKey, fastPreviewModel, microThumbnailModel, hasThumbnail, screenWidth, screenHeight, isGif) {
-                { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
-                    val base = requestBuilder
-                        .signature(signatureKey)
-                    
-                    val withOptions = if (isGif) {
-                        base.format(com.bumptech.glide.load.DecodeFormat.PREFER_ARGB_8888)
-                    } else {
-                        base
-                            .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
-                            .dontAnimate()
-                            .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
-                    }
-                    
-                    val finalBase = withOptions.listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
-                            override fun onLoadFailed(
-                                e: com.bumptech.glide.load.engine.GlideException?,
-                                model: Any?,
-                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>,
-                                isFirstResource: Boolean
-                            ): Boolean {
-                                android.util.Log.e("GalleryImageLoad", "Large Image LOAD FAILED: uri=${media.uri}, reason=${e?.message}")
-                                return false
-                            }
-
-                            override fun onResourceReady(
-                                resource: android.graphics.drawable.Drawable,
-                                model: Any,
-                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
-                                dataSource: com.bumptech.glide.load.DataSource,
-                                isFirstResource: Boolean
-                            ): Boolean {
-                                android.util.Log.e("GalleryImageLoad", "Large Image LOAD SUCCESS: uri=${media.uri}, dataSource=$dataSource")
-                                return false
-                            }
-                        })
-                    if (hasThumbnail) {
-                        if (fastPreviewModel != null) {
-                            finalBase.thumbnail(
-                                com.bumptech.glide.Glide.with(context)
-                                    .asDrawable()
-                                    .load(fastPreviewModel)
-                                    .signature(signatureKey)
-                                    .override(screenWidth, screenHeight)
-                                    .thumbnail(
-                                        com.bumptech.glide.Glide.with(context)
-                                            .asDrawable()
-                                            .load(microThumbnailModel)
-                                            .signature(signatureKey)
-                                            .override(512)
-                                    )
-                            )
-                        } else {
-                            finalBase.thumbnail(
-                                com.bumptech.glide.Glide.with(context)
-                                    .asDrawable()
-                                    .load(microThumbnailModel)
-                                    .signature(signatureKey)
-                                    .override(512)
-                            )
-                        }
-                    } else {
-                        finalBase
-                    }
-                }
-            }
-            
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -352,6 +507,87 @@ fun ViewerScreen(
                     )
                 } else {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val swipeThumbnailModel = remember(
+                            media.uri,
+                            media.sourceMimeType,
+                            media.sizeBytes,
+                            media.sourceRotationDegrees,
+                            media.dateModifiedMillis
+                        ) {
+                            AvesAppGlideModule.getModel(
+                                context = context,
+                                uri = Uri.parse(media.uri),
+                                mimeType = media.sourceMimeType,
+                                pageId = null,
+                                sizeBytes = media.sizeBytes,
+                                isThumbnail = true,
+                                rotationDegrees = media.sourceRotationDegrees,
+                                dateModifiedMillis = media.dateModifiedMillis,
+                                // This 200 px image only bridges Grid/pager motion. Persisting it
+                                // causes JPEG writes and cache trimming on viewer entry.
+                                allowPersistentThumbnailCache = false,
+                                traceViewerLoad = ViewerLoadMetrics.isEnabled,
+                            ).also { model ->
+                                ViewerLoadMetrics.event(
+                                    "SWIPE_THUMB_MODEL",
+                                    "page=$page model=${model.javaClass.simpleName}",
+                                    imageKey = pageKey,
+                                )
+                            }
+                        }
+                        val swipeThumbnailSignature = remember(media.dateModifiedMillis) {
+                            ObjectKey(media.dateModifiedMillis)
+                        }
+                        val swipeThumbnailTransform = remember(
+                            swipeThumbnailSignature,
+                            pageKey,
+                            page,
+                        ) {
+                            { request: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
+                                val configured = request
+                                    .withViewerTaskCompression()
+                                    .format(DecodeFormat.PREFER_RGB_565)
+                                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                    .signature(swipeThumbnailSignature)
+                                    .override(200)
+                                if (ViewerLoadMetrics.isEnabled) {
+                                    val mainToken = ViewerLoadMetrics.workStarted(
+                                        "SWIPE_THUMB_200PX",
+                                        pageKey,
+                                        "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
+                                    )
+                                    swipeMainTokenRef.getAndSet(mainToken)?.let {
+                                        ViewerLoadMetrics.workCleared(it, "request-replaced")
+                                    }
+                                    configured.listener(
+                                        trackedDrawableListener(mainToken, swipeMainTokenRef),
+                                    )
+                                } else {
+                                    configured
+                                }
+                            }
+                        }
+
+                        GlideImage(
+                            model = swipeThumbnailModel,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(if (fullPreviewReady) 0f else 1f),
+                            contentScale = ContentScale.Fit,
+                            requestBuilderTransform = swipeThumbnailTransform
+                        )
+
+                        if (isGif) {
+                            val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
+                                AvesAppGlideModule.getModel(
+                                    context = context,
+                                    uri = Uri.parse(media.uri),
+                                    mimeType = media.sourceMimeType,
+                                    pageId = null,
+                                    sizeBytes = media.sizeBytes
+                                )
+                            }
                         val containerWidth = constraints.maxWidth.toFloat()
                         val containerHeight = constraints.maxHeight.toFloat()
 
@@ -426,11 +662,7 @@ fun ViewerScreen(
                             )
                         }
 
-                        SideEffect {
-                            android.util.Log.e("GalleryCompose", "ZoomableGlideImage recomposed: mediaId=${media.contentId}, uri=${media.uri}, zoomableState=${zoomableState.hashCode()}")
-                        }
 
-                        if (isGif) {
                             val coroutineScope = rememberCoroutineScope()
                             Box(
                                 modifier = Modifier
@@ -474,10 +706,15 @@ fun ViewerScreen(
                                     model = model,
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit
+                                    contentScale = ContentScale.Fit,
+                                    requestBuilderTransform = { request ->
+                                        request.withViewerTaskCompression()
+                                    },
                                 )
                             }
                         } else {
+                            // [Legacy/Original Code commented out per user request - migrated to Simple-Gallery native SubsamplingScaleImageView component]
+                            /*
                             ZoomableGlideImage(
                                 model = model,
                                 contentDescription = null,
@@ -501,6 +738,105 @@ fun ViewerScreen(
                                     }
                                 }
                             )
+                            */
+                            val isActivePage = pagerState.settledPage == page
+                            val isPagerIdle = !pagerState.isScrollInProgress
+                            val isPreviewVisible by remember(pagerState, page) {
+                                derivedStateOf {
+                                    kotlin.math.abs(pagerState.settledPage - page) <= 1
+                                }
+                            }
+                            val metadataPending = isActivePage &&
+                                pagerState.currentPage == page &&
+                                media.canContainMotionPhoto() && viewerPhotoMetadata == null
+                            val renderPlan = remember(media.contentId, media.dateModifiedMillis) {
+                                ViewerFormatRegistry.resolve(media).also {
+                                    ViewerLoadMetrics.event(
+                                        "RENDER_PLAN_RESOLVED",
+                                        "page=$page plan=$it",
+                                        imageKey = pageKey,
+                                    )
+                                }
+                            }
+                            val onImageClick = {
+                                if (isPlayingMotion) isPlayingMotion = false else showUI = !showUI
+                            }
+                            if (renderPlan is ViewerRenderPlan.PreviewOnly) {
+                                GlideViewerFallback(
+                                    imagePath = media.path.ifEmpty { media.uri },
+                                    width = media.width,
+                                    height = media.height,
+                                    orientationDegrees = media.sourceRotationDegrees,
+                                    dateModifiedMillis = media.dateModifiedMillis,
+                                    isVisiblePage = isPreviewVisible,
+                                    modifier = Modifier.fillMaxSize(),
+                                    onContentReadyChanged = { fullPreviewReady = it },
+                                    onClick = onImageClick
+                                )
+                            } else if (renderPlan is ViewerRenderPlan.RawEmbeddedPreview) {
+                                RawEmbeddedPreviewViewer(
+                                    uri = media.uri,
+                                    filePath = media.path,
+                                    width = media.width,
+                                    height = media.height,
+                                    orientationDegrees = media.sourceRotationDegrees,
+                                    dateModifiedMillis = media.dateModifiedMillis,
+                                    isActivePage = isActivePage,
+                                    isPreviewVisible = isPreviewVisible,
+                                    transformStateStore = viewerTransformStateStore,
+                                    modifier = Modifier.fillMaxSize(),
+                                    onContentReadyChanged = { fullPreviewReady = it },
+                                    onClick = onImageClick,
+                                )
+                            } else {
+                                val tiledPlan = renderPlan as ViewerRenderPlan.Tiled
+                                val sourceUri = remember(media.uri, media.path) {
+                                    media.path.takeIf { it.isNotEmpty() && File(it).isFile }
+                                        ?.let { Uri.fromFile(File(it)) }
+                                        ?: Uri.parse(media.uri)
+                                }
+                                val previewModel = remember(tiledPlan.previewKind, sourceUri) {
+                                    when (tiledPlan.previewKind) {
+                                        ViewerPreviewKind.DEFAULT -> media.path.ifEmpty { media.uri }
+                                        ViewerPreviewKind.SVG -> SvgImage(context, sourceUri)
+                                        ViewerPreviewKind.TIFF -> TiffImage(context, sourceUri)
+                                    }
+                                }
+                                SimpleSubsamplingImageView(
+                                    uri = media.uri,
+                                    filePath = media.path,
+                                    orientationDegrees = media.sourceRotationDegrees,
+                                    isActivePage = isActivePage,
+                                    isPagerIdle = isPagerIdle,
+                                    isPreviewVisible = isPreviewVisible,
+                                    enableSubsampling = !metadataPending,
+                                    dateModifiedMillis = media.dateModifiedMillis,
+                                    sourceWidth = media.width,
+                                    sourceHeight = media.height,
+                                    enableUltraHdr = enableUltraHdr,
+                                    previewModel = previewModel,
+                                    metricsDetail = "id=${media.contentId} mime=${media.sourceMimeType} " +
+                                        "bytes=${media.sizeBytes} source=${media.width}x${media.height} " +
+                                        "rotation=${media.sourceRotationDegrees} modified=${media.dateModifiedMillis} " +
+                                        "preview=${tiledPlan.previewKind} decoder=${tiledPlan.regionDecoderKind} " +
+                                        "motionPending=$metadataPending",
+                                    regionDecoderKind = tiledPlan.regionDecoderKind,
+                                    transformStateStore = viewerTransformStateStore,
+                                    onContentReadyChanged = { fullPreviewReady = it },
+                                    onUltraHdrAvailabilityChanged = { available ->
+                                        ViewerLoadMetrics.event(
+                                            "ULTRA_HDR_AVAILABILITY",
+                                            "page=$page available=$available settled=${pagerState.settledPage}",
+                                            imageKey = pageKey,
+                                        )
+                                        if (enableUltraHdr && pagerState.settledPage == page) {
+                                            ultraHdrActive = available
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                    onClick = onImageClick
+                                )
+                            }
                         }
                         
                         if (isPlayingMotion && motionVideoFile != null) {
@@ -542,8 +878,33 @@ fun ViewerScreen(
                         }
                     },
                     actions = {
-                        if (motionVideoFile != null) {
-                            IconButton(onClick = { isPlayingMotion = !isPlayingMotion }) {
+                        if (hasMotionPhoto || motionVideoFile != null) {
+                            IconButton(
+                                enabled = !isExtractingMotion,
+                                onClick = {
+                                    if (isPlayingMotion) {
+                                        isPlayingMotion = false
+                                    } else if (motionVideoFile != null) {
+                                        isPlayingMotion = true
+                                    } else {
+                                        val media = currentMedia ?: return@IconButton
+                                        val requestedKey = currentMediaCacheKey ?: return@IconButton
+                                        isExtractingMotion = true
+                                        viewerScope.launch {
+                                            val extracted = withContext(Dispatchers.IO) {
+                                                viewModel.extractMotionVideo(media.path)
+                                            }
+                                            if (latestMediaCacheKey.value == requestedKey) {
+                                                motionVideoFile = extracted
+                                                isPlayingMotion = extracted != null
+                                                isExtractingMotion = false
+                                            } else {
+                                                withContext(Dispatchers.IO) { extracted?.delete() }
+                                            }
+                                        }
+                                    }
+                                }
+                            ) {
                                 Icon(
                                     imageVector = if (isPlayingMotion) Icons.Default.MotionPhotosPause else Icons.Default.MotionPhotosOn,
                                     contentDescription = "Motion Photo",

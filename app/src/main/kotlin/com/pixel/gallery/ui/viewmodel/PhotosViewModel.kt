@@ -63,8 +63,8 @@ class PhotosViewModel @Inject constructor(
             !hidden.any { entry.path.startsWith(it) }
         }
         when (sort) {
-            PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
-            PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
+            PhotoSortOrder.DATE_DESC -> filtered.sortedWith(MEDIA_DATE_DESCENDING)
+            PhotoSortOrder.DATE_ASC -> filtered.sortedWith(MEDIA_DATE_ASCENDING)
             PhotoSortOrder.NAME_ASC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
             PhotoSortOrder.NAME_DESC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
             PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
@@ -79,10 +79,10 @@ class PhotosViewModel @Inject constructor(
         val items = mutableListOf<GridItem>()
         var lastHeader = ""
         val format = if (columns >= 6) "MMMM yyyy" else "MMMM d, yyyy"
-        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.getDefault())
+        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.US)
         
         entries.forEach { entry ->
-            val timestamp = entry.bestTimestamp
+            val timestamp = entry.chronologicalTimestamp()
             val date = java.util.Date(timestamp)
             val header = sdf.format(date)
             if (header != lastHeader) {
@@ -140,36 +140,33 @@ class PhotosViewModel @Inject constructor(
     val glidePersistentGridCacheSize: StateFlow<Int> = settingsRepository.glidePersistentGridCacheSize
         .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
 
-    val glidePersistentViewerCacheSize: StateFlow<Int> = settingsRepository.glidePersistentViewerCacheSize
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
-
-    val largeImageTileSize: StateFlow<Int> = settingsRepository.largeImageTileSize
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 1024)
-
-    val largeImageMaxCores: StateFlow<Int> = settingsRepository.largeImageMaxCores
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
-
-    val largeImageDebounceMs: StateFlow<Int> = settingsRepository.largeImageDebounceMs
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 150)
-
-    val largeImageHardwareBitmap: StateFlow<Boolean> = settingsRepository.largeImageHardwareBitmap
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
+
+    fun getParentFolderName(path: String): String {
+        if (path.isEmpty()) return "Unknown"
+        val lastSlash = path.lastIndexOf('/')
+        if (lastSlash <= 0) return "Unknown"
+        val parentPath = path.substring(0, lastSlash)
+        val secondLastSlash = parentPath.lastIndexOf('/')
+        return if (secondLastSlash >= 0) {
+            parentPath.substring(secondLastSlash + 1)
+        } else {
+            parentPath
+        }
+    }
 
     val albums: StateFlow<List<Album>> = combine(
         photos,
         albumSortOrder
     ) { photosList, sort ->
         val grouped = photosList.groupBy { 
-            val file = java.io.File(it.path)
-            file.parentFile?.name ?: "Unknown"
+            getParentFolderName(it.path)
         }.map { (name, entries) ->
             val firstEntry = entries.first()
-            val parentPath = java.io.File(firstEntry.path).parent ?: ""
-            val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
+            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
+            val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
         when (sort) {
@@ -180,7 +177,9 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
@@ -190,12 +189,11 @@ class PhotosViewModel @Inject constructor(
         val grouped = all.filter { entry ->
             hidden.any { entry.path.startsWith(it) }
         }.groupBy { 
-            val file = java.io.File(it.path)
-            file.parentFile?.name ?: "Unknown"
+            getParentFolderName(it.path)
         }.map { (name, entries) ->
             val firstEntry = entries.first()
-            val parentPath = java.io.File(firstEntry.path).parent ?: ""
-            val lastModified = entries.maxOfOrNull { it.bestTimestamp } ?: 0L
+            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
+            val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
         when (sort) {
@@ -206,7 +204,9 @@ class PhotosViewModel @Inject constructor(
             AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
             AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var contentObserver: android.database.ContentObserver? = null
 
@@ -221,7 +221,6 @@ class PhotosViewModel @Inject constructor(
 
     init {
         registerContentObserver()
-        observeGlideThreadCount()
     }
 
     private fun registerContentObserver() {
@@ -325,8 +324,8 @@ class PhotosViewModel @Inject constructor(
     // --- Metadata ---
     fun getMediaMetadata(path: String) = metadataService.getMetadata(path)
     fun getCoordinates(path: String) = metadataService.getCoordinates(path)
+    fun inspectViewerPhoto(path: String) = metadataService.inspectViewerPhoto(path)
     fun extractMotionVideo(path: String) = metadataService.extractMotionVideo(path)
-    fun isUltraHdr(path: String) = metadataService.isUltraHdr(path)
 
 
     // --- Settings Actions ---
@@ -366,12 +365,6 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun setGlidePersistentViewerCacheSize(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setGlidePersistentViewerCacheSize(value)
-        }
-    }
-
     fun clearAllCaches(context: android.content.Context, onComplete: () -> Unit) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
@@ -389,7 +382,8 @@ class PhotosViewModel @Inject constructor(
                     "persistent_viewer_thumbnails",
                     "persistent_thumbnails",
                     "persistent_thumbnails_v2",
-                    "persistent_thumbnails_v3"
+                    "persistent_thumbnails_v3",
+                    "ssiv_tile_cache"
                 )
                 for (dirName in dirs) {
                     val dir = java.io.File(context.cacheDir, dirName)
@@ -397,6 +391,7 @@ class PhotosViewModel @Inject constructor(
                         dir.deleteRecursively()
                     }
                 }
+                com.pixel.gallery.ui.viewer.decoders.resetSsivTileCacheBudget(context)
             } catch (e: Exception) {
                 // ignore
             }
@@ -459,8 +454,9 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    val customShortcuts: StateFlow<List<com.pixel.gallery.utils.CustomShortcut>> = settingsRepository.customShortcuts
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val customShortcuts: StateFlow<List<com.pixel.gallery.utils.CustomShortcut>> =
+        settingsRepository.customShortcuts
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     fun addCustomShortcut(shortcut: com.pixel.gallery.utils.CustomShortcut) {
         viewModelScope.launch {
@@ -474,41 +470,6 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun setLargeImageTileSize(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageTileSize(value)
-        }
-    }
-
-    fun setLargeImageMaxCores(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageMaxCores(value)
-        }
-    }
-
-    fun setLargeImageDebounceMs(value: Int) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageDebounceMs(value)
-        }
-    }
-
-    fun setLargeImageHardwareBitmap(value: Boolean) {
-        viewModelScope.launch {
-            settingsRepository.setLargeImageHardwareBitmap(value)
-        }
-    }
-
-    private fun observeGlideThreadCount() {
-        viewModelScope.launch {
-            settingsRepository.glideThreadCount.collect { threads ->
-                try {
-                    com.pixel.gallery.glide.AvesAppGlideModule.updateThreadCount(threads)
-                } catch (e: Exception) {
-                    android.util.Log.e("PhotosViewModel", "Failed to update Glide thread count", e)
-                }
-            }
-        }
-    }
 }
 
 enum class PhotoSortOrder {
@@ -548,3 +509,24 @@ private val CASE_INSENSITIVE_NATURAL_ORDER = Comparator<String> { s1, s2 ->
     }
     len1.compareTo(len2)
 }
+
+private fun MediaEntry.chronologicalTimestamp(): Long {
+    val addedMillis = dateAddedSecs.takeIf { it > 0L }?.times(1000L) ?: 0L
+    val scannedTimestamp = bestTimestamp.takeIf {
+        it > 0L && (addedMillis == 0L || it != addedMillis)
+    }
+    return sourceDateTakenMillis?.takeIf { it > 0L }
+        ?: scannedTimestamp
+        ?: dateModifiedMillis.takeIf { it > 0L }
+        ?: addedMillis
+}
+
+private val MEDIA_DATE_DESCENDING =
+    compareByDescending<MediaEntry> { it.chronologicalTimestamp() }
+        .thenByDescending { it.dateModifiedMillis }
+        .thenByDescending { it.contentId }
+
+private val MEDIA_DATE_ASCENDING =
+    compareBy<MediaEntry> { it.chronologicalTimestamp() }
+        .thenBy { it.dateModifiedMillis }
+        .thenBy { it.contentId }
