@@ -1,7 +1,9 @@
 package com.pixel.gallery.data.repository
 
 import android.app.PendingIntent
+import android.app.RecoverableSecurityException
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -15,10 +17,19 @@ import com.pixel.gallery.data.local.dao.MediaDao
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.local.entity.VaultEntry
 import com.google.gson.Gson
+import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.ConflictPolicy
+import com.pixel.gallery.model.TransferItemFailure
+import com.pixel.gallery.model.TransferMode
+import com.pixel.gallery.model.TransferProgress
+import com.pixel.gallery.model.TransferSummary
+import com.pixel.gallery.model.getAvailableTransferName
+import com.pixel.gallery.utils.StorageUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -28,6 +39,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import kotlin.coroutines.resume
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -282,6 +297,345 @@ class MediaRepository @Inject constructor(
 
     fun getContentResolver() = context.contentResolver
 
+    fun createTransferWriteRequest(entries: List<MediaEntry>): IntentSenderRequest? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+            return null
+        }
+        val uris = entries.mapNotNull { runCatching { Uri.parse(it.uri) }.getOrNull() }
+        if (uris.isEmpty()) return null
+
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+            for (uri in uris) {
+                try {
+                    context.contentResolver.openFileDescriptor(uri, "rw")?.close()
+                } catch (error: RecoverableSecurityException) {
+                    return IntentSenderRequest.Builder(
+                        error.userAction.actionIntent.intentSender
+                    ).build()
+                } catch (_: SecurityException) {
+                    // Let the transfer report a concrete per-item failure if the
+                    // provider does not expose a recoverable permission request.
+                }
+            }
+            return null
+        }
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val pendingIntent = MediaStore.createWriteRequest(context.contentResolver, uris)
+            IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+        } else {
+            null
+        }
+    }
+
+    suspend fun createTransferFolder(parentPath: String, name: String): Result<TransferDestination> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val cleanName = name.trim()
+                require(cleanName.isNotEmpty()) { "Folder name cannot be empty" }
+                require(!cleanName.contains('/') && !cleanName.contains('\\')) { "Folder name cannot contain path separators" }
+
+                val parent = File(parentPath)
+                val folder = File(parent, cleanName)
+                require(!folder.exists()) { "A folder with this name already exists" }
+                if (!folder.mkdirs() && !folder.isDirectory) {
+                    throw IOException("Could not create folder")
+                }
+                TransferDestination(
+                    stableKey = folder.canonicalPath,
+                    displayName = folder.name,
+                    path = folder.canonicalPath
+                )
+            }
+        }
+
+    suspend fun transferMedia(
+        entries: List<MediaEntry>,
+        destination: TransferDestination,
+        mode: TransferMode,
+        conflictPolicy: ConflictPolicy,
+        onProgress: (TransferProgress) -> Unit
+    ): TransferSummary = withContext(Dispatchers.IO) {
+        val destinationDir = File(destination.path)
+        if ((!destinationDir.exists() && !destinationDir.mkdirs()) || !destinationDir.isDirectory) {
+            return@withContext TransferSummary(
+                mode = mode,
+                succeeded = 0,
+                skipped = 0,
+                failures = entries.map { TransferItemFailure(it, "Destination folder is unavailable") }
+            )
+        }
+
+        var succeeded = 0
+        var skipped = 0
+        val failures = mutableListOf<TransferItemFailure>()
+
+        entries.forEachIndexed { index, entry ->
+            val sourceFile = File(entry.path)
+            onProgress(
+                TransferProgress(
+                    mode = mode,
+                    completed = index,
+                    total = entries.size,
+                    currentName = sourceFile.name
+                )
+            )
+
+            if (!sourceFile.exists()) {
+                failures += TransferItemFailure(entry, "Source file no longer exists")
+                return@forEachIndexed
+            }
+
+            if (
+                mode == TransferMode.MOVE &&
+                sourceFile.parentFile?.canonicalPath == destinationDir.canonicalPath
+            ) {
+                skipped++
+                return@forEachIndexed
+            }
+
+            try {
+                val directTarget = File(destinationDir, sourceFile.name)
+                if (directTarget.exists() && conflictPolicy == ConflictPolicy.SKIP) {
+                    skipped++
+                    return@forEachIndexed
+                }
+                if (directTarget.exists() && conflictPolicy == ConflictPolicy.REPLACE) {
+                    if (directTarget.canonicalPath == sourceFile.canonicalPath) {
+                        skipped++
+                        return@forEachIndexed
+                    }
+                    replaceEntry(entry, sourceFile, directTarget, mode)
+                    succeeded++
+                    return@forEachIndexed
+                }
+
+                val targetFile = if (conflictPolicy == ConflictPolicy.KEEP_BOTH) {
+                    getAvailableTarget(destinationDir, sourceFile.name)
+                } else {
+                    directTarget
+                }
+                when (mode) {
+                    TransferMode.COPY -> copyEntry(entry, sourceFile, targetFile)
+                    TransferMode.MOVE -> moveEntry(entry, sourceFile, targetFile)
+                }
+                succeeded++
+            } catch (error: Exception) {
+                failures += TransferItemFailure(entry, error.message ?: error.javaClass.simpleName)
+            }
+        }
+
+        onProgress(
+            TransferProgress(
+                mode = mode,
+                completed = entries.size,
+                total = entries.size,
+                currentName = ""
+            )
+        )
+
+        if (succeeded > 0) {
+            // MediaStore generation changes after a successful transfer. Querying here
+            // also updates paths whose DATE_MODIFIED value did not change.
+            syncWithMediaStore()
+        }
+
+        TransferSummary(mode, succeeded, skipped, failures)
+    }
+
+    private suspend fun replaceEntry(
+        entry: MediaEntry,
+        sourceFile: File,
+        targetFile: File,
+        mode: TransferMode
+    ) {
+        val hasDirectWriteAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+        if (!hasDirectWriteAccess) {
+            throw IOException("Replacing existing files requires all-files access")
+        }
+
+        val destinationDir = targetFile.parentFile ?: throw IOException("Invalid destination")
+        val transferToken = System.nanoTime().toString()
+        val temporary = File(destinationDir, ".pixel-transfer-$transferToken.tmp")
+        val backup = File(destinationDir, ".pixel-backup-$transferToken.tmp")
+        var targetBackedUp = false
+        var targetCommitted = false
+
+        try {
+            sourceFile.copyTo(temporary, overwrite = false)
+            if (sourceFile.length() > 0L && temporary.length() != sourceFile.length()) {
+                throw IOException("Destination verification failed")
+            }
+
+            if (!targetFile.renameTo(backup)) {
+                throw IOException("Could not prepare the existing destination for replacement")
+            }
+            targetBackedUp = true
+
+            if (!temporary.renameTo(targetFile)) {
+                throw IOException("Could not commit replacement")
+            }
+            targetCommitted = true
+            targetFile.setLastModified(entry.dateModifiedMillis)
+            backup.delete()
+
+            val targetUri = scanFile(targetFile, entry.sourceMimeType)
+            if (mode == TransferMode.MOVE) {
+                val wasFavourite = mediaDao.isFavourite(entry.contentId).first()
+                val removed = runCatching {
+                    context.contentResolver.delete(Uri.parse(entry.uri), null, null) > 0 || sourceFile.delete()
+                }.getOrDefault(false)
+                if (!removed && sourceFile.exists()) {
+                    throw IOException("Replaced the destination, but could not remove the source")
+                }
+                if (wasFavourite) {
+                    targetUri?.lastPathSegment?.toLongOrNull()?.let { newId ->
+                        mediaDao.addFavourite(com.pixel.gallery.data.local.entity.FavouriteEntry(newId))
+                        mediaDao.removeFavourite(entry.contentId)
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            if (targetBackedUp && !targetCommitted && !targetFile.exists() && backup.exists()) {
+                backup.renameTo(targetFile)
+            }
+            throw error
+        } finally {
+            if (temporary.exists()) temporary.delete()
+            if (targetCommitted && backup.exists()) backup.delete()
+        }
+    }
+
+    private suspend fun moveEntry(entry: MediaEntry, sourceFile: File, targetFile: File) {
+        val sourceVolume = StorageUtils.getVolumePath(context, sourceFile.absolutePath)
+        val targetVolume = StorageUtils.getVolumePath(context, targetFile.absolutePath)
+        val sameVolume = sourceVolume != null && sourceVolume == targetVolume
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && sameVolume) {
+            val relativePath = StorageUtils.PathSegments(context, targetFile.absolutePath).relativeDir
+                ?: throw IOException("Could not resolve destination path")
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath.replace(File.separatorChar, '/'))
+                if (targetFile.name != sourceFile.name) {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, targetFile.name)
+                }
+            }
+            val updated = context.contentResolver.update(Uri.parse(entry.uri), values, null, null)
+            if (updated > 0) return
+        }
+
+        if (sameVolume && sourceFile.renameTo(targetFile)) {
+            targetFile.setLastModified(entry.dateModifiedMillis)
+            context.contentResolver.delete(Uri.parse(entry.uri), null, null)
+            scanFile(targetFile, entry.sourceMimeType)
+            return
+        }
+
+        val wasFavourite = mediaDao.isFavourite(entry.contentId).first()
+        val copiedUri = copyEntry(entry, sourceFile, targetFile)
+
+        val deleted = runCatching {
+            context.contentResolver.delete(Uri.parse(entry.uri), null, null) > 0 || sourceFile.delete()
+        }.getOrDefault(false)
+        if (!deleted && sourceFile.exists()) {
+            // The destination is a valid copy, but this item did not complete as a move.
+            throw IOException("Copied the item, but could not remove the source")
+        }
+
+        if (wasFavourite) {
+            copiedUri?.lastPathSegment?.toLongOrNull()?.let { newId ->
+                mediaDao.addFavourite(com.pixel.gallery.data.local.entity.FavouriteEntry(newId))
+                mediaDao.removeFavourite(entry.contentId)
+            }
+        }
+    }
+
+    private suspend fun copyEntry(entry: MediaEntry, sourceFile: File, targetFile: File): Uri? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                return copyEntryWithMediaStore(entry, sourceFile, targetFile)
+            }.onFailure {
+                android.util.Log.w("MediaRepository", "MediaStore copy failed, trying file fallback", it)
+            }
+        }
+
+        sourceFile.copyTo(targetFile, overwrite = false)
+        targetFile.setLastModified(entry.dateModifiedMillis)
+        return scanFile(targetFile, entry.sourceMimeType)
+    }
+
+    private fun copyEntryWithMediaStore(entry: MediaEntry, sourceFile: File, targetFile: File): Uri {
+        val relativePath = StorageUtils.PathSegments(context, targetFile.absolutePath).relativeDir
+            ?: throw IOException("Could not resolve destination path")
+        val volumeName = getMediaStoreVolumeName(targetFile.absolutePath)
+        val collection = if (entry.sourceMimeType.startsWith("video/")) {
+            MediaStore.Video.Media.getContentUri(volumeName)
+        } else {
+            MediaStore.Images.Media.getContentUri(volumeName)
+        }
+
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, targetFile.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, entry.sourceMimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath.replace(File.separatorChar, '/'))
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+            entry.sourceDateTakenMillis?.let { put(MediaStore.Images.Media.DATE_TAKEN, it) }
+        }
+
+        val resolver = context.contentResolver
+        val targetUri = resolver.insert(collection, values)
+            ?: throw IOException("Could not create destination media")
+        try {
+            val input = resolver.openInputStream(Uri.parse(entry.uri)) ?: FileInputStream(sourceFile)
+            input.use { source ->
+                resolver.openOutputStream(targetUri, "w")?.use { target ->
+                    source.copyTo(target)
+                } ?: throw IOException("Could not open destination")
+            }
+            resolver.update(
+                targetUri,
+                ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                null,
+                null
+            )
+            return targetUri
+        } catch (error: Exception) {
+            runCatching { resolver.delete(targetUri, null, null) }
+            throw error
+        }
+    }
+
+    private fun getMediaStoreVolumeName(path: String): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return MediaStore.VOLUME_EXTERNAL
+        val targetVolume = StorageUtils.getVolumePath(context, path)
+        val primaryVolume = StorageUtils.getPrimaryVolumePath(context)
+        return if (targetVolume == null || targetVolume == primaryVolume) {
+            MediaStore.VOLUME_EXTERNAL_PRIMARY
+        } else {
+            File(targetVolume.trimEnd(File.separatorChar)).name
+        }
+    }
+
+    private fun getAvailableTarget(directory: File, originalName: String): File {
+        val availableName = getAvailableTransferName(originalName) { name ->
+            File(directory, name).exists()
+        }
+        return File(directory, availableName)
+    }
+
+    private suspend fun scanFile(file: File, mimeType: String): Uri? =
+        suspendCancellableCoroutine { continuation ->
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(file.absolutePath),
+                arrayOf(mimeType)
+            ) { _, uri ->
+                if (continuation.isActive) continuation.resume(uri)
+            }
+        }
+
     suspend fun syncWithMediaStore() = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
 
@@ -408,7 +762,11 @@ class MediaRepository @Inject constructor(
 
                 // Also update if trashing status changed
                 val knownEntry = knownEntries[id]
-                if (knownEntry?.dateModifiedMillis != modified || knownEntry.isTrashed != queryTrashed) {
+                if (
+                    knownEntry?.dateModifiedMillis != modified ||
+                    knownEntry.path != path ||
+                    knownEntry.isTrashed != queryTrashed
+                ) {
                     val mediaStoreTaken = if (takenColumn != -1) cursor.getLong(takenColumn) else 0L
                     
                     val addedMillis = cursor.getLong(addedColumn) * 1000

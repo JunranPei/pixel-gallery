@@ -39,6 +39,7 @@ android {
 
     defaultConfig {
         applicationId = when (viewerTestVariant) {
+            "simplemerge" -> "com.pixel.gallery.simplegallerymerge"
             "trace" -> "com.pixel.gallery.codextrace"
             "clean" -> "com.pixel.gallery.codexclean"
             "compressed" -> "com.pixel.gallery.codexcompressed"
@@ -46,6 +47,7 @@ android {
             else -> "com.pixel.gallery.multitask"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
+            "simplemerge" -> "Gallery Test"
             "trace" -> "Pixel Trace"
             "clean" -> "Pixel Clean"
             "compressed" -> "Pixel Compressed"
@@ -239,4 +241,5 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("junit:junit:4.13.2")
 }

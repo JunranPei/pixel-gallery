@@ -21,7 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.pixel.gallery.R
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
 import com.pixel.gallery.ui.settings.SettingsScreen
@@ -68,6 +70,8 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import kotlinx.coroutines.launch
+import com.pixel.gallery.model.TransferMode
+import com.pixel.gallery.ui.transfer.TransferDestinationScreen
 
 // Height of the toolbar + gap, used to pad content so last items aren't hidden
 private val FloatingBarHeight = 80.dp
@@ -90,8 +94,13 @@ sealed class Screen : Parcelable {
     @Parcelize object Licenses : Screen()
     @Parcelize data class Photo(val albumName: String) : Screen()
     @Parcelize object PerformanceSettings : Screen()
+    @Parcelize data class TransferDestination(
+        val entryIds: LongArray,
+        val origin: TransferOrigin
+    ) : Screen()
 
     enum class ViewerSource { All, Favourites, Trash, Album, Vault, External }
+    enum class TransferOrigin { Grid, Viewer }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -122,6 +131,7 @@ fun MainScaffold(
     var showAlbumSortDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeletePermanentlyConfirm by remember { mutableStateOf(false) }
+    var showSelectionMenu by remember { mutableStateOf(false) }
 
     // Simple navigation stack
     var navigationStack by rememberSaveable {
@@ -198,6 +208,7 @@ fun MainScaffold(
     val startupAtAlbums by photosViewModel.startupAtAlbums.collectAsState()
     val homePagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Initialize tab based on preference once
     var hasInitializedTab by rememberSaveable { mutableStateOf(false) }
@@ -247,7 +258,9 @@ fun MainScaffold(
                 "screen=$currentScreen baseGridRetained=${currentScreen is Screen.Viewer}",
             )
         }
-        selectedIds = emptySet()
+        if (currentScreen !is Screen.TransferDestination) {
+            selectedIds = emptySet()
+        }
     }
 
     // Scroll behavior: bar exits when scrolling down, returns when scrolling up
@@ -281,8 +294,9 @@ fun MainScaffold(
         Scaffold(
             contentWindowInsets = WindowInsets(0), // Manual padding for full control
             modifier = Modifier.nestedScroll(scrollBehavior),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (selectedIds.isNotEmpty()) {
+            if (selectedIds.isNotEmpty() && currentScreen !is Screen.TransferDestination) {
                 // Contextual Top Bar for Selection
                 TopAppBar(
                     title = { Text("${selectedIds.size} selected") },
@@ -314,12 +328,6 @@ fun MainScaffold(
                             }
                         } else {
                             IconButton(onClick = {
-                                selectedEntries.forEach { photosViewModel.moveToVault(it) }
-                                selectedIds = emptySet()
-                            }) {
-                                Icon(Icons.Outlined.Lock, contentDescription = "Move to Locked")
-                            }
-                            IconButton(onClick = {
                                 val uris = selectedEntries.map {
                                     FileProvider.getUriForFile(context, context.packageName + ".fileprovider", java.io.File(it.path))
                                 }
@@ -334,10 +342,42 @@ fun MainScaffold(
                             }
 
                             IconButton(onClick = {
+                                photosViewModel.clearTransferState()
+                                navigationStack = navigationStack + Screen.TransferDestination(
+                                    selectedEntries.map { it.contentId }.toLongArray(),
+                                    Screen.TransferOrigin.Grid
+                                )
+                            }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_transfer_to_folder),
+                                    contentDescription = "Move or copy to"
+                                )
+                            }
+
+                            IconButton(onClick = {
                                 isDeletePermanentlyConfirm = false
                                 showDeleteConfirmDialog = true
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete")
+                            }
+                            Box {
+                                IconButton(onClick = { showSelectionMenu = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More")
+                                }
+                                DropdownMenu(
+                                    expanded = showSelectionMenu,
+                                    onDismissRequest = { showSelectionMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Move to locked folder") },
+                                        onClick = {
+                                            showSelectionMenu = false
+                                            selectedEntries.forEach { photosViewModel.moveToVault(it) }
+                                            selectedIds = emptySet()
+                                        },
+                                        leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) }
+                                    )
+                                }
                             }
                         }
                     }
@@ -419,7 +459,9 @@ fun MainScaffold(
         ) {
             // Screen content management
             val baseScreen = remember(navigationStack) {
-                navigationStack.lastOrNull { it !is Screen.Viewer } ?: Screen.Home
+                navigationStack.lastOrNull {
+                    it !is Screen.Viewer && it !is Screen.TransferDestination
+                } ?: Screen.Home
             }
 
             // Keep the base screen composed so its LazyGridState and loaded thumbnails
@@ -565,6 +607,9 @@ fun MainScaffold(
                 is Screen.Viewer -> {
                     // Fallback, baseScreen should not be Viewer
                 }
+                is Screen.TransferDestination -> {
+                    // Fallback, transfer screens are rendered as overlays below.
+                }
             }
 
             }
@@ -693,7 +738,19 @@ fun MainScaffold(
                     ViewerScreen(
                         initialId = viewer.initialId,
                         photos = photosForViewer,
-                        onBack = { navigationStack = navigationStack.dropLast(1) }
+                        onBack = { navigationStack = navigationStack.dropLast(1) },
+                        allowTransfer = viewer.source !in setOf(
+                            Screen.ViewerSource.Trash,
+                            Screen.ViewerSource.Vault,
+                            Screen.ViewerSource.External
+                        ),
+                        onRequestTransfer = { media ->
+                            photosViewModel.clearTransferState()
+                            navigationStack = navigationStack + Screen.TransferDestination(
+                                longArrayOf(media.contentId),
+                                Screen.TransferOrigin.Viewer
+                            )
+                        }
                     )
                 } else {
                     Box(
@@ -702,6 +759,41 @@ fun MainScaffold(
                             .background(Color.Black)
                     )
                 }
+            }
+
+            if (currentScreen is Screen.TransferDestination) {
+                val transferScreen = currentScreen
+                val transferableEntries = remember(transferScreen, allPhotos, favourites) {
+                    val byId = (allPhotos + favourites).associateBy { it.contentId }
+                    transferScreen.entryIds.toList().mapNotNull(byId::get)
+                }
+                TransferDestinationScreen(
+                    entries = transferableEntries,
+                    onBack = {
+                        photosViewModel.clearTransferState()
+                        navigationStack = navigationStack.dropLast(1)
+                    },
+                    onFinished = { summary ->
+                        val action = if (summary.mode == TransferMode.MOVE) "Moved" else "Copied"
+                        val message = buildString {
+                            append("$action ${summary.succeeded} item")
+                            if (summary.succeeded != 1) append('s')
+                            if (summary.failed > 0) append("; ${summary.failed} failed")
+                            if (summary.skipped > 0) append("; ${summary.skipped} skipped")
+                        }
+                        scope.launch { snackbarHostState.showSnackbar(message) }
+                        selectedIds = emptySet()
+                        navigationStack = if (
+                            transferScreen.origin == Screen.TransferOrigin.Viewer &&
+                            summary.mode == TransferMode.MOVE
+                        ) {
+                            navigationStack.dropLast(2)
+                        } else {
+                            navigationStack.dropLast(1)
+                        }
+                        photosViewModel.clearTransferState()
+                    }
+                )
             }
 
 

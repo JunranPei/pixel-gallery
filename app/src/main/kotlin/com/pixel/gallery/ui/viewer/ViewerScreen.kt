@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -169,6 +170,8 @@ fun ViewerScreen(
     initialId: Long,
     photos: List<MediaEntry>,
     onBack: () -> Unit,
+    allowTransfer: Boolean = true,
+    onRequestTransfer: (MediaEntry) -> Unit = {},
     enableUltraHdr: Boolean = false,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
@@ -968,6 +971,16 @@ fun ViewerScreen(
                                 },
                                 leadingIcon = { Icon(Icons.Outlined.Wallpaper, contentDescription = null) }
                             )
+                            if (allowTransfer) {
+                                DropdownMenuItem(
+                                    text = { Text("Move or copy to…") },
+                                    onClick = {
+                                        showMenu = false
+                                        currentMedia?.let(onRequestTransfer)
+                                    },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = null) }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Move to locked folder") },
                                 onClick = {
