@@ -55,8 +55,8 @@ android {
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         minSdk = 26
         targetSdk = 35
-        versionCode = 28
-        versionName = "4.2.14-auto-multitask"
+        versionCode = 29
+        versionName = "4.2.15-auto-multitask"
     }
 
     signingConfigs {

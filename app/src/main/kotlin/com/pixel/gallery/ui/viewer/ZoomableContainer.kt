@@ -197,6 +197,7 @@ fun ZoomableContainer(
                         val animSpec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
                         animationJob?.cancel()
                         animationJob = scope.launch {
+                            var completed = false
                             try {
                                 trace(
                                     "ZOOM_PREVIEW_ANIMATION_START",
@@ -211,7 +212,22 @@ fun ZoomableContainer(
                                     launch { animOffsetX.animateTo(targetOffsetX, animSpec) }
                                     launch { animOffsetY.animateTo(targetOffsetY, animSpec) }
                                 }
+                                completed = true
                             } finally {
+                                // The three Animatables notify Compose independently. Without an
+                                // explicit final write, the gesture callback can hand the image to
+                                // SSIV while one render value is still from the preceding frame.
+                                // Keep cancellation at the actually rendered point; only a fully
+                                // completed double-tap is snapped to its exact target.
+                                val finalScale = if (completed) targetScale else animScale.value
+                                val finalOffsetX = if (completed) targetOffsetX else animOffsetX.value
+                                val finalOffsetY = if (completed) targetOffsetY else animOffsetY.value
+                                gestureScale = finalScale
+                                gestureOffsetX = finalOffsetX
+                                gestureOffsetY = finalOffsetY
+                                renderScale = finalScale
+                                renderOffsetX = finalOffsetX
+                                renderOffsetY = finalOffsetY
                                 trace(
                                     "ZOOM_PREVIEW_ANIMATION_END",
                                     "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +

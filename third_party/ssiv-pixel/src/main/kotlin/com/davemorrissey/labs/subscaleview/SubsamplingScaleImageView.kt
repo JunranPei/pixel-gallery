@@ -81,6 +81,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     var orientation = ORIENTATION_0
 
     private var bitmap: Bitmap? = null
+    private var bitmapIsBorrowedPreview = false
+    private var borrowedPreviewReleaseRequested = false
     private var uri: Uri? = null
     private var fullImageSampleSize = 0
     private var tileMap: MutableMap<Int, List<Tile>>? = null
@@ -161,20 +163,36 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private fun getIsBaseLayerReady(): Boolean {
         if (bitmap != null) {
             return true
-        } else if (tileMap != null) {
-            var baseLayerReady = true
-            for ((key, value) in tileMap!!) {
-                if (key == fullImageSampleSize) {
-                    for (tile in value) {
-                        if (tile.loading || tile.bitmap == null) {
-                            baseLayerReady = false
-                        }
-                    }
-                }
-            }
-            return baseLayerReady
         }
-        return false
+        return getAreBaseTilesReady()
+    }
+
+    private fun getAreBaseTilesReady(): Boolean {
+        val baseTiles = tileMap?.get(fullImageSampleSize) ?: return false
+        return baseTiles.all { !it.loading && it.bitmap != null }
+    }
+
+    private fun clearBaseBitmap() {
+        if (!bitmapIsBorrowedPreview) {
+            bitmap?.recycle()
+        }
+        bitmap = null
+        bitmapIsBorrowedPreview = false
+        borrowedPreviewReleaseRequested = false
+    }
+
+    /**
+     * Keep the borrowed Glide preview through the renderer handoff, then release the
+     * reference as soon as the complete base tile layer can replace it without a gap.
+     * The bitmap belongs to Glide and is never recycled here.
+     */
+    fun releaseBorrowedPreviewWhenTilesReady() {
+        if (!bitmapIsBorrowedPreview) return
+        borrowedPreviewReleaseRequested = true
+        if (getAreBaseTilesReady()) {
+            clearBaseBitmap()
+        }
+        invalidate()
     }
 
     private fun getRequiredRotation() = if (orientation == ORIENTATION_USE_EXIF) sOrientation else orientation
@@ -185,7 +203,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         return viewToSourceCoord(centerX.toFloat(), centerY.toFloat())
     }
 
-    fun setImage(path: String) {
+    fun setImage(
+        path: String,
+        borrowedPreview: Bitmap? = null,
+        previewSourceWidth: Int = 0,
+        previewSourceHeight: Int = 0,
+    ) {
         reset(true)
 
         var newPath = path
@@ -211,6 +234,19 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
 
         uri = Uri.parse(newPath)
+        if (
+            borrowedPreview?.isRecycled == false &&
+            previewSourceWidth > 0 && previewSourceHeight > 0
+        ) {
+            bitmap = borrowedPreview
+            bitmapIsBorrowedPreview = true
+            borrowedPreviewReleaseRequested = false
+            sWidth = previewSourceWidth
+            sHeight = previewSourceHeight
+            sOrientation = orientation
+            invalidate()
+            requestLayout()
+        }
         val task = TilesInitTask(this, context, regionDecoderFactory, uri!!)
         execute(task)
     }
@@ -254,7 +290,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 decoderLock.writeLock().unlock()
             }
 
-            bitmap?.recycle()
+            clearBaseBitmap()
 
             prevDegrees = 0
             sWidth = 0
@@ -263,7 +299,6 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             isReady = false
             isImageLoaded = false
             hasDispatchedImageDrawn = false
-            bitmap = null
             cos = Math.cos(0.0)
             sin = Math.sin(0.0)
         }
@@ -815,7 +850,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
 
         var imageDrawnThisFrame = false
-        if (tileMap != null && getIsBaseLayerReady()) {
+        if (tileMap != null && getAreBaseTilesReady() && !bitmapIsBorrowedPreview) {
             val sampleSize = min(fullImageSampleSize, calculateInSampleSize(scale))
             var hasMissingTiles = false
             for ((key, value) in tileMap!!) {
@@ -876,8 +911,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 }
             }
         } else if (bitmap?.isRecycled == false) {
-            val xScale = scale
-            val yScale = scale
+            // A borrowed preview can be smaller than the source image. SSIV's scale is
+            // expressed in source pixels, so compensate for the preview's downsampling
+            // while it temporarily fills the base layer.
+            val xScale = scale * sWidth().toFloat() / bitmap!!.width.coerceAtLeast(1)
+            val yScale = scale * sHeight().toFloat() / bitmap!!.height.coerceAtLeast(1)
 
             if (objectMatrix == null) {
                 objectMatrix = Matrix()
@@ -1061,7 +1099,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             return
         }
 
-        if (fullImageSampleSize == 1 && sWidth() < maxTileDimensions.x && sHeight() < maxTileDimensions.y) {
+        if (
+            fullImageSampleSize == 1 &&
+            sWidth() < maxTileDimensions.x && sHeight() < maxTileDimensions.y &&
+            !bitmapIsBorrowedPreview
+        ) {
             decoder!!.recycle()
             decoder = null
             val task = BitmapLoadTask(this, context, bitmapDecoderFactory, uri!!)
@@ -1453,15 +1495,14 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         debug("onTilesInited sWidth=$sWidth, sHeight=$sHeight, sOrientation=$orientation")
         if (this.sWidth > 0 && this.sHeight > 0 && (this.sWidth != sWidth || this.sHeight != sHeight)) {
             reset(false)
-            bitmap?.recycle()
-            bitmap = null
+            clearBaseBitmap()
         }
         this.decoder = decoder
         this.sWidth = sWidth
         this.sHeight = sHeight
         this.sOrientation = sOrientation
         checkReady()
-        if (!checkImageLoaded() && maxTileWidth > 0 && maxTileWidth != TILE_SIZE_AUTO && maxTileHeight > 0 && maxTileHeight != TILE_SIZE_AUTO && width > 0 && height > 0) {
+        if (tileMap == null && decoder != null && maxTileWidth > 0 && maxTileWidth != TILE_SIZE_AUTO && maxTileHeight > 0 && maxTileHeight != TILE_SIZE_AUTO && width > 0 && height > 0) {
             initialiseBaseLayer(Point(maxTileWidth, maxTileHeight))
         }
 
@@ -1533,9 +1574,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         debug("onTileLoaded")
         checkReady()
         checkImageLoaded()
-        if (getIsBaseLayerReady()) {
-            bitmap?.recycle()
-            bitmap = null
+        if (getAreBaseTilesReady() && (!bitmapIsBorrowedPreview || borrowedPreviewReleaseRequested)) {
+            clearBaseBitmap()
         }
         invalidate()
     }
@@ -1595,8 +1635,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             reset(false)
         }
 
-        this.bitmap?.recycle()
+        clearBaseBitmap()
         this.bitmap = bitmap
+        bitmapIsBorrowedPreview = false
         sWidth = bitmap!!.width
         sHeight = bitmap.height
         this.sOrientation = sOrientation
