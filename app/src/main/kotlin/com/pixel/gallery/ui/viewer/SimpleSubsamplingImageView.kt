@@ -429,6 +429,7 @@ internal fun SimpleSubsamplingImageView(
         isPagerIdle,
         enableSubsampling,
         previewLoaded,
+        previewDrawable,
         deepZoomRequested,
         ssivView,
         imagePath,
@@ -458,7 +459,32 @@ internal fun SimpleSubsamplingImageView(
                     view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
                     imageSessionGeneration += 1
                     imageAssigned = true
-                    view.setImage(imagePath)
+                    val normalizedOrientation = ((orientationDegrees % 360) + 360) % 360
+                    val borrowedPreview = (previewDrawable as? BitmapDrawable)
+                        ?.bitmap
+                        ?.takeIf { bitmap ->
+                            val sourceRatio = sourceWidth.toFloat() / sourceHeight.coerceAtLeast(1)
+                            val bitmapRatio = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1)
+                            regionDecoderKind == ViewerRegionDecoderKind.PLATFORM &&
+                                normalizedOrientation == 0 &&
+                                sourceWidth > 0 && sourceHeight > 0 &&
+                                !bitmap.isRecycled &&
+                                kotlin.math.abs(bitmapRatio / sourceRatio - 1f) < 0.02f
+                        }
+                    ViewerLoadMetrics.event(
+                        "SSIV_BASE_PREVIEW_REUSE",
+                        "reused=${borrowedPreview != null} " +
+                            "preview=${borrowedPreview?.let { "${it.width}x${it.height}" } ?: "none"} " +
+                            "source=${sourceWidth}x$sourceHeight orientation=$normalizedOrientation " +
+                            "decoder=$regionDecoderKind",
+                        imageKey = transformStateKey,
+                    )
+                    view.setImage(
+                        path = imagePath,
+                        borrowedPreview = borrowedPreview,
+                        previewSourceWidth = if (borrowedPreview != null) sourceWidth else 0,
+                        previewSourceHeight = if (borrowedPreview != null) sourceHeight else 0,
+                    )
                     ViewerLoadMetrics.workReady(
                         token,
                         source = "SET_IMAGE_RETURNED",
@@ -515,7 +541,6 @@ internal fun SimpleSubsamplingImageView(
             previewGestureInProgress
         ) return@LaunchedEffect
 
-        delay(120)
         val view = ssivView ?: return@LaunchedEffect
         val liveSsivState = view.snapshotViewState()
         val handoffState = if (previewOwnsTransform) {
@@ -559,6 +584,12 @@ internal fun SimpleSubsamplingImageView(
             previewOwnsTransform = false
             view.alpha = 1f
             subsamplingReady = true
+            // The first visible SSIV frame keeps using the exact Glide bitmap that
+            // completed the zoom animation. Switch to decoded tiles on the next frame,
+            // after the renderer handoff is already complete.
+            view.postOnAnimation {
+                view.releaseBorrowedPreviewWhenTilesReady()
+            }
             ViewerLoadMetrics.event(
                 "DEEP_ZOOM_HANDOFF",
                 "intendedScale=${handoffState?.scale ?: -1f} " +
@@ -766,8 +797,12 @@ internal fun SimpleSubsamplingImageView(
             initialScale = savedPreviewScale,
             initialOffsetX = savedPreviewOffsetX,
             initialOffsetY = savedPreviewOffsetY,
-            enabled = isActivePage && !subsamplingReady,
-            autoApplyTransformations = !subsamplingReady,
+            // When returning to a page whose transform belongs to SSIV, the ImageView
+            // already receives that saved transform directly. Reapplying the stale
+            // outer preview transform would double-scale it for one frame before SSIV
+            // appears, which is the visible size jump during pager return.
+            enabled = isActivePage && !subsamplingReady && previewOwnsTransform,
+            autoApplyTransformations = !subsamplingReady && previewOwnsTransform,
             imageFitScaleX = fitWidthFraction,
             imageFitScaleY = fitHeightFraction,
             onTap = onClick,
