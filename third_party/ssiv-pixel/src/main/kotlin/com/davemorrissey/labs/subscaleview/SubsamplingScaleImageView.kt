@@ -395,13 +395,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             anim = null
         }
 
-        if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
-            onImageEventListener?.onUpEvent()
-            ignoreTouches = false
-        }
-
         if (vTranslate == null) {
             singleDetector?.onTouchEvent(event)
+            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                onImageEventListener?.onUpEvent()
+                ignoreTouches = false
+            }
             return true
         }
 
@@ -439,6 +438,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val beforeTranslate = if (shouldTraceTouch) PointF(vTranslate!!.x, vTranslate!!.y) else null
         val beforeCenter = if (shouldTraceTouch) getCenter() else null
         val handled = onTouchEventInternal(event) || super.onTouchEvent(event)
+        // Commit the transform only after SSIV has processed UP/CANCEL. Dispatching this
+        // callback before onTouchEventInternal() caused callers to persist the previous
+        // scale, then restore that stale scale after a pager detach/re-attach.
+        if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+            onImageEventListener?.onUpEvent()
+            ignoreTouches = false
+        }
         if (shouldTraceTouch) {
             val pointerDetail = buildString {
                 for (index in 0 until event.pointerCount) {
@@ -473,6 +479,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 parent?.requestDisallowInterceptTouchEvent(true)
                 maxTouchCount = max(maxTouchCount, touchCount)
                 if (touchCount >= 2) {
+                    // A second pointer definitively turns the stroke into a pinch. The
+                    // gesture detector may already have marked the first DOWN as the start
+                    // of double-tap quick-scale; leaving that flag set makes POINTER_UP run
+                    // doubleTapZoom() and unexpectedly snap the image back to fit-screen.
+                    isQuickScaling = false
+                    quickScaleMoved = false
                     scaleStart = scale
                     vDistStart = distance(event.getX(0), event.getX(1), event.getY(0), event.getY(1))
                     vTranslateStart!!.set(vTranslate!!.x, vTranslate!!.y)
@@ -1265,9 +1277,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     /** Captures the small, decoder-independent transform state for pager restoration. */
     fun snapshotViewState(): ViewState? {
         if (!isReady || scale <= 0f) return null
-        // Pager hand-off can leave a few pixels of transient drag translation in the
-        // child view. Normalize it with the same bounds used by restore before saving.
-        fitToBounds()
+        // A snapshot must be read-only. Calling fitToBounds() here used to mutate the
+        // live scale/translation before ACTION_UP reached the gesture state machine,
+        // which could visibly shrink or recenter the image while merely saving state.
         val center = getCenter() ?: return null
         val baseFitScale = min(
             width / sWidth().toFloat(),

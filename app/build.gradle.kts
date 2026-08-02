@@ -15,7 +15,9 @@ val keystoreProperties = Properties()
 // by a build-wide experiment flag.
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
-val viewerMetricsEnabled = viewerTestVariant == "trace" || viewerTestVariant == "compressed"
+val viewerMetricsEnabled = viewerTestVariant == "trace" ||
+    viewerTestVariant == "compressed" ||
+    viewerTestVariant == "zoomtrace"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -40,19 +42,21 @@ android {
             "trace" -> "com.pixel.gallery.codextrace"
             "clean" -> "com.pixel.gallery.codexclean"
             "compressed" -> "com.pixel.gallery.codexcompressed"
+            "zoomtrace" -> "com.pixel.gallery.zoomtrace"
             else -> "com.pixel.gallery.multitask"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "trace" -> "Pixel Trace"
             "clean" -> "Pixel Clean"
             "compressed" -> "Pixel Compressed"
+            "zoomtrace" -> "Pixel Zoom Trace"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "4.2.13-auto-multitask"
+        versionCode = 28
+        versionName = "4.2.14-auto-multitask"
     }
 
     signingConfigs {
