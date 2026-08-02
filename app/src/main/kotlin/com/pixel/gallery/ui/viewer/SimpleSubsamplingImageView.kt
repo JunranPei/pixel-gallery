@@ -13,6 +13,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -88,12 +89,34 @@ private val tileDecodeExecutor = LIFOThreadPoolExecutor(
 }
 
 internal class ViewerTransformStateStore {
-    private val states = HashMap<String, SubsamplingScaleImageView.ViewState>()
+    private data class StoredState(
+        val state: SubsamplingScaleImageView.ViewState,
+        val revision: Int,
+    )
 
-    fun get(key: String): SubsamplingScaleImageView.ViewState? = states[key]
+    private val states = HashMap<String, StoredState>()
 
-    fun save(key: String, state: SubsamplingScaleImageView.ViewState) {
-        states[key] = state
+    @Synchronized
+    fun get(key: String): SubsamplingScaleImageView.ViewState? = states[key]?.state
+
+    @Synchronized
+    fun revision(key: String): Int = states[key]?.revision ?: 0
+
+    @Synchronized
+    fun save(
+        key: String,
+        state: SubsamplingScaleImageView.ViewState,
+        reason: String = "unspecified",
+    ) {
+        val revision = (states[key]?.revision ?: 0) + 1
+        states[key] = StoredState(state, revision)
+        ViewerLoadMetrics.event(
+            "TRANSFORM_STORE_SAVE",
+            "revision=$revision reason=$reason scale=${state.scale} " +
+                "base=${state.baseFitScale} center=${state.sourceCenter} " +
+                "rotation=${state.rotationRadians}",
+            imageKey = key,
+        )
     }
 }
 
@@ -198,12 +221,10 @@ private fun applySavedPreviewTransform(
 private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boolean {
     if (state == null || state.baseFitScale <= 0f) return false
     val relativeScale = state.scale / state.baseFitScale
-    val centeredX = state.sourceWidth / 2f
-    val centeredY = state.sourceHeight / 2f
-    return kotlin.math.abs(relativeScale - 1f) > 0.02f ||
-        kotlin.math.abs(state.sourceCenter.x - centeredX) > 1f ||
-        kotlin.math.abs(state.sourceCenter.y - centeredY) > 1f ||
-        kotlin.math.abs(state.rotationRadians) > 0.001
+    // A centered state at or below fit-screen is fully represented by the preview.
+    // Loading SSIV for it causes an unnecessary renderer handoff and can strand the
+    // gesture at the minimum scale. Pan is only meaningful above fit-screen.
+    return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
 
 private fun previewTransformState(
@@ -298,14 +319,27 @@ internal fun SimpleSubsamplingImageView(
     var deepZoomRequested by remember(transformStateKey) {
         mutableStateOf(requiresDeepZoom(savedTransformAtAttach))
     }
-    val previewOwnsTransform = remember(transformStateKey) {
-        !requiresDeepZoom(savedTransformAtAttach)
+    var previewOwnsTransform by remember(transformStateKey) {
+        mutableStateOf(!requiresDeepZoom(savedTransformAtAttach))
     }
-    var previewUserScale by remember(transformStateKey) { mutableFloatStateOf(1f) }
-    var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(0f) }
-    var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(0f) }
+    val savedPreviewScale = savedTransformAtAttach
+        ?.takeUnless(::requiresDeepZoom)
+        ?.let { (it.scale / it.baseFitScale).coerceAtLeast(0.01f) }
+        ?: 1f
+    val savedPreviewOffsetX = savedTransformAtAttach
+        ?.takeUnless(::requiresDeepZoom)
+        ?.let { (it.sourceWidth / 2f - it.sourceCenter.x) * it.scale }
+        ?: 0f
+    val savedPreviewOffsetY = savedTransformAtAttach
+        ?.takeUnless(::requiresDeepZoom)
+        ?.let { (it.sourceHeight / 2f - it.sourceCenter.y) * it.scale }
+        ?: 0f
+    var previewUserScale by remember(transformStateKey) { mutableFloatStateOf(savedPreviewScale) }
+    var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetX) }
+    var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetY) }
     var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
+    var imageSessionGeneration by remember(transformStateKey) { mutableIntStateOf(0) }
     val previewRequestGuard = remember(transformStateKey) { PreviewRequestGuard() }
     var ssivView by remember { mutableStateOf<SubsamplingScaleImageView?>(null) }
     var imageViewRef by remember { mutableStateOf<android.widget.ImageView?>(null) }
@@ -422,6 +456,7 @@ internal fun SimpleSubsamplingImageView(
                     view.alpha = 0f
                     ssivBaseDrawn = false
                     view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                    imageSessionGeneration += 1
                     imageAssigned = true
                     view.setImage(imagePath)
                     ViewerLoadMetrics.workReady(
@@ -444,7 +479,10 @@ internal fun SimpleSubsamplingImageView(
                     transformStateKey,
                     "reason=${if (!isActivePage) "inactive" else "subsampling-disabled"}",
                 )
-                view.snapshotViewState()?.let { transformStateStore.save(transformStateKey, it) }
+                view.snapshotViewState()?.let {
+                    transformStateStore.save(transformStateKey, it, "page-inactive")
+                }
+                imageSessionGeneration += 1
                 val purged = tileDecodeExecutor.purgePendingTasks()
                 view.recycle()
                 view.visibility = View.GONE
@@ -491,7 +529,7 @@ internal fun SimpleSubsamplingImageView(
                 sourceHeight = liveSsivState?.sourceHeight ?: sourceHeight,
                 orientationDegrees = if (liveSsivState != null) 0 else orientationDegrees,
                 baseFitScaleOverride = liveSsivState?.baseFitScale,
-            )?.also { transformStateStore.save(transformStateKey, it) }
+            )?.also { transformStateStore.save(transformStateKey, it, "preview-handoff") }
         } else {
             transformStateStore.get(transformStateKey)
         }
@@ -518,6 +556,7 @@ internal fun SimpleSubsamplingImageView(
         delay(16)
         if (isActivePage && imageAssigned && ssivBaseDrawn) {
             val frameState = view.snapshotViewState()
+            previewOwnsTransform = false
             view.alpha = 1f
             subsamplingReady = true
             ViewerLoadMetrics.event(
@@ -528,7 +567,8 @@ internal fun SimpleSubsamplingImageView(
                     "frameCenter=${frameState?.sourceCenter ?: "none"} " +
                     "previewScale=$previewUserScale previewOffset=${previewOffsetX},${previewOffsetY} " +
                     "view=${view.width}x${view.height} liveBase=${liveSsivState?.baseFitScale ?: -1f} " +
-                    "liveSource=${liveSsivState?.sourceWidth ?: -1}x${liveSsivState?.sourceHeight ?: -1}",
+                    "liveSource=${liveSsivState?.sourceWidth ?: -1}x${liveSsivState?.sourceHeight ?: -1} " +
+                    "owner=TILES revision=${transformStateStore.revision(transformStateKey)}",
                 imageKey = transformStateKey,
             )
         }
@@ -546,6 +586,7 @@ internal fun SimpleSubsamplingImageView(
         val imageView = imageViewRef
         if (imageView != null && isPreviewVisible) {
             val savedTransform = transformStateStore.get(transformStateKey)
+            val previewUsesContainerTransform = previewOwnsTransform
             imageView.visibility = View.VISIBLE
             val requestModel = previewModel ?: imagePath
             val metricsToken = previewRequestGuard.begin(
@@ -558,6 +599,7 @@ internal fun SimpleSubsamplingImageView(
             if (metricsToken != null) {
                 currentOnContentReadyChanged(false)
                 imageView.rotation = savedTransform
+                    ?.takeUnless { previewUsesContainerTransform }
                     ?.let { Math.toDegrees(it.rotationRadians).toFloat() }
                     ?: 0f
                 imageView.scaleX = 1f
@@ -634,7 +676,7 @@ internal fun SimpleSubsamplingImageView(
                                             applySavedPreviewTransform(
                                                 imageView,
                                                 imageView.drawable ?: resource,
-                                                savedTransform
+                                                savedTransform.takeUnless { previewUsesContainerTransform }
                                             )
                                             imageView.alpha = 1f
                                         }
@@ -652,7 +694,7 @@ internal fun SimpleSubsamplingImageView(
                                     applySavedPreviewTransform(
                                         imageView,
                                         imageView.drawable ?: resource,
-                                        savedTransform
+                                        savedTransform.takeUnless { previewUsesContainerTransform }
                                     )
                                     imageView.alpha = 1f
                                 }
@@ -685,6 +727,19 @@ internal fun SimpleSubsamplingImageView(
     DisposableEffect(previewRequestGuard) {
         onDispose { previewRequestGuard.clear("dispose") }
     }
+
+    // AndroidView can detach temporarily during pager layout/recomposition. Detach is
+    // therefore not a resource-lifecycle boundary. Recycle only when this composable is
+    // actually disposed; inactive settled pages are handled by the effect above.
+    DisposableEffect(ssivView, transformStateKey) {
+        val view = ssivView
+        onDispose {
+            view?.snapshotViewState()?.let {
+                transformStateStore.save(transformStateKey, it, "composition-dispose")
+            }
+            view?.recycle()
+        }
+    }
     BoxWithConstraints(modifier = modifier) {
         val normalizedOrientation = ((orientationDegrees % 360) + 360) % 360
         val swapped = normalizedOrientation == 90 || normalizedOrientation == 270
@@ -708,6 +763,9 @@ internal fun SimpleSubsamplingImageView(
             minScale = previewMinScale,
             maxScale = previewMaxScale,
             scaleToOriginal = scaleToOriginal,
+            initialScale = savedPreviewScale,
+            initialOffsetX = savedPreviewOffsetX,
+            initialOffsetY = savedPreviewOffsetY,
             enabled = isActivePage && !subsamplingReady,
             autoApplyTransformations = !subsamplingReady,
             imageFitScaleX = fitWidthFraction,
@@ -746,7 +804,9 @@ internal fun SimpleSubsamplingImageView(
                         sourceWidth = sourceWidth,
                         sourceHeight = sourceHeight,
                         orientationDegrees = normalizedOrientation,
-                    )?.let { transformStateStore.save(transformStateKey, it) }
+                    )?.let {
+                        transformStateStore.save(transformStateKey, it, "preview-gesture")
+                    }
                 }
             },
         ) {
@@ -832,6 +892,12 @@ internal fun SimpleSubsamplingImageView(
                         doubleTapZoomScale = 1f.coerceAtMost(maxScale)
                         transformStateStore.get(transformStateKey)?.let {
                             this@ssivView.restoreViewState(it)
+                            ViewerLoadMetrics.event(
+                                "SSIV_READY_RESTORE",
+                                "revision=${transformStateStore.revision(transformStateKey)} " +
+                                    "scale=${it.scale} center=${it.sourceCenter}",
+                                imageKey = transformStateKey,
+                            )
                         }
                         ViewerLoadMetrics.tilesReady(transformStateKey)
                         ViewerLoadMetrics.event(
@@ -869,27 +935,42 @@ internal fun SimpleSubsamplingImageView(
 
                     override fun onImageRotation(degrees: Int) {
                         this@ssivView.snapshotViewState()?.let {
-                            transformStateStore.save(transformStateKey, it)
+                            transformStateStore.save(transformStateKey, it, "rotation")
                         }
                     }
 
                     override fun onUpEvent() {
                         val immediateState = this@ssivView.snapshotViewState()
+                        immediateState?.let {
+                            transformStateStore.save(transformStateKey, it, "touch-up-immediate")
+                        }
+                        val saveGeneration = imageSessionGeneration
                         ViewerLoadMetrics.event(
                             "SSIV_TOUCH_UP",
                             "immediateScale=${immediateState?.scale ?: -1f} " +
-                                "immediateCenter=${immediateState?.sourceCenter ?: "none"}",
+                                "immediateCenter=${immediateState?.sourceCenter ?: "none"} " +
+                                "generation=$saveGeneration revision=${transformStateStore.revision(transformStateKey)}",
                             imageKey = transformStateKey,
                         )
                         // SSIV may spend 200 ms snapping scale/rotation to bounds after
                         // the fingers lift. Save once after that animation, never per frame.
                         this@ssivView.postDelayed({
+                            if (saveGeneration != imageSessionGeneration || !imageAssigned) {
+                                ViewerLoadMetrics.event(
+                                    "SSIV_TOUCH_SETTLED_SKIPPED",
+                                    "savedGeneration=$saveGeneration currentGeneration=$imageSessionGeneration " +
+                                        "assigned=$imageAssigned",
+                                    imageKey = transformStateKey,
+                                )
+                                return@postDelayed
+                            }
                             this@ssivView.snapshotViewState()?.let { state ->
-                                transformStateStore.save(transformStateKey, state)
+                                transformStateStore.save(transformStateKey, state, "touch-settled")
                                 ViewerLoadMetrics.event(
                                     "SSIV_TOUCH_SETTLED",
                                     "scale=${state.scale} center=${state.sourceCenter} " +
-                                        "base=${state.baseFitScale} rotation=${state.rotationRadians}",
+                                        "base=${state.baseFitScale} rotation=${state.rotationRadians} " +
+                                        "generation=$saveGeneration revision=${transformStateStore.revision(transformStateKey)}",
                                     imageKey = transformStateKey,
                                 )
                             }
@@ -901,19 +982,24 @@ internal fun SimpleSubsamplingImageView(
                     override fun onViewAttachedToWindow(v: View) {
                         ViewerLoadMetrics.event(
                             "SSIV_VIEW_ATTACHED",
+                            "assigned=$imageAssigned ready=$subsamplingReady " +
+                                "generation=$imageSessionGeneration",
                             imageKey = transformStateKey,
                         )
                     }
                     override fun onViewDetachedFromWindow(v: View) {
                         val token = ViewerLoadMetrics.workStarted(
-                            "SSIV_DETACH_RECYCLE",
+                            "SSIV_VIEW_DETACHED",
                             transformStateKey,
                         )
                         this@ssivView.snapshotViewState()?.let {
-                            transformStateStore.save(transformStateKey, it)
+                            transformStateStore.save(transformStateKey, it, "view-detached")
                         }
-                        recycle()
-                        ViewerLoadMetrics.workReady(token)
+                        ViewerLoadMetrics.workReady(
+                            token,
+                            detail = "generation=$imageSessionGeneration retained=true " +
+                                "assigned=$imageAssigned ready=$subsamplingReady",
+                        )
                     }
                 })
             }
@@ -938,17 +1024,33 @@ internal fun SimpleSubsamplingImageView(
                         "VIEWER_LAYER_CHANGE",
                         "from=$previousLayer to=$layer active=$isActivePage " +
                             "previewVisible=$isPreviewVisible previewLoaded=$previewLoaded " +
-                            "tilesReady=$subsamplingReady",
+                            "tilesReady=$subsamplingReady assigned=$imageAssigned " +
+                            "owner=${if (previewOwnsTransform) "PREVIEW" else "TILES"} " +
+                            "generation=$imageSessionGeneration revision=${transformStateStore.revision(transformStateKey)}",
                         imageKey = transformStateKey,
                     )
                 }
                 if (layer == "PREVIEW") {
-                    imageView.visibility = View.VISIBLE
                     // Preserve the transparent restore handoff until the new drawable has
                     // received its saved transform. A retained preview returning from tiles
-                    // is already transformed and can be revealed immediately.
+                    // must first receive the newest SSIV transform. Otherwise the stale
+                    // fit/original-size preview flashes for one frame while swiping or reloading.
                     if (previousLayer == "TILES" && previewLoaded) {
+                        val drawable = imageView.drawable
+                        val latestState = transformStateStore.get(transformStateKey)
+                        if (drawable != null && latestState != null) {
+                            applySavedPreviewTransform(imageView, drawable, latestState)
+                        }
+                        ViewerLoadMetrics.event(
+                            "PREVIEW_REVEAL_FROM_TILES",
+                            "appliedSaved=${drawable != null && latestState != null} " +
+                                "revision=${transformStateStore.revision(transformStateKey)}",
+                            imageKey = transformStateKey,
+                        )
+                        imageView.visibility = View.VISIBLE
                         imageView.alpha = 1f
+                    } else {
+                        imageView.visibility = View.VISIBLE
                     }
                 } else {
                     imageView.alpha = 0f

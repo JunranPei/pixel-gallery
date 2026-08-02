@@ -53,6 +53,9 @@ fun ZoomableContainer(
     minScale: Float = 0.333f,
     maxScale: Float = 3.0f,
     scaleToOriginal: Float = 1.0f,
+    initialScale: Float = 1.0f,
+    initialOffsetX: Float = 0.0f,
+    initialOffsetY: Float = 0.0f,
     enabled: Boolean = true,
     autoApplyTransformations: Boolean = true,
     // The fraction of container size the image occupies at userScale=1.0 (fit-to-screen).
@@ -74,19 +77,20 @@ fun ZoomableContainer(
     val safeMaxScale = maxOf(minScale, maxScale)
 
     // Animated values for smooth double-tap transitions
-    val animScale = remember(diagnosticsKey) { Animatable(1f) }
-    val animOffsetX = remember(diagnosticsKey) { Animatable(0f) }
-    val animOffsetY = remember(diagnosticsKey) { Animatable(0f) }
+    val startingScale = initialScale.coerceIn(safeMinScale, safeMaxScale)
+    val animScale = remember(diagnosticsKey) { Animatable(startingScale) }
+    val animOffsetX = remember(diagnosticsKey) { Animatable(initialOffsetX) }
+    val animOffsetY = remember(diagnosticsKey) { Animatable(initialOffsetY) }
     var animationJob by remember(diagnosticsKey) { mutableStateOf<Job?>(null) }
-    var renderScale by remember(diagnosticsKey) { mutableFloatStateOf(1f) }
-    var renderOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
-    var renderOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var renderScale by remember(diagnosticsKey) { mutableFloatStateOf(startingScale) }
+    var renderOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetX) }
+    var renderOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetY) }
     var pointerGestureInProgress by remember(diagnosticsKey) { mutableStateOf(false) }
 
     // Immediate tracking values used during gesture processing
-    var gestureScale by remember(diagnosticsKey) { mutableFloatStateOf(1f) }
-    var gestureOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
-    var gestureOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(0f) }
+    var gestureScale by remember(diagnosticsKey) { mutableFloatStateOf(startingScale) }
+    var gestureOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetX) }
+    var gestureOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetY) }
 
     fun trace(name: String, detail: String) {
         if (diagnosticsKey.isNotEmpty()) {
@@ -253,6 +257,7 @@ fun ZoomableContainer(
                     var isGestureLockedToPan = false
                     var gestureLockChecked = false
                     var zoomIntentDispatched = false
+                    var pinchGestureClaimed = false
                     var sample = 0
                     var endedBecauseConsumed = false
                     var lastSampleTraceTime = Long.MIN_VALUE
@@ -261,9 +266,21 @@ fun ZoomableContainer(
                     var gestureActive = true
                     while (gestureActive) {
                         val event = awaitPointerEvent()
+                        val hasMultiplePointers = event.changes.size >= 2
 
-                        // If any change was already consumed upstream, bail out
-                        if (event.changes.any { it.isConsumed }) {
+                        // Once a second pointer appears, this entire stroke belongs to zoom,
+                        // including pointer-up and the remaining one-finger tail. Otherwise
+                        // HorizontalPager can inherit the same pinch halfway through.
+                        if (hasMultiplePointers) {
+                            pinchGestureClaimed = true
+                        }
+                        if (pinchGestureClaimed) {
+                            event.changes.forEach { it.consume() }
+                        }
+
+                        // A consumed single-finger stroke belongs to another recognizer. A
+                        // claimed pinch remains ours even if the tap detector consumed a change.
+                        if (event.changes.any { it.isConsumed } && !pinchGestureClaimed) {
                             endedBecauseConsumed = true
                             gestureActive = false
                             continue
@@ -290,12 +307,15 @@ fun ZoomableContainer(
                         }
 
                         if (pastTouchSlop) {
-                            val isPinching = event.changes.size >= 2
-                            if (isPinching && !zoomIntentDispatched) {
+                            val isPinching = hasMultiplePointers
+                            val newScale = (gestureScale * zoomChange).coerceIn(safeMinScale, safeMaxScale)
+                            // The preview is already sufficient at and below fit-screen. Start
+                            // the tiled layer only once the gesture actually needs detail above
+                            // fit; shrinking must never cause a mid-gesture renderer handoff.
+                            if (isPinching && newScale > 1.01f && !zoomIntentDispatched) {
                                 zoomIntentDispatched = true
                                 onZoomGestureStarted()
                             }
-                            val newScale = (gestureScale * zoomChange).coerceIn(safeMinScale, safeMaxScale)
 
                             // Lock in the gesture consumer on the very first frame of panning motion
                             if (!gestureLockChecked && !isPinching) {
@@ -386,6 +406,7 @@ fun ZoomableContainer(
                     trace(
                         "ZOOM_PREVIEW_POINTER_END",
                         "samples=$sample consumed=$endedBecauseConsumed zoomIntent=$zoomIntentDispatched " +
+                            "pinchClaimed=$pinchGestureClaimed " +
                             "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
                             "render=$renderScale,$renderOffsetX,$renderOffsetY",
                     )

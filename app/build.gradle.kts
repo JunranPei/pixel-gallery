@@ -48,8 +48,8 @@ android {
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "4.2.13-multi-entry"
+        versionCode = 28
+        versionName = "4.2.14-multi-entry"
     }
 
     signingConfigs {
