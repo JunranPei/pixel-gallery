@@ -72,6 +72,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
      * When enabled, a double tap at any non-fit scale returns to fit-screen.
      */
     var doubleTapReturnsToFit = false
+
+    /**
+     * Clamp pinch/quick-scale continuously instead of allowing an elastic excursion beyond the
+     * configured range. Pixel's fit-screen preview already uses strict bounds; enabling this for
+     * the deferred tile layer keeps the same gesture from changing behaviour after tile handoff.
+     */
+    var strictScaleBounds = false
     var taskExecutor: Executor = AsyncTask.THREAD_POOL_EXECUTOR
     var bitmapDecoderFactory: DecoderFactory<out ImageDecoder> = CompatDecoderFactory(SkiaImageDecoder::class.java)
     var regionDecoderFactory: DecoderFactory<out ImageRegionDecoder> = CompatDecoderFactory(SkiaImageRegionDecoder::class.java)
@@ -566,7 +573,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             consumed = true
 
                             val previousScale = scale.toDouble()
-                            scale = min(maxScale, vDistEnd / vDistStart * scaleStart)
+                            scale = if (strictScaleBounds) {
+                                limitedScale(vDistEnd / vDistStart * scaleStart)
+                            } else {
+                                min(maxScale, vDistEnd / vDistStart * scaleStart)
+                            }
 
                             sourceToViewCoord(sCenterStart!!, vCenterStartNow!!)
 
@@ -578,6 +589,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
                             vTranslate!!.x += dxR
                             vTranslate!!.y += dyR
+
+                            if (strictScaleBounds) {
+                                // The preview path is centered and bounded on every gesture
+                                // sample. Apply the same rule here so shrinking through fit-screen
+                                // cannot leave a transient offset that later animates back.
+                                fitToBounds()
+                            }
 
                             if (previousScale * sHeight() < height && scale * sHeight() >= height || previousScale * sWidth() < width && scale * sWidth() >= width) {
                                 vCenterStart!!.set(vCenterEndX, vCenterEndY)
@@ -608,7 +626,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             }
 
                             val previousScale = scale.toDouble()
-                            scale = min(maxScale, scale * multiplier)
+                            scale = if (strictScaleBounds) {
+                                limitedScale(scale * multiplier)
+                            } else {
+                                min(maxScale, scale * multiplier)
+                            }
 
                             val vLeftStart = vCenterStart!!.x - vTranslateStart!!.x
                             val vTopStart = vCenterStart!!.y - vTranslateStart!!.y
@@ -616,6 +638,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             val vTopNow = vTopStart * (scale / scaleStart)
                             vTranslate!!.x = vCenterStart!!.x - vLeftNow
                             vTranslate!!.y = vCenterStart!!.y - vTopNow
+                            if (strictScaleBounds) {
+                                fitToBounds()
+                            }
                             if (previousScale * sHeight() < height && scale * sHeight() >= height || previousScale * sWidth() < width && scale * sWidth() >= width) {
                                 vCenterStart!!.set(sourceToViewCoord(quickScaleSCenter!!)!!)
                                 vTranslateStart!!.set(vTranslate!!)
@@ -645,7 +670,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
                             val lastX = vTranslate!!.x
                             val lastY = vTranslate!!.y
-                            if (!didZoomInGesture && scale >= getFullScale()) {
+                            if (!didZoomInGesture) {
+                                // A single-finger stroke must never move an image that already
+                                // fits completely inside the viewport. The old scale guard left
+                                // the below-fit translation mutated just before the parent Pager
+                                // cancelled the event, so a centred image was saved off-centre.
                                 fitToBounds()
                             }
 

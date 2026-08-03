@@ -218,6 +218,21 @@ private fun applySavedPreviewTransform(
     imageView.translationY = -rotatedOffsetY.toFloat()
 }
 
+private fun applyPreviewTransform(
+    imageView: android.widget.ImageView,
+    userScale: Float,
+    offsetX: Float,
+    offsetY: Float,
+) {
+    imageView.pivotX = imageView.width / 2f
+    imageView.pivotY = imageView.height / 2f
+    imageView.rotation = 0f
+    imageView.scaleX = userScale
+    imageView.scaleY = userScale
+    imageView.translationX = offsetX
+    imageView.translationY = offsetY
+}
+
 private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boolean {
     if (state == null || state.baseFitScale <= 0f) return false
     val relativeScale = state.scale / state.baseFitScale
@@ -338,6 +353,8 @@ internal fun SimpleSubsamplingImageView(
     var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetX) }
     var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetY) }
     var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
+    var previewTransformSyncRevision by remember(transformStateKey) { mutableIntStateOf(0) }
+    var previewTakeoverPending by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
     var imageSessionGeneration by remember(transformStateKey) { mutableIntStateOf(0) }
     val previewRequestGuard = remember(transformStateKey) { PreviewRequestGuard() }
@@ -346,6 +363,9 @@ internal fun SimpleSubsamplingImageView(
     var metricsSessionId by remember(transformStateKey) { mutableStateOf(0L) }
     val renderedLayer = remember(transformStateKey) { AtomicReference("UNSET") }
     val currentOnContentReadyChanged by rememberUpdatedState(onContentReadyChanged)
+    val currentPreviewUserScale by rememberUpdatedState(previewUserScale)
+    val currentPreviewOffsetX by rememberUpdatedState(previewOffsetX)
+    val currentPreviewOffsetY by rememberUpdatedState(previewOffsetY)
 
     // Active-page bookkeeping is intentionally separate from preview loading.
     // A preview that was loaded while swiping must not be restarted on the settle frame.
@@ -541,6 +561,21 @@ internal fun SimpleSubsamplingImageView(
             previewGestureInProgress
         ) return@LaunchedEffect
 
+        // The gesture may briefly cross above fit (which starts SSIV) and then finish
+        // below fit. In that case the screen-sized preview is already the correct and
+        // cheaper renderer. Never perform a late PREVIEW -> TILES swap at the final
+        // below-fit scale; that swap is the full-screen background flash.
+        if (previewOwnsTransform && previewUserScale <= 1.02f) {
+            deepZoomRequested = false
+            ViewerLoadMetrics.event(
+                "DEEP_ZOOM_HANDOFF_CANCELLED",
+                "reason=ended-at-or-below-fit previewScale=$previewUserScale " +
+                    "assigned=$imageAssigned baseDrawn=$ssivBaseDrawn",
+                imageKey = transformStateKey,
+            )
+            return@LaunchedEffect
+        }
+
         val view = ssivView ?: return@LaunchedEffect
         val liveSsivState = view.snapshotViewState()
         val handoffState = if (previewOwnsTransform) {
@@ -582,6 +617,7 @@ internal fun SimpleSubsamplingImageView(
         if (isActivePage && imageAssigned && ssivBaseDrawn) {
             val frameState = view.snapshotViewState()
             previewOwnsTransform = false
+            view.visibility = View.VISIBLE
             view.alpha = 1f
             subsamplingReady = true
             // The first visible SSIV frame keeps using the exact Glide bitmap that
@@ -704,11 +740,20 @@ internal fun SimpleSubsamplingImageView(
                                             imageView.viewTreeObserver.removeOnPreDrawListener(this)
                                         }
                                         if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
-                                            applySavedPreviewTransform(
-                                                imageView,
-                                                imageView.drawable ?: resource,
-                                                savedTransform.takeUnless { previewUsesContainerTransform }
-                                            )
+                                            if (previewUsesContainerTransform) {
+                                                applyPreviewTransform(
+                                                    imageView,
+                                                    currentPreviewUserScale,
+                                                    currentPreviewOffsetX,
+                                                    currentPreviewOffsetY,
+                                                )
+                                            } else {
+                                                applySavedPreviewTransform(
+                                                    imageView,
+                                                    imageView.drawable ?: resource,
+                                                    savedTransform,
+                                                )
+                                            }
                                             imageView.alpha = 1f
                                         }
                                         return true
@@ -722,11 +767,20 @@ internal fun SimpleSubsamplingImageView(
                                     previewRequestGuard.isCurrent(imageView, transformStateKey) &&
                                     imageView.alpha == 0f
                                 ) {
-                                    applySavedPreviewTransform(
-                                        imageView,
-                                        imageView.drawable ?: resource,
-                                        savedTransform.takeUnless { previewUsesContainerTransform }
-                                    )
+                                    if (previewUsesContainerTransform) {
+                                        applyPreviewTransform(
+                                            imageView,
+                                            currentPreviewUserScale,
+                                            currentPreviewOffsetX,
+                                            currentPreviewOffsetY,
+                                        )
+                                    } else {
+                                        applySavedPreviewTransform(
+                                            imageView,
+                                            imageView.drawable ?: resource,
+                                            savedTransform,
+                                        )
+                                    }
                                     imageView.alpha = 1f
                                 }
                             }
@@ -794,15 +848,15 @@ internal fun SimpleSubsamplingImageView(
             minScale = previewMinScale,
             maxScale = previewMaxScale,
             scaleToOriginal = scaleToOriginal,
-            initialScale = savedPreviewScale,
-            initialOffsetX = savedPreviewOffsetX,
-            initialOffsetY = savedPreviewOffsetY,
-            // When returning to a page whose transform belongs to SSIV, the ImageView
-            // already receives that saved transform directly. Reapplying the stale
-            // outer preview transform would double-scale it for one frame before SSIV
-            // appears, which is the visible size jump during pager return.
+            initialScale = previewUserScale,
+            initialOffsetX = previewOffsetX,
+            initialOffsetY = previewOffsetY,
+            transformSyncRevision = previewTransformSyncRevision,
             enabled = isActivePage && !subsamplingReady && previewOwnsTransform,
-            autoApplyTransformations = !subsamplingReady && previewOwnsTransform,
+            // Apply preview transforms directly to the ImageView. Transforming the
+            // outer FrameLayout also transforms its SSIV sibling and makes an atomic
+            // tile-to-preview handoff impossible.
+            autoApplyTransformations = false,
             imageFitScaleX = fitWidthFraction,
             imageFitScaleY = fitHeightFraction,
             onTap = onClick,
@@ -819,17 +873,60 @@ internal fun SimpleSubsamplingImageView(
             },
             onZoomGestureEnded = {
                 previewGestureInProgress = false
+                if (previewOwnsTransform && previewUserScale <= 1.02f) {
+                    // A gesture that briefly crossed fit no longer needs a renderer
+                    // handoff when it finishes below fit.
+                    deepZoomRequested = false
+                }
                 ViewerLoadMetrics.event(
                     "DEEP_ZOOM_GESTURE_END",
                     "previewScale=$previewUserScale previewOffset=${previewOffsetX},${previewOffsetY}",
                     imageKey = transformStateKey,
                 )
             },
+            onExternalTransformSynced = {
+                if (previewTakeoverPending) {
+                    imageViewRef?.let { imageView ->
+                        applyPreviewTransform(
+                            imageView,
+                            previewUserScale,
+                            previewOffsetX,
+                            previewOffsetY,
+                        )
+                        imageView.alpha = 1f
+                        imageView.visibility = View.VISIBLE
+                    }
+                    ssivView?.let { view ->
+                        view.alpha = 0f
+                        view.visibility = View.GONE
+                    }
+                    previewOwnsTransform = true
+                    subsamplingReady = false
+                    deepZoomRequested = false
+                    previewTakeoverPending = false
+                    ViewerLoadMetrics.event(
+                        "PREVIEW_TAKEOVER_COMPLETE",
+                        "scale=$previewUserScale offset=${previewOffsetX},${previewOffsetY} " +
+                            "revision=$previewTransformSyncRevision",
+                        imageKey = transformStateKey,
+                    )
+                }
+            },
+            onTransformFrame = { scale, offsetX, offsetY ->
+                if (previewOwnsTransform) {
+                    imageViewRef?.let { imageView ->
+                        applyPreviewTransform(imageView, scale, offsetX, offsetY)
+                    }
+                }
+            },
             onTransformChanged = { scale, offsetX, offsetY ->
-                if (!subsamplingReady && previewOwnsTransform) {
+                if (previewOwnsTransform) {
                     previewUserScale = scale
                     previewOffsetX = offsetX
                     previewOffsetY = offsetY
+                    imageViewRef?.let { imageView ->
+                        applyPreviewTransform(imageView, scale, offsetX, offsetY)
+                    }
                     previewTransformState(
                         userScale = scale,
                         offsetX = offsetX,
@@ -880,6 +977,10 @@ internal fun SimpleSubsamplingImageView(
                 taskExecutor = tileDecodeExecutor
                 rotationEnabled = true
                 doubleTapReturnsToFit = true
+                // Direct fit-preview gestures already clamp at their configured minimum.
+                // Keep the deferred tile renderer on that same rule so crossing into SSIV does
+                // not introduce overshrink/rebound or a transient off-centre frame.
+                strictScaleBounds = true
                 orientation = ((orientationDegrees % 360) + 360) % 360
 
                 val bitmapDecoder = object : DecoderFactory<ImageDecoder> {
@@ -1000,14 +1101,53 @@ internal fun SimpleSubsamplingImageView(
                                 return@postDelayed
                             }
                             this@ssivView.snapshotViewState()?.let { state ->
-                                transformStateStore.save(transformStateKey, state, "touch-settled")
+                                val relativeScale = if (state.baseFitScale > 0f) {
+                                    state.scale / state.baseFitScale
+                                } else {
+                                    Float.POSITIVE_INFINITY
+                                }
+                                val returnToPreview =
+                                    relativeScale <= 1.02f &&
+                                        kotlin.math.abs(state.rotationRadians) <= 0.001
+                                val settledState = if (returnToPreview) {
+                                    // Below fit, the complete image is visible and therefore has
+                                    // no valid pan range. Persist an exactly centred state even if
+                                    // the final MotionEvent was cancelled by the parent Pager.
+                                    state.copy(
+                                        sourceCenter = PointF(
+                                            state.sourceWidth / 2f,
+                                            state.sourceHeight / 2f,
+                                        ),
+                                    )
+                                } else {
+                                    state
+                                }
+                                transformStateStore.save(
+                                    transformStateKey,
+                                    settledState,
+                                    if (returnToPreview) "touch-settled-preview" else "touch-settled",
+                                )
                                 ViewerLoadMetrics.event(
                                     "SSIV_TOUCH_SETTLED",
-                                    "scale=${state.scale} center=${state.sourceCenter} " +
-                                        "base=${state.baseFitScale} rotation=${state.rotationRadians} " +
+                                    "scale=${settledState.scale} center=${settledState.sourceCenter} " +
+                                        "base=${settledState.baseFitScale} rotation=${settledState.rotationRadians} " +
                                         "generation=$saveGeneration revision=${transformStateStore.revision(transformStateKey)}",
                                     imageKey = transformStateKey,
                                 )
+                                if (returnToPreview && !previewTakeoverPending) {
+                                    previewUserScale = relativeScale.coerceAtLeast(0.01f)
+                                    previewOffsetX = 0f
+                                    previewOffsetY = 0f
+                                    previewTakeoverPending = true
+                                    previewTransformSyncRevision += 1
+                                    ViewerLoadMetrics.event(
+                                        "PREVIEW_TAKEOVER_REQUEST",
+                                        "scale=$previewUserScale fromCenter=${state.sourceCenter} " +
+                                            "toCenter=${settledState.sourceCenter} " +
+                                            "revision=$previewTransformSyncRevision",
+                                        imageKey = transformStateKey,
+                                    )
+                                }
                             }
                         }, 220L)
                     }
@@ -1073,7 +1213,14 @@ internal fun SimpleSubsamplingImageView(
                     if (previousLayer == "TILES" && previewLoaded) {
                         val drawable = imageView.drawable
                         val latestState = transformStateStore.get(transformStateKey)
-                        if (drawable != null && latestState != null) {
+                        if (previewOwnsTransform) {
+                            applyPreviewTransform(
+                                imageView,
+                                previewUserScale,
+                                previewOffsetX,
+                                previewOffsetY,
+                            )
+                        } else if (drawable != null && latestState != null) {
                             applySavedPreviewTransform(imageView, drawable, latestState)
                         }
                         ViewerLoadMetrics.event(
@@ -1085,6 +1232,14 @@ internal fun SimpleSubsamplingImageView(
                         imageView.visibility = View.VISIBLE
                         imageView.alpha = 1f
                     } else {
+                        if (previewOwnsTransform) {
+                            applyPreviewTransform(
+                                imageView,
+                                previewUserScale,
+                                previewOffsetX,
+                                previewOffsetY,
+                            )
+                        }
                         imageView.visibility = View.VISIBLE
                     }
                 } else {
