@@ -67,6 +67,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.Priority
 import com.bumptech.glide.load.engine.GlideException
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
@@ -510,6 +511,16 @@ fun ViewerScreen(
                     )
                 } else {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val isActivePage = pagerState.settledPage == page
+                        val isPagerIdle = !pagerState.isScrollInProgress
+                        val isPreviewVisible by remember(pagerState, page) {
+                            derivedStateOf {
+                                pagerState.settledPage == page ||
+                                    (pagerState.isScrollInProgress &&
+                                        kotlin.math.abs(pagerState.currentPage - page) <= 1)
+                            }
+                        }
+                        val allowSwipeThumbnailSourceLoad = pagerState.isScrollInProgress
                         val swipeThumbnailModel = remember(
                             media.uri,
                             media.sourceMimeType,
@@ -545,19 +556,30 @@ fun ViewerScreen(
                             swipeThumbnailSignature,
                             pageKey,
                             page,
+                            allowSwipeThumbnailSourceLoad,
                         ) {
                             { request: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
+                                // At rest the 200 px image is only allowed to reuse the Grid
+                                // cache. A cache miss must not decode another copy of the source
+                                // while the current page's screen-sized ARGB preview is waiting.
+                                // Once a pager gesture starts it may load normally so the incoming
+                                // page always has a lightweight moving placeholder.
                                 val configured = request
-                                    .withViewerTaskCompression()
                                     .format(DecodeFormat.PREFER_RGB_565)
                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                     .signature(swipeThumbnailSignature)
                                     .override(200)
+                                    .priority(
+                                        if (allowSwipeThumbnailSourceLoad) Priority.NORMAL
+                                        else Priority.LOW
+                                    )
+                                    .onlyRetrieveFromCache(!allowSwipeThumbnailSourceLoad)
                                 if (ViewerLoadMetrics.isEnabled) {
                                     val mainToken = ViewerLoadMetrics.workStarted(
                                         "SWIPE_THUMB_200PX",
                                         pageKey,
-                                        "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
+                                        "page=$page sourceAllowed=$allowSwipeThumbnailSourceLoad " +
+                                            "model=${swipeThumbnailModel.javaClass.simpleName}",
                                     )
                                     swipeMainTokenRef.getAndSet(mainToken)?.let {
                                         ViewerLoadMetrics.workCleared(it, "request-replaced")
@@ -765,13 +787,6 @@ fun ViewerScreen(
                                 }
                             )
                             */
-                            val isActivePage = pagerState.settledPage == page
-                            val isPagerIdle = !pagerState.isScrollInProgress
-                            val isPreviewVisible by remember(pagerState, page) {
-                                derivedStateOf {
-                                    kotlin.math.abs(pagerState.settledPage - page) <= 1
-                                }
-                            }
                             val metadataPending = isActivePage &&
                                 pagerState.currentPage == page &&
                                 media.canContainMotionPhoto() && viewerPhotoMetadata == null
