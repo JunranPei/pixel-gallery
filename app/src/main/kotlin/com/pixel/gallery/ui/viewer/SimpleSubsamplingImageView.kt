@@ -3,6 +3,7 @@ package com.pixel.gallery.ui.viewer
 import android.graphics.PointF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
@@ -40,50 +41,29 @@ import com.pixel.gallery.ui.viewer.decoders.RawEmbeddedPreviewRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrAwareFitCenter
 import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-// Custom LIFO (Last-In-First-Out) Queue to prioritize newly submitted active page tasks
-class LIFOLinkedBlockingDeque<T> : LinkedBlockingDeque<T>() {
-    override fun offer(e: T): Boolean {
-        return super.offerFirst(e)
-    }
-
-    override fun offer(e: T, timeout: Long, unit: TimeUnit): Boolean {
-        return super.offerFirst(e, timeout, unit)
-    }
-
-    override fun add(e: T): Boolean {
-        return super.offerFirst(e)
-    }
-
-    override fun put(e: T) {
-        super.putFirst(e)
-    }
-}
-
-// Custom Executor that supports purging pending tasks to clear stale page backlog instantly
-class LIFOThreadPoolExecutor(corePoolSize: Int, maximumPoolSize: Int, keepAliveTime: Long, unit: TimeUnit) :
-    ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, unit, LIFOLinkedBlockingDeque<Runnable>()) {
-
-    fun purgePendingTasks(): Int {
-        val count = queue.size
-        queue.clear()
-        return count
-    }
-}
-
-private val tileDecodeExecutor = LIFOThreadPoolExecutor(
-    corePoolSize = 2,
-    maximumPoolSize = 2,
-    keepAliveTime = 60L,
-    unit = TimeUnit.SECONDS
+// FIFO preserves SSIV's explicit centre-first tile order. Do not clear this process-wide
+// queue when one page becomes inactive: another freeform/multi-window viewer can own the
+// remaining work. Recycled views invalidate their own queued tasks by image generation.
+private val tileDecodeExecutor = ThreadPoolExecutor(
+    // A single decode lane matches the stable viewer's large-image resource pool.
+    // More workers do not make one BitmapRegionDecoder parallel, but they can leave a
+    // stale tile waiting inside the decoder lock and increase cross-window power peaks.
+    1,
+    1,
+    60L,
+    TimeUnit.SECONDS,
+    LinkedBlockingQueue<Runnable>(),
 ).apply {
     allowCoreThreadTimeOut(true)
 }
@@ -216,6 +196,51 @@ private fun applySavedPreviewTransform(
     imageView.rotation = Math.toDegrees(rotation).toFloat()
     imageView.translationX = -rotatedOffsetX.toFloat()
     imageView.translationY = -rotatedOffsetY.toFloat()
+}
+
+private suspend fun resolveGlideDataCacheFile(
+    context: android.content.Context,
+    model: Any,
+    dateModifiedMillis: Long,
+    fallbackPath: String,
+    imageKey: String,
+): String {
+    val requestManager = Glide.with(context.applicationContext)
+    val request = requestManager
+        .downloadOnly()
+        .load(model)
+        .diskCacheStrategy(DiskCacheStrategy.DATA)
+        .skipMemoryCache(true)
+        .let { builder ->
+            if (dateModifiedMillis > 0L) builder.signature(ObjectKey(dateModifiedMillis)) else builder
+        }
+    val target = request.submit()
+    val token = ViewerLoadMetrics.workStarted(
+        "REGION_SOURCE_FILE",
+        imageKey,
+        "model=${model.javaClass.simpleName}",
+    )
+    return try {
+        val cachedFile = runInterruptible(Dispatchers.IO) { target.get() }
+        val resolved = cachedFile
+            ?.takeIf { it.isFile && it.canRead() }
+            ?.absolutePath
+            ?: fallbackPath
+        ViewerLoadMetrics.workReady(
+            token,
+            source = if (resolved == fallbackPath) "ORIGINAL_FALLBACK" else "GLIDE_DATA_CACHE",
+            detail = "file=${File(resolved).name} bytes=${File(resolved).length()}",
+        )
+        resolved
+    } catch (e: CancellationException) {
+        ViewerLoadMetrics.workCleared(token, "cancelled")
+        throw e
+    } catch (e: Exception) {
+        ViewerLoadMetrics.workCleared(token, "fallback=${e.javaClass.simpleName}")
+        fallbackPath
+    } finally {
+        requestManager.clear(target)
+    }
 }
 
 private fun applyPreviewTransform(
@@ -477,6 +502,21 @@ internal fun SimpleSubsamplingImageView(
                     view.alpha = 0f
                     ssivBaseDrawn = false
                     view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                    val regionSourcePath = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                        val sourceModel = uri
+                            .takeIf { it.isNotBlank() }
+                            ?.let(Uri::parse)
+                            ?: imagePath
+                        resolveGlideDataCacheFile(
+                            context = context,
+                            model = sourceModel,
+                            dateModifiedMillis = dateModifiedMillis,
+                            fallbackPath = imagePath,
+                            imageKey = transformStateKey,
+                        )
+                    } else {
+                        imagePath
+                    }
                     imageSessionGeneration += 1
                     imageAssigned = true
                     val normalizedOrientation = ((orientationDegrees % 360) + 360) % 360
@@ -500,7 +540,7 @@ internal fun SimpleSubsamplingImageView(
                         imageKey = transformStateKey,
                     )
                     view.setImage(
-                        path = imagePath,
+                        path = regionSourcePath,
                         borrowedPreview = borrowedPreview,
                         previewSourceWidth = if (borrowedPreview != null) sourceWidth else 0,
                         previewSourceHeight = if (borrowedPreview != null) sourceHeight else 0,
@@ -529,7 +569,6 @@ internal fun SimpleSubsamplingImageView(
                     transformStateStore.save(transformStateKey, it, "page-inactive")
                 }
                 imageSessionGeneration += 1
-                val purged = tileDecodeExecutor.purgePendingTasks()
                 view.recycle()
                 view.visibility = View.GONE
                 view.alpha = 0f
@@ -538,7 +577,8 @@ internal fun SimpleSubsamplingImageView(
                 ssivBaseDrawn = false
                 ViewerLoadMetrics.workReady(
                     recycleToken,
-                    detail = "purged=$purged executorActive=${tileDecodeExecutor.activeCount}",
+                    detail = "executorActive=${tileDecodeExecutor.activeCount} " +
+                        "executorQueued=${tileDecodeExecutor.queue.size}",
                 )
             }
         }
@@ -655,7 +695,15 @@ internal fun SimpleSubsamplingImageView(
             val savedTransform = transformStateStore.get(transformStateKey)
             val previewUsesContainerTransform = previewOwnsTransform
             imageView.visibility = View.VISIBLE
-            val requestModel = previewModel ?: imagePath
+            // Telephoto's Glide adapter resolves local photos through the MediaStore URI,
+            // forces DATA caching, then gives its private cache file to the region decoder.
+            // Keep format-specific models unchanged, but use that same route for platform
+            // JPEG/PNG decoding instead of decoding every tile from shared external storage.
+            val requestModel = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                uri.takeIf { it.isNotBlank() }?.let(Uri::parse) ?: imagePath
+            } else {
+                previewModel ?: imagePath
+            }
             val metricsToken = previewRequestGuard.begin(
                 imageView = imageView,
                 key = transformStateKey,
@@ -678,7 +726,13 @@ internal fun SimpleSubsamplingImageView(
                 val requestOptions = RequestOptions()
                     .withViewerTaskCompression()
                     .format(DecodeFormat.PREFER_ARGB_8888)
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .diskCacheStrategy(
+                        if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                            DiskCacheStrategy.ALL
+                        } else {
+                            DiskCacheStrategy.RESOURCE
+                        },
+                    )
                     .downsample(DownsampleStrategy.FIT_CENTER)
                     .priority(if (isActivePage) Priority.IMMEDIATE else Priority.NORMAL)
                     .let { opts ->
@@ -696,7 +750,7 @@ internal fun SimpleSubsamplingImageView(
                     // Match Simple Gallery's local-photo path exactly. Going through the
                     // MediaStore URI selects Glide's QMediaStore loader even though SSIV
                     // already proved that the original file is directly readable.
-                    .load(previewModel ?: imagePath)
+                    .load(requestModel)
                     .apply(requestOptions)
                     .listener(object : com.bumptech.glide.request.RequestListener<Drawable> {
                         override fun onLoadFailed(
