@@ -51,7 +51,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val INSTANT_ANIMATION_DURATION = 10L
         private const val TARGET_DECODED_TILE_SIZE = 1024
         private const val ARGB_8888_BYTES_PER_PIXEL = 4L
-        private const val MAX_BATCH_DECODED_BYTES = 48L * 1024L * 1024L
+        // A source miss is decoded into one temporary sampled fragment and then split
+        // into the visible tiles it covers. Keeping this below 24MB bounds the transient
+        // fragment + split copies to roughly the existing 48MB tile-memory budget.
+        private const val MAX_SOURCE_MISS_FRAGMENT_BYTES = 24L * 1024L * 1024L
+        private const val MAX_SOURCE_MISS_TILES_PER_FRAGMENT = 4
+        private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 80L
         private const val TILE_CACHE_ADMISSION_DELAY_MS = 1200L
         private const val MAX_PENDING_TILE_CACHE_WRITES = 4
         private const val SAMPLE_SIZE_HYSTERESIS = 0.12f
@@ -1167,9 +1172,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             initialiseTileMap(maxTileDimensions)
 
             val baseGrid = tileMap!![fullImageSampleSize]
-            for (baseTile in baseGrid!!) {
-                val task = TileLoadTask(this, decoder!!, baseTile)
-                execute(task)
+            if (!bitmapIsBorrowedPreview) {
+                for (baseTile in baseGrid!!) {
+                    val task = TileLoadTask(this, decoder!!, baseTile)
+                    execute(task)
+                }
             }
             refreshRequiredTiles(true)
         }
@@ -1218,7 +1225,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             val prioritizedTiles = tileMap!![sampleSize]
                 .orEmpty()
                 .asSequence()
-                .filter { it.visible && !it.loading && it.bitmap == null && it.failedAttempts < 2 }
+                .filter {
+                    it.visible && !it.loading && it.bitmap == null && it.failedAttempts < 2 &&
+                        // The borrowed fit preview already contains every pixel needed at
+                        // the base sampling level. Decoding the same layer from the original
+                        // JPEG was pure entry-time work and could take more than a second.
+                        !(bitmapIsBorrowedPreview && sampleSize == fullImageSampleSize)
+                }
                 .sortedWith(
                     compareByDescending<Tile> { tile ->
                         tile.sRect?.contains(sourceFocus.x.toInt(), sourceFocus.y.toInt()) == true
@@ -1252,20 +1265,25 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     scheduledCount += 1
                 }
 
-                val remainingMisses = sourceMissTiles.toMutableList()
-                while (remainingMisses.isNotEmpty()) {
-                    val first = remainingMisses.removeAt(0)
-                    val partnerIndex = remainingMisses.indexOfFirst { candidate ->
-                        canBatchSourceMisses(first, candidate)
-                    }
-                    if (partnerIndex >= 0) {
-                        val partner = remainingMisses.removeAt(partnerIndex)
-                        execute(TileBatchLoadTask(this, batchDecoder, listOf(first, partner)))
-                        scheduledCount += 2
-                    } else {
-                        execute(TileLoadTask(this, decoder!!, first))
-                        scheduledCount += 1
-                    }
+                // Submit one bounded source fragment per wave. BitmapRegionDecoder has to
+                // advance through a JPEG stream to reach a vertical region, so decoding
+                // every visible tile independently repeats much of that work. A dense 2D
+                // fragment amortizes the scan across up to four tiles. The next wave starts
+                // only after this one finishes, avoiding a long queue of obsolete misses.
+                val fragment = buildSourceMissFragment(sourceMissTiles)
+                if (fragment.isNotEmpty()) {
+                    diagnosticsListener?.invoke(
+                        "tile=SOURCE_FRAGMENT sample=$sampleSize count=${fragment.size} " +
+                            "bytes=${sourceMissFragmentBytes(fragment)} " +
+                            "deferred=${sourceMissTiles.size - fragment.size}",
+                    )
+                }
+                if (fragment.size > 1) {
+                    execute(TileBatchLoadTask(this, batchDecoder, fragment))
+                    scheduledCount += fragment.size
+                } else if (fragment.size == 1) {
+                    execute(TileLoadTask(this, decoder!!, fragment.first()))
+                    scheduledCount += 1
                 }
             }
         }
@@ -1287,18 +1305,65 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (load) scheduleStableTileCachePersistence()
     }
 
-    private fun canBatchSourceMisses(first: Tile, second: Tile): Boolean {
-        if (first.sampleSize != second.sampleSize) return false
-        val a = first.fileSRect ?: return false
-        val b = second.fileSRect ?: return false
-        if (a.top != b.top || a.bottom != b.bottom) return false
-        if (a.right != b.left && b.right != a.left) return false
-        val unionWidth = max(a.right, b.right) - min(a.left, b.left)
-        val decodedBytes =
-            ceilDiv(unionWidth, first.sampleSize).toLong() *
-                ceilDiv(a.height(), first.sampleSize).toLong() *
-                ARGB_8888_BYTES_PER_PIXEL
-        return decodedBytes <= MAX_BATCH_DECODED_BYTES
+    private fun buildSourceMissFragment(candidates: List<Tile>): List<Tile> {
+        val first = candidates.firstOrNull() ?: return emptyList()
+        val fragment = mutableListOf(first)
+        val remaining = candidates.drop(1).toMutableList()
+        while (fragment.size < MAX_SOURCE_MISS_TILES_PER_FRAGMENT) {
+            val nextIndex = remaining.indices
+                .filter { canExtendSourceMissFragment(fragment, remaining[it]) }
+                .minByOrNull { index -> sourceMissFragmentBytes(fragment + remaining[index]) }
+                ?: break
+            fragment += remaining.removeAt(nextIndex)
+        }
+        return fragment
+    }
+
+    private fun canExtendSourceMissFragment(fragment: List<Tile>, candidate: Tile): Boolean {
+        val first = fragment.firstOrNull() ?: return false
+        if (candidate.sampleSize != first.sampleSize) return false
+        val candidateRect = candidate.fileSRect ?: return false
+        val rects = fragment.mapNotNull { it.fileSRect }
+        if (rects.size != fragment.size) return false
+
+        val touchesExisting = rects.any { rect ->
+            val horizontalTouch = (rect.right == candidateRect.left || candidateRect.right == rect.left) &&
+                max(rect.top, candidateRect.top) < min(rect.bottom, candidateRect.bottom)
+            val verticalTouch = (rect.bottom == candidateRect.top || candidateRect.bottom == rect.top) &&
+                max(rect.left, candidateRect.left) < min(rect.right, candidateRect.right)
+            horizontalTouch || verticalTouch
+        }
+        if (!touchesExisting) return false
+
+        val extended = fragment + candidate
+        if (sourceMissFragmentBytes(extended) > MAX_SOURCE_MISS_FRAGMENT_BYTES) return false
+
+        // Permit an L-shape while assembling a 2x2 fragment, but reject sparse unions
+        // that would decode mostly invisible pixels.
+        val union = sourceMissFragmentBounds(extended) ?: return false
+        val coveredArea = extended.sumOf { tile ->
+            val rect = tile.fileSRect ?: return false
+            rect.width().toLong() * rect.height().toLong()
+        }
+        val unionArea = union.width().toLong() * union.height().toLong()
+        return coveredArea * 3L >= unionArea * 2L
+    }
+
+    private fun sourceMissFragmentBytes(tiles: List<Tile>): Long {
+        val first = tiles.firstOrNull() ?: return 0L
+        val union = sourceMissFragmentBounds(tiles) ?: return Long.MAX_VALUE
+        return ceilDiv(union.width(), first.sampleSize).toLong() *
+            ceilDiv(union.height(), first.sampleSize).toLong() *
+            ARGB_8888_BYTES_PER_PIXEL
+    }
+
+    private fun sourceMissFragmentBounds(tiles: List<Tile>): Rect? {
+        val firstRect = tiles.firstOrNull()?.fileSRect ?: return null
+        return Rect(firstRect).also { union ->
+            tiles.drop(1).forEach { tile ->
+                union.union(tile.fileSRect ?: return null)
+            }
+        }
     }
 
     private fun ceilDiv(value: Int, divisor: Int): Int =
@@ -2023,6 +2088,15 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val currentSampleSize = calculateRequiredTileSampleSize()
         trimTileMemoryCache(currentSampleSize)
         scheduleStableTileCachePersistence()
+        val currentTiles = tileMap?.get(currentSampleSize).orEmpty().filter(::tileVisible)
+        val hasLoadingTile = currentTiles.any { it.loading }
+        val hasMissingTile = currentTiles.any { tile ->
+            tile.bitmap == null && tile.failedAttempts < 2 &&
+                !(bitmapIsBorrowedPreview && currentSampleSize == fullImageSampleSize)
+        }
+        if (!hasLoadingTile && hasMissingTile) {
+            scheduleStableTileRefresh(SOURCE_MISS_NEXT_WAVE_DELAY_MS)
+        }
         invalidate()
     }
 
