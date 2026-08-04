@@ -21,4 +21,7 @@ interface BatchedImageRegionDecoder : ImageRegionDecoder {
     fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean
 
     fun decodeRegions(sRects: List<Rect>, sampleSize: Int): List<Bitmap>
+
+    /** Persist a decoded tile after SSIV confirms the viewport has remained stable. */
+    fun cacheRegion(sRect: Rect, sampleSize: Int, bitmap: Bitmap): Boolean
 }

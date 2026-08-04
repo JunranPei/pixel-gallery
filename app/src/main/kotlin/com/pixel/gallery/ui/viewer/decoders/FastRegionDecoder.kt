@@ -220,7 +220,6 @@ class FastRegionDecoder(
                     durationMs = (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
                 )
             }
-            val cacheWritten = saveCachedTile(cacheFiles, bitmap)
             val attached = UltraHdrTileSupport.attach(
                 imageKey = imageVersion,
                 baseTile = bitmap,
@@ -232,8 +231,7 @@ class FastRegionDecoder(
                 decodeToken,
                 source = "SOURCE_REGION_DECODE",
                 detail = "actualSample=$newSampleSize bitmap=${attached.width}x${attached.height} " +
-                    "config=${attached.config} cacheWrite=" +
-                    if (cacheWritten) "ARGB_8888" else "SKIPPED",
+                    "config=${attached.config} cacheWrite=DEFERRED",
             )
             return attached
         }
@@ -318,7 +316,6 @@ class FastRegionDecoder(
 
             val attached = splitBitmaps.mapIndexed { index, bitmap ->
                 val rect = sRects[index]
-                saveCachedTile(tileCacheFiles(rect, actualSample), bitmap)
                 UltraHdrTileSupport.attach(
                     imageKey = imageVersion,
                     baseTile = bitmap,
@@ -333,6 +330,16 @@ class FastRegionDecoder(
                 detail = "count=${attached.size} actualSample=$actualSample decodeMs=$decodeDurationMs",
             )
             return attached
+        }
+    }
+
+    override fun cacheRegion(sRect: Rect, sampleSize: Int, bitmap: Bitmap): Boolean {
+        synchronized(decoderLock) {
+            if (!initialized || bitmap.isRecycled) return false
+            val actualSample = effectiveSampleSize(sRect, sampleSize)
+            val cacheFiles = tileCacheFiles(sRect, actualSample)
+            if (cacheFiles.argb8888.isFile) return true
+            return saveCachedTile(cacheFiles, bitmap)
         }
     }
 
@@ -505,7 +512,6 @@ class FastRegionDecoder(
                 mapped.putInt(bitmap.height)
                 mapped.putInt(pixelBytes.toInt())
                 bitmap.copyPixelsToBuffer(mapped.slice())
-                mapped.force()
             }
             if (cacheFile.isFile) {
                 tempFile.delete()
