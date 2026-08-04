@@ -8,8 +8,8 @@ import android.graphics.Point
 import android.graphics.Rect
 import android.net.Uri
 import android.os.SystemClock
+import com.davemorrissey.labs.subscaleview.BatchedImageRegionDecoder
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
-import com.davemorrissey.labs.subscaleview.ImageRegionDecoder
 import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
@@ -94,7 +94,7 @@ class FastRegionDecoder(
     private val imageVersion: String,
     private val knownSourceWidth: Int = 0,
     private val knownSourceHeight: Int = 0,
-) : ImageRegionDecoder {
+) : BatchedImageRegionDecoder {
     private companion object {
         const val RAW_TILE_MAGIC = 0x50475854
         const val RAW_TILE_VERSION = 1
@@ -239,6 +239,103 @@ class FastRegionDecoder(
         }
     }
 
+    override fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean {
+        if (!initialized) return false
+        return tileCacheFiles(sRect, effectiveSampleSize(sRect, sampleSize)).argb8888.isFile
+    }
+
+    override fun decodeRegions(sRects: List<Rect>, sampleSize: Int): List<Bitmap> {
+        require(sRects.isNotEmpty()) { "At least one source region is required" }
+        if (sRects.size == 1) return listOf(decodeRegion(sRects.first(), sampleSize))
+
+        synchronized(decoderLock) {
+            val actualSamples = sRects.map { effectiveSampleSize(it, sampleSize) }
+            if (actualSamples.distinct().size != 1) {
+                return sRects.map { decodeRegion(it, sampleSize) }
+            }
+            val actualSample = actualSamples.first()
+            // A cache file may have appeared after SSIV built this batch. Preserve the
+            // ordinary hit path instead of making that region wait on a source decode.
+            if (sRects.any { tileCacheFiles(it, actualSample).argb8888.isFile }) {
+                return sRects.map { decodeRegion(it, sampleSize) }
+            }
+
+            val union = Rect(sRects.first())
+            sRects.drop(1).forEach(union::union)
+            val batchToken = ViewerLoadMetrics.workStarted(
+                "REGION_TILE_BATCH_REQUEST",
+                imageVersion,
+                "count=${sRects.size} rect=${union.left},${union.top}-${union.right},${union.bottom} " +
+                    "sample=$sampleSize actualSample=$actualSample",
+            )
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = actualSample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val decodeStartedAt = SystemClock.elapsedRealtimeNanos()
+            val unionBitmap = openDecoder("tile-batch-cache-miss").decodeRegion(union, options)
+                ?: throw RuntimeException("Region decoder returned null batch bitmap")
+            val decodeDurationMs =
+                (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
+            if (ViewerLoadMetrics.isEnabled) {
+                ViewerLoadMetrics.regionDecoded(
+                    imageKey = metricsKey,
+                    sessionId = metricsSessionId,
+                    rect = "${union.left},${union.top}-${union.right},${union.bottom}",
+                    requestedSample = sampleSize,
+                    actualSample = actualSample,
+                    outputPixels = unionBitmap.width.toLong() * unionBitmap.height.toLong(),
+                    durationMs = decodeDurationMs,
+                )
+            }
+
+            val splitBitmaps = ArrayList<Bitmap>(sRects.size)
+            try {
+                for (rect in sRects) {
+                    val left = ((rect.left - union.left) / actualSample)
+                        .coerceIn(0, unionBitmap.width - 1)
+                    val top = ((rect.top - union.top) / actualSample)
+                        .coerceIn(0, unionBitmap.height - 1)
+                    val right = ceilDiv(rect.right - union.left, actualSample)
+                        .coerceIn(left + 1, unionBitmap.width)
+                    val bottom = ceilDiv(rect.bottom - union.top, actualSample)
+                        .coerceIn(top + 1, unionBitmap.height)
+                    splitBitmaps += Bitmap.createBitmap(
+                        unionBitmap,
+                        left,
+                        top,
+                        right - left,
+                        bottom - top,
+                    )
+                }
+            } catch (error: Throwable) {
+                splitBitmaps.forEach { if (!it.isRecycled) it.recycle() }
+                ViewerLoadMetrics.workFailed(batchToken, error.javaClass.simpleName)
+                throw error
+            } finally {
+                if (!unionBitmap.isRecycled) unionBitmap.recycle()
+            }
+
+            val attached = splitBitmaps.mapIndexed { index, bitmap ->
+                val rect = sRects[index]
+                saveCachedTile(tileCacheFiles(rect, actualSample), bitmap)
+                UltraHdrTileSupport.attach(
+                    imageKey = imageVersion,
+                    baseTile = bitmap,
+                    sourceRect = rect,
+                    sourceWidth = sourceWidth,
+                    sourceHeight = sourceHeight,
+                )
+            }
+            ViewerLoadMetrics.workReady(
+                batchToken,
+                source = "SOURCE_REGION_BATCH_DECODE",
+                detail = "count=${attached.size} actualSample=$actualSample decodeMs=$decodeDurationMs",
+            )
+            return attached
+        }
+    }
+
     override fun isReady() = initialized && decoder?.isRecycled != true
 
     override fun recycle() {
@@ -310,6 +407,25 @@ class FastRegionDecoder(
     }
 
     private data class TileCacheFiles(val argb8888: File)
+
+    private fun effectiveSampleSize(rect: Rect, sampleSize: Int): Int {
+        var effective = sampleSize
+        if (minTileDpi <= 160) {
+            val sourceAndScreenHaveSameOrientation =
+                (rect.width() > rect.height() && screenWidth > screenHeight) ||
+                    (rect.height() > rect.width() && screenHeight > screenWidth)
+            if (
+                sourceAndScreenHaveSameOrientation &&
+                (rect.width() / sampleSize > screenWidth || rect.height() / sampleSize > screenHeight)
+            ) {
+                effective *= 2
+            }
+        }
+        return effective
+    }
+
+    private fun ceilDiv(value: Int, divisor: Int): Int =
+        ((value.toLong() + divisor - 1L) / divisor).toInt()
 
     private fun tileCacheFiles(rect: Rect, sampleSize: Int): TileCacheFiles {
         val key = "$imageVersion:${rect.left}:${rect.top}:${rect.right}:${rect.bottom}:$sampleSize:argb8888-v1"

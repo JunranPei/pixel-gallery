@@ -50,6 +50,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val FLING_DURATION = 300L
         private const val INSTANT_ANIMATION_DURATION = 10L
         private const val TARGET_DECODED_TILE_SIZE = 1024
+        private const val MAX_BATCH_DECODED_PIXELS = 4L * 1024L * 1024L
         private const val SAMPLE_SIZE_HYSTERESIS = 0.12f
         private const val MAX_OFFSCREEN_TILE_CACHE_ENTRIES = 12
         private val ROTATION_THRESHOLD = Math.toRadians(10.0)
@@ -1220,9 +1221,41 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     },
                 )
                 .toList()
-            for (tile in prioritizedTiles) {
-                execute(TileLoadTask(this, decoder!!, tile))
-                scheduledCount += 1
+            prioritizedTiles.forEach { tile ->
+                fileSRect(tile.sRect, tile.fileSRect)
+            }
+            val batchDecoder = decoder as? BatchedImageRegionDecoder
+            if (batchDecoder == null) {
+                for (tile in prioritizedTiles) {
+                    execute(TileLoadTask(this, decoder!!, tile))
+                    scheduledCount += 1
+                }
+            } else {
+                val (cachedTiles, sourceMissTiles) = prioritizedTiles.partition { tile ->
+                    batchDecoder.isRegionCached(tile.fileSRect!!, tile.sampleSize)
+                }
+                // A disk hit stays on the original single-tile path and never queues
+                // behind an expensive source batch.
+                for (tile in cachedTiles) {
+                    execute(TileLoadTask(this, decoder!!, tile))
+                    scheduledCount += 1
+                }
+
+                val remainingMisses = sourceMissTiles.toMutableList()
+                while (remainingMisses.isNotEmpty()) {
+                    val first = remainingMisses.removeAt(0)
+                    val partnerIndex = remainingMisses.indexOfFirst { candidate ->
+                        canBatchSourceMisses(first, candidate)
+                    }
+                    if (partnerIndex >= 0) {
+                        val partner = remainingMisses.removeAt(partnerIndex)
+                        execute(TileBatchLoadTask(this, batchDecoder, listOf(first, partner)))
+                        scheduledCount += 2
+                    } else {
+                        execute(TileLoadTask(this, decoder!!, first))
+                        scheduledCount += 1
+                    }
+                }
             }
         }
         val cacheStats = trimTileMemoryCache(sampleSize)
@@ -1240,6 +1273,22 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             )
         }
     }
+
+    private fun canBatchSourceMisses(first: Tile, second: Tile): Boolean {
+        if (first.sampleSize != second.sampleSize) return false
+        val a = first.fileSRect ?: return false
+        val b = second.fileSRect ?: return false
+        if (a.top != b.top || a.bottom != b.bottom) return false
+        if (a.right != b.left && b.right != a.left) return false
+        val unionWidth = max(a.right, b.right) - min(a.left, b.left)
+        val decodedPixels =
+            ceilDiv(unionWidth, first.sampleSize).toLong() *
+                ceilDiv(a.height(), first.sampleSize).toLong()
+        return decodedPixels <= MAX_BATCH_DECODED_PIXELS
+    }
+
+    private fun ceilDiv(value: Int, divisor: Int): Int =
+        ((value.toLong() + divisor - 1L) / divisor).toInt()
 
     private fun scheduleStableTileRefresh(delayMillis: Long = 150L) {
         val generation = ++stableTileRefreshGeneration
@@ -1664,6 +1713,90 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 view.onImageEventListener?.onImageLoadError(exception!!)
             }
         }    }
+
+    private data class TileBatchResult(
+        val tiles: List<Tile>,
+        val bitmaps: List<Bitmap>,
+    )
+
+    private class TileBatchLoadTask internal constructor(
+        view: SubsamplingScaleImageView,
+        decoder: BatchedImageRegionDecoder,
+        tiles: List<Tile>,
+    ) : AsyncTask<Void, Void, TileBatchResult>() {
+        private val viewRef = WeakReference(view)
+        private val decoderRef = WeakReference(decoder)
+        private val tileRefs = tiles.map(::WeakReference)
+        private val generation = view.imageGeneration
+        private var exception: Exception? = null
+
+        init {
+            tiles.forEach { it.loading = true }
+        }
+
+        override fun doInBackground(vararg params: Void): TileBatchResult? {
+            try {
+                val view = viewRef.get() ?: return null
+                val decoder = decoderRef.get() ?: return null
+                if (view.imageGeneration != generation || !decoder.isReady()) return null
+                val tiles = tileRefs.mapNotNull { it.get() }
+                    .filter { it.visible && it.loading && it.bitmap == null }
+                if (tiles.isEmpty()) return null
+
+                view.decoderLock.readLock().lock()
+                try {
+                    if (!decoder.isReady()) return null
+                    tiles.forEach { view.fileSRect(it.sRect, it.fileSRect) }
+                    val bitmaps = if (tiles.size == 1) {
+                        listOf(decoder.decodeRegion(tiles.first().fileSRect!!, tiles.first().sampleSize))
+                    } else {
+                        decoder.decodeRegions(tiles.map { Rect(it.fileSRect!!) }, tiles.first().sampleSize)
+                    }
+                    require(bitmaps.size == tiles.size) {
+                        "Batch decoder returned ${bitmaps.size} bitmaps for ${tiles.size} regions"
+                    }
+                    return TileBatchResult(tiles, bitmaps)
+                } finally {
+                    view.decoderLock.readLock().unlock()
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "Failed to decode tile batch", error)
+                exception = error
+            } catch (error: OutOfMemoryError) {
+                Log.e(TAG, "Failed to decode tile batch - OutOfMemoryError", error)
+                exception = RuntimeException(error)
+            }
+            return null
+        }
+
+        override fun onPostExecute(result: TileBatchResult?) {
+            val view = viewRef.get()
+            val originalTiles = tileRefs.mapNotNull { it.get() }
+            if (view == null || view.imageGeneration != generation) {
+                result?.bitmaps?.forEach { if (!it.isRecycled) it.recycle() }
+                originalTiles.forEach { it.loading = false }
+                return
+            }
+
+            val completed = result?.tiles?.zip(result.bitmaps).orEmpty().toMap()
+            for (tile in originalTiles) {
+                val bitmap = completed[tile]
+                if (bitmap != null) {
+                    tile.bitmap = bitmap
+                    tile.failedAttempts = 0
+                    view.markTileAccess(tile)
+                } else if (exception != null) {
+                    tile.failedAttempts += 1
+                }
+                tile.loading = false
+            }
+            if (completed.isNotEmpty()) {
+                view.onTileLoaded()
+            } else {
+                view.onTileLoadFinishedWithoutBitmap(retryImmediately = exception == null)
+            }
+        }
+    }
 
     @Synchronized
     private fun onTilesInited(decoder: ImageRegionDecoder, sWidth: Int, sHeight: Int, sOrientation: Int) {

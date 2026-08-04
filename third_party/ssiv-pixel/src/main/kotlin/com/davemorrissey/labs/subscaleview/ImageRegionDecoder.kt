@@ -15,3 +15,10 @@ interface ImageRegionDecoder {
 
     fun recycle()
 }
+
+/** Optional extension for amortizing adjacent source-cache misses. */
+interface BatchedImageRegionDecoder : ImageRegionDecoder {
+    fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean
+
+    fun decodeRegions(sRects: List<Rect>, sampleSize: Int): List<Bitmap>
+}
