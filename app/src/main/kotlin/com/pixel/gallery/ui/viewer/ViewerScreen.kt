@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -269,6 +270,27 @@ fun ViewerScreen(
     var isPlayingMotion by remember { mutableStateOf(false) }
     var isExtractingMotion by remember { mutableStateOf(false) }
     val viewerScope = rememberCoroutineScope()
+    val pagerIsDragged by pagerState.interactionSource.collectIsDraggedAsState()
+    // After an edge swipe is released back toward the settled page, Pager can remain
+    // scroll-active for a few frames even though the current image already looks centred.
+    // A new fast stroke during that window used to be captured by Pager and could expose
+    // the opposite neighbour without first panning across the zoomed image. Disable only
+    // user paging during this return animation; the Android image view then owns the new
+    // stroke immediately, while Pager is still free to finish settling programmatically.
+    val pagerReturningToSettledPage =
+        pagerState.isScrollInProgress &&
+            !pagerIsDragged &&
+            pagerState.targetPage == pagerState.settledPage
+
+    LaunchedEffect(pagerReturningToSettledPage) {
+        ViewerLoadMetrics.event(
+            "PAGER_RETURN_GUARD",
+            "enabled=$pagerReturningToSettledPage current=${pagerState.currentPage} " +
+                "settled=${pagerState.settledPage} target=${pagerState.targetPage} " +
+                "dragged=$pagerIsDragged scrolling=${pagerState.isScrollInProgress}",
+            imageKey = photos.getOrNull(pagerState.settledPage)?.viewerCacheKey(),
+        )
+    }
 
     val currentMediaCacheKey = remember(currentMedia?.contentId, currentMedia?.dateModifiedMillis) {
         currentMedia?.viewerCacheKey()
@@ -453,7 +475,7 @@ fun ViewerScreen(
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
-            userScrollEnabled = !isPlayingMotion,
+            userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage,
             key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
