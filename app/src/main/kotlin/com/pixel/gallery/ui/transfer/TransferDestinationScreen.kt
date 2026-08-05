@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Environment
 import android.os.Build
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -174,7 +175,11 @@ fun TransferDestinationScreen(
             val destination = TransferDestination(
                 stableKey = uri.toString(),
                 displayName = file.name.ifEmpty { path },
-                path = file.absolutePath
+                path = file.absolutePath,
+                documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    uri,
+                    DocumentsContract.getTreeDocumentId(uri)
+                ).toString()
             )
             createdDestinations.removeAll { it.stableKey == destination.stableKey }
             createdDestinations.add(0, destination)
@@ -390,8 +395,11 @@ fun TransferDestinationScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parent = selectedDestination?.path
-                            ?: Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).absolutePath
+                        val parent = selectedDestination ?: TransferDestination(
+                            stableKey = "default-pictures",
+                            displayName = Environment.DIRECTORY_PICTURES,
+                            path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).absolutePath
+                        )
                         viewModel.createTransferFolder(parent, folderName) { result ->
                             result.onSuccess { destination ->
                                 createdDestinations.add(0, destination)
@@ -417,8 +425,9 @@ fun TransferDestinationScreen(
     }
 
     if (showConflictDialog) {
-        val canReplace = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
-            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+        val canReplace = selectedDestination?.documentUri == null &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()))
         AlertDialog(
             onDismissRequest = { showConflictDialog = false },
             title = { Text("Items with the same name already exist") },

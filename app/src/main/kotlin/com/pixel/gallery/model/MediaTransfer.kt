@@ -14,10 +14,43 @@ enum class ConflictPolicy {
     REPLACE
 }
 
+enum class ReplacementStage {
+    CREATED,
+    TEMP_READY,
+    TARGET_BACKED_UP,
+    TARGET_COMMITTED,
+    SOURCE_REMOVED
+}
+
+enum class ReplacementRecoveryAction {
+    CLEAN_UNCOMMITTED,
+    ROLLBACK_TO_BACKUP,
+    KEEP_COMMITTED
+}
+
+fun replacementRecoveryAction(
+    stage: ReplacementStage,
+    mode: TransferMode,
+    sourceExists: Boolean
+): ReplacementRecoveryAction = when (stage) {
+    ReplacementStage.CREATED,
+    ReplacementStage.TEMP_READY -> ReplacementRecoveryAction.CLEAN_UNCOMMITTED
+    ReplacementStage.TARGET_BACKED_UP -> ReplacementRecoveryAction.ROLLBACK_TO_BACKUP
+    ReplacementStage.TARGET_COMMITTED -> {
+        if (mode == TransferMode.MOVE && sourceExists) {
+            ReplacementRecoveryAction.ROLLBACK_TO_BACKUP
+        } else {
+            ReplacementRecoveryAction.KEEP_COMMITTED
+        }
+    }
+    ReplacementStage.SOURCE_REMOVED -> ReplacementRecoveryAction.KEEP_COMMITTED
+}
+
 data class TransferDestination(
     val stableKey: String,
     val displayName: String,
     val path: String,
+    val documentUri: String? = null,
     val coverUri: String? = null,
     val itemCount: Int = 0,
     val lastModified: Long = 0L
@@ -75,3 +108,6 @@ fun getAvailableTransferName(originalName: String, exists: (String) -> Boolean):
         index++
     }
 }
+
+fun isVerifiedTransferSize(expectedBytes: Long, actualBytes: Long): Boolean =
+    expectedBytes >= 0L && actualBytes == expectedBytes

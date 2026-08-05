@@ -50,6 +50,52 @@ class MediaTransferTest {
         assertEquals("README (1)", result)
     }
 
+    @Test
+    fun `transfer verification requires an exact byte count`() {
+        assertEquals(true, isVerifiedTransferSize(42, 42))
+        assertEquals(false, isVerifiedTransferSize(42, 41))
+        assertEquals(false, isVerifiedTransferSize(42, 43))
+        assertEquals(false, isVerifiedTransferSize(-1, 42))
+    }
+
+    @Test
+    fun `committed move rolls back while source still exists`() {
+        assertEquals(
+            ReplacementRecoveryAction.ROLLBACK_TO_BACKUP,
+            replacementRecoveryAction(
+                ReplacementStage.TARGET_COMMITTED,
+                TransferMode.MOVE,
+                sourceExists = true
+            )
+        )
+    }
+
+    @Test
+    fun `committed move is kept after source removal`() {
+        assertEquals(
+            ReplacementRecoveryAction.KEEP_COMMITTED,
+            replacementRecoveryAction(
+                ReplacementStage.TARGET_COMMITTED,
+                TransferMode.MOVE,
+                sourceExists = false
+            )
+        )
+    }
+
+    @Test
+    fun `backed up target always rolls back`() {
+        TransferMode.entries.forEach { mode ->
+            assertEquals(
+                ReplacementRecoveryAction.ROLLBACK_TO_BACKUP,
+                replacementRecoveryAction(
+                    ReplacementStage.TARGET_BACKED_UP,
+                    mode,
+                    sourceExists = mode == TransferMode.MOVE
+                )
+            )
+        }
+    }
+
     private fun entry(id: Long, path: String) = MediaEntry(
         contentId = id,
         uri = "content://media/$id",

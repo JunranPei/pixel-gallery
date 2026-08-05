@@ -111,10 +111,13 @@ class PhotosViewModel @Inject constructor(
     ) {
         if (entries.isEmpty() || _transferUiState.value.isRunning) return
         _transferUiState.value = TransferUiState()
-        val request = if (mode == TransferMode.MOVE) {
-            repository.createTransferWriteRequest(entries)
-        } else {
-            null
+        val request = runCatching {
+            if (mode == TransferMode.MOVE) repository.createTransferWriteRequest(entries) else null
+        }.getOrElse { error ->
+            _transferUiState.value = TransferUiState(
+                error = error.message ?: "Could not request storage permission"
+            )
+            return
         }
         if (request != null) {
             pendingTransfer = PendingTransfer(entries, destination, mode, conflictPolicy)
@@ -138,7 +141,15 @@ class PhotosViewModel @Inject constructor(
         // Android 10 grants recoverable write access one item at a time. Recheck
         // the batch and request the next item before starting any mutations.
         if (android.os.Build.VERSION.SDK_INT == android.os.Build.VERSION_CODES.Q) {
-            val nextPermission = repository.createTransferWriteRequest(request.entries)
+            val nextPermission = runCatching {
+                repository.createTransferWriteRequest(request.entries)
+            }.getOrElse { error ->
+                pendingTransfer = null
+                _transferUiState.value = TransferUiState(
+                    error = error.message ?: "Could not request storage permission"
+                )
+                return
+            }
             if (nextPermission != null) {
                 onPermissionRequired(nextPermission)
                 return
@@ -170,12 +181,12 @@ class PhotosViewModel @Inject constructor(
     }
 
     fun createTransferFolder(
-        parentPath: String,
+        parent: TransferDestination,
         name: String,
         onResult: (Result<TransferDestination>) -> Unit
     ) {
         viewModelScope.launch {
-            onResult(repository.createTransferFolder(parentPath, name))
+            onResult(repository.createTransferFolder(parent, name))
         }
     }
 
@@ -422,6 +433,19 @@ class PhotosViewModel @Inject constructor(
             if (repository.restoreFromVault(id)) {
                 refresh()
             }
+        }
+    }
+
+    fun restoreFromVaultBulk(
+        ids: List<Long>,
+        onComplete: (MediaRepository.VaultRestoreResult) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val result = repository.restoreFromVaultBulk(ids)
+            if (result.restoredIds.isNotEmpty()) {
+                refresh()
+            }
+            onComplete(result)
         }
     }
 

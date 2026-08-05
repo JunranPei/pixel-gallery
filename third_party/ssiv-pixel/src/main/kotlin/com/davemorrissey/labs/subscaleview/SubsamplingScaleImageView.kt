@@ -5,6 +5,8 @@ import android.graphics.*
 import android.graphics.Paint.Style
 import android.net.Uri
 import android.os.AsyncTask
+import android.os.Process
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.util.TypedValue
@@ -17,6 +19,7 @@ import java.lang.ref.WeakReference
 import java.net.URLDecoder
 import java.util.*
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.math.*
 
@@ -62,6 +65,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val SAMPLE_SIZE_HYSTERESIS = 0.12f
         private const val MAX_OFFSCREEN_TILE_CACHE_ENTRIES = 12
         private const val MAX_OFFSCREEN_TILE_CACHE_BYTES = 48L * 1024L * 1024L
+        private const val TILE_RECYCLE_GRACE_MS = 64L
+        private val TILE_RECYCLE_EXECUTOR = Executors.newSingleThreadExecutor { runnable ->
+            Thread({
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                runnable.run()
+            }, "ssiv-tile-recycler").apply { isDaemon = true }
+        }
         private val ROTATION_THRESHOLD = Math.toRadians(10.0)
         private val ZOOM_IN_THRESHOLD = 0.05f   // if the user zooms in a bit, do not allow rotating the image with the given gesture anymore
     }
@@ -710,14 +720,17 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             val degrees = Math.toDegrees(imageRotation)
                             val rightAngle = getClosestRightAngle(degrees)
                             val atXEdge = if (rightAngle == 90.0 || rightAngle == 270.0) lastY != vTranslate!!.y else lastX != vTranslate!!.x
-                            val atYEdge = if (rightAngle == 90.0 || rightAngle == 270.0) lastX != vTranslate!!.x else lastY != vTranslate!!.y
                             val edgeXSwipe = atXEdge && dxA > dyA && !isPanning
-                            val edgeYSwipe = atYEdge && dyA > dxA && !isPanning
                             // disable panning and allow swiping when the image is too small to fit the view bounds
                             val lowRes = height > sHeight * scale && width > sWidth * scale
-                            if (!edgeXSwipe && !edgeYSwipe && (!atXEdge || !atYEdge || isPanning) && !lowRes) {
+                            // The only parent gesture is a HorizontalPager. Reaching the image's
+                            // top or bottom must therefore keep the whole stroke inside SSIV;
+                            // otherwise the pager can steal the horizontal component of a
+                            // diagonal vertical pan and switch pages before the image reaches a
+                            // left/right edge.
+                            if (!edgeXSwipe && !lowRes) {
                                 isPanning = true
-                            } else if (lowRes || (dxA > offset && atXEdge && dxA > dyA) || (dyA > offset && atYEdge && dyA > dxA)) {
+                            } else if (lowRes || (dxA > offset && atXEdge && dxA > dyA)) {
                                 maxTouchCount = 0
                                 parent?.requestDisallowInterceptTouchEvent(false)
                             }
@@ -1287,7 +1300,14 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 }
             }
         }
-        val cacheStats = trimTileMemoryCache(sampleSize)
+        // A gesture only changes which already-loaded tiles are visible; it does not load
+        // new ones. Trimming here used to recycle tens of megabytes on the UI thread in
+        // ACTION_MOVE, forcing RenderThread fence waits and producing low-power jank.
+        val cacheStats = if (load && !isZooming && !isPanning && anim == null) {
+            trimTileMemoryCache(sampleSize)
+        } else {
+            TileMemoryCacheStats(0)
+        }
         if (load && diagnosticsListener != null) {
             val currentTiles = tileMap!![sampleSize].orEmpty().filter(::tileVisible)
             val memoryHits = currentTiles.count { it.bitmap?.isRecycled == false }
@@ -1488,8 +1508,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             evictedBytes += bytes
             remainingBytes -= bytes
             remainingEntries -= 1
-            tile.bitmap?.recycle()
+            val retiredBitmap = tile.bitmap
             tile.bitmap = null
+            retiredBitmap?.let(::recycleTileBitmapOffMainThread)
             evictedCount += 1
         }
         if (evictedCount > 0) {
@@ -1497,10 +1518,18 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 "tile=EVICT count=$evictedCount bytes=$evictedBytes " +
                     "offscreen=$remainingEntries/$MAX_OFFSCREEN_TILE_CACHE_ENTRIES " +
                     "offscreenBytes=$remainingBytes/$MAX_OFFSCREEN_TILE_CACHE_BYTES " +
-                    "sample=$currentSampleSize",
+                    "sample=$currentSampleSize recycle=DEFERRED",
             )
         }
         return TileMemoryCacheStats(remainingEntries, remainingBytes, evictedCount, evictedBytes)
+    }
+
+    private fun recycleTileBitmapOffMainThread(bitmap: Bitmap) {
+        TILE_RECYCLE_EXECUTOR.execute {
+            // Let already submitted RenderThread commands finish before invalidating pixels.
+            SystemClock.sleep(TILE_RECYCLE_GRACE_MS)
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
     }
 
     private fun tileVisible(tile: Tile): Boolean {
@@ -2086,7 +2115,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             clearBaseBitmap()
         }
         val currentSampleSize = calculateRequiredTileSampleSize()
-        trimTileMemoryCache(currentSampleSize)
+        if (!isZooming && !isPanning && anim == null) {
+            trimTileMemoryCache(currentSampleSize)
+        }
         scheduleStableTileCachePersistence()
         val currentTiles = tileMap?.get(currentSampleSize).orEmpty().filter(::tileVisible)
         val hasLoadingTile = currentTiles.any { it.loading }

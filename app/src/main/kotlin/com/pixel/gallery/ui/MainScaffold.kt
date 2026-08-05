@@ -132,6 +132,7 @@ fun MainScaffold(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeletePermanentlyConfirm by remember { mutableStateOf(false) }
     var showSelectionMenu by remember { mutableStateOf(false) }
+    var isVaultRestoreRunning by remember { mutableStateOf(false) }
 
     // Simple navigation stack
     var navigationStack by rememberSaveable {
@@ -320,11 +321,37 @@ fun MainScaffold(
                                 Icon(Icons.Default.Delete, contentDescription = "Delete permanently")
                             }
                         } else if (currentScreen == Screen.LockedFolder) {
-                            IconButton(onClick = {
-                                selectedEntries.forEach { photosViewModel.restoreFromVault(it.contentId) }
-                                selectedIds = emptySet()
-                            }) {
-                                Icon(Icons.Outlined.LockOpen, contentDescription = "Unlock")
+                            IconButton(
+                                enabled = !isVaultRestoreRunning,
+                                onClick = {
+                                    val idsToRestore = selectedIds.toList()
+                                    isVaultRestoreRunning = true
+                                    photosViewModel.restoreFromVaultBulk(idsToRestore) { result ->
+                                        isVaultRestoreRunning = false
+                                        selectedIds = result.failedIds.toSet()
+                                        val message = buildString {
+                                            append("Moved ${result.restoredIds.size} item")
+                                            if (result.restoredIds.size != 1) append('s')
+                                            append(" out of Locked Folder")
+                                            if (result.failedIds.isNotEmpty()) {
+                                                append("; ${result.failedIds.size} failed")
+                                            }
+                                        }
+                                        scope.launch { snackbarHostState.showSnackbar(message) }
+                                    }
+                                }
+                            ) {
+                                if (isVaultRestoreRunning) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Outlined.LockOpen,
+                                        contentDescription = "Move out of Locked Folder"
+                                    )
+                                }
                             }
                         } else {
                             IconButton(onClick = {

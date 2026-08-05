@@ -21,9 +21,8 @@ enum class ConflictPolicy { KEEP_BOTH, SKIP, REPLACE }
 data class TransferDestination(
     val stableKey: String,
     val displayName: String,
-    val path: String?,
-    val treeUri: String?,
-    val volumeName: String?,
+    val path: String,
+    val documentUri: String?,
 )
 
 data class TransferRequest(
@@ -54,7 +53,7 @@ data class TransferResult(
 
 ### 其他文件夹
 
-优先通过 `ACTION_OPEN_DOCUMENT_TREE` 获取持久目录授权。若返回 External Storage Provider tree URI，则尝试映射为物理路径；无法映射时保留 tree URI，由 SAF 适配器完成写入。
+通过 `ACTION_OPEN_DOCUMENT_TREE` 获取持久目录授权。External Storage Provider tree URI 同时保留映射路径和真实 document URI；创建文件、枚举冲突及新建子目录均通过 `DocumentsContract`，映射路径只用于 MediaScanner 建立图库索引。内容先写入隐藏临时文档，完整校验后再重命名为最终名称；超过 24 小时的残留临时文档在再次访问目录时清理。
 
 ### 新建文件夹
 
@@ -74,16 +73,17 @@ data class TransferResult(
 
 1. 在正确的目标集合和存储卷插入新 MediaStore 项。
 2. 写入 `DISPLAY_NAME`、`MIME_TYPE`、`RELATIVE_PATH` 和 `IS_PENDING=1`。
-3. 通过 `ContentResolver` 流式复制内容。
-4. 校验写入完成后设置 `IS_PENDING=0`。
-5. 失败时删除未发布的目标项，源项不变。
+3. 通过 `ParcelFileDescriptor` 流式复制，关闭前执行 `fsync`。
+4. 校验目标字节数与源文件完全一致。
+5. 检查 `IS_PENDING=0` 更新确实成功。
+6. 失败时删除未发布的目标项，源项不变。
 
 ### 跨卷移动或无法更新路径
 
 使用“安全复制 + 提交 + 删除源”策略：
 
 1. 按复制流程完整创建目标。
-2. 确认目标已发布并可查询。
+2. 确认目标字节数一致、已发布并获得有效 MediaStore URI。
 3. 删除源 MediaStore 项或源 DocumentFile。
 4. 将 Pixel 收藏关联从旧 `contentId` 迁移到新 `contentId`。
 
@@ -99,7 +99,9 @@ data class TransferResult(
 
 - `KEEP_BOTH`：按 `name (1).ext`、`name (2).ext` 生成可用名称。
 - `SKIP`：记录跳过，不修改源和目标。
-- `REPLACE`：先完成新内容的临时写入，再替换旧目标；移动场景中目标失败不得删除源。
+- `REPLACE`：先完成新内容的临时写入，再替换旧目标；每个阶段写入应用私有事务日志。启动时若发现中断事务，在源仍存在时恢复旧目标，源已删除时保留已提交目标并清理备份。
+
+SAF 目标不提供 `REPLACE`，只允许 `KEEP_BOTH` 或 `SKIP`，避免依赖文档提供器不一致的重命名与原子替换语义。
 
 冲突检测与最终创建之间仍可能出现竞争，因此适配器需要处理插入/创建时的二次冲突。
 
@@ -140,3 +142,6 @@ data class TransferResult(
 - 日志只记录 contentId、模式、目标 stableKey、耗时与结果，不记录用户搜索词。
 - 禁止将目标解析到 `Android/data`、应用私有目录或系统限制目录。
 - 所有路径在使用前规范化，并验证目标仍位于用户授权的树或允许的 MediaStore 顶级目录。
+- 目标未完成落盘、字节校验、发布和索引前，禁止删除源文件。
+- 源删除失败时尽量清理目标副本并重新扫描源路径，确保回到操作前状态。
+- MediaStore 完整同步失败不得把已经完成的文件操作误报为整体失败。
