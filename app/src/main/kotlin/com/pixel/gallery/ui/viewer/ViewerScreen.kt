@@ -52,6 +52,7 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.glide.AvesAppGlideModule
 import com.pixel.gallery.glide.SvgImage
 import com.pixel.gallery.glide.TiffImage
+import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
 import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
 import com.pixel.gallery.ui.viewer.formats.ViewerRenderPlan
@@ -64,6 +65,8 @@ import io.github.indexedtiff.IndexedTiffStatus
 import io.github.indexedtiff.IndexedTiffStore
 import io.github.indexedwebp.IndexedWebpStatus
 import io.github.indexedwebp.IndexedWebpStore
+import io.github.indexedraw.IndexedRawStatus
+import io.github.indexedraw.IndexedRawStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -119,11 +122,19 @@ private val MapnikHttps = XYTileSource(
 
 private val viewerPhotoMetadataCache = ConcurrentHashMap<String, ViewerPhotoMetadata>()
 
+private val rawIndexExtensions = setOf(
+    "3fr", "arw", "bay", "cap", "cr2", "cr3", "crw", "dcr", "dcs", "dng",
+    "drf", "eip", "erf", "fff", "gpr", "iiq", "k25", "kdc", "mdc", "mef",
+    "mos", "mrw", "nef", "nrw", "obm", "orf", "pef", "ptx", "pxn", "r3d",
+    "raf", "raw", "rw2", "rwl", "rwz", "sr2", "srf", "srw", "x3f",
+)
+
 private enum class IndexedImageFormat(val displayName: String) {
     JPEG("JPEG"),
     PNG("PNG"),
     TIFF("TIFF"),
     WEBP("WebP"),
+    RAW("RAW"),
 }
 
 private data class IndexedImageTarget(
@@ -329,6 +340,9 @@ fun ViewerScreen(
     val webpIndexStore = remember(context.applicationContext) {
         IndexedWebpStore(context.applicationContext)
     }
+    val rawIndexStore = remember(context.applicationContext) {
+        IndexedRawStore(context.applicationContext)
+    }
     val currentJpegIndexPath = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -383,11 +397,26 @@ fun ViewerScreen(
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
+    val currentRawIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                MimeTypes.isRaw(it.sourceMimeType.substringBefore(';').trim().lowercase()) ||
+                    it.path.substringAfterLast('.', "").lowercase() in rawIndexExtensions
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
     val currentIndexTarget = remember(
         currentJpegIndexPath,
         currentPngIndexPath,
         currentTiffIndexPath,
         currentWebpIndexPath,
+        currentRawIndexPath,
     ) {
         when {
             currentJpegIndexPath != null -> IndexedImageTarget(
@@ -406,6 +435,10 @@ fun ViewerScreen(
                 format = IndexedImageFormat.WEBP,
                 path = currentWebpIndexPath,
             )
+            currentRawIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.RAW,
+                path = currentRawIndexPath,
+            )
             else -> null
         }
     }
@@ -422,6 +455,7 @@ fun ViewerScreen(
                     IndexedImageFormat.PNG -> pngIndexStore.status(target.path) is IndexedPngStatus.Ready
                     IndexedImageFormat.TIFF -> tiffIndexStore.status(target.path) is IndexedTiffStatus.Ready
                     IndexedImageFormat.WEBP -> webpIndexStore.status(target.path) is IndexedWebpStatus.Ready
+                    IndexedImageFormat.RAW -> rawIndexStore.status(target.path) is IndexedRawStatus.Ready
                 }
             }
         }
@@ -977,6 +1011,9 @@ fun ViewerScreen(
                                     dateModifiedMillis = media.dateModifiedMillis,
                                     isActivePage = isActivePage,
                                     isPreviewVisible = isPreviewVisible,
+                                    rawIndexReady = imageIndexReady == true &&
+                                        currentIndexTarget?.format == IndexedImageFormat.RAW &&
+                                        currentIndexTarget.path == media.path,
                                     transformStateStore = viewerTransformStateStore,
                                     modifier = Modifier.fillMaxSize(),
                                     onContentReadyChanged = { fullPreviewReady = it },
@@ -1339,6 +1376,9 @@ fun ViewerScreen(
                                 IndexedImageFormat.WEBP ->
                                     "This decodes the complete static WebP once and builds a lossless " +
                                         "multi-resolution tile index. Animated WebP is not changed or indexed."
+                                IndexedImageFormat.RAW ->
+                                    "This develops the complete camera RAW once with camera white balance and " +
+                                        "builds a lossless sRGB tile pyramid. The original RAW is never changed."
                             }
                         } else {
                             "Delete the saved $formatName index for this image? Future uncached tiles will use " +
@@ -1385,6 +1425,13 @@ fun ViewerScreen(
                                                     "Unable to delete the WebP index"
                                                 }
                                             }
+                                            IndexedImageFormat.RAW -> if (isBuild) {
+                                                rawIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(rawIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the RAW index"
+                                                }
+                                            }
                                         }
                                         "$formatName index ${if (isBuild) "built" else "deleted"}"
                                     }
@@ -1401,6 +1448,8 @@ fun ViewerScreen(
                                                 tiffIndexStore.status(operationTarget.path) is IndexedTiffStatus.Ready
                                             IndexedImageFormat.WEBP ->
                                                 webpIndexStore.status(operationTarget.path) is IndexedWebpStatus.Ready
+                                            IndexedImageFormat.RAW ->
+                                                rawIndexStore.status(operationTarget.path) is IndexedRawStatus.Ready
                                         }
                                     }
                                 }

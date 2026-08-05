@@ -1053,7 +1053,10 @@ internal fun SimpleSubsamplingImageView(
                         )
                         ViewerRegionDecoderKind.TIFF -> TiffRegionDecoder()
                         ViewerRegionDecoderKind.SVG -> SvgRegionDecoder()
-                        ViewerRegionDecoderKind.RAW_EMBEDDED -> RawEmbeddedPreviewRegionDecoder(decoderSourceKey)
+                        ViewerRegionDecoderKind.RAW_EMBEDDED -> RawEmbeddedPreviewRegionDecoder(
+                            sourceKey = decoderSourceKey,
+                            sourcePath = imagePath,
+                        )
                     }
                 }
                 bitmapDecoderFactory = bitmapDecoder

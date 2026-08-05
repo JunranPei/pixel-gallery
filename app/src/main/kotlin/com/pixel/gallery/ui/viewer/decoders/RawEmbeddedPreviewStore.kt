@@ -10,6 +10,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.exifinterface.media.ExifInterface
 import com.davemorrissey.labs.subscaleview.ImageRegionDecoder
+import io.github.indexedraw.IndexedRawRegionDecoder
+import io.github.indexedraw.IndexedRawStore
 import java.io.File
 import java.util.LinkedHashMap
 
@@ -68,11 +70,20 @@ internal object RawEmbeddedPreviewStore {
 
 internal class RawEmbeddedPreviewRegionDecoder(
     private val sourceKey: String,
+    private val sourcePath: String,
 ) : ImageRegionDecoder {
+    private var rawStore: IndexedRawStore? = null
+    private var indexedDecoder: IndexedRawRegionDecoder? = null
+    private var indexedGeneration = Long.MIN_VALUE
+    private var indexedDecodeFailed = false
     private var decoder: BitmapRegionDecoder? = null
     private val lock = Any()
 
     override fun init(context: Context, uri: Uri): Point = synchronized(lock) {
+        rawStore = IndexedRawStore(context.applicationContext)
+        refreshIndexedDecoder()?.let { indexed ->
+            return Point(indexed.sourceWidth, indexed.sourceHeight)
+        }
         val preview = RawEmbeddedPreviewStore.peek(sourceKey)
             ?: throw IllegalStateException("RAW embedded preview was evicted before decoder init")
         @Suppress("DEPRECATION")
@@ -83,6 +94,17 @@ internal class RawEmbeddedPreviewRegionDecoder(
     }
 
     override fun decodeRegion(sRect: Rect, sampleSize: Int): Bitmap = synchronized(lock) {
+        refreshIndexedDecoder()?.let { indexed ->
+            val bitmap = try {
+                indexed.decodeRegion(sRect, sampleSize.coerceAtLeast(1))
+            } catch (_: Throwable) {
+                null
+            }
+            if (bitmap != null) return bitmap
+            indexed.close()
+            indexedDecoder = null
+            indexedDecodeFailed = true
+        }
         val active = decoder ?: throw IllegalStateException("RAW preview decoder is recycled")
         val options = BitmapFactory.Options().apply {
             inSampleSize = sampleSize.coerceAtLeast(1)
@@ -92,11 +114,36 @@ internal class RawEmbeddedPreviewRegionDecoder(
             ?: throw IllegalStateException("RAW embedded preview region decode returned null")
     }
 
-    override fun isReady(): Boolean = decoder?.isRecycled == false
+    override fun isReady(): Boolean = indexedDecoder != null || decoder?.isRecycled == false
 
     override fun recycle() = synchronized(lock) {
+        indexedDecoder?.close()
+        indexedDecoder = null
+        rawStore = null
+        indexedGeneration = Long.MIN_VALUE
+        indexedDecodeFailed = false
         decoder?.recycle()
         decoder = null
+    }
+
+    private fun refreshIndexedDecoder(): IndexedRawRegionDecoder? {
+        val activeStore = rawStore ?: return null
+        val generation = activeStore.currentGeneration
+        if (indexedGeneration != generation) {
+            indexedDecoder?.close()
+            indexedDecoder = null
+            indexedGeneration = generation
+            indexedDecodeFailed = false
+        }
+        if (indexedDecodeFailed) return null
+        indexedDecoder?.let { return it }
+        indexedDecoder = try {
+            activeStore.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedDecoder == null) indexedDecodeFailed = true
+        return indexedDecoder
     }
 }
 
