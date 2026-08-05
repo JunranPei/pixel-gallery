@@ -62,6 +62,8 @@ import io.github.indexedpng.IndexedPngStatus
 import io.github.indexedpng.IndexedPngStore
 import io.github.indexedtiff.IndexedTiffStatus
 import io.github.indexedtiff.IndexedTiffStore
+import io.github.indexedwebp.IndexedWebpStatus
+import io.github.indexedwebp.IndexedWebpStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -121,6 +123,7 @@ private enum class IndexedImageFormat(val displayName: String) {
     JPEG("JPEG"),
     PNG("PNG"),
     TIFF("TIFF"),
+    WEBP("WebP"),
 }
 
 private data class IndexedImageTarget(
@@ -323,6 +326,9 @@ fun ViewerScreen(
     val tiffIndexStore = remember(context.applicationContext) {
         IndexedTiffStore(context.applicationContext)
     }
+    val webpIndexStore = remember(context.applicationContext) {
+        IndexedWebpStore(context.applicationContext)
+    }
     val currentJpegIndexPath = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -363,10 +369,25 @@ fun ViewerScreen(
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
+    val currentWebpIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals("image/webp", ignoreCase = true) ||
+                    it.path.endsWith(".webp", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
     val currentIndexTarget = remember(
         currentJpegIndexPath,
         currentPngIndexPath,
         currentTiffIndexPath,
+        currentWebpIndexPath,
     ) {
         when {
             currentJpegIndexPath != null -> IndexedImageTarget(
@@ -380,6 +401,10 @@ fun ViewerScreen(
             currentTiffIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.TIFF,
                 path = currentTiffIndexPath,
+            )
+            currentWebpIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.WEBP,
+                path = currentWebpIndexPath,
             )
             else -> null
         }
@@ -396,6 +421,7 @@ fun ViewerScreen(
                     IndexedImageFormat.JPEG -> jpegIndexStore.status(target.path) is IndexedJpegStatus.Ready
                     IndexedImageFormat.PNG -> pngIndexStore.status(target.path) is IndexedPngStatus.Ready
                     IndexedImageFormat.TIFF -> tiffIndexStore.status(target.path) is IndexedTiffStatus.Ready
+                    IndexedImageFormat.WEBP -> webpIndexStore.status(target.path) is IndexedWebpStatus.Ready
                 }
             }
         }
@@ -1310,6 +1336,9 @@ fun ViewerScreen(
                                 IndexedImageFormat.TIFF ->
                                     "This validates and activates the TIFF's existing tiles, strips, and " +
                                         "reduced-resolution directories. It does not decode or duplicate the full image."
+                                IndexedImageFormat.WEBP ->
+                                    "This decodes the complete static WebP once and builds a lossless " +
+                                        "multi-resolution tile index. Animated WebP is not changed or indexed."
                             }
                         } else {
                             "Delete the saved $formatName index for this image? Future uncached tiles will use " +
@@ -1349,6 +1378,13 @@ fun ViewerScreen(
                                                     "Unable to delete the TIFF index"
                                                 }
                                             }
+                                            IndexedImageFormat.WEBP -> if (isBuild) {
+                                                webpIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(webpIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the WebP index"
+                                                }
+                                            }
                                         }
                                         "$formatName index ${if (isBuild) "built" else "deleted"}"
                                     }
@@ -1363,6 +1399,8 @@ fun ViewerScreen(
                                                 pngIndexStore.status(operationTarget.path) is IndexedPngStatus.Ready
                                             IndexedImageFormat.TIFF ->
                                                 tiffIndexStore.status(operationTarget.path) is IndexedTiffStatus.Ready
+                                            IndexedImageFormat.WEBP ->
+                                                webpIndexStore.status(operationTarget.path) is IndexedWebpStatus.Ready
                                         }
                                     }
                                 }

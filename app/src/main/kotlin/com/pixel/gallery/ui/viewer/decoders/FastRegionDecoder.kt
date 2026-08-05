@@ -16,6 +16,8 @@ import io.github.indexedjpeg.IndexedJpegRegionDecoder
 import io.github.indexedjpeg.IndexedJpegStore
 import io.github.indexedpng.IndexedPngRegionDecoder
 import io.github.indexedpng.IndexedPngStore
+import io.github.indexedwebp.IndexedWebpRegionDecoder
+import io.github.indexedwebp.IndexedWebpStore
 import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
@@ -128,6 +130,10 @@ class FastRegionDecoder(
     private var indexedPngDecoder: IndexedPngRegionDecoder? = null
     private var indexedPngGeneration = Long.MIN_VALUE
     private var indexedPngDecodeFailed = false
+    private var indexedWebpStore: IndexedWebpStore? = null
+    private var indexedWebpDecoder: IndexedWebpRegionDecoder? = null
+    private var indexedWebpGeneration = Long.MIN_VALUE
+    private var indexedWebpDecodeFailed = false
     private var initialized = false
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
@@ -148,6 +154,7 @@ class FastRegionDecoder(
         }
         indexedStore = IndexedJpegStore(appContext)
         indexedPngStore = IndexedPngStore(appContext)
+        indexedWebpStore = IndexedWebpStore(appContext)
         metricsKey = imageVersion
         metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
@@ -356,6 +363,7 @@ class FastRegionDecoder(
                 source = when (source) {
                     "INDEXED_JPEG_REGION_DECODE" -> "INDEXED_JPEG_REGION_BATCH_DECODE"
                     "INDEXED_PNG_REGION_DECODE" -> "INDEXED_PNG_REGION_BATCH_DECODE"
+                    "INDEXED_WEBP_REGION_DECODE" -> "INDEXED_WEBP_REGION_BATCH_DECODE"
                     else -> "SOURCE_REGION_BATCH_DECODE"
                 },
                 detail = "count=${attached.size} actualSample=$actualSample decodeMs=$decodeDurationMs",
@@ -397,6 +405,11 @@ class FastRegionDecoder(
             indexedPngStore = null
             indexedPngGeneration = Long.MIN_VALUE
             indexedPngDecodeFailed = false
+            indexedWebpDecoder?.close()
+            indexedWebpDecoder = null
+            indexedWebpStore = null
+            indexedWebpGeneration = Long.MIN_VALUE
+            indexedWebpDecodeFailed = false
             initialized = false
         }
         ViewerLoadMetrics.workReady(token)
@@ -544,6 +557,39 @@ class FastRegionDecoder(
             )
         }
 
+        refreshIndexedWebpDecoder()?.let { indexed ->
+            val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                SystemClock.elapsedRealtimeNanos()
+            } else {
+                0L
+            }
+            val bitmap = try {
+                indexed.decodeRegion(rect, sampleSize)
+            } catch (_: Throwable) {
+                null
+            }
+            if (bitmap != null) {
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.event(
+                        "INDEXED_WEBP_REGION_DECODE",
+                        "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} " +
+                            "sample=$sampleSize bitmap=${bitmap.width}x${bitmap.height} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                        imageKey = imageVersion,
+                    )
+                }
+                return bitmap to "INDEXED_WEBP_REGION_DECODE"
+            }
+            indexed.close()
+            indexedWebpDecoder = null
+            indexedWebpDecodeFailed = true
+            ViewerLoadMetrics.event(
+                "INDEXED_WEBP_FALLBACK",
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+                imageKey = imageVersion,
+            )
+        }
+
         val bitmap = openDecoder(fallbackReason).decodeRegion(rect, options)
             ?: throw RuntimeException("Region decoder returned null bitmap")
         return bitmap to "SOURCE_REGION_DECODE"
@@ -591,6 +637,28 @@ class FastRegionDecoder(
         if (indexedPngDecoder == null) indexedPngDecodeFailed = true
         logIndexOpen("PNG", sourcePath, indexedPngDecoder != null)
         return indexedPngDecoder
+    }
+
+    private fun refreshIndexedWebpDecoder(): IndexedWebpRegionDecoder? {
+        val store = indexedWebpStore ?: return null
+        val sourcePath = indexedSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedWebpGeneration != generation) {
+            indexedWebpDecoder?.close()
+            indexedWebpDecoder = null
+            indexedWebpGeneration = generation
+            indexedWebpDecodeFailed = false
+        }
+        if (indexedWebpDecodeFailed) return null
+        indexedWebpDecoder?.let { return it }
+        indexedWebpDecoder = try {
+            store.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedWebpDecoder == null) indexedWebpDecodeFailed = true
+        logIndexOpen("WEBP", sourcePath, indexedWebpDecoder != null)
+        return indexedWebpDecoder
     }
 
     private fun logIndexOpen(format: String, sourcePath: String, hit: Boolean) {
