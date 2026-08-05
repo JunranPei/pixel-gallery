@@ -8,7 +8,9 @@ import android.graphics.Point
 import android.graphics.Rect
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import com.davemorrissey.labs.subscaleview.BatchedImageRegionDecoder
+import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import io.github.indexedjpeg.IndexedJpegRegionDecoder
 import io.github.indexedjpeg.IndexedJpegStore
@@ -96,6 +98,7 @@ fun resetSsivTileCacheBudget(context: Context) {
 class FastRegionDecoder(
     private val minTileDpi: Int,
     private val imageVersion: String,
+    private val indexedSourcePath: String? = null,
     private val knownSourceWidth: Int = 0,
     private val knownSourceHeight: Int = 0,
 ) : BatchedImageRegionDecoder {
@@ -548,7 +551,7 @@ class FastRegionDecoder(
 
     private fun refreshIndexedDecoder(): IndexedJpegRegionDecoder? {
         val store = indexedStore ?: return null
-        val sourcePath = localSourcePath ?: return null
+        val sourcePath = indexedSourcePath ?: return null
         val generation = store.currentGeneration
         if (indexedGeneration != generation) {
             indexedDecoder?.close()
@@ -564,12 +567,13 @@ class FastRegionDecoder(
             null
         }
         if (indexedDecoder == null) indexedDecodeFailed = true
+        logIndexOpen("JPEG", sourcePath, indexedDecoder != null)
         return indexedDecoder
     }
 
     private fun refreshIndexedPngDecoder(): IndexedPngRegionDecoder? {
         val store = indexedPngStore ?: return null
-        val sourcePath = localSourcePath ?: return null
+        val sourcePath = indexedSourcePath ?: return null
         val generation = store.currentGeneration
         if (indexedPngGeneration != generation) {
             indexedPngDecoder?.close()
@@ -585,7 +589,17 @@ class FastRegionDecoder(
             null
         }
         if (indexedPngDecoder == null) indexedPngDecodeFailed = true
+        logIndexOpen("PNG", sourcePath, indexedPngDecoder != null)
         return indexedPngDecoder
+    }
+
+    private fun logIndexOpen(format: String, sourcePath: String, hit: Boolean) {
+        if (!BuildConfig.INDEXED_IMAGE_DIAGNOSTICS_ENABLED) return
+        Log.i(
+            "IndexedImageDecode",
+            "INDEX_OPEN format=$format result=${if (hit) "HIT" else "MISS"} " +
+                "source=${File(sourcePath).name} decodeSource=${localSourcePath?.let(::File)?.name ?: "none"}",
+        )
     }
 
     private fun ceilDiv(value: Int, divisor: Int): Int =

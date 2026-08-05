@@ -18,6 +18,7 @@ val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lo
 val viewerMetricsEnabled = viewerTestVariant == "trace" ||
     viewerTestVariant == "compressed" ||
     viewerTestVariant == "zoomtrace"
+val indexedImageDiagnosticsEnabled = viewerTestVariant == "jpegindex"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -57,6 +58,11 @@ android {
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
+        buildConfigField(
+            "boolean",
+            "INDEXED_IMAGE_DIAGNOSTICS_ENABLED",
+            indexedImageDiagnosticsEnabled.toString(),
+        )
         minSdk = 26
         targetSdk = 35
         versionCode = 35

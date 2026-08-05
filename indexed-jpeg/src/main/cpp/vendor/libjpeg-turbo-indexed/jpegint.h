@@ -450,11 +450,11 @@ EXTERN(void) jcopy_block_row JPP((JBLOCKROW input_row, JBLOCKROW output_row,
 				  JDIMENSION num_blocks));
 EXTERN(void) jzero_far JPP((void FAR * target, size_t bytestozero));
 EXTERN(void) jset_input_stream_position JPP((j_decompress_ptr cinfo,
-                    int offset));
+                    long offset));
 EXTERN(void) jset_input_stream_position_bit JPP((j_decompress_ptr cinfo,
-                    int byte_offset, int bit_left, INT32 buf));
+                    long byte_offset, int bit_left, unsigned long long buf));
 
-EXTERN(int) jget_input_stream_position JPP((j_decompress_ptr cinfo));
+EXTERN(long) jget_input_stream_position JPP((j_decompress_ptr cinfo));
 
 /* Constant tables in jutils.c */
 #if 0				/* This table is not actually needed in v6a */

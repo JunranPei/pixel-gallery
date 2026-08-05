@@ -871,10 +871,10 @@ jpeg_get_huffman_decoder_configuration(j_decompress_ptr cinfo,
   offset->next_restart_num = cinfo->marker->next_restart_num;
 
   offset->bitstream_offset =
-      (jget_input_stream_position(cinfo) << LOG_TWO_BIT_BUF_SIZE)
+      (((unsigned long long)jget_input_stream_position(cinfo)) << LOG_TWO_BIT_BUF_SIZE)
       + entropy->bitstate.bits_left;
 
-  offset->get_buffer = entropy->bitstate.get_buffer;
+  offset->get_buffer = (unsigned long long)entropy->bitstate.get_buffer;
 }
 
 /*
@@ -907,10 +907,10 @@ jpeg_configure_huffman_decoder(j_decompress_ptr cinfo,
   entropy->restarts_to_go = offset.restarts_to_go;
   cinfo->marker->next_restart_num = offset.next_restart_num;
 
-  unsigned int bitstream_offset = offset.bitstream_offset;
+  unsigned long long bitstream_offset = offset.bitstream_offset;
   int blkn, i;
 
-  unsigned int byte_offset = bitstream_offset >> LOG_TWO_BIT_BUF_SIZE;
+  long byte_offset = (long)(bitstream_offset >> LOG_TWO_BIT_BUF_SIZE);
   unsigned int bit_in_bit_buffer =
       bitstream_offset & ((1 << LOG_TWO_BIT_BUF_SIZE) - 1);
 
@@ -1036,7 +1036,7 @@ jpeg_destroy_huffman_index(huffman_index *index)
  * Set the reader byte position to offset
  */
 GLOBAL(void)
-jset_input_stream_position(j_decompress_ptr cinfo, int offset)
+jset_input_stream_position(j_decompress_ptr cinfo, long offset)
 {
   if (cinfo->src->seek_input_data) {
     cinfo->src->seek_input_data(cinfo, offset);
@@ -1052,12 +1052,12 @@ jset_input_stream_position(j_decompress_ptr cinfo, int offset)
  */
 GLOBAL(void)
 jset_input_stream_position_bit(j_decompress_ptr cinfo,
-        int byte_offset, int bit_left, INT32 buf)
+        long byte_offset, int bit_left, unsigned long long buf)
 {
   huff_entropy_ptr entropy = (huff_entropy_ptr) cinfo->entropy;
 
   entropy->bitstate.bits_left = bit_left;
-  entropy->bitstate.get_buffer = buf;
+  entropy->bitstate.get_buffer = (bit_buf_type)buf;
 
   jset_input_stream_position(cinfo, byte_offset);
 }
@@ -1065,10 +1065,10 @@ jset_input_stream_position_bit(j_decompress_ptr cinfo,
 /*
  * Get the current reader byte position.
  */
-GLOBAL(int)
+GLOBAL(long)
 jget_input_stream_position(j_decompress_ptr cinfo)
 {
-  return cinfo->src->current_offset - cinfo->src->bytes_in_buffer;
+  return (long)(cinfo->src->current_offset - cinfo->src->bytes_in_buffer);
 }
 
 #endif /* ANDROID */

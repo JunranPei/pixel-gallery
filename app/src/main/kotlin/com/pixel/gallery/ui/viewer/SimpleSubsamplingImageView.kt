@@ -1045,6 +1045,9 @@ internal fun SimpleSubsamplingImageView(
                         ViewerRegionDecoderKind.PLATFORM -> FastRegionDecoder(
                             minTileDpi = minTileDpi,
                             imageVersion = "$imagePath:$dateModifiedMillis",
+                            indexedSourcePath = imagePath.takeIf { path ->
+                                File(path).let { it.isFile && it.canRead() }
+                            },
                             knownSourceWidth = sourceWidth,
                             knownSourceHeight = sourceHeight,
                         )

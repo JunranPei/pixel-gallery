@@ -470,12 +470,14 @@ internal object ViewerLoadMetrics {
         it.baseAllocationBytes.addAndGet(allocationBytes)
     }
 
-    fun tileWritten(imageKey: String, sessionId: Long, durationMs: Long, bytes: Long) =
+    fun tileWritten(imageKey: String, sessionId: Long, durationMs: Long, bytes: Long) {
+        if (!isEnabled) return
         session(imageKey, sessionId, "tileWritten")?.let {
             it.tileWrites.incrementAndGet()
             it.tileWriteMs.addAndGet(durationMs)
             it.tileWriteBytes.addAndGet(bytes)
         }
+    }
 
     fun end(context: Context, imageKey: String, sessionId: Long) {
         if (!isEnabled) return

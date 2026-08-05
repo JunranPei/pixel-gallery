@@ -19,7 +19,10 @@ extern "C" {
 namespace {
 
 constexpr uint8_t kMagic[8] = {'I', 'J', 'X', 'M', 'C', 'U', '0', '1'};
-constexpr uint32_t kFormatVersion = 1;
+// Version 2 stores the complete entropy position and an ABI-independent bit
+// buffer field. Version 1 could truncate state on 64-bit devices and silently
+// decode corrupt tiles, especially for large JPEG files.
+constexpr uint32_t kFormatVersion = 2;
 constexpr uint32_t kEndMarker = 0x31444E45;  // END1
 constexpr uint32_t kMaxScans = 1024;
 constexpr uint32_t kMaxRows = 1u << 20;
@@ -134,25 +137,27 @@ bool readU64(FILE* file, uint64_t* value) {
 }
 
 bool writeOffset(FILE* file, const huffman_offset_data& value) {
-    return writeU32(file, value.bitstream_offset) &&
+    return writeU64(file, static_cast<uint64_t>(value.bitstream_offset)) &&
            writeU16(file, static_cast<uint16_t>(value.prev_dc[0])) &&
            writeU16(file, static_cast<uint16_t>(value.prev_dc[1])) &&
            writeU16(file, static_cast<uint16_t>(value.prev_dc[2])) &&
            writeU16(file, value.EOBRUN) &&
-           writeU32(file, static_cast<uint32_t>(value.get_buffer)) &&
+           writeU64(file, static_cast<uint64_t>(value.get_buffer)) &&
            writeU16(file, value.restarts_to_go) &&
            writeU8(file, value.next_restart_num);
 }
 
 bool readOffset(FILE* file, huffman_offset_data* value) {
     uint16_t dc0, dc1, dc2;
-    uint32_t buffer;
-    return readU32(file, &value->bitstream_offset) &&
+    uint64_t bitstreamOffset, buffer;
+    return readU64(file, &bitstreamOffset) &&
+           (value->bitstream_offset = static_cast<unsigned long long>(bitstreamOffset), true) &&
            readU16(file, &dc0) && (value->prev_dc[0] = static_cast<int16_t>(dc0), true) &&
            readU16(file, &dc1) && (value->prev_dc[1] = static_cast<int16_t>(dc1), true) &&
            readU16(file, &dc2) && (value->prev_dc[2] = static_cast<int16_t>(dc2), true) &&
            readU16(file, &value->EOBRUN) &&
-           readU32(file, &buffer) && (value->get_buffer = static_cast<INT32>(buffer), true) &&
+           readU64(file, &buffer) &&
+           (value->get_buffer = static_cast<unsigned long long>(buffer), true) &&
            readU16(file, &value->restarts_to_go) &&
            readU8(file, &value->next_restart_num);
 }
@@ -197,7 +202,7 @@ bool writeIndex(
                                    static_cast<uint64_t>(scan.MCUs_per_row);
         if (records64 == 0 || records64 > kMaxRecordsPerRow) return false;
         const uint32_t records = static_cast<uint32_t>(records64);
-        if (!writeU32(file.get(), scan.bitstream_offset) ||
+        if (!writeU64(file.get(), static_cast<uint64_t>(scan.bitstream_offset)) ||
             !writeU32(file.get(), static_cast<uint32_t>(scan.comps_in_scan)) ||
             !writeU32(file.get(), static_cast<uint32_t>(scan.MCUs_per_row)) ||
             !writeU32(file.get(), static_cast<uint32_t>(scan.MCU_rows_per_iMCU_row)) ||
@@ -262,8 +267,13 @@ bool readIndex(
     for (uint32_t scanNo = 0; scanNo < header->scanCount; ++scanNo) {
         auto& scan = index->scan[scanNo];
         uint32_t comps, mcus, mcuRows, records;
-        if (!readU32(file.get(), &scan.bitstream_offset) ||
-            !readU32(file.get(), &comps) || !readU32(file.get(), &mcus) ||
+        uint64_t scanBitstreamOffset;
+        if (!readU64(file.get(), &scanBitstreamOffset)) {
+            freeIndex(index);
+            return false;
+        }
+        scan.bitstream_offset = static_cast<unsigned long long>(scanBitstreamOffset);
+        if (!readU32(file.get(), &comps) || !readU32(file.get(), &mcus) ||
             !readU32(file.get(), &mcuRows) ||
             !readOffset(file.get(), &scan.prev_MCU_offset) ||
             !readU32(file.get(), &records) || records == 0 ||
@@ -518,7 +528,10 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
     info.out_color_space = JCS_EXT_RGBA;
     // The indexed progressive controller intentionally retains one iMCU row,
     // while libjpeg's optional block smoothing requests neighboring rows.
-    // Final decoded coefficients do not need that preview-only smoothing.
+    // Fancy chroma upsampling also needs adjacent rows and breaks the tile
+    // controller's one-row seek/restore pipeline. Android's original indexed
+    // tile caller disables both optimizations for this reason.
+    info.do_fancy_upsampling = FALSE;
     info.do_block_smoothing = FALSE;
     if (!jpeg_start_tile_decompress(&info)) {
         jpeg_destroy_decompress(&info);

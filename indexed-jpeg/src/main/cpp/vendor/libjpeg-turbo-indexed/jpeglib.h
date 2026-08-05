@@ -716,16 +716,17 @@ struct jpeg_decompress_struct {
 
 typedef struct {
 
-  // |--- byte_offset ---|- bit_left -|
-  //  \------ 27 -------/ \---- 5 ----/
-  unsigned int bitstream_offset;
+  // Packed byte offset and bit count. This must be 64-bit because JPEG sources
+  // can be larger than the old 27-bit byte-offset range.
+  unsigned long long bitstream_offset;
   short prev_dc[3];
 
   // remaining EOBs in EOBRUN
   unsigned short EOBRUN;
 
-  // save the decoder current bit buffer, entropy->bitstate.get_buffer.
-  INT32 get_buffer;
+  // ABI-independent carrier for entropy->bitstate.get_buffer. The indexed
+  // tile decoder deliberately uses IJG's 32-bit bit buffer on every ABI.
+  unsigned long long get_buffer;
 
   // save the restart info.
   unsigned short restarts_to_go;
@@ -735,7 +736,7 @@ typedef struct {
 typedef struct {
 
   // The header starting position of this scan
-  unsigned int bitstream_offset;
+  unsigned long long bitstream_offset;
 
   // Number of components in this scan
   int comps_in_scan;

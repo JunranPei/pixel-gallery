@@ -75,17 +75,15 @@ EXTERN(void) jpeg_make_d_derived_tbl
  * necessary.
  */
 
-#if __WORDSIZE == 64 || defined(_WIN64)
-
-typedef size_t bit_buf_type;	/* type of bit-extraction buffer */
-#define BIT_BUF_SIZE  64		/* size of buffer in bits */
-
-#else
-
+/*
+ * Android's tile-index extension serializes and restores the entropy reader
+ * at MCU checkpoints.  That extension was designed around IJG's 32-bit bit
+ * buffer.  Using libjpeg-turbo's optional 64-bit buffer changes the amount of
+ * prefetched entropy data and makes the saved checkpoint incompatible with
+ * the tile restore path, producing correctly-sized but corrupt regions.
+ */
 typedef INT32 bit_buf_type;	/* type of bit-extraction buffer */
 #define BIT_BUF_SIZE  32		/* size of buffer in bits */
-
-#endif
 #define LOG_TWO_BIT_BUF_SIZE  5        /* log_2(BIT_BUF_SIZE) */
 
 /* If long is > 32 bits on your machine, and shifting/masking longs is

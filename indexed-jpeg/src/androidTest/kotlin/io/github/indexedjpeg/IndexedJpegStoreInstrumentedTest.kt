@@ -1,6 +1,8 @@
 package io.github.indexedjpeg
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
 import android.graphics.Color
 import android.graphics.Rect
 import androidx.test.core.app.ApplicationProvider
@@ -36,6 +38,27 @@ class IndexedJpegStoreInstrumentedTest {
             assertDecodedSize(decoder!!.decodeRegion(region, 1), 384, 288)
             assertDecodedSize(decoder.decodeRegion(region, 2), 192, 144)
             assertDecodedSize(decoder.decodeRegion(region, 16), 24, 18)
+            assertRegionMatchesPlatform(
+                source = source,
+                indexed = decoder,
+                region = Rect(0, 0, 180, 288),
+                sampleSize = 1,
+            )
+            assertRegionMatchesPlatform(
+                source = source,
+                indexed = decoder,
+                region = Rect(0, 48, 180, 336),
+                sampleSize = 1,
+            )
+            // Start beyond the first horizontal Huffman checkpoint. A broken
+            // persisted entropy state still returns a correctly-sized, but
+            // visibly corrupt, bitmap here.
+            assertRegionMatchesPlatform(
+                source = source,
+                indexed = decoder,
+                region = Rect(320, 48, 500, 336),
+                sampleSize = 1,
+            )
         }
 
         assertTrue(source.setLastModified(source.lastModified() + 2_000L))
@@ -75,6 +98,63 @@ class IndexedJpegStoreInstrumentedTest {
         assertEquals(height, bitmap.height)
         assertTrue(Color.alpha(bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)) > 0)
         bitmap.recycle()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun assertRegionMatchesPlatform(
+        source: File,
+        indexed: IndexedJpegRegionDecoder,
+        region: Rect,
+        sampleSize: Int,
+    ) {
+        val actual = indexed.decodeRegion(region, sampleSize)
+        assertNotNull(actual)
+        actual!!
+        val platform = BitmapRegionDecoder.newInstance(source.absolutePath, false)
+        assertNotNull(platform)
+        val expected = try {
+            platform!!.decodeRegion(
+                region,
+                BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                },
+            )
+        } finally {
+            platform!!.recycle()
+        }
+        assertNotNull(expected)
+        expected!!
+        assertEquals(expected.width, actual.width)
+        assertEquals(expected.height, actual.height)
+
+        var totalDifference = 0L
+        var samples = 0L
+        val stepX = (actual.width / 32).coerceAtLeast(1)
+        val stepY = (actual.height / 32).coerceAtLeast(1)
+        for (y in 0 until actual.height step stepY) {
+            for (x in 0 until actual.width step stepX) {
+                val expectedColor = expected.getPixel(x, y)
+                val actualColor = actual.getPixel(x, y)
+                totalDifference += kotlin.math.abs(Color.red(expectedColor) - Color.red(actualColor))
+                totalDifference += kotlin.math.abs(Color.green(expectedColor) - Color.green(actualColor))
+                totalDifference += kotlin.math.abs(Color.blue(expectedColor) - Color.blue(actualColor))
+                samples += 3
+            }
+        }
+        val meanDifference = totalDifference.toDouble() / samples.coerceAtLeast(1)
+        val centerX = actual.width / 2
+        val centerY = actual.height / 2
+        val actualCenter = actual.getPixel(centerX, centerY)
+        val expectedCenter = expected.getPixel(centerX, centerY)
+        assertTrue(
+            "Mean RGB difference for $region was $meanDifference; " +
+                "center actual=${Integer.toHexString(actualCenter)} " +
+                "expected=${Integer.toHexString(expectedCenter)}",
+            meanDifference <= 5.0,
+        )
+        expected.recycle()
+        actual.recycle()
     }
 
     private fun createFixture(destination: File) {
