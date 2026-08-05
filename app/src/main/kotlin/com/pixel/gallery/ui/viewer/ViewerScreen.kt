@@ -56,6 +56,7 @@ import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
 import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
 import com.pixel.gallery.ui.viewer.formats.ViewerRenderPlan
+import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
 import io.github.indexedjpeg.IndexedJpegStatus
 import io.github.indexedjpeg.IndexedJpegStore
@@ -69,6 +70,8 @@ import io.github.indexedraw.IndexedRawStatus
 import io.github.indexedraw.IndexedRawStore
 import io.github.indexedheif.IndexedHeifStatus
 import io.github.indexedheif.IndexedHeifStore
+import io.github.indexedbmp.IndexedBmpStatus
+import io.github.indexedbmp.IndexedBmpStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -138,6 +141,7 @@ private enum class IndexedImageFormat(val displayName: String) {
     WEBP("WebP"),
     RAW("RAW"),
     HEIF("HEIF/AVIF"),
+    BMP("BMP"),
 }
 
 private data class IndexedImageTarget(
@@ -349,6 +353,9 @@ fun ViewerScreen(
     val heifIndexStore = remember(context.applicationContext) {
         IndexedHeifStore(context.applicationContext)
     }
+    val bmpIndexStore = remember(context.applicationContext) {
+        IndexedBmpStore(context.applicationContext)
+    }
     val currentJpegIndexPath = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -431,6 +438,20 @@ fun ViewerScreen(
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
+    val currentBmpIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals(MimeTypes.BMP, ignoreCase = true) ||
+                    it.path.endsWith(".bmp", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
     val currentIndexTarget = remember(
         currentJpegIndexPath,
         currentPngIndexPath,
@@ -438,6 +459,7 @@ fun ViewerScreen(
         currentWebpIndexPath,
         currentRawIndexPath,
         currentHeifIndexPath,
+        currentBmpIndexPath,
     ) {
         when {
             currentJpegIndexPath != null -> IndexedImageTarget(
@@ -464,6 +486,10 @@ fun ViewerScreen(
                 format = IndexedImageFormat.HEIF,
                 path = currentHeifIndexPath,
             )
+            currentBmpIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.BMP,
+                path = currentBmpIndexPath,
+            )
             else -> null
         }
     }
@@ -482,6 +508,7 @@ fun ViewerScreen(
                     IndexedImageFormat.WEBP -> webpIndexStore.status(target.path) is IndexedWebpStatus.Ready
                     IndexedImageFormat.RAW -> rawIndexStore.status(target.path) is IndexedRawStatus.Ready
                     IndexedImageFormat.HEIF -> heifIndexStore.status(target.path) is IndexedHeifStatus.Ready
+                    IndexedImageFormat.BMP -> bmpIndexStore.status(target.path) is IndexedBmpStatus.Ready
                 }
             }
         }
@@ -1045,6 +1072,42 @@ fun ViewerScreen(
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick,
                                 )
+                            } else if (renderPlan is ViewerRenderPlan.IndexedBmp) {
+                                val bmpIndexReady = imageIndexReady == true &&
+                                    currentIndexTarget?.format == IndexedImageFormat.BMP &&
+                                    currentIndexTarget.path == media.path
+                                if (!bmpIndexReady) {
+                                    GlideViewerFallback(
+                                        imagePath = media.path.ifEmpty { media.uri },
+                                        width = media.width,
+                                        height = media.height,
+                                        orientationDegrees = media.sourceRotationDegrees,
+                                        dateModifiedMillis = media.dateModifiedMillis,
+                                        isVisiblePage = isPreviewVisible,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onContentReadyChanged = { fullPreviewReady = it },
+                                        onClick = onImageClick,
+                                    )
+                                } else {
+                                    SimpleSubsamplingImageView(
+                                        uri = media.uri,
+                                        filePath = media.path,
+                                        orientationDegrees = media.sourceRotationDegrees,
+                                        isActivePage = isActivePage,
+                                        isPagerIdle = isPagerIdle,
+                                        isPreviewVisible = isPreviewVisible,
+                                        enableSubsampling = !metadataPending,
+                                        dateModifiedMillis = media.dateModifiedMillis,
+                                        sourceWidth = media.width,
+                                        sourceHeight = media.height,
+                                        previewModel = media.path.ifEmpty { media.uri },
+                                        regionDecoderKind = ViewerRegionDecoderKind.BMP,
+                                        transformStateStore = viewerTransformStateStore,
+                                        onContentReadyChanged = { fullPreviewReady = it },
+                                        modifier = Modifier.fillMaxSize(),
+                                        onClick = onImageClick,
+                                    )
+                                }
                             } else {
                                 val tiledPlan = renderPlan as ViewerRenderPlan.Tiled
                                 val sourceUri = remember(media.uri, media.path) {
@@ -1408,6 +1471,9 @@ fun ViewerScreen(
                                 IndexedImageFormat.HEIF ->
                                     "This reads bounded HEIF/AVIF regions once and builds a lossless tile " +
                                         "pyramid. The complete decoded image is never held in memory."
+                                IndexedImageFormat.BMP ->
+                                    "This validates the uncompressed BMP row layout and writes a 56-byte " +
+                                        "activation. Later zoom reads only scan lines crossing the viewport."
                             }
                         } else {
                             "Delete the saved $formatName index for this image? Future uncached tiles will use " +
@@ -1468,6 +1534,13 @@ fun ViewerScreen(
                                                     "Unable to delete the HEIF/AVIF index"
                                                 }
                                             }
+                                            IndexedImageFormat.BMP -> if (isBuild) {
+                                                bmpIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(bmpIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the BMP activation"
+                                                }
+                                            }
                                         }
                                         "$formatName index ${if (isBuild) "built" else "deleted"}"
                                     }
@@ -1488,6 +1561,8 @@ fun ViewerScreen(
                                                 rawIndexStore.status(operationTarget.path) is IndexedRawStatus.Ready
                                             IndexedImageFormat.HEIF ->
                                                 heifIndexStore.status(operationTarget.path) is IndexedHeifStatus.Ready
+                                            IndexedImageFormat.BMP ->
+                                                bmpIndexStore.status(operationTarget.path) is IndexedBmpStatus.Ready
                                         }
                                     }
                                 }

@@ -38,6 +38,7 @@ import com.pixel.gallery.ui.viewer.decoders.GlideBaseImageDecoder
 import com.pixel.gallery.ui.viewer.decoders.SvgRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.TiffRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.RawEmbeddedPreviewRegionDecoder
+import com.pixel.gallery.ui.viewer.decoders.BmpRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrAwareFitCenter
 import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
@@ -1057,6 +1058,7 @@ internal fun SimpleSubsamplingImageView(
                             sourceKey = decoderSourceKey,
                             sourcePath = imagePath,
                         )
+                        ViewerRegionDecoderKind.BMP -> BmpRegionDecoder(imagePath)
                     }
                 }
                 bitmapDecoderFactory = bitmapDecoder

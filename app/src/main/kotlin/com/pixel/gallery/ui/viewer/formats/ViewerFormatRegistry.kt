@@ -9,6 +9,7 @@ enum class ViewerRegionDecoderKind {
     TIFF,
     SVG,
     RAW_EMBEDDED,
+    BMP,
 }
 
 enum class ViewerPreviewKind {
@@ -25,6 +26,7 @@ sealed interface ViewerRenderPlan {
 
     data object PreviewOnly : ViewerRenderPlan
     data object RawEmbeddedPreview : ViewerRenderPlan
+    data object IndexedBmp : ViewerRenderPlan
 }
 
 private interface ViewerFormatAdapter {
@@ -39,6 +41,7 @@ object ViewerFormatRegistry {
     private val adapters = listOf(
         SvgAdapter,
         TiffAdapter,
+        BmpAdapter,
         NativeRegionAdapter,
         RawAdapter,
     )
@@ -65,6 +68,13 @@ object ViewerFormatRegistry {
             return if (matches) {
                 ViewerRenderPlan.Tiled(ViewerRegionDecoderKind.TIFF, ViewerPreviewKind.TIFF)
             } else null
+        }
+    }
+
+    private object BmpAdapter : ViewerFormatAdapter {
+        override fun resolve(media: MediaEntry, normalizedMime: String): ViewerRenderPlan? {
+            val matches = normalizedMime == MimeTypes.BMP || media.path.endsWith(".bmp", true)
+            return if (matches) ViewerRenderPlan.IndexedBmp else null
         }
     }
 
