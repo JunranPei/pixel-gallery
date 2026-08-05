@@ -1,4 +1,5 @@
 #include <android/bitmap.h>
+#include <android/log.h>
 #include <jni.h>
 
 #include <algorithm>
@@ -307,6 +308,10 @@ bool isPowerOfTwo(int value) {
     return value > 0 && (value & (value - 1)) == 0;
 }
 
+void logDecodeFailure(const char* stage) {
+    __android_log_print(ANDROID_LOG_ERROR, "IndexedJpeg", "decode failed at %s", stage);
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jintArray JNICALL
@@ -457,22 +462,30 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
         left < 0 || top < 0 || right <= left || bottom <= top ||
         static_cast<uint32_t>(right) > handle->width ||
         static_cast<uint32_t>(bottom) > handle->height) {
+        logDecodeFailure("arguments");
         return JNI_FALSE;
     }
 
     AndroidBitmapInfo bitmapInfo{};
     if (AndroidBitmap_getInfo(env, bitmap, &bitmapInfo) != ANDROID_BITMAP_RESULT_SUCCESS ||
         bitmapInfo.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
+        logDecodeFailure("bitmap-info");
         return JNI_FALSE;
     }
     const uint32_t expectedWidth =
         static_cast<uint32_t>((right - left + sampleSize - 1) / sampleSize);
     const uint32_t expectedHeight =
         static_cast<uint32_t>((bottom - top + sampleSize - 1) / sampleSize);
-    if (bitmapInfo.width != expectedWidth || bitmapInfo.height != expectedHeight) return JNI_FALSE;
+    if (bitmapInfo.width != expectedWidth || bitmapInfo.height != expectedHeight) {
+        logDecodeFailure("bitmap-size");
+        return JNI_FALSE;
+    }
 
     std::unique_ptr<FILE, decltype(&fclose)> input(fopen(handle->sourcePath.c_str(), "rb"), fclose);
-    if (!input) return JNI_FALSE;
+    if (!input) {
+        logDecodeFailure("source-open");
+        return JNI_FALSE;
+    }
     jpeg_decompress_struct info{};
     JpegError error{};
     info.err = jpeg_std_error(&error.base);
@@ -483,6 +496,7 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
     if (setjmp(error.jump)) {
         if (pixels != nullptr) AndroidBitmap_unlockPixels(env, bitmap);
         if (created) jpeg_destroy_decompress(&info);
+        __android_log_print(ANDROID_LOG_ERROR, "IndexedJpeg", "jpeg error: %s", error.message);
         return JNI_FALSE;
     }
 
@@ -493,6 +507,7 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
         info.image_width != handle->width || info.image_height != handle->height ||
         info.arith_code) {
         jpeg_destroy_decompress(&info);
+        logDecodeFailure("source-header");
         return JNI_FALSE;
     }
 
@@ -501,8 +516,13 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
     info.scale_num = 1;
     info.scale_denom = nativeSample;
     info.out_color_space = JCS_EXT_RGBA;
+    // The indexed progressive controller intentionally retains one iMCU row,
+    // while libjpeg's optional block smoothing requests neighboring rows.
+    // Final decoded coefficients do not need that preview-only smoothing.
+    info.do_block_smoothing = FALSE;
     if (!jpeg_start_tile_decompress(&info)) {
         jpeg_destroy_decompress(&info);
+        logDecodeFailure("tile-start");
         return JNI_FALSE;
     }
 
@@ -514,6 +534,10 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
         &info, &handle->index, &alignedLeft, &alignedTop, &alignedWidth, &alignedHeight);
     if (alignedWidth <= 0 || alignedHeight <= 0 || info.output_components != 4) {
         jpeg_destroy_decompress(&info);
+        __android_log_print(
+            ANDROID_LOG_ERROR, "IndexedJpeg",
+            "bad tile dimensions width=%d height=%d components=%d",
+            alignedWidth, alignedHeight, info.output_components);
         return JNI_FALSE;
     }
 
@@ -521,11 +545,13 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
     const int firstY = (top - alignedTop) / nativeSample;
     if (firstX < 0 || firstY < 0) {
         jpeg_destroy_decompress(&info);
+        logDecodeFailure("crop-origin");
         return JNI_FALSE;
     }
 
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
         jpeg_destroy_decompress(&info);
+        logDecodeFailure("bitmap-lock");
         return JNI_FALSE;
     }
 
@@ -547,7 +573,14 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
     AndroidBitmap_unlockPixels(env, bitmap);
     pixels = nullptr;
     jpeg_destroy_decompress(&info);
-    return destinationY == bitmapInfo.height ? JNI_TRUE : JNI_FALSE;
+    if (destinationY != bitmapInfo.height) {
+        __android_log_print(
+            ANDROID_LOG_ERROR, "IndexedJpeg",
+            "short tile output rows=%u expected=%u alignedHeight=%d firstY=%d post=%d",
+            destinationY, bitmapInfo.height, alignedHeight, firstY, postSample);
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL

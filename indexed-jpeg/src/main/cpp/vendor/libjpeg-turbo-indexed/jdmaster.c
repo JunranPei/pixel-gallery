@@ -275,6 +275,11 @@ jpeg_calc_output_dimensions (j_decompress_ptr cinfo)
 #endif
 
   /* Prevent application from calling me at wrong times */
+#if ANDROID_TILE_BASED_DECODE
+  /* Indexed tile decoding recalculates output dimensions after the tile
+   * decompressor has entered scanline state. */
+  if (!cinfo->tile_decode)
+#endif
   if (cinfo->global_state != DSTATE_READY)
     ERREXIT1(cinfo, JERR_BAD_STATE, cinfo->global_state);
 
