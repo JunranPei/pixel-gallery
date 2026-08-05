@@ -796,13 +796,16 @@ fun DateHeader(
             style = EmphasizedTypography.LabelLarge,
             color = MaterialTheme.colorScheme.primary
         )
-        if (isSelectionMode) {
-            Icon(
-                imageVector = if (isSelected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                contentDescription = "Select Group",
-                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
-            )
+        // Keep the header's measured height stable when selection mode changes.
+        Box(modifier = Modifier.size(24.dp)) {
+            if (isSelectionMode) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = "Select Group",
+                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }

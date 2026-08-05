@@ -15,7 +15,7 @@ interface MediaDao {
     @Query("SELECT * FROM media_entries WHERE isTrashed = 0 ORDER BY bestTimestamp DESC")
     fun getAllEntries(): Flow<List<MediaEntry>>
 
-    @Query("SELECT contentId, dateModifiedMillis, isTrashed FROM media_entries")
+    @Query("SELECT contentId, path, dateModifiedMillis, isTrashed FROM media_entries")
     suspend fun getKnownEntries(): List<KnownEntry>
 
     @Query("SELECT * FROM media_entries")
@@ -76,6 +76,7 @@ interface MediaDao {
 
 data class KnownEntry(
     val contentId: Long,
+    val path: String,
     val dateModifiedMillis: Long,
     val isTrashed: Boolean
 )

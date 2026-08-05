@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -66,6 +68,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.Priority
 import com.bumptech.glide.load.engine.GlideException
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
@@ -169,6 +172,8 @@ fun ViewerScreen(
     initialId: Long,
     photos: List<MediaEntry>,
     onBack: () -> Unit,
+    allowTransfer: Boolean = true,
+    onRequestTransfer: (MediaEntry) -> Unit = {},
     enableUltraHdr: Boolean = false,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
@@ -265,6 +270,27 @@ fun ViewerScreen(
     var isPlayingMotion by remember { mutableStateOf(false) }
     var isExtractingMotion by remember { mutableStateOf(false) }
     val viewerScope = rememberCoroutineScope()
+    val pagerIsDragged by pagerState.interactionSource.collectIsDraggedAsState()
+    // After an edge swipe is released back toward the settled page, Pager can remain
+    // scroll-active for a few frames even though the current image already looks centred.
+    // A new fast stroke during that window used to be captured by Pager and could expose
+    // the opposite neighbour without first panning across the zoomed image. Disable only
+    // user paging during this return animation; the Android image view then owns the new
+    // stroke immediately, while Pager is still free to finish settling programmatically.
+    val pagerReturningToSettledPage =
+        pagerState.isScrollInProgress &&
+            !pagerIsDragged &&
+            pagerState.targetPage == pagerState.settledPage
+
+    LaunchedEffect(pagerReturningToSettledPage) {
+        ViewerLoadMetrics.event(
+            "PAGER_RETURN_GUARD",
+            "enabled=$pagerReturningToSettledPage current=${pagerState.currentPage} " +
+                "settled=${pagerState.settledPage} target=${pagerState.targetPage} " +
+                "dragged=$pagerIsDragged scrolling=${pagerState.isScrollInProgress}",
+            imageKey = photos.getOrNull(pagerState.settledPage)?.viewerCacheKey(),
+        )
+    }
 
     val currentMediaCacheKey = remember(currentMedia?.contentId, currentMedia?.dateModifiedMillis) {
         currentMedia?.viewerCacheKey()
@@ -449,7 +475,7 @@ fun ViewerScreen(
             modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
-            userScrollEnabled = !isPlayingMotion,
+            userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage,
             key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
@@ -507,6 +533,16 @@ fun ViewerScreen(
                     )
                 } else {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val isActivePage = pagerState.settledPage == page
+                        val isPagerIdle = !pagerState.isScrollInProgress
+                        val isPreviewVisible by remember(pagerState, page) {
+                            derivedStateOf {
+                                pagerState.settledPage == page ||
+                                    (pagerState.isScrollInProgress &&
+                                        kotlin.math.abs(pagerState.currentPage - page) <= 1)
+                            }
+                        }
+                        val allowSwipeThumbnailSourceLoad = pagerState.isScrollInProgress
                         val swipeThumbnailModel = remember(
                             media.uri,
                             media.sourceMimeType,
@@ -542,19 +578,30 @@ fun ViewerScreen(
                             swipeThumbnailSignature,
                             pageKey,
                             page,
+                            allowSwipeThumbnailSourceLoad,
                         ) {
                             { request: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
+                                // At rest the 200 px image is only allowed to reuse the Grid
+                                // cache. A cache miss must not decode another copy of the source
+                                // while the current page's screen-sized ARGB preview is waiting.
+                                // Once a pager gesture starts it may load normally so the incoming
+                                // page always has a lightweight moving placeholder.
                                 val configured = request
-                                    .withViewerTaskCompression()
                                     .format(DecodeFormat.PREFER_RGB_565)
                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                     .signature(swipeThumbnailSignature)
                                     .override(200)
+                                    .priority(
+                                        if (allowSwipeThumbnailSourceLoad) Priority.NORMAL
+                                        else Priority.LOW
+                                    )
+                                    .onlyRetrieveFromCache(!allowSwipeThumbnailSourceLoad)
                                 if (ViewerLoadMetrics.isEnabled) {
                                     val mainToken = ViewerLoadMetrics.workStarted(
                                         "SWIPE_THUMB_200PX",
                                         pageKey,
-                                        "page=$page model=${swipeThumbnailModel.javaClass.simpleName}",
+                                        "page=$page sourceAllowed=$allowSwipeThumbnailSourceLoad " +
+                                            "model=${swipeThumbnailModel.javaClass.simpleName}",
                                     )
                                     swipeMainTokenRef.getAndSet(mainToken)?.let {
                                         ViewerLoadMetrics.workCleared(it, "request-replaced")
@@ -762,13 +809,6 @@ fun ViewerScreen(
                                 }
                             )
                             */
-                            val isActivePage = pagerState.settledPage == page
-                            val isPagerIdle = !pagerState.isScrollInProgress
-                            val isPreviewVisible by remember(pagerState, page) {
-                                derivedStateOf {
-                                    kotlin.math.abs(pagerState.settledPage - page) <= 1
-                                }
-                            }
                             val metadataPending = isActivePage &&
                                 pagerState.currentPage == page &&
                                 media.canContainMotionPhoto() && viewerPhotoMetadata == null
@@ -968,6 +1008,16 @@ fun ViewerScreen(
                                 },
                                 leadingIcon = { Icon(Icons.Outlined.Wallpaper, contentDescription = null) }
                             )
+                            if (allowTransfer) {
+                                DropdownMenuItem(
+                                    text = { Text("Move or copy to…") },
+                                    onClick = {
+                                        showMenu = false
+                                        currentMedia?.let(onRequestTransfer)
+                                    },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = null) }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Move to locked folder") },
                                 onClick = {

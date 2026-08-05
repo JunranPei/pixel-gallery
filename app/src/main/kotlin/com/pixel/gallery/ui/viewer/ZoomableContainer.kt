@@ -56,6 +56,7 @@ fun ZoomableContainer(
     initialScale: Float = 1.0f,
     initialOffsetX: Float = 0.0f,
     initialOffsetY: Float = 0.0f,
+    transformSyncRevision: Int = 0,
     enabled: Boolean = true,
     autoApplyTransformations: Boolean = true,
     // The fraction of container size the image occupies at userScale=1.0 (fit-to-screen).
@@ -66,6 +67,8 @@ fun ZoomableContainer(
     onTap: () -> Unit = {},
     onZoomGestureStarted: () -> Unit = {},
     onZoomGestureEnded: () -> Unit = {},
+    onExternalTransformSynced: () -> Unit = {},
+    onTransformFrame: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     onTransformChanged: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     content: @Composable () -> Unit
 ) {
@@ -85,7 +88,6 @@ fun ZoomableContainer(
     var renderScale by remember(diagnosticsKey) { mutableFloatStateOf(startingScale) }
     var renderOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetX) }
     var renderOffsetY by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetY) }
-    var pointerGestureInProgress by remember(diagnosticsKey) { mutableStateOf(false) }
 
     // Immediate tracking values used during gesture processing
     var gestureScale by remember(diagnosticsKey) { mutableFloatStateOf(startingScale) }
@@ -98,23 +100,35 @@ fun ZoomableContainer(
         }
     }
 
-    // Double-tap animation values update one render state. Pointer gestures write the
-    // render state directly so no per-event coroutine can overtake a newer touch sample.
-    LaunchedEffect(animScale.value, animOffsetX.value, animOffsetY.value) {
-        if (!pointerGestureInProgress) {
-            renderScale = animScale.value
-            renderOffsetX = animOffsetX.value
-            renderOffsetY = animOffsetY.value
-        } else {
-            trace(
-                "ZOOM_PREVIEW_STALE_ANIMATION_IGNORED",
-                "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
-                    "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY",
-            )
-        }
+    // A frame changes only what is visible. Persisting every animation frame lets a
+    // half-finished double tap leak into the page's saved transform and Pager reuse.
+    fun renderFrame(scale: Float, offsetX: Float, offsetY: Float) {
+        renderScale = scale
+        renderOffsetX = offsetX
+        renderOffsetY = offsetY
+        onTransformFrame(scale, offsetX, offsetY)
     }
-    LaunchedEffect(renderScale, renderOffsetX, renderOffsetY) {
-        onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
+
+    // SSIV can return ownership after a zoomed image has been shrunk back to fit or
+    // below-fit. Synchronise both of this container's state representations while its
+    // child layers are still hidden, then let the caller reveal the preview atomically.
+    LaunchedEffect(transformSyncRevision) {
+        if (transformSyncRevision <= 0) return@LaunchedEffect
+        animationJob?.cancel()
+        val syncedScale = initialScale.coerceIn(safeMinScale, safeMaxScale)
+        gestureScale = syncedScale
+        gestureOffsetX = initialOffsetX
+        gestureOffsetY = initialOffsetY
+        renderFrame(syncedScale, initialOffsetX, initialOffsetY)
+        animScale.snapTo(syncedScale)
+        animOffsetX.snapTo(initialOffsetX)
+        animOffsetY.snapTo(initialOffsetY)
+        onTransformChanged(syncedScale, initialOffsetX, initialOffsetY)
+        trace(
+            "ZOOM_PREVIEW_EXTERNAL_SYNC",
+            "revision=$transformSyncRevision transform=$syncedScale,$initialOffsetX,$initialOffsetY",
+        )
+        onExternalTransformSynced()
     }
 
     /**
@@ -208,9 +222,21 @@ fun ZoomableContainer(
                                 animOffsetX.snapTo(currentOffsetX)
                                 animOffsetY.snapTo(currentOffsetY)
                                 coroutineScope {
-                                    launch { animScale.animateTo(targetScale, animSpec) }
-                                    launch { animOffsetX.animateTo(targetOffsetX, animSpec) }
-                                    launch { animOffsetY.animateTo(targetOffsetY, animSpec) }
+                                    launch {
+                                        animScale.animateTo(targetScale, animSpec) {
+                                            renderFrame(value, animOffsetX.value, animOffsetY.value)
+                                        }
+                                    }
+                                    launch {
+                                        animOffsetX.animateTo(targetOffsetX, animSpec) {
+                                            renderFrame(animScale.value, value, animOffsetY.value)
+                                        }
+                                    }
+                                    launch {
+                                        animOffsetY.animateTo(targetOffsetY, animSpec) {
+                                            renderFrame(animScale.value, animOffsetX.value, value)
+                                        }
+                                    }
                                 }
                                 completed = true
                             } finally {
@@ -225,9 +251,8 @@ fun ZoomableContainer(
                                 gestureScale = finalScale
                                 gestureOffsetX = finalOffsetX
                                 gestureOffsetY = finalOffsetY
-                                renderScale = finalScale
-                                renderOffsetX = finalOffsetX
-                                renderOffsetY = finalOffsetY
+                                renderFrame(finalScale, finalOffsetX, finalOffsetY)
+                                onTransformChanged(finalScale, finalOffsetX, finalOffsetY)
                                 trace(
                                     "ZOOM_PREVIEW_ANIMATION_END",
                                     "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
@@ -253,7 +278,6 @@ fun ZoomableContainer(
                 awaitEachGesture {
                     // Wait for the first finger down
                     val firstDown = awaitFirstDown(requireUnconsumed = false)
-                    pointerGestureInProgress = true
                     animationJob?.cancel()
                     trace(
                         "ZOOM_PREVIEW_POINTER_DOWN",
@@ -406,19 +430,20 @@ fun ZoomableContainer(
                                 gestureOffsetY = clampedY
 
                                 // Snap (no animation) during active gesture
-                                renderScale = newScale
-                                renderOffsetX = clampedX
-                                renderOffsetY = clampedY
+                                renderFrame(newScale, clampedX, clampedY)
                             }
                         }
 
                         // Continue while any pointer is still down
                         gestureActive = event.changes.any { it.pressed }
                     }
+                    if (sample > 0) {
+                        renderFrame(gestureScale, gestureOffsetX, gestureOffsetY)
+                        onTransformChanged(gestureScale, gestureOffsetX, gestureOffsetY)
+                    }
                     if (zoomIntentDispatched) {
                         onZoomGestureEnded()
                     }
-                    pointerGestureInProgress = false
                     trace(
                         "ZOOM_PREVIEW_POINTER_END",
                         "samples=$sample consumed=$endedBecauseConsumed zoomIntent=$zoomIntentDispatched " +

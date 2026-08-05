@@ -3,6 +3,7 @@ package com.pixel.gallery.ui.viewer
 import android.graphics.PointF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
@@ -40,50 +41,29 @@ import com.pixel.gallery.ui.viewer.decoders.RawEmbeddedPreviewRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrAwareFitCenter
 import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-// Custom LIFO (Last-In-First-Out) Queue to prioritize newly submitted active page tasks
-class LIFOLinkedBlockingDeque<T> : LinkedBlockingDeque<T>() {
-    override fun offer(e: T): Boolean {
-        return super.offerFirst(e)
-    }
-
-    override fun offer(e: T, timeout: Long, unit: TimeUnit): Boolean {
-        return super.offerFirst(e, timeout, unit)
-    }
-
-    override fun add(e: T): Boolean {
-        return super.offerFirst(e)
-    }
-
-    override fun put(e: T) {
-        super.putFirst(e)
-    }
-}
-
-// Custom Executor that supports purging pending tasks to clear stale page backlog instantly
-class LIFOThreadPoolExecutor(corePoolSize: Int, maximumPoolSize: Int, keepAliveTime: Long, unit: TimeUnit) :
-    ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, unit, LIFOLinkedBlockingDeque<Runnable>()) {
-
-    fun purgePendingTasks(): Int {
-        val count = queue.size
-        queue.clear()
-        return count
-    }
-}
-
-private val tileDecodeExecutor = LIFOThreadPoolExecutor(
-    corePoolSize = 2,
-    maximumPoolSize = 2,
-    keepAliveTime = 60L,
-    unit = TimeUnit.SECONDS
+// FIFO preserves SSIV's explicit centre-first tile order. Do not clear this process-wide
+// queue when one page becomes inactive: another freeform/multi-window viewer can own the
+// remaining work. Recycled views invalidate their own queued tasks by image generation.
+private val tileDecodeExecutor = ThreadPoolExecutor(
+    // A single decode lane matches the stable viewer's large-image resource pool.
+    // More workers do not make one BitmapRegionDecoder parallel, but they can leave a
+    // stale tile waiting inside the decoder lock and increase cross-window power peaks.
+    1,
+    1,
+    60L,
+    TimeUnit.SECONDS,
+    LinkedBlockingQueue<Runnable>(),
 ).apply {
     allowCoreThreadTimeOut(true)
 }
@@ -218,6 +198,66 @@ private fun applySavedPreviewTransform(
     imageView.translationY = -rotatedOffsetY.toFloat()
 }
 
+private suspend fun resolveGlideDataCacheFile(
+    context: android.content.Context,
+    model: Any,
+    dateModifiedMillis: Long,
+    fallbackPath: String,
+    imageKey: String,
+): String {
+    val requestManager = Glide.with(context.applicationContext)
+    val request = requestManager
+        .downloadOnly()
+        .load(model)
+        .diskCacheStrategy(DiskCacheStrategy.DATA)
+        .skipMemoryCache(true)
+        .let { builder ->
+            if (dateModifiedMillis > 0L) builder.signature(ObjectKey(dateModifiedMillis)) else builder
+        }
+    val target = request.submit()
+    val token = ViewerLoadMetrics.workStarted(
+        "REGION_SOURCE_FILE",
+        imageKey,
+        "model=${model.javaClass.simpleName}",
+    )
+    return try {
+        val cachedFile = runInterruptible(Dispatchers.IO) { target.get() }
+        val resolved = cachedFile
+            ?.takeIf { it.isFile && it.canRead() }
+            ?.absolutePath
+            ?: fallbackPath
+        ViewerLoadMetrics.workReady(
+            token,
+            source = if (resolved == fallbackPath) "ORIGINAL_FALLBACK" else "GLIDE_DATA_CACHE",
+            detail = "file=${File(resolved).name} bytes=${File(resolved).length()}",
+        )
+        resolved
+    } catch (e: CancellationException) {
+        ViewerLoadMetrics.workCleared(token, "cancelled")
+        throw e
+    } catch (e: Exception) {
+        ViewerLoadMetrics.workCleared(token, "fallback=${e.javaClass.simpleName}")
+        fallbackPath
+    } finally {
+        requestManager.clear(target)
+    }
+}
+
+private fun applyPreviewTransform(
+    imageView: android.widget.ImageView,
+    userScale: Float,
+    offsetX: Float,
+    offsetY: Float,
+) {
+    imageView.pivotX = imageView.width / 2f
+    imageView.pivotY = imageView.height / 2f
+    imageView.rotation = 0f
+    imageView.scaleX = userScale
+    imageView.scaleY = userScale
+    imageView.translationX = offsetX
+    imageView.translationY = offsetY
+}
+
 private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boolean {
     if (state == null || state.baseFitScale <= 0f) return false
     val relativeScale = state.scale / state.baseFitScale
@@ -338,6 +378,8 @@ internal fun SimpleSubsamplingImageView(
     var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetX) }
     var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetY) }
     var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
+    var previewTransformSyncRevision by remember(transformStateKey) { mutableIntStateOf(0) }
+    var previewTakeoverPending by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
     var imageSessionGeneration by remember(transformStateKey) { mutableIntStateOf(0) }
     val previewRequestGuard = remember(transformStateKey) { PreviewRequestGuard() }
@@ -346,6 +388,9 @@ internal fun SimpleSubsamplingImageView(
     var metricsSessionId by remember(transformStateKey) { mutableStateOf(0L) }
     val renderedLayer = remember(transformStateKey) { AtomicReference("UNSET") }
     val currentOnContentReadyChanged by rememberUpdatedState(onContentReadyChanged)
+    val currentPreviewUserScale by rememberUpdatedState(previewUserScale)
+    val currentPreviewOffsetX by rememberUpdatedState(previewOffsetX)
+    val currentPreviewOffsetY by rememberUpdatedState(previewOffsetY)
 
     // Active-page bookkeeping is intentionally separate from preview loading.
     // A preview that was loaded while swiping must not be restarted on the settle frame.
@@ -457,6 +502,21 @@ internal fun SimpleSubsamplingImageView(
                     view.alpha = 0f
                     ssivBaseDrawn = false
                     view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                    val regionSourcePath = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                        val sourceModel = uri
+                            .takeIf { it.isNotBlank() }
+                            ?.let(Uri::parse)
+                            ?: imagePath
+                        resolveGlideDataCacheFile(
+                            context = context,
+                            model = sourceModel,
+                            dateModifiedMillis = dateModifiedMillis,
+                            fallbackPath = imagePath,
+                            imageKey = transformStateKey,
+                        )
+                    } else {
+                        imagePath
+                    }
                     imageSessionGeneration += 1
                     imageAssigned = true
                     val normalizedOrientation = ((orientationDegrees % 360) + 360) % 360
@@ -480,7 +540,7 @@ internal fun SimpleSubsamplingImageView(
                         imageKey = transformStateKey,
                     )
                     view.setImage(
-                        path = imagePath,
+                        path = regionSourcePath,
                         borrowedPreview = borrowedPreview,
                         previewSourceWidth = if (borrowedPreview != null) sourceWidth else 0,
                         previewSourceHeight = if (borrowedPreview != null) sourceHeight else 0,
@@ -509,7 +569,6 @@ internal fun SimpleSubsamplingImageView(
                     transformStateStore.save(transformStateKey, it, "page-inactive")
                 }
                 imageSessionGeneration += 1
-                val purged = tileDecodeExecutor.purgePendingTasks()
                 view.recycle()
                 view.visibility = View.GONE
                 view.alpha = 0f
@@ -518,7 +577,8 @@ internal fun SimpleSubsamplingImageView(
                 ssivBaseDrawn = false
                 ViewerLoadMetrics.workReady(
                     recycleToken,
-                    detail = "purged=$purged executorActive=${tileDecodeExecutor.activeCount}",
+                    detail = "executorActive=${tileDecodeExecutor.activeCount} " +
+                        "executorQueued=${tileDecodeExecutor.queue.size}",
                 )
             }
         }
@@ -540,6 +600,21 @@ internal fun SimpleSubsamplingImageView(
             !ssivBaseDrawn || !isActivePage || !imageAssigned || subsamplingReady ||
             previewGestureInProgress
         ) return@LaunchedEffect
+
+        // The gesture may briefly cross above fit (which starts SSIV) and then finish
+        // below fit. In that case the screen-sized preview is already the correct and
+        // cheaper renderer. Never perform a late PREVIEW -> TILES swap at the final
+        // below-fit scale; that swap is the full-screen background flash.
+        if (previewOwnsTransform && previewUserScale <= 1.02f) {
+            deepZoomRequested = false
+            ViewerLoadMetrics.event(
+                "DEEP_ZOOM_HANDOFF_CANCELLED",
+                "reason=ended-at-or-below-fit previewScale=$previewUserScale " +
+                    "assigned=$imageAssigned baseDrawn=$ssivBaseDrawn",
+                imageKey = transformStateKey,
+            )
+            return@LaunchedEffect
+        }
 
         val view = ssivView ?: return@LaunchedEffect
         val liveSsivState = view.snapshotViewState()
@@ -582,6 +657,7 @@ internal fun SimpleSubsamplingImageView(
         if (isActivePage && imageAssigned && ssivBaseDrawn) {
             val frameState = view.snapshotViewState()
             previewOwnsTransform = false
+            view.visibility = View.VISIBLE
             view.alpha = 1f
             subsamplingReady = true
             // The first visible SSIV frame keeps using the exact Glide bitmap that
@@ -619,7 +695,15 @@ internal fun SimpleSubsamplingImageView(
             val savedTransform = transformStateStore.get(transformStateKey)
             val previewUsesContainerTransform = previewOwnsTransform
             imageView.visibility = View.VISIBLE
-            val requestModel = previewModel ?: imagePath
+            // Telephoto's Glide adapter resolves local photos through the MediaStore URI,
+            // forces DATA caching, then gives its private cache file to the region decoder.
+            // Keep format-specific models unchanged, but use that same route for platform
+            // JPEG/PNG decoding instead of decoding every tile from shared external storage.
+            val requestModel = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                uri.takeIf { it.isNotBlank() }?.let(Uri::parse) ?: imagePath
+            } else {
+                previewModel ?: imagePath
+            }
             val metricsToken = previewRequestGuard.begin(
                 imageView = imageView,
                 key = transformStateKey,
@@ -642,7 +726,13 @@ internal fun SimpleSubsamplingImageView(
                 val requestOptions = RequestOptions()
                     .withViewerTaskCompression()
                     .format(DecodeFormat.PREFER_ARGB_8888)
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .diskCacheStrategy(
+                        if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                            DiskCacheStrategy.ALL
+                        } else {
+                            DiskCacheStrategy.RESOURCE
+                        },
+                    )
                     .downsample(DownsampleStrategy.FIT_CENTER)
                     .priority(if (isActivePage) Priority.IMMEDIATE else Priority.NORMAL)
                     .let { opts ->
@@ -660,7 +750,7 @@ internal fun SimpleSubsamplingImageView(
                     // Match Simple Gallery's local-photo path exactly. Going through the
                     // MediaStore URI selects Glide's QMediaStore loader even though SSIV
                     // already proved that the original file is directly readable.
-                    .load(previewModel ?: imagePath)
+                    .load(requestModel)
                     .apply(requestOptions)
                     .listener(object : com.bumptech.glide.request.RequestListener<Drawable> {
                         override fun onLoadFailed(
@@ -704,11 +794,20 @@ internal fun SimpleSubsamplingImageView(
                                             imageView.viewTreeObserver.removeOnPreDrawListener(this)
                                         }
                                         if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
-                                            applySavedPreviewTransform(
-                                                imageView,
-                                                imageView.drawable ?: resource,
-                                                savedTransform.takeUnless { previewUsesContainerTransform }
-                                            )
+                                            if (previewUsesContainerTransform) {
+                                                applyPreviewTransform(
+                                                    imageView,
+                                                    currentPreviewUserScale,
+                                                    currentPreviewOffsetX,
+                                                    currentPreviewOffsetY,
+                                                )
+                                            } else {
+                                                applySavedPreviewTransform(
+                                                    imageView,
+                                                    imageView.drawable ?: resource,
+                                                    savedTransform,
+                                                )
+                                            }
                                             imageView.alpha = 1f
                                         }
                                         return true
@@ -722,11 +821,20 @@ internal fun SimpleSubsamplingImageView(
                                     previewRequestGuard.isCurrent(imageView, transformStateKey) &&
                                     imageView.alpha == 0f
                                 ) {
-                                    applySavedPreviewTransform(
-                                        imageView,
-                                        imageView.drawable ?: resource,
-                                        savedTransform.takeUnless { previewUsesContainerTransform }
-                                    )
+                                    if (previewUsesContainerTransform) {
+                                        applyPreviewTransform(
+                                            imageView,
+                                            currentPreviewUserScale,
+                                            currentPreviewOffsetX,
+                                            currentPreviewOffsetY,
+                                        )
+                                    } else {
+                                        applySavedPreviewTransform(
+                                            imageView,
+                                            imageView.drawable ?: resource,
+                                            savedTransform,
+                                        )
+                                    }
                                     imageView.alpha = 1f
                                 }
                             }
@@ -794,15 +902,15 @@ internal fun SimpleSubsamplingImageView(
             minScale = previewMinScale,
             maxScale = previewMaxScale,
             scaleToOriginal = scaleToOriginal,
-            initialScale = savedPreviewScale,
-            initialOffsetX = savedPreviewOffsetX,
-            initialOffsetY = savedPreviewOffsetY,
-            // When returning to a page whose transform belongs to SSIV, the ImageView
-            // already receives that saved transform directly. Reapplying the stale
-            // outer preview transform would double-scale it for one frame before SSIV
-            // appears, which is the visible size jump during pager return.
+            initialScale = previewUserScale,
+            initialOffsetX = previewOffsetX,
+            initialOffsetY = previewOffsetY,
+            transformSyncRevision = previewTransformSyncRevision,
             enabled = isActivePage && !subsamplingReady && previewOwnsTransform,
-            autoApplyTransformations = !subsamplingReady && previewOwnsTransform,
+            // Apply preview transforms directly to the ImageView. Transforming the
+            // outer FrameLayout also transforms its SSIV sibling and makes an atomic
+            // tile-to-preview handoff impossible.
+            autoApplyTransformations = false,
             imageFitScaleX = fitWidthFraction,
             imageFitScaleY = fitHeightFraction,
             onTap = onClick,
@@ -819,17 +927,60 @@ internal fun SimpleSubsamplingImageView(
             },
             onZoomGestureEnded = {
                 previewGestureInProgress = false
+                if (previewOwnsTransform && previewUserScale <= 1.02f) {
+                    // A gesture that briefly crossed fit no longer needs a renderer
+                    // handoff when it finishes below fit.
+                    deepZoomRequested = false
+                }
                 ViewerLoadMetrics.event(
                     "DEEP_ZOOM_GESTURE_END",
                     "previewScale=$previewUserScale previewOffset=${previewOffsetX},${previewOffsetY}",
                     imageKey = transformStateKey,
                 )
             },
+            onExternalTransformSynced = {
+                if (previewTakeoverPending) {
+                    imageViewRef?.let { imageView ->
+                        applyPreviewTransform(
+                            imageView,
+                            previewUserScale,
+                            previewOffsetX,
+                            previewOffsetY,
+                        )
+                        imageView.alpha = 1f
+                        imageView.visibility = View.VISIBLE
+                    }
+                    ssivView?.let { view ->
+                        view.alpha = 0f
+                        view.visibility = View.GONE
+                    }
+                    previewOwnsTransform = true
+                    subsamplingReady = false
+                    deepZoomRequested = false
+                    previewTakeoverPending = false
+                    ViewerLoadMetrics.event(
+                        "PREVIEW_TAKEOVER_COMPLETE",
+                        "scale=$previewUserScale offset=${previewOffsetX},${previewOffsetY} " +
+                            "revision=$previewTransformSyncRevision",
+                        imageKey = transformStateKey,
+                    )
+                }
+            },
+            onTransformFrame = { scale, offsetX, offsetY ->
+                if (previewOwnsTransform) {
+                    imageViewRef?.let { imageView ->
+                        applyPreviewTransform(imageView, scale, offsetX, offsetY)
+                    }
+                }
+            },
             onTransformChanged = { scale, offsetX, offsetY ->
-                if (!subsamplingReady && previewOwnsTransform) {
+                if (previewOwnsTransform) {
                     previewUserScale = scale
                     previewOffsetX = offsetX
                     previewOffsetY = offsetY
+                    imageViewRef?.let { imageView ->
+                        applyPreviewTransform(imageView, scale, offsetX, offsetY)
+                    }
                     previewTransformState(
                         userScale = scale,
                         offsetX = offsetX,
@@ -880,6 +1031,10 @@ internal fun SimpleSubsamplingImageView(
                 taskExecutor = tileDecodeExecutor
                 rotationEnabled = true
                 doubleTapReturnsToFit = true
+                // Direct fit-preview gestures already clamp at their configured minimum.
+                // Keep the deferred tile renderer on that same rule so crossing into SSIV does
+                // not introduce overshrink/rebound or a transient off-centre frame.
+                strictScaleBounds = true
                 orientation = ((orientationDegrees % 360) + 360) % 360
 
                 val bitmapDecoder = object : DecoderFactory<ImageDecoder> {
@@ -1000,14 +1155,53 @@ internal fun SimpleSubsamplingImageView(
                                 return@postDelayed
                             }
                             this@ssivView.snapshotViewState()?.let { state ->
-                                transformStateStore.save(transformStateKey, state, "touch-settled")
+                                val relativeScale = if (state.baseFitScale > 0f) {
+                                    state.scale / state.baseFitScale
+                                } else {
+                                    Float.POSITIVE_INFINITY
+                                }
+                                val returnToPreview =
+                                    relativeScale <= 1.02f &&
+                                        kotlin.math.abs(state.rotationRadians) <= 0.001
+                                val settledState = if (returnToPreview) {
+                                    // Below fit, the complete image is visible and therefore has
+                                    // no valid pan range. Persist an exactly centred state even if
+                                    // the final MotionEvent was cancelled by the parent Pager.
+                                    state.copy(
+                                        sourceCenter = PointF(
+                                            state.sourceWidth / 2f,
+                                            state.sourceHeight / 2f,
+                                        ),
+                                    )
+                                } else {
+                                    state
+                                }
+                                transformStateStore.save(
+                                    transformStateKey,
+                                    settledState,
+                                    if (returnToPreview) "touch-settled-preview" else "touch-settled",
+                                )
                                 ViewerLoadMetrics.event(
                                     "SSIV_TOUCH_SETTLED",
-                                    "scale=${state.scale} center=${state.sourceCenter} " +
-                                        "base=${state.baseFitScale} rotation=${state.rotationRadians} " +
+                                    "scale=${settledState.scale} center=${settledState.sourceCenter} " +
+                                        "base=${settledState.baseFitScale} rotation=${settledState.rotationRadians} " +
                                         "generation=$saveGeneration revision=${transformStateStore.revision(transformStateKey)}",
                                     imageKey = transformStateKey,
                                 )
+                                if (returnToPreview && !previewTakeoverPending) {
+                                    previewUserScale = relativeScale.coerceAtLeast(0.01f)
+                                    previewOffsetX = 0f
+                                    previewOffsetY = 0f
+                                    previewTakeoverPending = true
+                                    previewTransformSyncRevision += 1
+                                    ViewerLoadMetrics.event(
+                                        "PREVIEW_TAKEOVER_REQUEST",
+                                        "scale=$previewUserScale fromCenter=${state.sourceCenter} " +
+                                            "toCenter=${settledState.sourceCenter} " +
+                                            "revision=$previewTransformSyncRevision",
+                                        imageKey = transformStateKey,
+                                    )
+                                }
                             }
                         }, 220L)
                     }
@@ -1073,7 +1267,14 @@ internal fun SimpleSubsamplingImageView(
                     if (previousLayer == "TILES" && previewLoaded) {
                         val drawable = imageView.drawable
                         val latestState = transformStateStore.get(transformStateKey)
-                        if (drawable != null && latestState != null) {
+                        if (previewOwnsTransform) {
+                            applyPreviewTransform(
+                                imageView,
+                                previewUserScale,
+                                previewOffsetX,
+                                previewOffsetY,
+                            )
+                        } else if (drawable != null && latestState != null) {
                             applySavedPreviewTransform(imageView, drawable, latestState)
                         }
                         ViewerLoadMetrics.event(
@@ -1085,6 +1286,14 @@ internal fun SimpleSubsamplingImageView(
                         imageView.visibility = View.VISIBLE
                         imageView.alpha = 1f
                     } else {
+                        if (previewOwnsTransform) {
+                            applyPreviewTransform(
+                                imageView,
+                                previewUserScale,
+                                previewOffsetX,
+                                previewOffsetY,
+                            )
+                        }
                         imageView.visibility = View.VISIBLE
                     }
                 } else {

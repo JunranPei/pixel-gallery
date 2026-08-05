@@ -12,7 +12,9 @@ import java.io.FileInputStream
 
 val keystoreProperties = Properties()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
-val viewerMetricsEnabled = viewerTestVariant == "trace" || viewerTestVariant == "compressed"
+val viewerMetricsEnabled = viewerTestVariant == "trace" ||
+    viewerTestVariant == "compressed" ||
+    viewerTestVariant == "zoomtrace"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -37,19 +39,21 @@ android {
             "trace" -> "com.pixel.gallery.shortcuts.codextrace"
             "clean" -> "com.pixel.gallery.shortcuts.codexclean"
             "compressed" -> "com.pixel.gallery.shortcuts.codexcompressed"
+            "zoomtrace" -> "com.pixel.gallery.shortcuts.zoomtrace"
             else -> "com.pixel.gallery.shortcuts"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "trace" -> "Pixel Shortcuts Trace"
             "clean" -> "Pixel Shortcuts Clean"
             "compressed" -> "Pixel Shortcuts Compressed"
+            "zoomtrace" -> "Pixel Shortcuts Zoom Trace"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         minSdk = 26
         targetSdk = 35
-        versionCode = 29
-        versionName = "4.2.15-multi-entry"
+        versionCode = 30
+        versionName = "4.2.15.1-multi-entry"
     }
 
     signingConfigs {
@@ -228,4 +232,5 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("junit:junit:4.13.2")
 }
