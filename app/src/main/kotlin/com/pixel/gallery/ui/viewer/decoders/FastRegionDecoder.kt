@@ -10,6 +10,8 @@ import android.net.Uri
 import android.os.SystemClock
 import com.davemorrissey.labs.subscaleview.BatchedImageRegionDecoder
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
+import io.github.indexedjpeg.IndexedJpegRegionDecoder
+import io.github.indexedjpeg.IndexedJpegStore
 import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
@@ -112,6 +114,11 @@ class FastRegionDecoder(
     private lateinit var tileCacheDir: File
     private lateinit var appContext: Context
     private lateinit var sourceUri: Uri
+    private var localSourcePath: String? = null
+    private var indexedStore: IndexedJpegStore? = null
+    private var indexedDecoder: IndexedJpegRegionDecoder? = null
+    private var indexedGeneration = Long.MIN_VALUE
+    private var indexedDecodeFailed = false
     private var initialized = false
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
@@ -124,6 +131,13 @@ class FastRegionDecoder(
         )
         appContext = context.applicationContext
         sourceUri = uri
+        localSourcePath = if (uri.scheme == "file" || uri.scheme == null) {
+            val path = uri.path ?: uri.toString()
+            File(path).takeIf { it.isFile && it.canRead() }?.absolutePath
+        } else {
+            null
+        }
+        indexedStore = IndexedJpegStore(appContext)
         metricsKey = imageVersion
         metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
@@ -207,8 +221,7 @@ class FastRegionDecoder(
             }
 
             val decodeStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            val bitmap = openDecoder("tile-cache-miss").decodeRegion(rect, options)
-                ?: throw RuntimeException("Region decoder returned null bitmap")
+            val (bitmap, source) = decodeSourceRegion(rect, newSampleSize, options, "tile-cache-miss")
             if (metricsEnabled) {
                 ViewerLoadMetrics.regionDecoded(
                     imageKey = metricsKey,
@@ -229,7 +242,7 @@ class FastRegionDecoder(
             )
             ViewerLoadMetrics.workReady(
                 decodeToken,
-                source = "SOURCE_REGION_DECODE",
+                source = source,
                 detail = "actualSample=$newSampleSize bitmap=${attached.width}x${attached.height} " +
                     "config=${attached.config} cacheWrite=DEFERRED",
             )
@@ -271,8 +284,12 @@ class FastRegionDecoder(
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val decodeStartedAt = SystemClock.elapsedRealtimeNanos()
-            val unionBitmap = openDecoder("tile-batch-cache-miss").decodeRegion(union, options)
-                ?: throw RuntimeException("Region decoder returned null batch bitmap")
+            val (unionBitmap, source) = decodeSourceRegion(
+                union,
+                actualSample,
+                options,
+                "tile-batch-cache-miss",
+            )
             val decodeDurationMs =
                 (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
             if (ViewerLoadMetrics.isEnabled) {
@@ -326,7 +343,11 @@ class FastRegionDecoder(
             }
             ViewerLoadMetrics.workReady(
                 batchToken,
-                source = "SOURCE_REGION_BATCH_DECODE",
+                source = if (source == "INDEXED_JPEG_REGION_DECODE") {
+                    "INDEXED_JPEG_REGION_BATCH_DECODE"
+                } else {
+                    "SOURCE_REGION_BATCH_DECODE"
+                },
                 detail = "count=${attached.size} actualSample=$actualSample decodeMs=$decodeDurationMs",
             )
             return attached
@@ -356,6 +377,11 @@ class FastRegionDecoder(
             decoder = null
             decoderInputStream?.close()
             decoderInputStream = null
+            indexedDecoder?.close()
+            indexedDecoder = null
+            indexedStore = null
+            indexedGeneration = Long.MIN_VALUE
+            indexedDecodeFailed = false
             initialized = false
         }
         ViewerLoadMetrics.workReady(token)
@@ -429,6 +455,71 @@ class FastRegionDecoder(
             }
         }
         return effective
+    }
+
+    private fun decodeSourceRegion(
+        rect: Rect,
+        sampleSize: Int,
+        options: BitmapFactory.Options,
+        fallbackReason: String,
+    ): Pair<Bitmap, String> {
+        refreshIndexedDecoder()?.let { indexed ->
+            val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                SystemClock.elapsedRealtimeNanos()
+            } else {
+                0L
+            }
+            val bitmap = try {
+                indexed.decodeRegion(rect, sampleSize)
+            } catch (_: Throwable) {
+                null
+            }
+            if (bitmap != null) {
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.event(
+                        "INDEXED_JPEG_REGION_DECODE",
+                        "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} " +
+                            "sample=$sampleSize bitmap=${bitmap.width}x${bitmap.height} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                        imageKey = imageVersion,
+                    )
+                }
+                return bitmap to "INDEXED_JPEG_REGION_DECODE"
+            }
+            indexed.close()
+            indexedDecoder = null
+            indexedDecodeFailed = true
+            ViewerLoadMetrics.event(
+                "INDEXED_JPEG_FALLBACK",
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+                imageKey = imageVersion,
+            )
+        }
+
+        val bitmap = openDecoder(fallbackReason).decodeRegion(rect, options)
+            ?: throw RuntimeException("Region decoder returned null bitmap")
+        return bitmap to "SOURCE_REGION_DECODE"
+    }
+
+    private fun refreshIndexedDecoder(): IndexedJpegRegionDecoder? {
+        val store = indexedStore ?: return null
+        val sourcePath = localSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedGeneration != generation) {
+            indexedDecoder?.close()
+            indexedDecoder = null
+            indexedGeneration = generation
+            indexedDecodeFailed = false
+        }
+        if (indexedDecodeFailed) return null
+        indexedDecoder?.let { return it }
+        indexedDecoder = try {
+            store.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedDecoder == null) indexedDecodeFailed = true
+        return indexedDecoder
     }
 
     private fun ceilDiv(value: Int, divisor: Int): Int =

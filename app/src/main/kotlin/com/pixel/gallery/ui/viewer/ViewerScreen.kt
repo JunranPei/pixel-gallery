@@ -56,6 +56,8 @@ import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
 import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
 import com.pixel.gallery.ui.viewer.formats.ViewerRenderPlan
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
+import io.github.indexedjpeg.IndexedJpegStatus
+import io.github.indexedjpeg.IndexedJpegStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -110,6 +112,8 @@ private val MapnikHttps = XYTileSource(
 )
 
 private val viewerPhotoMetadataCache = ConcurrentHashMap<String, ViewerPhotoMetadata>()
+
+private enum class JpegIndexAction { BUILD, DELETE }
 
 private fun MediaEntry.viewerCacheKey(): String = "$contentId:$dateModifiedMillis"
 
@@ -294,6 +298,30 @@ fun ViewerScreen(
 
     val currentMediaCacheKey = remember(currentMedia?.contentId, currentMedia?.dateModifiedMillis) {
         currentMedia?.viewerCacheKey()
+    }
+    val jpegIndexStore = remember(context.applicationContext) {
+        IndexedJpegStore(context.applicationContext)
+    }
+    val currentJpegIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf { it.canContainMotionPhoto() }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    var jpegIndexStatus by remember { mutableStateOf<IndexedJpegStatus?>(null) }
+    var jpegIndexAction by remember { mutableStateOf<JpegIndexAction?>(null) }
+    var jpegIndexBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(currentJpegIndexPath) {
+        jpegIndexAction = null
+        jpegIndexBusy = false
+        jpegIndexStatus = currentJpegIndexPath?.let { path ->
+            withContext(Dispatchers.IO) { jpegIndexStore.status(path) }
+        }
     }
     val settledMediaCacheKey = remember(pagerState.settledPage, photos) {
         photos.getOrNull(pagerState.settledPage)?.viewerCacheKey()
@@ -997,6 +1025,37 @@ fun ViewerScreen(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
+                            if (currentJpegIndexPath != null) {
+                                val indexReady = jpegIndexStatus is IndexedJpegStatus.Ready
+                                val indexChecking = jpegIndexStatus == null
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            when {
+                                                jpegIndexBusy -> "Building JPEG index…"
+                                                indexChecking -> "Checking JPEG index…"
+                                                indexReady -> "Delete JPEG index"
+                                                else -> "Build JPEG index"
+                                            }
+                                        )
+                                    },
+                                    enabled = !jpegIndexBusy && !indexChecking,
+                                    onClick = {
+                                        showMenu = false
+                                        jpegIndexAction = if (indexReady) {
+                                            JpegIndexAction.DELETE
+                                        } else {
+                                            JpegIndexAction.BUILD
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Set as Wallpaper") },
                                 onClick = {
@@ -1150,6 +1209,73 @@ fun ViewerScreen(
                 }
             }
         )
+
+        jpegIndexAction?.let { action ->
+            val isBuild = action == JpegIndexAction.BUILD
+            AlertDialog(
+                onDismissRequest = { if (!jpegIndexBusy) jpegIndexAction = null },
+                title = {
+                    Text(if (isBuild) "Build JPEG index?" else "Delete JPEG index?")
+                },
+                text = {
+                    Text(
+                        if (isBuild) {
+                            "This reads the complete JPEG once and may briefly use significant power. " +
+                                "The saved index applies only to this image and is used for every zoom level."
+                        } else {
+                            "Delete the saved seek index for this image? Future uncached tiles will use " +
+                                "the standard decoder again."
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !jpegIndexBusy,
+                        onClick = {
+                            val path = currentJpegIndexPath ?: return@TextButton
+                            jpegIndexAction = null
+                            jpegIndexBusy = isBuild
+                            viewerScope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        if (isBuild) {
+                                            jpegIndexStore.build(path)
+                                            "JPEG index built"
+                                        } else {
+                                            check(jpegIndexStore.delete(path)) {
+                                                "Unable to delete the JPEG index"
+                                            }
+                                            "JPEG index deleted"
+                                        }
+                                    }
+                                }
+                                if (currentJpegIndexPath == path) {
+                                    jpegIndexBusy = false
+                                    jpegIndexStatus = withContext(Dispatchers.IO) {
+                                        jpegIndexStore.status(path)
+                                    }
+                                }
+                                android.widget.Toast.makeText(
+                                    context,
+                                    result.getOrElse { it.message ?: "JPEG index operation failed" },
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        },
+                    ) {
+                        Text(if (isBuild) "Build index" else "Delete index")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !jpegIndexBusy,
+                        onClick = { jpegIndexAction = null },
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
     }
 }
 

@@ -44,6 +44,7 @@ android {
             "clean" -> "com.pixel.gallery.codexclean"
             "compressed" -> "com.pixel.gallery.codexcompressed"
             "zoomtrace" -> "com.pixel.gallery.zoomtrace"
+            "jpegindex" -> "com.pixel.gallery.jpegindextest"
             else -> "com.pixel.gallery.multitask"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
@@ -52,6 +53,7 @@ android {
             "clean" -> "Pixel Clean"
             "compressed" -> "Pixel Compressed"
             "zoomtrace" -> "Pixel Zoom Trace"
+            "jpegindex" -> "Pixel JPEG Index"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
@@ -218,6 +220,7 @@ dependencies {
         exclude(group = "me.saket.telephoto", module = "sub-sampling-image")
     }
     implementation(project(":ssiv-pixel"))
+    implementation(project(":indexed-jpeg"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")
