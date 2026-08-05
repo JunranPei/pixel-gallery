@@ -67,6 +67,8 @@ import io.github.indexedwebp.IndexedWebpStatus
 import io.github.indexedwebp.IndexedWebpStore
 import io.github.indexedraw.IndexedRawStatus
 import io.github.indexedraw.IndexedRawStore
+import io.github.indexedheif.IndexedHeifStatus
+import io.github.indexedheif.IndexedHeifStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -135,6 +137,7 @@ private enum class IndexedImageFormat(val displayName: String) {
     TIFF("TIFF"),
     WEBP("WebP"),
     RAW("RAW"),
+    HEIF("HEIF/AVIF"),
 }
 
 private data class IndexedImageTarget(
@@ -343,6 +346,9 @@ fun ViewerScreen(
     val rawIndexStore = remember(context.applicationContext) {
         IndexedRawStore(context.applicationContext)
     }
+    val heifIndexStore = remember(context.applicationContext) {
+        IndexedHeifStore(context.applicationContext)
+    }
     val currentJpegIndexPath = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -411,12 +417,27 @@ fun ViewerScreen(
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
+    val currentHeifIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                MimeTypes.isIsoBMFFImage(it.sourceMimeType.substringBefore(';').trim().lowercase()) ||
+                    it.path.substringAfterLast('.', "").lowercase() in setOf("heic", "heif", "hif", "avif")
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
     val currentIndexTarget = remember(
         currentJpegIndexPath,
         currentPngIndexPath,
         currentTiffIndexPath,
         currentWebpIndexPath,
         currentRawIndexPath,
+        currentHeifIndexPath,
     ) {
         when {
             currentJpegIndexPath != null -> IndexedImageTarget(
@@ -439,6 +460,10 @@ fun ViewerScreen(
                 format = IndexedImageFormat.RAW,
                 path = currentRawIndexPath,
             )
+            currentHeifIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.HEIF,
+                path = currentHeifIndexPath,
+            )
             else -> null
         }
     }
@@ -456,6 +481,7 @@ fun ViewerScreen(
                     IndexedImageFormat.TIFF -> tiffIndexStore.status(target.path) is IndexedTiffStatus.Ready
                     IndexedImageFormat.WEBP -> webpIndexStore.status(target.path) is IndexedWebpStatus.Ready
                     IndexedImageFormat.RAW -> rawIndexStore.status(target.path) is IndexedRawStatus.Ready
+                    IndexedImageFormat.HEIF -> heifIndexStore.status(target.path) is IndexedHeifStatus.Ready
                 }
             }
         }
@@ -1379,6 +1405,9 @@ fun ViewerScreen(
                                 IndexedImageFormat.RAW ->
                                     "This develops the complete camera RAW once with camera white balance and " +
                                         "builds a lossless sRGB tile pyramid. The original RAW is never changed."
+                                IndexedImageFormat.HEIF ->
+                                    "This reads bounded HEIF/AVIF regions once and builds a lossless tile " +
+                                        "pyramid. The complete decoded image is never held in memory."
                             }
                         } else {
                             "Delete the saved $formatName index for this image? Future uncached tiles will use " +
@@ -1432,6 +1461,13 @@ fun ViewerScreen(
                                                     "Unable to delete the RAW index"
                                                 }
                                             }
+                                            IndexedImageFormat.HEIF -> if (isBuild) {
+                                                heifIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(heifIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the HEIF/AVIF index"
+                                                }
+                                            }
                                         }
                                         "$formatName index ${if (isBuild) "built" else "deleted"}"
                                     }
@@ -1450,6 +1486,8 @@ fun ViewerScreen(
                                                 webpIndexStore.status(operationTarget.path) is IndexedWebpStatus.Ready
                                             IndexedImageFormat.RAW ->
                                                 rawIndexStore.status(operationTarget.path) is IndexedRawStatus.Ready
+                                            IndexedImageFormat.HEIF ->
+                                                heifIndexStore.status(operationTarget.path) is IndexedHeifStatus.Ready
                                         }
                                     }
                                 }

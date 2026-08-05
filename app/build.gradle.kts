@@ -231,6 +231,7 @@ dependencies {
     implementation(project(":indexed-tiff"))
     implementation(project(":indexed-webp"))
     implementation(project(":indexed-raw"))
+    implementation(project(":indexed-heif"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")

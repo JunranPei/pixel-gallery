@@ -18,6 +18,8 @@ import io.github.indexedpng.IndexedPngRegionDecoder
 import io.github.indexedpng.IndexedPngStore
 import io.github.indexedwebp.IndexedWebpRegionDecoder
 import io.github.indexedwebp.IndexedWebpStore
+import io.github.indexedheif.IndexedHeifRegionDecoder
+import io.github.indexedheif.IndexedHeifStore
 import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
@@ -134,6 +136,10 @@ class FastRegionDecoder(
     private var indexedWebpDecoder: IndexedWebpRegionDecoder? = null
     private var indexedWebpGeneration = Long.MIN_VALUE
     private var indexedWebpDecodeFailed = false
+    private var indexedHeifStore: IndexedHeifStore? = null
+    private var indexedHeifDecoder: IndexedHeifRegionDecoder? = null
+    private var indexedHeifGeneration = Long.MIN_VALUE
+    private var indexedHeifDecodeFailed = false
     private var initialized = false
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
@@ -155,6 +161,7 @@ class FastRegionDecoder(
         indexedStore = IndexedJpegStore(appContext)
         indexedPngStore = IndexedPngStore(appContext)
         indexedWebpStore = IndexedWebpStore(appContext)
+        indexedHeifStore = IndexedHeifStore(appContext)
         metricsKey = imageVersion
         metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
@@ -410,6 +417,11 @@ class FastRegionDecoder(
             indexedWebpStore = null
             indexedWebpGeneration = Long.MIN_VALUE
             indexedWebpDecodeFailed = false
+            indexedHeifDecoder?.close()
+            indexedHeifDecoder = null
+            indexedHeifStore = null
+            indexedHeifGeneration = Long.MIN_VALUE
+            indexedHeifDecodeFailed = false
             initialized = false
         }
         ViewerLoadMetrics.workReady(token)
@@ -590,6 +602,39 @@ class FastRegionDecoder(
             )
         }
 
+        refreshIndexedHeifDecoder()?.let { indexed ->
+            val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                SystemClock.elapsedRealtimeNanos()
+            } else {
+                0L
+            }
+            val bitmap = try {
+                indexed.decodeRegion(rect, sampleSize)
+            } catch (_: Throwable) {
+                null
+            }
+            if (bitmap != null) {
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.event(
+                        "INDEXED_HEIF_REGION_DECODE",
+                        "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} " +
+                            "sample=$sampleSize bitmap=${bitmap.width}x${bitmap.height} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                        imageKey = imageVersion,
+                    )
+                }
+                return bitmap to "INDEXED_HEIF_REGION_DECODE"
+            }
+            indexed.close()
+            indexedHeifDecoder = null
+            indexedHeifDecodeFailed = true
+            ViewerLoadMetrics.event(
+                "INDEXED_HEIF_FALLBACK",
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+                imageKey = imageVersion,
+            )
+        }
+
         val bitmap = openDecoder(fallbackReason).decodeRegion(rect, options)
             ?: throw RuntimeException("Region decoder returned null bitmap")
         return bitmap to "SOURCE_REGION_DECODE"
@@ -659,6 +704,28 @@ class FastRegionDecoder(
         if (indexedWebpDecoder == null) indexedWebpDecodeFailed = true
         logIndexOpen("WEBP", sourcePath, indexedWebpDecoder != null)
         return indexedWebpDecoder
+    }
+
+    private fun refreshIndexedHeifDecoder(): IndexedHeifRegionDecoder? {
+        val store = indexedHeifStore ?: return null
+        val sourcePath = indexedSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedHeifGeneration != generation) {
+            indexedHeifDecoder?.close()
+            indexedHeifDecoder = null
+            indexedHeifGeneration = generation
+            indexedHeifDecodeFailed = false
+        }
+        if (indexedHeifDecodeFailed) return null
+        indexedHeifDecoder?.let { return it }
+        indexedHeifDecoder = try {
+            store.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedHeifDecoder == null) indexedHeifDecodeFailed = true
+        logIndexOpen("HEIF_AVIF", sourcePath, indexedHeifDecoder != null)
+        return indexedHeifDecoder
     }
 
     private fun logIndexOpen(format: String, sourcePath: String, hit: Boolean) {
