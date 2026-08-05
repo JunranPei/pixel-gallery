@@ -60,6 +60,8 @@ import io.github.indexedjpeg.IndexedJpegStatus
 import io.github.indexedjpeg.IndexedJpegStore
 import io.github.indexedpng.IndexedPngStatus
 import io.github.indexedpng.IndexedPngStore
+import io.github.indexedtiff.IndexedTiffStatus
+import io.github.indexedtiff.IndexedTiffStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -118,6 +120,7 @@ private val viewerPhotoMetadataCache = ConcurrentHashMap<String, ViewerPhotoMeta
 private enum class IndexedImageFormat(val displayName: String) {
     JPEG("JPEG"),
     PNG("PNG"),
+    TIFF("TIFF"),
 }
 
 private data class IndexedImageTarget(
@@ -317,6 +320,9 @@ fun ViewerScreen(
     val pngIndexStore = remember(context.applicationContext) {
         IndexedPngStore(context.applicationContext)
     }
+    val tiffIndexStore = remember(context.applicationContext) {
+        IndexedTiffStore(context.applicationContext)
+    }
     val currentJpegIndexPath = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -342,7 +348,26 @@ fun ViewerScreen(
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
-    val currentIndexTarget = remember(currentJpegIndexPath, currentPngIndexPath) {
+    val currentTiffIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals("image/tiff", ignoreCase = true) ||
+                    it.path.endsWith(".tif", ignoreCase = true) ||
+                    it.path.endsWith(".tiff", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentIndexTarget = remember(
+        currentJpegIndexPath,
+        currentPngIndexPath,
+        currentTiffIndexPath,
+    ) {
         when {
             currentJpegIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.JPEG,
@@ -351,6 +376,10 @@ fun ViewerScreen(
             currentPngIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.PNG,
                 path = currentPngIndexPath,
+            )
+            currentTiffIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.TIFF,
+                path = currentTiffIndexPath,
             )
             else -> null
         }
@@ -366,6 +395,7 @@ fun ViewerScreen(
                 when (target.format) {
                     IndexedImageFormat.JPEG -> jpegIndexStore.status(target.path) is IndexedJpegStatus.Ready
                     IndexedImageFormat.PNG -> pngIndexStore.status(target.path) is IndexedPngStatus.Ready
+                    IndexedImageFormat.TIFF -> tiffIndexStore.status(target.path) is IndexedTiffStatus.Ready
                 }
             }
         }
@@ -1277,6 +1307,9 @@ fun ViewerScreen(
                                 IndexedImageFormat.PNG ->
                                     "This decodes the complete PNG once and builds a lossless multi-resolution " +
                                         "tile index. It may temporarily use significant power and storage."
+                                IndexedImageFormat.TIFF ->
+                                    "This validates and activates the TIFF's existing tiles, strips, and " +
+                                        "reduced-resolution directories. It does not decode or duplicate the full image."
                             }
                         } else {
                             "Delete the saved $formatName index for this image? Future uncached tiles will use " +
@@ -1309,6 +1342,13 @@ fun ViewerScreen(
                                                     "Unable to delete the PNG index"
                                                 }
                                             }
+                                            IndexedImageFormat.TIFF -> if (isBuild) {
+                                                tiffIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(tiffIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the TIFF index"
+                                                }
+                                            }
                                         }
                                         "$formatName index ${if (isBuild) "built" else "deleted"}"
                                     }
@@ -1321,6 +1361,8 @@ fun ViewerScreen(
                                                 jpegIndexStore.status(operationTarget.path) is IndexedJpegStatus.Ready
                                             IndexedImageFormat.PNG ->
                                                 pngIndexStore.status(operationTarget.path) is IndexedPngStatus.Ready
+                                            IndexedImageFormat.TIFF ->
+                                                tiffIndexStore.status(operationTarget.path) is IndexedTiffStatus.Ready
                                         }
                                     }
                                 }
