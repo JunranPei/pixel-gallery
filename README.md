@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <b>A modern, open-source gallery app built natively for Android with Kotlin and Jetpack Compose.</b>
+  <b>A privacy-first Android gallery with standard, manual multi-entry, and automatic multi-task builds.</b>
 </p>
 
 <p align="center">
@@ -15,26 +15,35 @@
   <a href="https://developer.android.com/compose">
     <img src="https://img.shields.io/badge/UI-Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose">
   </a>
-  <a href="https://github.com/bkk31">
+  <a href="https://github.com/JunranPei/pixel-gallery">
     <img src="https://img.shields.io/badge/Maintained%3F-yes-green.svg?style=for-the-badge" alt="Maintained">
   </a>
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> •
-  <a href="#migration-notice">Migration Notice</a> •
-  <a href="#screenshots">Screenshots</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#tech-stack">Tech Stack</a> •
-  <a href="#contributing">Contributing</a> •
+  <a href="#features">Features</a> &nbsp;•&nbsp;
+  <a href="#three-release-branches">3 Release Branches</a> &nbsp;•&nbsp;
+  <a href="#screenshots">Screenshots</a> &nbsp;•&nbsp;
+  <a href="#installation">Installation</a> &nbsp;•&nbsp;
+  <a href="#tech-stack">Tech Stack</a> &nbsp;•&nbsp;
+  <a href="#contributing">Contributing</a> &nbsp;•&nbsp;
   <a href="#license">License</a>
 </p>
+
+> [!TIP]
+> **The main difference between the three builds is task handling.** Branch 1 opens like a normal gallery. Branch 2 lets you create named gallery shortcuts. Branch 3 starts a separate gallery task each time you launch it.
 
 ---
 
 ## 📖 About
 
 **Pixel Gallery** is a sleek, privacy-focused gallery application designed to provide a premium user experience. Originally built with Flutter, it has now been rewritten as a **fully native Android app** using **Kotlin** and **Jetpack Compose**. It leverages the power of **Material You** dynamic theming to adapt to your device's wallpaper, ensuring a seamless and personalized look. From managing your photo albums to viewing motion photos and map locations, Pixel Gallery creates a beautiful home for your memories.
+
+### About This Fork
+
+This repository is based on the original [Pixel Gallery](https://github.com/bkk31/pixel-gallery) project. The original author and contributors built the app, its design, and its core gallery features. This fork continues that work with multi-entry and multi-task builds, viewer refinements, and other changes described below.
+
+Thank you to the original author and every contributor who made Pixel Gallery possible. Their work is the foundation of this repository.
 
 > [!IMPORTANT]
 > **Migration Notice:** Pixel Gallery is now a native Kotlin app. You can update your existing Flutter installation directly, but please keep the following in mind:
@@ -88,26 +97,33 @@ Sample photos used in screenshots are by the following authors on Unsplash:
 
 Icons generated using [icon.kitchen](https://icon.kitchen)
 
-## 🔧 Custom Modifications
+## Three Release Branches
 
-This fork includes the following improvements compared to the upstream version:
+All three branches contain the same basic gallery. The difference is whether you want one gallery task or several independent ones in Android Recents.
 
-### 1. Grid Layout & Sorting
-* **Grid Column Adjustment**: Pinch-to-zoom gestures dynamically adjust the main photo grid's column count.
-* **Persistent Sorting**: Persistent media sorting settings (supporting sorting by date, size, or name).
+| Version | Branch | Compared with Branch 1 | Use it when |
+| --- | --- | --- | --- |
+| **Branch 1 · Standard** | [`main`](https://github.com/JunranPei/pixel-gallery/tree/main) | Normal Android app behavior. Reopening Pixel Gallery returns to the existing task. | One gallery window is enough. |
+| **Branch 2 · Manual clones** | [`feature/multi-entry-alias`](https://github.com/JunranPei/pixel-gallery/tree/feature/multi-entry-alias) | Adds home-screen shortcuts that open as separate gallery tasks. Each shortcut can have its own name, icon, and starting page. | You want a few fixed entries, such as Camera, Screenshots, Favorites, or a work album. |
+| **Branch 3 · Automatic clones** | [`feature-3`](https://github.com/JunranPei/pixel-gallery/tree/feature-3) | Each launch creates a new gallery task automatically. No shortcuts need to be configured first. | You often compare photos, switch between albums, or want to leave one view open while starting another. |
 
-### 2. Performance, Power & Cache
-* **Custom Cache Limit**: Customizable maximum local disk cache size in settings.
-* **Decoding Optimization**: Background decoding threads are capped to prevent CPU throttling, and thumbnail rendering clarity is improved.
-* **Scroll-to-Suspend**: Suspension of thumbnail decoding during vertical scrollbar drag to reduce device heat and battery usage.
+### Branch 2: create only the clones you need
 
-### 3. Rebuilt Vertical Scrollbar
-* **Gesture Control & Misclick Protection**: Dynamic width expansions on touch and click-through protection when the scrollbar is hidden.
-* **Smooth Scrolling**: Anti-jitter logic that resolves list jumping and feedback loop shaking during drags.
+Branch 2 adds a shortcut manager inside Pixel Gallery. A shortcut can open Photos, Albums, Favorites, Trash, or a specific album. You can give it a custom name and use the app icon, a photo, or a colored text icon.
 
-### 4. Media Viewer Zoom
-* **Double-Tap to Zoom**: Double-tap on images zooms to 100% of their actual dimensions.
-* **Video Pinch-to-Zoom**: Support for 0.3x to 15x zoom gestures on videos while keeping progress controls pinned to the bottom.
+Each shortcut has its own entry in Android Recents. For example, you can keep “Camera”, “Screenshots”, and “Work” open at the same time without turning every normal launch into another task. This suits users who want stable, recognizable entry points and control over how many clones are created.
+
+### Branch 3: open a new copy without setting anything up
+
+Branch 3 takes the automatic approach. Launching Pixel Gallery again creates another independent task, so the previous album or photo stays where it was. Up to 50 recent tasks are requested, although the actual number still depends on the device and Android system.
+
+This is useful for temporary parallel browsing: comparing several photos, checking different albums, or opening a new view without losing the current position. Branch 3 can also request Notification Access for background keep-alive support. This permission is optional; the gallery still opens if you decline it.
+
+In short: use Branch 1 for one normal gallery, Branch 2 for a small set of named clones, and Branch 3 when you want new gallery tasks on demand.
+
+### Other Fork Improvements
+
+The fork also includes adjustable grid density, persistent sorting, a rebuilt scrollbar with a date cursor, configurable thumbnail cache and decode settings, and improved large-image viewing. Media stays on the device; no account or cloud upload is required.
 
 
 ## 🛠 Installation
@@ -117,7 +133,7 @@ To build Pixel Gallery locally, you'll need [Android Studio](https://developer.a
 1.  **Clone the repository:**
 
     ```bash
-    git clone https://github.com/bkk31/pixel-gallery.git
+    git clone https://github.com/JunranPei/pixel-gallery.git
     cd pixel-gallery
     ```
 

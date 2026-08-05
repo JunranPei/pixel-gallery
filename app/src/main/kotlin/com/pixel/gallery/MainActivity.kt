@@ -104,6 +104,11 @@ class MainActivity : FragmentActivity() {
                 android.Manifest.permission.READ_MEDIA_IMAGES,
                 android.Manifest.permission.READ_MEDIA_VIDEO
             )
+        } else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
         } else {
             arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
         }

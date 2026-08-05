@@ -1,5 +1,6 @@
 package com.pixel.gallery.ui.viewmodel
 
+import androidx.activity.result.IntentSenderRequest
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pixel.gallery.data.local.entity.MediaEntry
@@ -10,6 +11,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import com.pixel.gallery.model.Album
+import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.ConflictPolicy
+import com.pixel.gallery.model.TransferMode
+import com.pixel.gallery.model.TransferProgress
+import com.pixel.gallery.model.TransferSummary
+import com.pixel.gallery.model.buildTransferDestinations
 import javax.inject.Inject
 
 @HiltViewModel
@@ -18,6 +25,20 @@ class PhotosViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val metadataService: MetadataService
 ) : ViewModel() {
+
+    data class TransferUiState(
+        val isRunning: Boolean = false,
+        val progress: TransferProgress? = null,
+        val summary: TransferSummary? = null,
+        val error: String? = null
+    )
+
+    private data class PendingTransfer(
+        val entries: List<MediaEntry>,
+        val destination: TransferDestination,
+        val mode: TransferMode,
+        val conflictPolicy: ConflictPolicy
+    )
 
     sealed class GridItem {
         data class Header(val title: String, val timestamp: Long) : GridItem()
@@ -71,6 +92,108 @@ class PhotosViewModel @Inject constructor(
             PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val transferDestinations: StateFlow<List<TransferDestination>> = photos
+        .map(::buildTransferDestinations)
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val _transferUiState = MutableStateFlow(TransferUiState())
+    val transferUiState: StateFlow<TransferUiState> = _transferUiState.asStateFlow()
+    private var pendingTransfer: PendingTransfer? = null
+
+    fun requestTransfer(
+        entries: List<MediaEntry>,
+        destination: TransferDestination,
+        mode: TransferMode,
+        conflictPolicy: ConflictPolicy,
+        onPermissionRequired: (IntentSenderRequest) -> Unit
+    ) {
+        if (entries.isEmpty() || _transferUiState.value.isRunning) return
+        _transferUiState.value = TransferUiState()
+        val request = runCatching {
+            if (mode == TransferMode.MOVE) repository.createTransferWriteRequest(entries) else null
+        }.getOrElse { error ->
+            _transferUiState.value = TransferUiState(
+                error = error.message ?: "Could not request storage permission"
+            )
+            return
+        }
+        if (request != null) {
+            pendingTransfer = PendingTransfer(entries, destination, mode, conflictPolicy)
+            onPermissionRequired(request)
+        } else {
+            executeTransfer(PendingTransfer(entries, destination, mode, conflictPolicy))
+        }
+    }
+
+    fun onTransferPermissionResult(
+        granted: Boolean,
+        onPermissionRequired: (IntentSenderRequest) -> Unit
+    ) {
+        val request = pendingTransfer
+        if (!granted || request == null) {
+            pendingTransfer = null
+            _transferUiState.value = TransferUiState(error = "Storage permission was not granted")
+            return
+        }
+
+        // Android 10 grants recoverable write access one item at a time. Recheck
+        // the batch and request the next item before starting any mutations.
+        if (android.os.Build.VERSION.SDK_INT == android.os.Build.VERSION_CODES.Q) {
+            val nextPermission = runCatching {
+                repository.createTransferWriteRequest(request.entries)
+            }.getOrElse { error ->
+                pendingTransfer = null
+                _transferUiState.value = TransferUiState(
+                    error = error.message ?: "Could not request storage permission"
+                )
+                return
+            }
+            if (nextPermission != null) {
+                onPermissionRequired(nextPermission)
+                return
+            }
+        }
+
+        pendingTransfer = null
+        executeTransfer(request)
+    }
+
+    private fun executeTransfer(request: PendingTransfer) {
+        _transferUiState.value = TransferUiState(isRunning = true)
+        viewModelScope.launch {
+            try {
+                val summary = repository.transferMedia(
+                    entries = request.entries,
+                    destination = request.destination,
+                    mode = request.mode,
+                    conflictPolicy = request.conflictPolicy
+                ) { progress ->
+                    _transferUiState.value = TransferUiState(isRunning = true, progress = progress)
+                }
+                _transferUiState.value = TransferUiState(summary = summary)
+                if (summary.completedAny) refresh()
+            } catch (error: Exception) {
+                _transferUiState.value = TransferUiState(error = error.message ?: "Transfer failed")
+            }
+        }
+    }
+
+    fun createTransferFolder(
+        parent: TransferDestination,
+        name: String,
+        onResult: (Result<TransferDestination>) -> Unit
+    ) {
+        viewModelScope.launch {
+            onResult(repository.createTransferFolder(parent, name))
+        }
+    }
+
+    fun clearTransferState() {
+        pendingTransfer = null
+        _transferUiState.value = TransferUiState()
+    }
 
     fun groupMedia(entries: List<MediaEntry>, columns: Int = 3, sortOrder: PhotoSortOrder = PhotoSortOrder.DATE_DESC): List<GridItem> {
         if (sortOrder != PhotoSortOrder.DATE_DESC && sortOrder != PhotoSortOrder.DATE_ASC) {
@@ -310,6 +433,19 @@ class PhotosViewModel @Inject constructor(
             if (repository.restoreFromVault(id)) {
                 refresh()
             }
+        }
+    }
+
+    fun restoreFromVaultBulk(
+        ids: List<Long>,
+        onComplete: (MediaRepository.VaultRestoreResult) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val result = repository.restoreFromVaultBulk(ids)
+            if (result.restoredIds.isNotEmpty()) {
+                refresh()
+            }
+            onComplete(result)
         }
     }
 

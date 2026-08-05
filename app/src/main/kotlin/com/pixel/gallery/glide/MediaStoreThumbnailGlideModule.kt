@@ -190,7 +190,8 @@ internal class MediaStoreThumbnailFetcher(
                     persistentDir.mkdirs()
                 }
                 val contentId = model.uri.tryParseId() ?: model.uri.hashCode()
-                val cacheFileName = "${contentId}_${model.dateModifiedMillis}_${model.rotationDegrees}.jpg"
+                val cacheFileName = "${contentId}_${model.dateModifiedMillis}_${model.rotationDegrees}" +
+                    if (isGridView) "_q75.jpg" else ".jpg"
                 persistentFile = File(persistentDir, cacheFileName)
 
                 if (persistentFile.exists()) {
@@ -314,8 +315,9 @@ internal class MediaStoreThumbnailFetcher(
                         null
                     }
                     try {
+                        val jpegQuality = if (isGridView) 75 else 85
                         FileOutputStream(persistentFile).use { out ->
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
                         }
                         // Check and trim persistent cache size if it exceeds the limit
                         val settingsRepository = com.pixel.gallery.data.repository.SettingsRepository(context.applicationContext)
