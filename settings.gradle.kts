@@ -12,4 +12,5 @@ pluginManagement {
 include(":app")
 include(":ssiv-pixel")
 include(":indexed-jpeg")
+include(":indexed-png")
 project(":ssiv-pixel").projectDir = file("third_party/ssiv-pixel")

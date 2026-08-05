@@ -53,7 +53,7 @@ android {
             "clean" -> "Pixel Clean"
             "compressed" -> "Pixel Compressed"
             "zoomtrace" -> "Pixel Zoom Trace"
-            "jpegindex" -> "Pixel JPEG Index"
+            "jpegindex" -> "Pixel Indexed Image"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
@@ -221,6 +221,7 @@ dependencies {
     }
     implementation(project(":ssiv-pixel"))
     implementation(project(":indexed-jpeg"))
+    implementation(project(":indexed-png"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")
