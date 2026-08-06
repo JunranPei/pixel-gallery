@@ -29,6 +29,7 @@ internal fun RawEmbeddedPreviewViewer(
     dateModifiedMillis: Long,
     isActivePage: Boolean,
     isPreviewVisible: Boolean,
+    rawIndexReady: Boolean,
     transformStateStore: ViewerTransformStateStore,
     modifier: Modifier = Modifier,
     onContentReadyChanged: (Boolean) -> Unit = {},
@@ -55,22 +56,24 @@ internal fun RawEmbeddedPreviewViewer(
     }
 
     when {
-        preview != null -> SimpleSubsamplingImageView(
-            uri = uri,
-            filePath = filePath,
-            orientationDegrees = orientationDegrees,
-            modifier = modifier,
-            isActivePage = isActivePage,
-            isPreviewVisible = isPreviewVisible,
-            enableSubsampling = true,
-            dateModifiedMillis = dateModifiedMillis,
-            previewModel = preview!!.bytes,
-            regionDecoderKind = ViewerRegionDecoderKind.RAW_EMBEDDED,
-            decoderSourceKey = sourceKey,
-            transformStateStore = transformStateStore,
-            onContentReadyChanged = onContentReadyChanged,
-            onClick = onClick,
-        )
+        preview != null -> androidx.compose.runtime.key(rawIndexReady) {
+            SimpleSubsamplingImageView(
+                uri = uri,
+                filePath = filePath,
+                orientationDegrees = orientationDegrees,
+                modifier = modifier,
+                isActivePage = isActivePage,
+                isPreviewVisible = isPreviewVisible,
+                enableSubsampling = true,
+                dateModifiedMillis = dateModifiedMillis,
+                previewModel = preview!!.bytes,
+                regionDecoderKind = ViewerRegionDecoderKind.RAW_EMBEDDED,
+                decoderSourceKey = sourceKey,
+                transformStateStore = transformStateStore,
+                onContentReadyChanged = onContentReadyChanged,
+                onClick = onClick,
+            )
+        }
 
         !isActivePage || resolved -> GlideViewerFallback(
             imagePath = filePath.ifEmpty { uri },

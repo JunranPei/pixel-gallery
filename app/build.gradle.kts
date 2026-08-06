@@ -14,7 +14,10 @@ val keystoreProperties = Properties()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
 val viewerMetricsEnabled = viewerTestVariant == "trace" ||
     viewerTestVariant == "compressed" ||
-    viewerTestVariant == "zoomtrace"
+    viewerTestVariant == "zoomtrace" ||
+    viewerTestVariant == "jpegindextrace"
+val indexedImageDiagnosticsEnabled = viewerTestVariant == "jpegindex" ||
+    viewerTestVariant == "jpegindextrace"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -36,24 +39,35 @@ android {
 
     defaultConfig {
         applicationId = when (viewerTestVariant) {
+            "simplemerge" -> "com.pixel.gallery.shortcuts.simplegallerymerge"
             "trace" -> "com.pixel.gallery.shortcuts.codextrace"
             "clean" -> "com.pixel.gallery.shortcuts.codexclean"
             "compressed" -> "com.pixel.gallery.shortcuts.codexcompressed"
             "zoomtrace" -> "com.pixel.gallery.shortcuts.zoomtrace"
+            "jpegindex" -> "com.pixel.gallery.shortcuts.jpegindextest"
+            "jpegindextrace" -> "com.pixel.gallery.shortcuts.jpegindextest"
             else -> "com.pixel.gallery.shortcuts"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
+            "simplemerge" -> "Gallery Test"
             "trace" -> "Pixel Shortcuts Trace"
             "clean" -> "Pixel Shortcuts Clean"
             "compressed" -> "Pixel Shortcuts Compressed"
             "zoomtrace" -> "Pixel Shortcuts Zoom Trace"
+            "jpegindex" -> "Pixel Shortcuts Indexed Image"
+            "jpegindextrace" -> "Pixel Shortcuts Indexed Trace"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
+        buildConfigField(
+            "boolean",
+            "INDEXED_IMAGE_DIAGNOSTICS_ENABLED",
+            indexedImageDiagnosticsEnabled.toString(),
+        )
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "4.2.15.1-multi-entry"
+        versionCode = 2032
+        versionName = "4.3.1.5-multi-entry"
     }
 
     signingConfigs {
@@ -209,6 +223,14 @@ dependencies {
         exclude(group = "me.saket.telephoto", module = "sub-sampling-image")
     }
     implementation(project(":ssiv-pixel"))
+    implementation(project(":indexed-jpeg"))
+    implementation(project(":indexed-png"))
+    implementation(project(":indexed-tiff"))
+    implementation(project(":indexed-webp"))
+    implementation(project(":indexed-raw"))
+    implementation(project(":indexed-heif"))
+    implementation(project(":indexed-bmp"))
+    implementation(project(":indexed-jxl"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")

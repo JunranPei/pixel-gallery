@@ -52,10 +52,28 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.glide.AvesAppGlideModule
 import com.pixel.gallery.glide.SvgImage
 import com.pixel.gallery.glide.TiffImage
+import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
 import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
 import com.pixel.gallery.ui.viewer.formats.ViewerRenderPlan
+import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
+import io.github.indexedjpeg.IndexedJpegStatus
+import io.github.indexedjpeg.IndexedJpegStore
+import io.github.indexedpng.IndexedPngStatus
+import io.github.indexedpng.IndexedPngStore
+import io.github.indexedtiff.IndexedTiffStatus
+import io.github.indexedtiff.IndexedTiffStore
+import io.github.indexedwebp.IndexedWebpStatus
+import io.github.indexedwebp.IndexedWebpStore
+import io.github.indexedraw.IndexedRawStatus
+import io.github.indexedraw.IndexedRawStore
+import io.github.indexedheif.IndexedHeifStatus
+import io.github.indexedheif.IndexedHeifStore
+import io.github.indexedbmp.IndexedBmpStatus
+import io.github.indexedbmp.IndexedBmpStore
+import io.github.indexedjxl.IndexedJxlStatus
+import io.github.indexedjxl.IndexedJxlStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -110,6 +128,31 @@ private val MapnikHttps = XYTileSource(
 )
 
 private val viewerPhotoMetadataCache = ConcurrentHashMap<String, ViewerPhotoMetadata>()
+
+private val rawIndexExtensions = setOf(
+    "3fr", "arw", "bay", "cap", "cr2", "cr3", "crw", "dcr", "dcs", "dng",
+    "drf", "eip", "erf", "fff", "gpr", "iiq", "k25", "kdc", "mdc", "mef",
+    "mos", "mrw", "nef", "nrw", "obm", "orf", "pef", "ptx", "pxn", "r3d",
+    "raf", "raw", "rw2", "rwl", "rwz", "sr2", "srf", "srw", "x3f",
+)
+
+private enum class IndexedImageFormat(val displayName: String) {
+    JPEG("JPEG"),
+    PNG("PNG"),
+    TIFF("TIFF"),
+    WEBP("WebP"),
+    RAW("RAW"),
+    HEIF("HEIF/AVIF"),
+    BMP("BMP"),
+    JXL("JPEG XL"),
+}
+
+private data class IndexedImageTarget(
+    val format: IndexedImageFormat,
+    val path: String,
+)
+
+private enum class IndexedImageAction { BUILD, DELETE }
 
 private fun MediaEntry.viewerCacheKey(): String = "$contentId:$dateModifiedMillis"
 
@@ -294,6 +337,207 @@ fun ViewerScreen(
 
     val currentMediaCacheKey = remember(currentMedia?.contentId, currentMedia?.dateModifiedMillis) {
         currentMedia?.viewerCacheKey()
+    }
+    val jpegIndexStore = remember(context.applicationContext) {
+        IndexedJpegStore(context.applicationContext)
+    }
+    val pngIndexStore = remember(context.applicationContext) {
+        IndexedPngStore(context.applicationContext)
+    }
+    val tiffIndexStore = remember(context.applicationContext) {
+        IndexedTiffStore(context.applicationContext)
+    }
+    val webpIndexStore = remember(context.applicationContext) {
+        IndexedWebpStore(context.applicationContext)
+    }
+    val rawIndexStore = remember(context.applicationContext) {
+        IndexedRawStore(context.applicationContext)
+    }
+    val heifIndexStore = remember(context.applicationContext) {
+        IndexedHeifStore(context.applicationContext)
+    }
+    val bmpIndexStore = remember(context.applicationContext) {
+        IndexedBmpStore(context.applicationContext)
+    }
+    val jxlIndexStore = remember(context.applicationContext) {
+        IndexedJxlStore(context.applicationContext)
+    }
+    val currentJpegIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf { it.canContainMotionPhoto() }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentPngIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals("image/png", ignoreCase = true) ||
+                    it.path.endsWith(".png", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentTiffIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals("image/tiff", ignoreCase = true) ||
+                    it.path.endsWith(".tif", ignoreCase = true) ||
+                    it.path.endsWith(".tiff", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentWebpIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals("image/webp", ignoreCase = true) ||
+                    it.path.endsWith(".webp", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentRawIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                MimeTypes.isRaw(it.sourceMimeType.substringBefore(';').trim().lowercase()) ||
+                    it.path.substringAfterLast('.', "").lowercase() in rawIndexExtensions
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentHeifIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                MimeTypes.isIsoBMFFImage(it.sourceMimeType.substringBefore(';').trim().lowercase()) ||
+                    it.path.substringAfterLast('.', "").lowercase() in setOf("heic", "heif", "hif", "avif")
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentBmpIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals(MimeTypes.BMP, ignoreCase = true) ||
+                    it.path.endsWith(".bmp", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentJxlIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals("image/jxl", ignoreCase = true) ||
+                    it.path.endsWith(".jxl", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val currentIndexTarget = remember(
+        currentJpegIndexPath,
+        currentPngIndexPath,
+        currentTiffIndexPath,
+        currentWebpIndexPath,
+        currentRawIndexPath,
+        currentHeifIndexPath,
+        currentBmpIndexPath,
+        currentJxlIndexPath,
+    ) {
+        when {
+            currentJpegIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.JPEG,
+                path = currentJpegIndexPath,
+            )
+            currentPngIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.PNG,
+                path = currentPngIndexPath,
+            )
+            currentTiffIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.TIFF,
+                path = currentTiffIndexPath,
+            )
+            currentWebpIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.WEBP,
+                path = currentWebpIndexPath,
+            )
+            currentRawIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.RAW,
+                path = currentRawIndexPath,
+            )
+            currentHeifIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.HEIF,
+                path = currentHeifIndexPath,
+            )
+            currentBmpIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.BMP,
+                path = currentBmpIndexPath,
+            )
+            currentJxlIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.JXL,
+                path = currentJxlIndexPath,
+            )
+            else -> null
+        }
+    }
+    var imageIndexReady by remember { mutableStateOf<Boolean?>(null) }
+    var imageIndexAction by remember { mutableStateOf<IndexedImageAction?>(null) }
+    var imageIndexBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(currentIndexTarget) {
+        imageIndexAction = null
+        imageIndexBusy = false
+        imageIndexReady = currentIndexTarget?.let { target ->
+            withContext(Dispatchers.IO) {
+                when (target.format) {
+                    IndexedImageFormat.JPEG -> jpegIndexStore.status(target.path) is IndexedJpegStatus.Ready
+                    IndexedImageFormat.PNG -> pngIndexStore.status(target.path) is IndexedPngStatus.Ready
+                    IndexedImageFormat.TIFF -> tiffIndexStore.status(target.path) is IndexedTiffStatus.Ready
+                    IndexedImageFormat.WEBP -> webpIndexStore.status(target.path) is IndexedWebpStatus.Ready
+                    IndexedImageFormat.RAW -> rawIndexStore.status(target.path) is IndexedRawStatus.Ready
+                    IndexedImageFormat.HEIF -> heifIndexStore.status(target.path) is IndexedHeifStatus.Ready
+                    IndexedImageFormat.BMP -> bmpIndexStore.status(target.path) is IndexedBmpStatus.Ready
+                    IndexedImageFormat.JXL -> jxlIndexStore.status(target.path) is IndexedJxlStatus.Ready
+                }
+            }
+        }
     }
     val settledMediaCacheKey = remember(pagerState.settledPage, photos) {
         photos.getOrNull(pagerState.settledPage)?.viewerCacheKey()
@@ -846,11 +1090,63 @@ fun ViewerScreen(
                                     dateModifiedMillis = media.dateModifiedMillis,
                                     isActivePage = isActivePage,
                                     isPreviewVisible = isPreviewVisible,
+                                    rawIndexReady = imageIndexReady == true &&
+                                        currentIndexTarget?.format == IndexedImageFormat.RAW &&
+                                        currentIndexTarget.path == media.path,
                                     transformStateStore = viewerTransformStateStore,
                                     modifier = Modifier.fillMaxSize(),
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick,
                                 )
+                            } else if (
+                                renderPlan is ViewerRenderPlan.IndexedBmp ||
+                                renderPlan is ViewerRenderPlan.IndexedJxl
+                            ) {
+                                val indexedFormat = if (renderPlan is ViewerRenderPlan.IndexedJxl) {
+                                    IndexedImageFormat.JXL
+                                } else {
+                                    IndexedImageFormat.BMP
+                                }
+                                val indexedRegionKind = if (renderPlan is ViewerRenderPlan.IndexedJxl) {
+                                    ViewerRegionDecoderKind.JXL
+                                } else {
+                                    ViewerRegionDecoderKind.BMP
+                                }
+                                val rareIndexReady = imageIndexReady == true &&
+                                    currentIndexTarget?.format == indexedFormat &&
+                                    currentIndexTarget.path == media.path
+                                if (!rareIndexReady) {
+                                    GlideViewerFallback(
+                                        imagePath = media.path.ifEmpty { media.uri },
+                                        width = media.width,
+                                        height = media.height,
+                                        orientationDegrees = media.sourceRotationDegrees,
+                                        dateModifiedMillis = media.dateModifiedMillis,
+                                        isVisiblePage = isPreviewVisible,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onContentReadyChanged = { fullPreviewReady = it },
+                                        onClick = onImageClick,
+                                    )
+                                } else {
+                                    SimpleSubsamplingImageView(
+                                        uri = media.uri,
+                                        filePath = media.path,
+                                        orientationDegrees = media.sourceRotationDegrees,
+                                        isActivePage = isActivePage,
+                                        isPagerIdle = isPagerIdle,
+                                        isPreviewVisible = isPreviewVisible,
+                                        enableSubsampling = !metadataPending,
+                                        dateModifiedMillis = media.dateModifiedMillis,
+                                        sourceWidth = media.width,
+                                        sourceHeight = media.height,
+                                        previewModel = media.path.ifEmpty { media.uri },
+                                        regionDecoderKind = indexedRegionKind,
+                                        transformStateStore = viewerTransformStateStore,
+                                        onContentReadyChanged = { fullPreviewReady = it },
+                                        modifier = Modifier.fillMaxSize(),
+                                        onClick = onImageClick,
+                                    )
+                                }
                             } else {
                                 val tiledPlan = renderPlan as ViewerRenderPlan.Tiled
                                 val sourceUri = remember(media.uri, media.path) {
@@ -997,6 +1293,38 @@ fun ViewerScreen(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
+                            currentIndexTarget?.let { indexTarget ->
+                                val indexReady = imageIndexReady == true
+                                val indexChecking = imageIndexReady == null
+                                val formatName = indexTarget.format.displayName
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            when {
+                                                imageIndexBusy -> "Building $formatName index…"
+                                                indexChecking -> "Checking $formatName index…"
+                                                indexReady -> "Delete $formatName index"
+                                                else -> "Build $formatName index"
+                                            }
+                                        )
+                                    },
+                                    enabled = !imageIndexBusy && !indexChecking,
+                                    onClick = {
+                                        showMenu = false
+                                        imageIndexAction = if (indexReady) {
+                                            IndexedImageAction.DELETE
+                                        } else {
+                                            IndexedImageAction.BUILD
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Set as Wallpaper") },
                                 onClick = {
@@ -1150,6 +1478,167 @@ fun ViewerScreen(
                 }
             }
         )
+
+        imageIndexAction?.let { action ->
+            val target = currentIndexTarget ?: return@let
+            val formatName = target.format.displayName
+            val isBuild = action == IndexedImageAction.BUILD
+            AlertDialog(
+                onDismissRequest = { if (!imageIndexBusy) imageIndexAction = null },
+                title = {
+                    Text(if (isBuild) "Build $formatName index?" else "Delete $formatName index?")
+                },
+                text = {
+                    Text(
+                        if (isBuild) {
+                            when (target.format) {
+                                IndexedImageFormat.JPEG ->
+                                    "This reads the complete JPEG once and may briefly use significant power. " +
+                                        "The saved seek index applies only to this image and every zoom level."
+                                IndexedImageFormat.PNG ->
+                                    "This decodes the complete PNG once and builds a lossless multi-resolution " +
+                                        "tile index. It may temporarily use significant power and storage."
+                                IndexedImageFormat.TIFF ->
+                                    "This validates and activates the TIFF's existing tiles, strips, and " +
+                                        "reduced-resolution directories. It does not decode or duplicate the full image."
+                                IndexedImageFormat.WEBP ->
+                                    "This decodes the complete static WebP once and builds a lossless " +
+                                        "multi-resolution tile index. Animated WebP is not changed or indexed."
+                                IndexedImageFormat.RAW ->
+                                    "This develops the complete camera RAW once with camera white balance and " +
+                                        "builds a lossless sRGB tile pyramid. The original RAW is never changed."
+                                IndexedImageFormat.HEIF ->
+                                    "This reads bounded HEIF/AVIF regions once and builds a lossless tile " +
+                                        "pyramid. The complete decoded image is never held in memory."
+                                IndexedImageFormat.BMP ->
+                                    "This validates the uncompressed BMP row layout and writes a 56-byte " +
+                                        "activation. Later zoom reads only scan lines crossing the viewport."
+                                IndexedImageFormat.JXL ->
+                                    "This streams the complete still JPEG XL once and builds a lossless sRGB " +
+                                        "multi-resolution tile index without holding the complete image in memory. " +
+                                        "Animated and HDR JPEG XL are not indexed yet."
+                            }
+                        } else {
+                            "Delete the saved $formatName index for this image? Future uncached tiles will use " +
+                                "the standard decoder again."
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !imageIndexBusy,
+                        onClick = {
+                            val operationTarget = currentIndexTarget ?: return@TextButton
+                            imageIndexAction = null
+                            imageIndexBusy = isBuild
+                            viewerScope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        when (operationTarget.format) {
+                                            IndexedImageFormat.JPEG -> if (isBuild) {
+                                                jpegIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(jpegIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the JPEG index"
+                                                }
+                                            }
+                                            IndexedImageFormat.PNG -> if (isBuild) {
+                                                pngIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(pngIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the PNG index"
+                                                }
+                                            }
+                                            IndexedImageFormat.TIFF -> if (isBuild) {
+                                                tiffIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(tiffIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the TIFF index"
+                                                }
+                                            }
+                                            IndexedImageFormat.WEBP -> if (isBuild) {
+                                                webpIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(webpIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the WebP index"
+                                                }
+                                            }
+                                            IndexedImageFormat.RAW -> if (isBuild) {
+                                                rawIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(rawIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the RAW index"
+                                                }
+                                            }
+                                            IndexedImageFormat.HEIF -> if (isBuild) {
+                                                heifIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(heifIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the HEIF/AVIF index"
+                                                }
+                                            }
+                                            IndexedImageFormat.BMP -> if (isBuild) {
+                                                bmpIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(bmpIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the BMP activation"
+                                                }
+                                            }
+                                            IndexedImageFormat.JXL -> if (isBuild) {
+                                                jxlIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(jxlIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the JPEG XL index"
+                                                }
+                                            }
+                                        }
+                                        "$formatName index ${if (isBuild) "built" else "deleted"}"
+                                    }
+                                }
+                                if (currentIndexTarget == operationTarget) {
+                                    imageIndexBusy = false
+                                    imageIndexReady = withContext(Dispatchers.IO) {
+                                        when (operationTarget.format) {
+                                            IndexedImageFormat.JPEG ->
+                                                jpegIndexStore.status(operationTarget.path) is IndexedJpegStatus.Ready
+                                            IndexedImageFormat.PNG ->
+                                                pngIndexStore.status(operationTarget.path) is IndexedPngStatus.Ready
+                                            IndexedImageFormat.TIFF ->
+                                                tiffIndexStore.status(operationTarget.path) is IndexedTiffStatus.Ready
+                                            IndexedImageFormat.WEBP ->
+                                                webpIndexStore.status(operationTarget.path) is IndexedWebpStatus.Ready
+                                            IndexedImageFormat.RAW ->
+                                                rawIndexStore.status(operationTarget.path) is IndexedRawStatus.Ready
+                                            IndexedImageFormat.HEIF ->
+                                                heifIndexStore.status(operationTarget.path) is IndexedHeifStatus.Ready
+                                            IndexedImageFormat.BMP ->
+                                                bmpIndexStore.status(operationTarget.path) is IndexedBmpStatus.Ready
+                                            IndexedImageFormat.JXL ->
+                                                jxlIndexStore.status(operationTarget.path) is IndexedJxlStatus.Ready
+                                        }
+                                    }
+                                }
+                                android.widget.Toast.makeText(
+                                    context,
+                                    result.getOrElse { it.message ?: "$formatName index operation failed" },
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        },
+                    ) {
+                        Text(if (isBuild) "Build index" else "Delete index")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !imageIndexBusy,
+                        onClick = { imageIndexAction = null },
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
     }
 }
 

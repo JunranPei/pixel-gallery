@@ -5,7 +5,7 @@ import android.graphics.*
 import android.graphics.Paint.Style
 import android.net.Uri
 import android.os.AsyncTask
-import android.os.Process
+import android.os.Build
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
@@ -19,7 +19,7 @@ import java.lang.ref.WeakReference
 import java.net.URLDecoder
 import java.util.*
 import java.util.concurrent.Executor
-import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.math.*
 
@@ -63,15 +63,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val TILE_CACHE_ADMISSION_DELAY_MS = 1200L
         private const val MAX_PENDING_TILE_CACHE_WRITES = 4
         private const val SAMPLE_SIZE_HYSTERESIS = 0.12f
-        private const val MAX_OFFSCREEN_TILE_CACHE_ENTRIES = 12
-        private const val MAX_OFFSCREEN_TILE_CACHE_BYTES = 48L * 1024L * 1024L
-        private const val TILE_RECYCLE_GRACE_MS = 64L
-        private val TILE_RECYCLE_EXECUTOR = Executors.newSingleThreadExecutor { runnable ->
-            Thread({
-                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
-                runnable.run()
-            }, "ssiv-tile-recycler").apply { isDaemon = true }
-        }
+        private const val ACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES = 12
+        private const val ACTIVE_OFFSCREEN_TILE_CACHE_MIN_BYTES = 48L * 1024L * 1024L
+        private const val ACTIVE_OFFSCREEN_TILE_CACHE_MAX_BYTES = 48L * 1024L * 1024L
+        private const val INACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES = 12
+        private const val INACTIVE_OFFSCREEN_TILE_CACHE_BYTES = 48L * 1024L * 1024L
+        private val NEXT_DIAGNOSTIC_TASK_ID = AtomicLong()
         private val ROTATION_THRESHOLD = Math.toRadians(10.0)
         private val ZOOM_IN_THRESHOLD = 0.05f   // if the user zooms in a bit, do not allow rotating the image with the given gesture anymore
     }
@@ -84,6 +81,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     var onImageEventListener: OnImageEventListener? = null
     var diagnosticsListener: ((String) -> Unit)? = null
     var doubleTapZoomScale = 1f
+    var cacheTaskExecutor: Executor? = null
 
     /**
      * Minimum zoom relative to fit-screen. The upstream value is 1f.
@@ -120,6 +118,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var lastRequiredSampleSize = 0
     private var stableTileRefreshGeneration = 0L
     private var stableTileCacheGeneration = 0L
+    private var activeTileMemoryCache = true
     private var minimumTileDpi = -1
     private var maxTileWidth = TILE_SIZE_AUTO
     private var maxTileHeight = TILE_SIZE_AUTO
@@ -155,7 +154,6 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var decoder: ImageRegionDecoder? = null
     private val decoderLock = ReentrantReadWriteLock(true)
     private var imageGeneration = 0L
-
     private var sCenterStart: PointF? = null
     private var vCenterStart: PointF? = null
     private var vCenterStartNow: PointF? = null
@@ -174,6 +172,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var isImageLoaded = false
     private var hasDispatchedImageDrawn = false
     private var lastDiagnosticsMoveEventTime = Long.MIN_VALUE
+    private var lastDiagnosticsDrawLogNanos = 0L
 
     private var bitmapPaint: Paint? = null
     private var debugTextPaint: Paint? = null
@@ -303,6 +302,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         lastRequiredSampleSize = 0
         stableTileRefreshGeneration += 1
         stableTileCacheGeneration += 1
+        lastDiagnosticsDrawLogNanos = 0L
         sCenterStart = null
         vCenterStart = null
         vCenterStartNow = null
@@ -343,8 +343,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         tileMap?.values?.forEach {
             for (tile in it) {
                 tile.visible = false
-                tile.bitmap?.recycle()
-                tile.bitmap = null
+                clearTileBitmap(tile, recycleBitmap = true)
             }
         }
         tileMap = null
@@ -896,6 +895,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (!checkReady()) {
             return
         }
+        val diagnosticsDrawStartedAt = if (diagnosticsListener != null) {
+            SystemClock.elapsedRealtimeNanos()
+        } else {
+            0L
+        }
 
         if (anim != null && anim!!.vFocusStart != null) {
             if (vTranslateBefore == null) {
@@ -948,6 +952,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         // tile over it immediately; waiting for the entire base grid causes an avoidable
         // full-screen blur even when sharper regions are already available.
         var imageDrawnThisFrame = bitmapIsBorrowedPreview && drawBaseBitmapLayer(canvas)
+        var drawnTileCount = 0
+        var drawnTileBytes = 0L
         val hasReadyTile = tileMap?.values?.any { grid ->
             grid.any { it.bitmap?.isRecycled == false }
         } == true
@@ -967,6 +973,17 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             for ((key, value) in tileMap!!) {
                 if (key == sampleSize || hasMissingTiles) {
                     for (tile in value) {
+                        // A decoded off-screen tile may remain in the CPU-side LRU, but it
+                        // must not enter this frame's display list. Telephoto/0713 keeps its
+                        // off-screen painters out of viewportImageTiles for the same reason.
+                        // Drawing every retained 20MB bitmap here made RenderThread upload
+                        // and evict invisible textures on every pan.
+                        if (!tileVisible(tile)) {
+                            // Keep the decoded bitmap in the bounded CPU cache, but stop
+                            // pinning an invisible GPU display list immediately.
+                            discardTileRenderNode(tile)
+                            continue
+                        }
                         sourceToViewRect(tile.sRect!!, tile.vRect!!)
                         if (!tile.loading && tile.bitmap != null) {
                             if (objectMatrix == null) {
@@ -992,7 +1009,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             }
                             objectMatrix!!.setPolyToPoly(srcArray, 0, dstArray, 0, 4)
                             objectMatrix!!.postRotate(Math.toDegrees(imageRotation).toFloat(), width / 2f, height / 2f)
-                            canvas.drawBitmap(tile.bitmap!!, objectMatrix!!, bitmapPaint)
+                            drawTileBitmap(canvas, tile, objectMatrix!!)
+                            drawnTileCount += 1
+                            drawnTileBytes += tileBytes(tile)
                             imageDrawnThisFrame = true
                             if (debug) {
                                 canvas.drawRect(tile.vRect!!, debugLinePaint!!)
@@ -1087,6 +1106,28 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             }
 
             debugLinePaint!!.color = Color.GREEN
+        }
+
+        if (diagnosticsDrawStartedAt != 0L) {
+            val now = SystemClock.elapsedRealtimeNanos()
+            val drawMs = (now - diagnosticsDrawStartedAt) / 1_000_000L
+            if (drawMs >= 8L || now - lastDiagnosticsDrawLogNanos >= 80_000_000L) {
+                lastDiagnosticsDrawLogNanos = now
+                val sampleSize = calculateRequiredTileSampleSize()
+                val visibleTiles = tileMap?.get(sampleSize).orEmpty().filter(::tileVisible)
+                val loaded = visibleTiles.count { it.bitmap?.isRecycled == false }
+                val loading = visibleTiles.count { it.loading }
+                val retained = tileMap?.values.orEmpty().flatten()
+                    .count { it.bitmap?.isRecycled == false }
+                diagnosticsListener?.invoke(
+                    "tile=DRAW durationMs=$drawMs sample=$sampleSize visible=${visibleTiles.size} " +
+                        "loaded=$loaded loading=$loading missing=${visibleTiles.size - loaded} " +
+                        "retained=$retained drawn=$drawnTileCount drawnBytes=$drawnTileBytes " +
+                        "preview=$bitmapIsBorrowedPreview scale=$scale " +
+                        "translate=${vTranslate?.x},${vTranslate?.y} center=${getCenter()} " +
+                        "gesture=${isZooming || isPanning} anim=${anim != null}",
+                )
+            }
         }
     }
 
@@ -1266,10 +1307,31 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     scheduledCount += 1
                 }
             } else {
+                val cacheProbeDetails = if (diagnosticsListener != null) {
+                    ArrayList<String>(prioritizedTiles.size)
+                } else {
+                    null
+                }
                 val (cachedTiles, sourceMissTiles) = prioritizedTiles.partition { tile ->
+                    val probeStartedAt = if (cacheProbeDetails != null) {
+                        SystemClock.elapsedRealtimeNanos()
+                    } else {
+                        0L
+                    }
                     batchDecoder.isRegionCached(tile.fileSRect!!, tile.sampleSize).also { cached ->
                         tile.diskCacheReady = cached
+                        cacheProbeDetails?.add(
+                            "${tile.fileSRect}@${tile.sampleSize}:${if (cached) "H" else "M"}:" +
+                                "${(SystemClock.elapsedRealtimeNanos() - probeStartedAt) / 1_000_000L}ms",
+                        )
                     }
+                }
+                if (cacheProbeDetails?.isNotEmpty() == true) {
+                    diagnosticsListener?.invoke(
+                        "tile=CACHE_PROBE count=${cacheProbeDetails.size} " +
+                            "hits=${cachedTiles.size} misses=${sourceMissTiles.size} " +
+                            "items=${cacheProbeDetails.joinToString(";")}",
+                    )
                 }
                 // A disk hit stays on the original single-tile path and never queues
                 // behind an expensive source batch.
@@ -1306,7 +1368,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val cacheStats = if (load && !isZooming && !isPanning && anim == null) {
             trimTileMemoryCache(sampleSize)
         } else {
-            TileMemoryCacheStats(0)
+            val budget = tileMemoryCacheBudget(sampleSize)
+            TileMemoryCacheStats(
+                entries = 0,
+                maxEntries = budget.entries,
+                maxBytes = budget.bytes,
+                profile = budget.profile,
+            )
         }
         if (load && diagnosticsListener != null) {
             val currentTiles = tileMap!![sampleSize].orEmpty().filter(::tileVisible)
@@ -1318,11 +1386,86 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 "tile=REFRESH sample=$sampleSize visible=${currentTiles.size} " +
                     "memoryHits=$memoryHits loading=$loading scheduled=$scheduledCount " +
                     "retained=$retainedTiles bytes=$retainedBytes " +
-                    "offscreen=${cacheStats.entries}/${MAX_OFFSCREEN_TILE_CACHE_ENTRIES} " +
-                    "offscreenBytes=${cacheStats.bytes}/${MAX_OFFSCREEN_TILE_CACHE_BYTES}",
+                    "offscreen=${cacheStats.entries}/${cacheStats.maxEntries} " +
+                    "offscreenBytes=${cacheStats.bytes}/${cacheStats.maxBytes} " +
+                    "cacheProfile=${cacheStats.profile}",
             )
         }
         if (load) scheduleStableTileCachePersistence()
+    }
+
+    /**
+     * Record a visible software bitmap once, then let RenderThread reuse that child
+     * display list while only the parent matrix changes during pan/zoom. The node is
+     * discarded as soon as the tile leaves the viewport; the independent CPU bitmap
+     * cache remains bounded by [trimTileMemoryCache].
+     */
+    private fun drawTileBitmap(canvas: Canvas, tile: Tile, matrix: Matrix) {
+        val bitmap = tile.bitmap ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canvas.isHardwareAccelerated) {
+            drawTileRenderNode(canvas, tile, bitmap, matrix)
+        } else {
+            canvas.drawBitmap(bitmap, matrix, bitmapPaint)
+        }
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private fun drawTileRenderNode(canvas: Canvas, tile: Tile, bitmap: Bitmap, matrix: Matrix) {
+        var node = tile.renderNode as? RenderNode
+        if (node == null || tile.renderNodeBitmap !== bitmap || !node.hasDisplayList()) {
+            node?.discardDisplayList()
+            node = RenderNode("ssiv-tile-${tile.sampleSize}").apply {
+                setPosition(0, 0, bitmap.width, bitmap.height)
+                val recordingCanvas = beginRecording(bitmap.width, bitmap.height)
+                recordingCanvas.drawBitmap(bitmap, 0f, 0f, bitmapPaint)
+                endRecording()
+            }
+            tile.renderNode = node
+            tile.renderNodeBitmap = bitmap
+            diagnosticsListener?.invoke(
+                "tile=RENDER_NODE_RECORD sample=${tile.sampleSize} " +
+                    "bitmap=${bitmap.width}x${bitmap.height} bytes=${tileBytes(tile)}",
+            )
+        }
+        val saveCount = canvas.save()
+        canvas.concat(matrix)
+        canvas.drawRenderNode(node)
+        canvas.restoreToCount(saveCount)
+    }
+
+    private fun discardTileRenderNode(tile: Tile) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            discardTileRenderNodeApi29(tile)
+        } else {
+            tile.renderNode = null
+            tile.renderNodeBitmap = null
+        }
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private fun discardTileRenderNodeApi29(tile: Tile) {
+        (tile.renderNode as? RenderNode)?.discardDisplayList()
+        tile.renderNode = null
+        tile.renderNodeBitmap = null
+    }
+
+    private fun clearTileBitmap(tile: Tile, recycleBitmap: Boolean) {
+        val previous = tile.bitmap
+        discardTileRenderNode(tile)
+        tile.bitmap = null
+        if (recycleBitmap && previous?.isRecycled == false) {
+            previous.recycle()
+        }
+    }
+
+    private fun assignTileBitmap(tile: Tile, bitmap: Bitmap) {
+        if (tile.bitmap !== bitmap) {
+            // A late duplicate result can replace a bitmap that RenderThread has already
+            // seen. Drop ownership and let GC reclaim it instead of recycling across a
+            // possibly in-flight display list.
+            clearTileBitmap(tile, recycleBitmap = false)
+            tile.bitmap = bitmap
+        }
     }
 
     private fun buildSourceMissFragment(candidates: List<Tile>): List<Tile> {
@@ -1391,20 +1534,39 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
     private fun scheduleStableTileRefresh(delayMillis: Long = 150L) {
         val generation = ++stableTileRefreshGeneration
+        diagnosticsListener?.invoke(
+            "tile=REFRESH_SCHEDULE generation=$generation delayMs=$delayMillis " +
+                "sample=${calculateRequiredTileSampleSize()} zooming=$isZooming " +
+                "panning=$isPanning anim=${anim != null}",
+        )
         postDelayed({
             if (
                 generation == stableTileRefreshGeneration &&
                 decoder != null && tileMap != null &&
                 anim == null && !isZooming && !isPanning
             ) {
+                diagnosticsListener?.invoke(
+                    "tile=REFRESH_FIRE generation=$generation sample=${calculateRequiredTileSampleSize()}",
+                )
                 refreshRequiredTiles(true)
                 invalidate()
+            } else {
+                diagnosticsListener?.invoke(
+                    "tile=REFRESH_SKIP generation=$generation current=$stableTileRefreshGeneration " +
+                        "decoder=${decoder != null} tileMap=${tileMap != null} zooming=$isZooming " +
+                        "panning=$isPanning anim=${anim != null}",
+                )
             }
         }, delayMillis)
     }
 
     private fun scheduleStableTileCachePersistence() {
         val generation = ++stableTileCacheGeneration
+        diagnosticsListener?.invoke(
+            "tile=CACHE_SCHEDULE generation=$generation delayMs=$TILE_CACHE_ADMISSION_DELAY_MS " +
+                "sample=${calculateRequiredTileSampleSize()} zooming=$isZooming " +
+                "panning=$isPanning anim=${anim != null}",
+        )
         postDelayed({
             val cacheDecoder = decoder as? BatchedImageRegionDecoder
             if (
@@ -1412,6 +1574,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 cacheDecoder == null || tileMap == null ||
                 anim != null || isZooming || isPanning
             ) {
+                diagnosticsListener?.invoke(
+                    "tile=CACHE_SKIP generation=$generation current=$stableTileCacheGeneration " +
+                        "decoder=${cacheDecoder != null} tileMap=${tileMap != null} " +
+                        "zooming=$isZooming panning=$isPanning anim=${anim != null}",
+                )
                 return@postDelayed
             }
 
@@ -1440,7 +1607,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 if (cacheDecoder.isRegionCached(tile.fileSRect!!, tile.sampleSize)) {
                     tile.diskCacheReady = true
                 } else {
-                    execute(TileCacheWriteTask(this, cacheDecoder, tile))
+                    executeCacheWrite(TileCacheWriteTask(this, cacheDecoder, tile, generation))
                 }
             }
             if (candidates.isNotEmpty()) {
@@ -1468,14 +1635,52 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val bytes: Long = 0L,
         val evictedCount: Int = 0,
         val evictedBytes: Long = 0L,
+        val maxEntries: Int = 0,
+        val maxBytes: Long = 0L,
+        val profile: String = "none",
     )
 
-    /** Visible/base tiles stay active. Each viewer owns a bounded off-screen LRU, limited
-     * by both entry count and bytes so a 20MB tile cannot consume the same budget as a
-     * 4MB tile. Evicted tiles remain recoverable through the independent disk cache.
+    private data class TileMemoryCacheBudget(
+        val entries: Int,
+        val bytes: Long,
+        val profile: String,
+    )
+
+    private fun tileMemoryCacheBudget(currentSampleSize: Int): TileMemoryCacheBudget {
+        if (!activeTileMemoryCache) {
+            return TileMemoryCacheBudget(
+                entries = INACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES,
+                bytes = INACTIVE_OFFSCREEN_TILE_CACHE_BYTES,
+                profile = "INACTIVE",
+            )
+        }
+        val representativeTileBytes = tileMap?.get(currentSampleSize)
+            .orEmpty()
+            .asSequence()
+            .map(::tileBytes)
+            .filter { it > 0L }
+            .maxOrNull()
+            ?: 0L
+        val adaptiveBytes = (representativeTileBytes * ACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES)
+            .coerceIn(
+                ACTIVE_OFFSCREEN_TILE_CACHE_MIN_BYTES,
+                ACTIVE_OFFSCREEN_TILE_CACHE_MAX_BYTES,
+            )
+        return TileMemoryCacheBudget(
+            entries = ACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES,
+            bytes = adaptiveBytes,
+            profile = "ACTIVE",
+        )
+    }
+
+    /** Visible/base tiles stay active. The current page keeps a bounded recent corridor
+     * sized from its actual tile allocations, while inactive pages fall back to the small
+     * fixed budget. This prevents 20MB tiles from reducing the active cache to two entries
+     * without restoring the stable viewer's unbounded-by-bytes 12-tile retention.
      */
     private fun trimTileMemoryCache(currentSampleSize: Int): TileMemoryCacheStats {
         val map = tileMap ?: return TileMemoryCacheStats(0)
+        val budget = tileMemoryCacheBudget(currentSampleSize)
         val loadedTiles = map.values.flatten().filter { it.bitmap?.isRecycled == false }
 
         val currentViewportTiles = map[currentSampleSize]
@@ -1499,8 +1704,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         var remainingBytes = offscreenTiles.sumOf(::tileBytes)
         for (tile in offscreenTiles) {
             if (
-                remainingEntries <= MAX_OFFSCREEN_TILE_CACHE_ENTRIES &&
-                remainingBytes <= MAX_OFFSCREEN_TILE_CACHE_BYTES
+                remainingEntries <= budget.entries &&
+                remainingBytes <= budget.bytes
             ) {
                 break
             }
@@ -1508,28 +1713,30 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             evictedBytes += bytes
             remainingBytes -= bytes
             remainingEntries -= 1
-            val retiredBitmap = tile.bitmap
-            tile.bitmap = null
-            retiredBitmap?.let(::recycleTileBitmapOffMainThread)
+            // Match the stable Telephoto cache lifecycle: stop owning the bitmap but do
+            // not recycle it explicitly. RenderThread may still reference a display list
+            // containing this bitmap; recycling it after an arbitrary delay can force a
+            // fence wait and make later pans stall for hundreds of milliseconds.
+            clearTileBitmap(tile, recycleBitmap = false)
             evictedCount += 1
         }
         if (evictedCount > 0) {
             diagnosticsListener?.invoke(
                 "tile=EVICT count=$evictedCount bytes=$evictedBytes " +
-                    "offscreen=$remainingEntries/$MAX_OFFSCREEN_TILE_CACHE_ENTRIES " +
-                    "offscreenBytes=$remainingBytes/$MAX_OFFSCREEN_TILE_CACHE_BYTES " +
-                    "sample=$currentSampleSize recycle=DEFERRED",
+                    "offscreen=$remainingEntries/${budget.entries} " +
+                    "offscreenBytes=$remainingBytes/${budget.bytes} " +
+                    "sample=$currentSampleSize profile=${budget.profile} recycle=GC_SAFE",
             )
         }
-        return TileMemoryCacheStats(remainingEntries, remainingBytes, evictedCount, evictedBytes)
-    }
-
-    private fun recycleTileBitmapOffMainThread(bitmap: Bitmap) {
-        TILE_RECYCLE_EXECUTOR.execute {
-            // Let already submitted RenderThread commands finish before invalidating pixels.
-            SystemClock.sleep(TILE_RECYCLE_GRACE_MS)
-            if (!bitmap.isRecycled) bitmap.recycle()
-        }
+        return TileMemoryCacheStats(
+            entries = remainingEntries,
+            bytes = remainingBytes,
+            evictedCount = evictedCount,
+            evictedBytes = evictedBytes,
+            maxEntries = budget.entries,
+            maxBytes = budget.bytes,
+            profile = budget.profile,
+        )
     }
 
     private fun tileVisible(tile: Tile): Boolean {
@@ -1898,10 +2105,19 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private val decoderRef = WeakReference(decoder)
         private val tileRefs = tiles.map(::WeakReference)
         private val generation = view.imageGeneration
+        private val diagnosticTaskId = NEXT_DIAGNOSTIC_TASK_ID.incrementAndGet()
+        private val queuedAtNanos = SystemClock.elapsedRealtimeNanos()
         private var exception: Exception? = null
 
         init {
             tiles.forEach { it.loading = true }
+            view.diagnosticsListener?.invoke(
+                "tile=TASK_ENQUEUE id=$diagnosticTaskId mode=BATCH generation=$generation " +
+                    "count=${tiles.size} regions=${tiles.joinToString(";") { tile ->
+                        val rect = tile.sRect
+                        "${rect?.left},${rect?.top}-${rect?.right},${rect?.bottom}@${tile.sampleSize}"
+                    }}",
+            )
         }
 
         override fun doInBackground(vararg params: Void): TileBatchResult? {
@@ -1945,14 +2161,23 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             if (view == null || view.imageGeneration != generation) {
                 result?.bitmaps?.forEach { if (!it.isRecycled) it.recycle() }
                 originalTiles.forEach { it.loading = false }
+                view?.diagnosticsListener?.invoke(
+                    "tile=TASK_RESULT id=$diagnosticTaskId mode=BATCH stale=true " +
+                        "generation=$generation currentGeneration=${view.imageGeneration} " +
+                        "totalMs=${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L}",
+                )
                 return
             }
 
             val completed = result?.tiles?.zip(result.bitmaps).orEmpty().toMap()
+            val allocationBytes = completed.values.sumOf { bitmap ->
+                runCatching { bitmap.allocationByteCount.toLong() }
+                    .getOrElse { bitmap.byteCount.toLong() }
+            }
             for (tile in originalTiles) {
                 val bitmap = completed[tile]
                 if (bitmap != null) {
-                    tile.bitmap = bitmap
+                    view.assignTileBitmap(tile, bitmap)
                     tile.failedAttempts = 0
                     view.markTileAccess(tile)
                 } else if (exception != null) {
@@ -1960,6 +2185,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 }
                 tile.loading = false
             }
+            view.diagnosticsListener?.invoke(
+                "tile=TASK_RESULT id=$diagnosticTaskId mode=BATCH stale=false " +
+                    "requested=${originalTiles.size} completed=${completed.size} bytes=$allocationBytes " +
+                    "error=${exception?.javaClass?.simpleName ?: "none"} " +
+                    "totalMs=${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L} " +
+                    "visible=${originalTiles.count { it.visible }}",
+            )
             if (completed.isNotEmpty()) {
                 view.onTileLoaded()
             } else {
@@ -1972,14 +2204,22 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         view: SubsamplingScaleImageView,
         decoder: BatchedImageRegionDecoder,
         tile: Tile,
+        private val cacheGeneration: Long,
     ) : AsyncTask<Void, Void, Boolean>() {
         private val viewRef = WeakReference(view)
         private val decoderRef = WeakReference(decoder)
         private val tileRef = WeakReference(tile)
         private val generation = view.imageGeneration
+        private val diagnosticTaskId = NEXT_DIAGNOSTIC_TASK_ID.incrementAndGet()
+        private val queuedAtNanos = SystemClock.elapsedRealtimeNanos()
 
         init {
             tile.cacheWriteScheduled = true
+            view.diagnosticsListener?.invoke(
+                "tile=TASK_ENQUEUE id=$diagnosticTaskId mode=CACHE_WRITE generation=$generation " +
+                    "cacheGeneration=$cacheGeneration rect=${tile.sRect} sample=${tile.sampleSize} " +
+                    "bytes=${view.tileBytes(tile)}",
+            )
         }
 
         override fun doInBackground(vararg params: Void): Boolean {
@@ -1988,6 +2228,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             val tile = tileRef.get() ?: return false
             if (
                 view.imageGeneration != generation || !decoder.isReady() ||
+                view.stableTileCacheGeneration != cacheGeneration ||
                 !tile.visible || tile.loading
             ) {
                 return false
@@ -1998,6 +2239,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             return try {
                 if (
                     view.imageGeneration != generation || !decoder.isReady() ||
+                    view.stableTileCacheGeneration != cacheGeneration ||
                     !tile.visible || tile.bitmap !== bitmap || bitmap.isRecycled
                 ) {
                     false
@@ -2018,6 +2260,14 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             val tile = tileRef.get() ?: return
             tile.cacheWriteScheduled = false
             if (cached) tile.diskCacheReady = true
+            val view = viewRef.get()
+            view?.diagnosticsListener?.invoke(
+                "tile=TASK_RESULT id=$diagnosticTaskId mode=CACHE_WRITE cached=$cached " +
+                    "generation=$generation cacheGeneration=$cacheGeneration " +
+                    "currentGeneration=${view.imageGeneration} rect=${tile.sRect} " +
+                    "sample=${tile.sampleSize} visible=${tile.visible} totalMs=" +
+                    "${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L}",
+            )
         }
     }
 
@@ -2047,10 +2297,16 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private val decoderRef = WeakReference(decoder)
         private val tileRef = WeakReference(tile)
         private val generation = view.imageGeneration
+        private val diagnosticTaskId = NEXT_DIAGNOSTIC_TASK_ID.incrementAndGet()
+        private val queuedAtNanos = SystemClock.elapsedRealtimeNanos()
         private var exception: Exception? = null
 
         init {
             tile.loading = true
+            view.diagnosticsListener?.invoke(
+                "tile=TASK_ENQUEUE id=$diagnosticTaskId mode=SINGLE generation=$generation " +
+                    "rect=${tile.sRect} sample=${tile.sampleSize} diskReady=${tile.diskCacheReady}",
+            )
         }
 
         override fun doInBackground(vararg params: Void): Bitmap? {
@@ -2091,17 +2347,35 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             if (view == null || view.imageGeneration != generation || tile == null) {
                 bitmap?.recycle()
                 tile?.loading = false
+                view?.diagnosticsListener?.invoke(
+                    "tile=TASK_RESULT id=$diagnosticTaskId mode=SINGLE stale=true " +
+                        "generation=$generation currentGeneration=${view.imageGeneration} " +
+                        "totalMs=${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L}",
+                )
                 return
             }
             if (bitmap != null) {
-                tile.bitmap = bitmap
+                view.assignTileBitmap(tile, bitmap)
                 tile.loading = false
                 tile.failedAttempts = 0
                 view.markTileAccess(tile)
+                view.diagnosticsListener?.invoke(
+                    "tile=TASK_RESULT id=$diagnosticTaskId mode=SINGLE stale=false success=true " +
+                        "rect=${tile.sRect} sample=${tile.sampleSize} bitmap=${bitmap.width}x${bitmap.height} " +
+                        "bytes=${runCatching { bitmap.allocationByteCount }.getOrElse { bitmap.byteCount }} " +
+                        "visible=${tile.visible} totalMs=" +
+                        "${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L}",
+                )
                 view.onTileLoaded()
             } else {
                 tile.loading = false
                 if (exception != null) tile.failedAttempts += 1
+                view.diagnosticsListener?.invoke(
+                    "tile=TASK_RESULT id=$diagnosticTaskId mode=SINGLE stale=false success=false " +
+                        "rect=${tile.sRect} sample=${tile.sampleSize} visible=${tile.visible} " +
+                        "error=${exception?.javaClass?.simpleName ?: "none"} totalMs=" +
+                        "${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L}",
+                )
                 view.onTileLoadFinishedWithoutBitmap(retryImmediately = exception == null)
             }
         }    }
@@ -2125,6 +2399,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             tile.bitmap == null && tile.failedAttempts < 2 &&
                 !(bitmapIsBorrowedPreview && currentSampleSize == fullImageSampleSize)
         }
+        diagnosticsListener?.invoke(
+            "tile=LOAD_APPLIED sample=$currentSampleSize visible=${currentTiles.size} " +
+                "loaded=${currentTiles.count { it.bitmap?.isRecycled == false }} " +
+                "loading=${currentTiles.count { it.loading }} missing=$hasMissingTile " +
+                "retained=${tileMap?.values.orEmpty().flatten().count { it.bitmap?.isRecycled == false }} " +
+                "preview=$bitmapIsBorrowedPreview",
+        )
         if (!hasLoadingTile && hasMissingTile) {
             scheduleStableTileRefresh(SOURCE_MISS_NEXT_WAVE_DELAY_MS)
         }
@@ -2137,7 +2418,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         // Once the viewport is stable, rescan immediately so a now-visible gap cannot
         // remain stalled until the user nudges the image. Real decoder failures are not
         // retried here; refreshRequiredTiles caps their later attempts.
-        if (retryImmediately && !isZooming && !isPanning && anim == null) {
+        val willRetry = retryImmediately && !isZooming && !isPanning && anim == null
+        diagnosticsListener?.invoke(
+            "tile=LOAD_EMPTY retryRequested=$retryImmediately willRetry=$willRetry " +
+                "zooming=$isZooming panning=$isPanning anim=${anim != null} " +
+                "sample=${calculateRequiredTileSampleSize()}",
+        )
+        if (willRetry) {
             refreshRequiredTiles(true)
         }
         invalidate()
@@ -2214,6 +2501,28 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
     private fun execute(asyncTask: AsyncTask<Void, Void, *>) {
         asyncTask.executeOnExecutor(taskExecutor)
+    }
+
+    private fun executeCacheWrite(asyncTask: AsyncTask<Void, Void, *>) {
+        asyncTask.executeOnExecutor(cacheTaskExecutor ?: taskExecutor)
+    }
+
+    fun setActiveTileMemoryCache(active: Boolean) {
+        if (activeTileMemoryCache == active) return
+        activeTileMemoryCache = active
+        val sampleSize = if (tileMap != null && sWidth > 0 && sHeight > 0) {
+            calculateRequiredTileSampleSize()
+        } else {
+            0
+        }
+        val stats = if (sampleSize > 0) trimTileMemoryCache(sampleSize) else null
+        val budget = if (sampleSize > 0) tileMemoryCacheBudget(sampleSize) else null
+        diagnosticsListener?.invoke(
+            "tile=CACHE_PROFILE profile=${if (active) "ACTIVE" else "INACTIVE"} " +
+                "sample=$sampleSize retained=${stats?.entries ?: 0}/${budget?.entries ?: 0} " +
+                "bytes=${stats?.bytes ?: 0L}/${budget?.bytes ?: 0L} " +
+                "evicted=${stats?.evictedCount ?: 0}",
+        )
     }
 
     fun setMaxTileSize(maxPixels: Int) {
@@ -2590,6 +2899,10 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         var sRect: Rect? = null
         var sampleSize = 0
         var bitmap: Bitmap? = null
+        // Kept as Any so loading this class remains safe on API 26-28 where RenderNode's
+        // public drawing API does not exist. Access is guarded by SDK checks above.
+        var renderNode: Any? = null
+        var renderNodeBitmap: Bitmap? = null
         var loading = false
         var visible = false
         var vRect: Rect? = null
