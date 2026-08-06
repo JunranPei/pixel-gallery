@@ -17,8 +17,10 @@ val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoole
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
 val viewerMetricsEnabled = viewerTestVariant == "trace" ||
     viewerTestVariant == "compressed" ||
-    viewerTestVariant == "zoomtrace"
-val indexedImageDiagnosticsEnabled = viewerTestVariant == "jpegindex"
+    viewerTestVariant == "zoomtrace" ||
+    viewerTestVariant == "jpegindextrace"
+val indexedImageDiagnosticsEnabled = viewerTestVariant == "jpegindex" ||
+    viewerTestVariant == "jpegindextrace"
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -46,6 +48,9 @@ android {
             "compressed" -> "com.pixel.gallery.codexcompressed"
             "zoomtrace" -> "com.pixel.gallery.zoomtrace"
             "jpegindex" -> "com.pixel.gallery.jpegindextest"
+            // Same package as the quiet indexed-image build so installing this trace
+            // build preserves the user's already-created indexes and tile cache.
+            "jpegindextrace" -> "com.pixel.gallery.jpegindextest"
             else -> "com.pixel.gallery.multitask"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
@@ -55,6 +60,7 @@ android {
             "compressed" -> "Pixel Compressed"
             "zoomtrace" -> "Pixel Zoom Trace"
             "jpegindex" -> "Pixel Indexed Image"
+            "jpegindextrace" -> "Pixel Indexed Trace"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
@@ -65,8 +71,8 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "4.3.1.4-auto-multitask"
+        versionCode = 36
+        versionName = "4.3.1.5-auto-multitask"
     }
 
     signingConfigs {

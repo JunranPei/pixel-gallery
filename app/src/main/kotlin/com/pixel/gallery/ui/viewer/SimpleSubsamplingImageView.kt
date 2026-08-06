@@ -5,6 +5,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,15 +49,53 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.Executor
+import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-// FIFO preserves SSIV's explicit centre-first tile order. Do not clear this process-wide
-// queue when one page becomes inactive: another freeform/multi-window viewer can own the
-// remaining work. Recycled views invalidate their own queued tasks by image generation.
-private val tileDecodeExecutor = ThreadPoolExecutor(
+private const val VISIBLE_TILE_TASK_PRIORITY = 0
+private const val CACHE_WRITE_TASK_PRIORITY = 1
+private val tileTaskSequence = AtomicLong()
+
+private class PrioritizedTileTask(
+    private val priority: Int,
+    private val sequence: Long,
+    private val delegate: Runnable,
+) : Runnable, Comparable<PrioritizedTileTask> {
+    private val submittedAtNanos = SystemClock.elapsedRealtimeNanos()
+
+    override fun run() {
+        val startedAtNanos = SystemClock.elapsedRealtimeNanos()
+        ViewerLoadMetrics.event(
+            "TILE_EXECUTOR_START",
+            "task=$sequence priority=$priority waitMs=" +
+                "${(startedAtNanos - submittedAtNanos) / 1_000_000L} " +
+                "queuedAfterTake=${tileTaskExecutor.queue.size} active=${tileTaskExecutor.activeCount}",
+        )
+        try {
+            delegate.run()
+        } finally {
+            ViewerLoadMetrics.event(
+                "TILE_EXECUTOR_END",
+                "task=$sequence priority=$priority runMs=" +
+                    "${(SystemClock.elapsedRealtimeNanos() - startedAtNanos) / 1_000_000L} " +
+                    "queued=${tileTaskExecutor.queue.size} active=${tileTaskExecutor.activeCount}",
+            )
+        }
+    }
+
+    override fun compareTo(other: PrioritizedTileTask): Int {
+        val priorityOrder = priority.compareTo(other.priority)
+        return if (priorityOrder != 0) priorityOrder else sequence.compareTo(other.sequence)
+    }
+}
+
+// Keep all heavy tile work serial for predictable power. Newly visible decodes can pass
+// cache writes that have not started yet, while work from another window remains intact.
+private val tileTaskExecutor = ThreadPoolExecutor(
     // A single decode lane matches the stable viewer's large-image resource pool.
     // More workers do not make one BitmapRegionDecoder parallel, but they can leave a
     // stale tile waiting inside the decoder lock and increase cross-window power peaks.
@@ -64,10 +103,23 @@ private val tileDecodeExecutor = ThreadPoolExecutor(
     1,
     60L,
     TimeUnit.SECONDS,
-    LinkedBlockingQueue<Runnable>(),
+    PriorityBlockingQueue<Runnable>(),
 ).apply {
     allowCoreThreadTimeOut(true)
 }
+
+private fun prioritizedTileExecutor(priority: Int): Executor = Executor { runnable ->
+    val sequence = tileTaskSequence.getAndIncrement()
+    ViewerLoadMetrics.event(
+        "TILE_EXECUTOR_SUBMIT",
+        "task=$sequence priority=$priority queuedBefore=${tileTaskExecutor.queue.size} " +
+            "active=${tileTaskExecutor.activeCount} completed=${tileTaskExecutor.completedTaskCount}",
+    )
+    tileTaskExecutor.execute(PrioritizedTileTask(priority, sequence, runnable))
+}
+
+private val tileDecodeExecutor = prioritizedTileExecutor(VISIBLE_TILE_TASK_PRIORITY)
+private val tileCacheWriteExecutor = prioritizedTileExecutor(CACHE_WRITE_TASK_PRIORITY)
 
 internal class ViewerTransformStateStore {
     private data class StoredState(
@@ -489,8 +541,8 @@ internal fun SimpleSubsamplingImageView(
                 val token = ViewerLoadMetrics.workStarted(
                     "SSIV_ASSIGN_IMAGE",
                     transformStateKey,
-                    "trigger=on-demand delay=0ms executorActive=${tileDecodeExecutor.activeCount} " +
-                        "executorQueued=${tileDecodeExecutor.queue.size}",
+                    "trigger=on-demand delay=0ms executorActive=${tileTaskExecutor.activeCount} " +
+                        "executorQueued=${tileTaskExecutor.queue.size}",
                 )
                 var tokenFinished = false
                 try {
@@ -549,8 +601,8 @@ internal fun SimpleSubsamplingImageView(
                     ViewerLoadMetrics.workReady(
                         token,
                         source = "SET_IMAGE_RETURNED",
-                        detail = "executorActive=${tileDecodeExecutor.activeCount} " +
-                            "executorQueued=${tileDecodeExecutor.queue.size}",
+                        detail = "executorActive=${tileTaskExecutor.activeCount} " +
+                            "executorQueued=${tileTaskExecutor.queue.size}",
                     )
                     tokenFinished = true
                 } finally {
@@ -578,8 +630,8 @@ internal fun SimpleSubsamplingImageView(
                 ssivBaseDrawn = false
                 ViewerLoadMetrics.workReady(
                     recycleToken,
-                    detail = "executorActive=${tileDecodeExecutor.activeCount} " +
-                        "executorQueued=${tileDecodeExecutor.queue.size}",
+                    detail = "executorActive=${tileTaskExecutor.activeCount} " +
+                        "executorQueued=${tileTaskExecutor.queue.size}",
                 )
             }
         }
@@ -1030,6 +1082,8 @@ internal fun SimpleSubsamplingImageView(
                 setMinimumTileDpi(minTileDpi)
                 setMaxTileSize(if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) 4096 else 2048)
                 taskExecutor = tileDecodeExecutor
+                cacheTaskExecutor = tileCacheWriteExecutor
+                setActiveTileMemoryCache(isActivePage)
                 rotationEnabled = true
                 doubleTapReturnsToFit = true
                 // Direct fit-preview gestures already clamp at their configured minimum.
@@ -1101,8 +1155,8 @@ internal fun SimpleSubsamplingImageView(
                         ViewerLoadMetrics.event(
                             "SSIV_READY",
                             "source=${sWidth}x${sHeight} scale=$scale minScaleFactor=$minScaleFactor " +
-                                "maxScale=$maxScale executorActive=${tileDecodeExecutor.activeCount} " +
-                                "executorQueued=${tileDecodeExecutor.queue.size}",
+                                "maxScale=$maxScale executorActive=${tileTaskExecutor.activeCount} " +
+                                "executorQueued=${tileTaskExecutor.queue.size}",
                             imageKey = transformStateKey,
                         )
                     }
@@ -1248,6 +1302,7 @@ internal fun SimpleSubsamplingImageView(
             frameLayout
         },
         update = {
+            ssivView?.setActiveTileMemoryCache(isActivePage)
             val imageView = imageViewRef
             if (imageView != null) {
                 val layer = when {
