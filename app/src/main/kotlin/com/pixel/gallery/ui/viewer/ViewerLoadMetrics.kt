@@ -36,6 +36,8 @@ internal object ViewerLoadMetrics {
     private const val powerTimelineRetentionMs = 120_000L
     private const val entryTimelineBeforeMs = 5_000L
     private const val entryTimelineAfterMs = 5_000L
+    private const val activeRuntimeSamplingWindowMs = 60_000L
+    private const val idlePowerTimelinePeriodMs = 1_000L
     const val isEnabled: Boolean = BuildConfig.VIEWER_METRICS_ENABLED
 
     private val sessions = ConcurrentHashMap<String, Session>()
@@ -53,6 +55,8 @@ internal object ViewerLoadMetrics {
     private val batteryBroadcastTimelineLock = Any()
     private val batteryBroadcastTimeline = ArrayDeque<BatteryBroadcastSample>()
     private val nextBatteryBroadcastId = AtomicLong()
+    private val lastRuntimeSampleNanos = AtomicLong()
+    private val lastContinuousPowerPollNanos = AtomicLong()
     private val latestBatteryState = AtomicReference(BatteryState())
     private val latestContinuousPower = AtomicReference<ContinuousPowerSample?>()
     @Volatile private var timelineBatteryManager: BatteryManager? = null
@@ -270,16 +274,24 @@ internal object ViewerLoadMetrics {
             stats.frames.incrementAndGet()
             stats.totalNs.addAndGet(totalNs)
             stats.maxNs.updateAndGet { old -> maxOf(old, totalNs) }
-            if (totalMs >= 24L) {
+            if (totalMs >= 12L) {
                 stats.slowFrames.incrementAndGet()
+                val gpuMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    metricMs(metrics, FrameMetrics.GPU_DURATION)
+                } else {
+                    -1L
+                }
                 emit(
                     entryId,
                     "FRAME_SLOW entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms total=${totalMs}ms " +
+                        "input=${metricMs(metrics, FrameMetrics.INPUT_HANDLING_DURATION)}ms " +
+                        "animation=${metricMs(metrics, FrameMetrics.ANIMATION_DURATION)}ms " +
                         "layout=${metricMs(metrics, FrameMetrics.LAYOUT_MEASURE_DURATION)}ms " +
                         "draw=${metricMs(metrics, FrameMetrics.DRAW_DURATION)}ms " +
                         "sync=${metricMs(metrics, FrameMetrics.SYNC_DURATION)}ms " +
                         "command=${metricMs(metrics, FrameMetrics.COMMAND_ISSUE_DURATION)}ms " +
-                        "swap=${metricMs(metrics, FrameMetrics.SWAP_BUFFERS_DURATION)}ms dropped=$dropped"
+                        "swap=${metricMs(metrics, FrameMetrics.SWAP_BUFFERS_DURATION)}ms " +
+                        "gpu=${gpuMs}ms dropped=$dropped ${snapshotDetail()}"
                 )
             }
         }
@@ -470,12 +482,14 @@ internal object ViewerLoadMetrics {
         it.baseAllocationBytes.addAndGet(allocationBytes)
     }
 
-    fun tileWritten(imageKey: String, sessionId: Long, durationMs: Long, bytes: Long) =
+    fun tileWritten(imageKey: String, sessionId: Long, durationMs: Long, bytes: Long) {
+        if (!isEnabled) return
         session(imageKey, sessionId, "tileWritten")?.let {
             it.tileWrites.incrementAndGet()
             it.tileWriteMs.addAndGet(durationMs)
             it.tileWriteBytes.addAndGet(bytes)
         }
+    }
 
     fun end(context: Context, imageKey: String, sessionId: Long) {
         if (!isEnabled) return
@@ -630,6 +644,20 @@ internal object ViewerLoadMetrics {
 
     private fun sampleContinuousPower() {
         val sampledAtNanos = SystemClock.elapsedRealtimeNanos()
+        val active = activeEntry.get()
+        val activeAgeMs = active?.let { elapsedMs(it.requestedAtNanos) } ?: Long.MAX_VALUE
+        val requiredPeriodMs = if (activeAgeMs <= activeRuntimeSamplingWindowMs) {
+            powerTimelinePeriodMs
+        } else {
+            idlePowerTimelinePeriodMs
+        }
+        val previousPoll = lastContinuousPowerPollNanos.get()
+        if (
+            sampledAtNanos - previousPoll < TimeUnit.MILLISECONDS.toNanos(requiredPeriodMs) ||
+            !lastContinuousPowerPollNanos.compareAndSet(previousPoll, sampledAtNanos)
+        ) {
+            return
+        }
         val rawCurrent = timelineBatteryManager
             ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
         val currentUa = rawCurrent?.takeUnless { it == Int.MIN_VALUE }
@@ -647,6 +675,23 @@ internal object ViewerLoadMetrics {
             val cutoffNanos = sampledAtNanos - TimeUnit.MILLISECONDS.toNanos(powerTimelineRetentionMs)
             while (powerTimeline.firstOrNull()?.sampledAtNanos?.let { it < cutoffNanos } == true) {
                 powerTimeline.removeFirst()
+            }
+        }
+        if (active != null && activeAgeMs <= activeRuntimeSamplingWindowMs) {
+            val previous = lastRuntimeSampleNanos.get()
+            if (
+                sampledAtNanos - previous >= 250_000_000L &&
+                lastRuntimeSampleNanos.compareAndSet(previous, sampledAtNanos)
+            ) {
+                emit(
+                    active.id,
+                    "RUNTIME_SAMPLE entry=${active.id} sinceClick=${sinceEntryMs(active.id)}ms " +
+                        "currentUa=${sample.currentUa ?: "unsupported"} " +
+                        "voltageMv=${sample.voltageMv ?: "unsupported"} " +
+                        "signedDischargeMw=${sample.signedDischargeMw()?.let {
+                            String.format(Locale.US, "%.1f", it)
+                        } ?: "unsupported"} ${snapshotDetail()}",
+                )
             }
         }
     }
@@ -797,7 +842,7 @@ internal object ViewerLoadMetrics {
             if (!directory.exists() && !directory.mkdirs()) return@runCatching
             val current = File(directory, "viewer-entries.log")
             val previous = File(directory, "viewer-entries.previous.log")
-            if (current.length() >= 4L * 1024L * 1024L) {
+            if (current.length() >= 32L * 1024L * 1024L) {
                 previous.delete()
                 current.renameTo(previous)
             }
@@ -1072,7 +1117,7 @@ internal object ViewerLoadMetrics {
         private val lines = ArrayDeque<String>()
 
         fun record(line: String) = synchronized(lines) {
-            if (lines.size >= 2048) lines.removeFirst()
+            if (lines.size >= 32_768) lines.removeFirst()
             lines.addLast(line)
         }
 

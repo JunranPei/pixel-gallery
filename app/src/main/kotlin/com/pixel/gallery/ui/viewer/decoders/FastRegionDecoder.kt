@@ -8,8 +8,18 @@ import android.graphics.Point
 import android.graphics.Rect
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import com.davemorrissey.labs.subscaleview.BatchedImageRegionDecoder
+import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
+import io.github.indexedjpeg.IndexedJpegRegionDecoder
+import io.github.indexedjpeg.IndexedJpegStore
+import io.github.indexedpng.IndexedPngRegionDecoder
+import io.github.indexedpng.IndexedPngStore
+import io.github.indexedwebp.IndexedWebpRegionDecoder
+import io.github.indexedwebp.IndexedWebpStore
+import io.github.indexedheif.IndexedHeifRegionDecoder
+import io.github.indexedheif.IndexedHeifStore
 import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
@@ -92,6 +102,7 @@ fun resetSsivTileCacheBudget(context: Context) {
 class FastRegionDecoder(
     private val minTileDpi: Int,
     private val imageVersion: String,
+    private val indexedSourcePath: String? = null,
     private val knownSourceWidth: Int = 0,
     private val knownSourceHeight: Int = 0,
 ) : BatchedImageRegionDecoder {
@@ -105,6 +116,7 @@ class FastRegionDecoder(
     private var decoder: BitmapRegionDecoder? = null
     private var decoderInputStream: InputStream? = null
     private val decoderLock = Any()
+    private val cacheWriteLock = Any()
     private var screenWidth = 1080
     private var screenHeight = 2400
     private var sourceWidth = 0
@@ -112,7 +124,24 @@ class FastRegionDecoder(
     private lateinit var tileCacheDir: File
     private lateinit var appContext: Context
     private lateinit var sourceUri: Uri
-    private var initialized = false
+    private var localSourcePath: String? = null
+    private var indexedStore: IndexedJpegStore? = null
+    private var indexedDecoder: IndexedJpegRegionDecoder? = null
+    private var indexedGeneration = Long.MIN_VALUE
+    private var indexedDecodeFailed = false
+    private var indexedPngStore: IndexedPngStore? = null
+    private var indexedPngDecoder: IndexedPngRegionDecoder? = null
+    private var indexedPngGeneration = Long.MIN_VALUE
+    private var indexedPngDecodeFailed = false
+    private var indexedWebpStore: IndexedWebpStore? = null
+    private var indexedWebpDecoder: IndexedWebpRegionDecoder? = null
+    private var indexedWebpGeneration = Long.MIN_VALUE
+    private var indexedWebpDecodeFailed = false
+    private var indexedHeifStore: IndexedHeifStore? = null
+    private var indexedHeifDecoder: IndexedHeifRegionDecoder? = null
+    private var indexedHeifGeneration = Long.MIN_VALUE
+    private var indexedHeifDecodeFailed = false
+    @Volatile private var initialized = false
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
 
@@ -124,6 +153,16 @@ class FastRegionDecoder(
         )
         appContext = context.applicationContext
         sourceUri = uri
+        localSourcePath = if (uri.scheme == "file" || uri.scheme == null) {
+            val path = uri.path ?: uri.toString()
+            File(path).takeIf { it.isFile && it.canRead() }?.absolutePath
+        } else {
+            null
+        }
+        indexedStore = IndexedJpegStore(appContext)
+        indexedPngStore = IndexedPngStore(appContext)
+        indexedWebpStore = IndexedWebpStore(appContext)
+        indexedHeifStore = IndexedHeifStore(appContext)
         metricsKey = imageVersion
         metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
@@ -207,8 +246,7 @@ class FastRegionDecoder(
             }
 
             val decodeStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            val bitmap = openDecoder("tile-cache-miss").decodeRegion(rect, options)
-                ?: throw RuntimeException("Region decoder returned null bitmap")
+            val (bitmap, source) = decodeSourceRegion(rect, newSampleSize, options, "tile-cache-miss")
             if (metricsEnabled) {
                 ViewerLoadMetrics.regionDecoded(
                     imageKey = metricsKey,
@@ -229,7 +267,7 @@ class FastRegionDecoder(
             )
             ViewerLoadMetrics.workReady(
                 decodeToken,
-                source = "SOURCE_REGION_DECODE",
+                source = source,
                 detail = "actualSample=$newSampleSize bitmap=${attached.width}x${attached.height} " +
                     "config=${attached.config} cacheWrite=DEFERRED",
             )
@@ -271,8 +309,12 @@ class FastRegionDecoder(
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val decodeStartedAt = SystemClock.elapsedRealtimeNanos()
-            val unionBitmap = openDecoder("tile-batch-cache-miss").decodeRegion(union, options)
-                ?: throw RuntimeException("Region decoder returned null batch bitmap")
+            val (unionBitmap, source) = decodeSourceRegion(
+                union,
+                actualSample,
+                options,
+                "tile-batch-cache-miss",
+            )
             val decodeDurationMs =
                 (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
             if (ViewerLoadMetrics.isEnabled) {
@@ -326,7 +368,12 @@ class FastRegionDecoder(
             }
             ViewerLoadMetrics.workReady(
                 batchToken,
-                source = "SOURCE_REGION_BATCH_DECODE",
+                source = when (source) {
+                    "INDEXED_JPEG_REGION_DECODE" -> "INDEXED_JPEG_REGION_BATCH_DECODE"
+                    "INDEXED_PNG_REGION_DECODE" -> "INDEXED_PNG_REGION_BATCH_DECODE"
+                    "INDEXED_WEBP_REGION_DECODE" -> "INDEXED_WEBP_REGION_BATCH_DECODE"
+                    else -> "SOURCE_REGION_BATCH_DECODE"
+                },
                 detail = "count=${attached.size} actualSample=$actualSample decodeMs=$decodeDurationMs",
             )
             return attached
@@ -334,7 +381,7 @@ class FastRegionDecoder(
     }
 
     override fun cacheRegion(sRect: Rect, sampleSize: Int, bitmap: Bitmap): Boolean {
-        synchronized(decoderLock) {
+        synchronized(cacheWriteLock) {
             if (!initialized || bitmap.isRecycled) return false
             val actualSample = effectiveSampleSize(sRect, sampleSize)
             val cacheFiles = tileCacheFiles(sRect, actualSample)
@@ -356,6 +403,26 @@ class FastRegionDecoder(
             decoder = null
             decoderInputStream?.close()
             decoderInputStream = null
+            indexedDecoder?.close()
+            indexedDecoder = null
+            indexedStore = null
+            indexedGeneration = Long.MIN_VALUE
+            indexedDecodeFailed = false
+            indexedPngDecoder?.close()
+            indexedPngDecoder = null
+            indexedPngStore = null
+            indexedPngGeneration = Long.MIN_VALUE
+            indexedPngDecodeFailed = false
+            indexedWebpDecoder?.close()
+            indexedWebpDecoder = null
+            indexedWebpStore = null
+            indexedWebpGeneration = Long.MIN_VALUE
+            indexedWebpDecodeFailed = false
+            indexedHeifDecoder?.close()
+            indexedHeifDecoder = null
+            indexedHeifStore = null
+            indexedHeifGeneration = Long.MIN_VALUE
+            indexedHeifDecodeFailed = false
             initialized = false
         }
         ViewerLoadMetrics.workReady(token)
@@ -429,6 +496,331 @@ class FastRegionDecoder(
             }
         }
         return effective
+    }
+
+    private fun decodeSourceRegion(
+        rect: Rect,
+        sampleSize: Int,
+        options: BitmapFactory.Options,
+        fallbackReason: String,
+    ): Pair<Bitmap, String> {
+        ViewerLoadMetrics.event(
+            "REGION_SOURCE_ROUTE",
+            "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize " +
+                "fallback=$fallbackReason indexedPath=${indexedSourcePath != null} " +
+                "jpeg=open:${indexedDecoder != null},failed:$indexedDecodeFailed,generation:$indexedGeneration " +
+                "png=open:${indexedPngDecoder != null},failed:$indexedPngDecodeFailed,generation:$indexedPngGeneration " +
+                "webp=open:${indexedWebpDecoder != null},failed:$indexedWebpDecodeFailed,generation:$indexedWebpGeneration " +
+                "heif=open:${indexedHeifDecoder != null},failed:$indexedHeifDecodeFailed,generation:$indexedHeifGeneration",
+            imageKey = imageVersion,
+        )
+        refreshIndexedDecoder()?.let { indexed ->
+            val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                SystemClock.elapsedRealtimeNanos()
+            } else {
+                0L
+            }
+            val bitmap = try {
+                indexed.decodeRegion(rect, sampleSize)
+            } catch (error: Throwable) {
+                ViewerLoadMetrics.event(
+                    "INDEXED_JPEG_DECODE_ERROR",
+                    "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize " +
+                        "error=${error.javaClass.simpleName}:${error.message}",
+                    imageKey = imageVersion,
+                )
+                null
+            }
+            if (bitmap != null) {
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.event(
+                        "INDEXED_JPEG_REGION_DECODE",
+                        "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} " +
+                            "sample=$sampleSize bitmap=${bitmap.width}x${bitmap.height} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                        imageKey = imageVersion,
+                    )
+                }
+                return bitmap to "INDEXED_JPEG_REGION_DECODE"
+            }
+            indexed.close()
+            indexedDecoder = null
+            indexedDecodeFailed = true
+            ViewerLoadMetrics.event(
+                "INDEXED_JPEG_FALLBACK",
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+                imageKey = imageVersion,
+            )
+        }
+
+        refreshIndexedPngDecoder()?.let { indexed ->
+            val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                SystemClock.elapsedRealtimeNanos()
+            } else {
+                0L
+            }
+            val bitmap = try {
+                indexed.decodeRegion(rect, sampleSize)
+            } catch (error: Throwable) {
+                ViewerLoadMetrics.event(
+                    "INDEXED_PNG_DECODE_ERROR",
+                    "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize " +
+                        "error=${error.javaClass.simpleName}:${error.message}",
+                    imageKey = imageVersion,
+                )
+                null
+            }
+            if (bitmap != null) {
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.event(
+                        "INDEXED_PNG_REGION_DECODE",
+                        "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} " +
+                            "sample=$sampleSize bitmap=${bitmap.width}x${bitmap.height} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                        imageKey = imageVersion,
+                    )
+                }
+                return bitmap to "INDEXED_PNG_REGION_DECODE"
+            }
+            indexed.close()
+            indexedPngDecoder = null
+            indexedPngDecodeFailed = true
+            ViewerLoadMetrics.event(
+                "INDEXED_PNG_FALLBACK",
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+                imageKey = imageVersion,
+            )
+        }
+
+        refreshIndexedWebpDecoder()?.let { indexed ->
+            val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                SystemClock.elapsedRealtimeNanos()
+            } else {
+                0L
+            }
+            val bitmap = try {
+                indexed.decodeRegion(rect, sampleSize)
+            } catch (error: Throwable) {
+                ViewerLoadMetrics.event(
+                    "INDEXED_WEBP_DECODE_ERROR",
+                    "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize " +
+                        "error=${error.javaClass.simpleName}:${error.message}",
+                    imageKey = imageVersion,
+                )
+                null
+            }
+            if (bitmap != null) {
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.event(
+                        "INDEXED_WEBP_REGION_DECODE",
+                        "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} " +
+                            "sample=$sampleSize bitmap=${bitmap.width}x${bitmap.height} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                        imageKey = imageVersion,
+                    )
+                }
+                return bitmap to "INDEXED_WEBP_REGION_DECODE"
+            }
+            indexed.close()
+            indexedWebpDecoder = null
+            indexedWebpDecodeFailed = true
+            ViewerLoadMetrics.event(
+                "INDEXED_WEBP_FALLBACK",
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+                imageKey = imageVersion,
+            )
+        }
+
+        refreshIndexedHeifDecoder()?.let { indexed ->
+            val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                SystemClock.elapsedRealtimeNanos()
+            } else {
+                0L
+            }
+            val bitmap = try {
+                indexed.decodeRegion(rect, sampleSize)
+            } catch (error: Throwable) {
+                ViewerLoadMetrics.event(
+                    "INDEXED_HEIF_DECODE_ERROR",
+                    "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize " +
+                        "error=${error.javaClass.simpleName}:${error.message}",
+                    imageKey = imageVersion,
+                )
+                null
+            }
+            if (bitmap != null) {
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.event(
+                        "INDEXED_HEIF_REGION_DECODE",
+                        "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} " +
+                            "sample=$sampleSize bitmap=${bitmap.width}x${bitmap.height} " +
+                            "duration=${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                        imageKey = imageVersion,
+                    )
+                }
+                return bitmap to "INDEXED_HEIF_REGION_DECODE"
+            }
+            indexed.close()
+            indexedHeifDecoder = null
+            indexedHeifDecodeFailed = true
+            ViewerLoadMetrics.event(
+                "INDEXED_HEIF_FALLBACK",
+                "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
+                imageKey = imageVersion,
+            )
+        }
+
+        val bitmap = openDecoder(fallbackReason).decodeRegion(rect, options)
+            ?: throw RuntimeException("Region decoder returned null bitmap")
+        return bitmap to "SOURCE_REGION_DECODE"
+    }
+
+    private fun refreshIndexedDecoder(): IndexedJpegRegionDecoder? {
+        val store = indexedStore ?: return null
+        val sourcePath = indexedSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedGeneration != generation) {
+            ViewerLoadMetrics.event(
+                "INDEX_GENERATION_CHANGE",
+                "format=JPEG from=$indexedGeneration to=$generation",
+                imageKey = imageVersion,
+            )
+            indexedDecoder?.close()
+            indexedDecoder = null
+            indexedGeneration = generation
+            indexedDecodeFailed = false
+        }
+        if (indexedDecodeFailed) {
+            ViewerLoadMetrics.event("INDEX_BYPASS", "format=JPEG reason=previous-failure", imageKey = imageVersion)
+            return null
+        }
+        indexedDecoder?.let {
+            ViewerLoadMetrics.event("INDEX_REUSE", "format=JPEG generation=$generation", imageKey = imageVersion)
+            return it
+        }
+        indexedDecoder = try {
+            store.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedDecoder == null) indexedDecodeFailed = true
+        logIndexOpen("JPEG", sourcePath, indexedDecoder != null)
+        return indexedDecoder
+    }
+
+    private fun refreshIndexedPngDecoder(): IndexedPngRegionDecoder? {
+        val store = indexedPngStore ?: return null
+        val sourcePath = indexedSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedPngGeneration != generation) {
+            ViewerLoadMetrics.event(
+                "INDEX_GENERATION_CHANGE",
+                "format=PNG from=$indexedPngGeneration to=$generation",
+                imageKey = imageVersion,
+            )
+            indexedPngDecoder?.close()
+            indexedPngDecoder = null
+            indexedPngGeneration = generation
+            indexedPngDecodeFailed = false
+        }
+        if (indexedPngDecodeFailed) {
+            ViewerLoadMetrics.event("INDEX_BYPASS", "format=PNG reason=previous-failure", imageKey = imageVersion)
+            return null
+        }
+        indexedPngDecoder?.let {
+            ViewerLoadMetrics.event("INDEX_REUSE", "format=PNG generation=$generation", imageKey = imageVersion)
+            return it
+        }
+        indexedPngDecoder = try {
+            store.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedPngDecoder == null) indexedPngDecodeFailed = true
+        logIndexOpen("PNG", sourcePath, indexedPngDecoder != null)
+        return indexedPngDecoder
+    }
+
+    private fun refreshIndexedWebpDecoder(): IndexedWebpRegionDecoder? {
+        val store = indexedWebpStore ?: return null
+        val sourcePath = indexedSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedWebpGeneration != generation) {
+            ViewerLoadMetrics.event(
+                "INDEX_GENERATION_CHANGE",
+                "format=WEBP from=$indexedWebpGeneration to=$generation",
+                imageKey = imageVersion,
+            )
+            indexedWebpDecoder?.close()
+            indexedWebpDecoder = null
+            indexedWebpGeneration = generation
+            indexedWebpDecodeFailed = false
+        }
+        if (indexedWebpDecodeFailed) {
+            ViewerLoadMetrics.event("INDEX_BYPASS", "format=WEBP reason=previous-failure", imageKey = imageVersion)
+            return null
+        }
+        indexedWebpDecoder?.let {
+            ViewerLoadMetrics.event("INDEX_REUSE", "format=WEBP generation=$generation", imageKey = imageVersion)
+            return it
+        }
+        indexedWebpDecoder = try {
+            store.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedWebpDecoder == null) indexedWebpDecodeFailed = true
+        logIndexOpen("WEBP", sourcePath, indexedWebpDecoder != null)
+        return indexedWebpDecoder
+    }
+
+    private fun refreshIndexedHeifDecoder(): IndexedHeifRegionDecoder? {
+        val store = indexedHeifStore ?: return null
+        val sourcePath = indexedSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedHeifGeneration != generation) {
+            ViewerLoadMetrics.event(
+                "INDEX_GENERATION_CHANGE",
+                "format=HEIF_AVIF from=$indexedHeifGeneration to=$generation",
+                imageKey = imageVersion,
+            )
+            indexedHeifDecoder?.close()
+            indexedHeifDecoder = null
+            indexedHeifGeneration = generation
+            indexedHeifDecodeFailed = false
+        }
+        if (indexedHeifDecodeFailed) {
+            ViewerLoadMetrics.event("INDEX_BYPASS", "format=HEIF_AVIF reason=previous-failure", imageKey = imageVersion)
+            return null
+        }
+        indexedHeifDecoder?.let {
+            ViewerLoadMetrics.event("INDEX_REUSE", "format=HEIF_AVIF generation=$generation", imageKey = imageVersion)
+            return it
+        }
+        indexedHeifDecoder = try {
+            store.openDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedHeifDecoder == null) indexedHeifDecodeFailed = true
+        logIndexOpen("HEIF_AVIF", sourcePath, indexedHeifDecoder != null)
+        return indexedHeifDecoder
+    }
+
+    private fun logIndexOpen(format: String, sourcePath: String, hit: Boolean) {
+        ViewerLoadMetrics.event(
+            "INDEX_OPEN",
+            "format=$format result=${if (hit) "HIT" else "MISS"} " +
+                "source=${File(sourcePath).name} " +
+                "decodeSource=${localSourcePath?.let(::File)?.name ?: "none"}",
+            imageKey = imageVersion,
+        )
+        if (!BuildConfig.INDEXED_IMAGE_DIAGNOSTICS_ENABLED) return
+        Log.i(
+            "IndexedImageDecode",
+            "INDEX_OPEN format=$format result=${if (hit) "HIT" else "MISS"} " +
+                "source=${File(sourcePath).name} decodeSource=${localSourcePath?.let(::File)?.name ?: "none"}",
+        )
     }
 
     private fun ceilDiv(value: Int, divisor: Int): Int =

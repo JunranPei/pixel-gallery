@@ -11,4 +11,12 @@ pluginManagement {
 
 include(":app")
 include(":ssiv-pixel")
+include(":indexed-jpeg")
+include(":indexed-png")
+include(":indexed-tiff")
+include(":indexed-webp")
+include(":indexed-raw")
+include(":indexed-heif")
+include(":indexed-bmp")
+include(":indexed-jxl")
 project(":ssiv-pixel").projectDir = file("third_party/ssiv-pixel")
