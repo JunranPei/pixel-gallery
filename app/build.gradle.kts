@@ -71,7 +71,7 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 36
+        versionCode = 2032
         versionName = "4.3.1.5-auto-multitask"
     }
 
@@ -239,6 +239,7 @@ dependencies {
     implementation(project(":indexed-raw"))
     implementation(project(":indexed-heif"))
     implementation(project(":indexed-bmp"))
+    implementation(project(":indexed-jxl"))
     
     // Other formats
     val tiffFile = file("libs/Android-TiffBitmapFactory-424b18a4ae.aar")

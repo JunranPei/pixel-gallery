@@ -10,6 +10,7 @@ enum class ViewerRegionDecoderKind {
     SVG,
     RAW_EMBEDDED,
     BMP,
+    JXL,
 }
 
 enum class ViewerPreviewKind {
@@ -27,6 +28,7 @@ sealed interface ViewerRenderPlan {
     data object PreviewOnly : ViewerRenderPlan
     data object RawEmbeddedPreview : ViewerRenderPlan
     data object IndexedBmp : ViewerRenderPlan
+    data object IndexedJxl : ViewerRenderPlan
 }
 
 private interface ViewerFormatAdapter {
@@ -42,6 +44,7 @@ object ViewerFormatRegistry {
         SvgAdapter,
         TiffAdapter,
         BmpAdapter,
+        JxlAdapter,
         NativeRegionAdapter,
         RawAdapter,
     )
@@ -75,6 +78,13 @@ object ViewerFormatRegistry {
         override fun resolve(media: MediaEntry, normalizedMime: String): ViewerRenderPlan? {
             val matches = normalizedMime == MimeTypes.BMP || media.path.endsWith(".bmp", true)
             return if (matches) ViewerRenderPlan.IndexedBmp else null
+        }
+    }
+
+    private object JxlAdapter : ViewerFormatAdapter {
+        override fun resolve(media: MediaEntry, normalizedMime: String): ViewerRenderPlan? {
+            val matches = normalizedMime == "image/jxl" || media.path.endsWith(".jxl", true)
+            return if (matches) ViewerRenderPlan.IndexedJxl else null
         }
     }
 

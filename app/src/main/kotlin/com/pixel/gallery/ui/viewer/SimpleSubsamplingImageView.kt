@@ -40,6 +40,7 @@ import com.pixel.gallery.ui.viewer.decoders.SvgRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.TiffRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.RawEmbeddedPreviewRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.BmpRegionDecoder
+import com.pixel.gallery.ui.viewer.decoders.JxlRegionDecoder
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrAwareFitCenter
 import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
@@ -409,11 +410,12 @@ internal fun SimpleSubsamplingImageView(
     val savedTransformAtAttach = remember(transformStateKey) {
         transformStateStore.get(transformStateKey)
     }
-    var deepZoomRequested by remember(transformStateKey) {
-        mutableStateOf(requiresDeepZoom(savedTransformAtAttach))
+    val indexedOnlyRenderer = regionDecoderKind == ViewerRegionDecoderKind.JXL
+    var deepZoomRequested by remember(transformStateKey, indexedOnlyRenderer) {
+        mutableStateOf(indexedOnlyRenderer || requiresDeepZoom(savedTransformAtAttach))
     }
-    var previewOwnsTransform by remember(transformStateKey) {
-        mutableStateOf(!requiresDeepZoom(savedTransformAtAttach))
+    var previewOwnsTransform by remember(transformStateKey, indexedOnlyRenderer) {
+        mutableStateOf(!indexedOnlyRenderer && !requiresDeepZoom(savedTransformAtAttach))
     }
     val savedPreviewScale = savedTransformAtAttach
         ?.takeUnless(::requiresDeepZoom)
@@ -535,7 +537,8 @@ internal fun SimpleSubsamplingImageView(
     ) {
         val view = ssivView
         when {
-            isActivePage && isPagerIdle && enableSubsampling && previewLoaded &&
+            isActivePage && isPagerIdle && enableSubsampling &&
+                (previewLoaded || indexedOnlyRenderer) &&
                 deepZoomRequested &&
                 view != null && !imageAssigned -> {
                 val token = ViewerLoadMetrics.workStarted(
@@ -1113,6 +1116,7 @@ internal fun SimpleSubsamplingImageView(
                             sourcePath = imagePath,
                         )
                         ViewerRegionDecoderKind.BMP -> BmpRegionDecoder(imagePath)
+                        ViewerRegionDecoderKind.JXL -> JxlRegionDecoder(imagePath)
                     }
                 }
                 bitmapDecoderFactory = bitmapDecoder
@@ -1250,7 +1254,7 @@ internal fun SimpleSubsamplingImageView(
                                         "generation=$saveGeneration revision=${transformStateStore.revision(transformStateKey)}",
                                     imageKey = transformStateKey,
                                 )
-                                if (returnToPreview && !previewTakeoverPending) {
+                                if (returnToPreview && !indexedOnlyRenderer && !previewTakeoverPending) {
                                     previewUserScale = relativeScale.coerceAtLeast(0.01f)
                                     previewOffsetX = 0f
                                     previewOffsetY = 0f

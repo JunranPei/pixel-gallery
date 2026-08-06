@@ -72,6 +72,8 @@ import io.github.indexedheif.IndexedHeifStatus
 import io.github.indexedheif.IndexedHeifStore
 import io.github.indexedbmp.IndexedBmpStatus
 import io.github.indexedbmp.IndexedBmpStore
+import io.github.indexedjxl.IndexedJxlStatus
+import io.github.indexedjxl.IndexedJxlStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -142,6 +144,7 @@ private enum class IndexedImageFormat(val displayName: String) {
     RAW("RAW"),
     HEIF("HEIF/AVIF"),
     BMP("BMP"),
+    JXL("JPEG XL"),
 }
 
 private data class IndexedImageTarget(
@@ -356,6 +359,9 @@ fun ViewerScreen(
     val bmpIndexStore = remember(context.applicationContext) {
         IndexedBmpStore(context.applicationContext)
     }
+    val jxlIndexStore = remember(context.applicationContext) {
+        IndexedJxlStore(context.applicationContext)
+    }
     val currentJpegIndexPath = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -452,6 +458,20 @@ fun ViewerScreen(
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
+    val currentJxlIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        currentMedia?.sourceMimeType,
+    ) {
+        currentMedia
+            ?.takeIf {
+                it.sourceMimeType.equals("image/jxl", ignoreCase = true) ||
+                    it.path.endsWith(".jxl", ignoreCase = true)
+            }
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
     val currentIndexTarget = remember(
         currentJpegIndexPath,
         currentPngIndexPath,
@@ -460,6 +480,7 @@ fun ViewerScreen(
         currentRawIndexPath,
         currentHeifIndexPath,
         currentBmpIndexPath,
+        currentJxlIndexPath,
     ) {
         when {
             currentJpegIndexPath != null -> IndexedImageTarget(
@@ -490,6 +511,10 @@ fun ViewerScreen(
                 format = IndexedImageFormat.BMP,
                 path = currentBmpIndexPath,
             )
+            currentJxlIndexPath != null -> IndexedImageTarget(
+                format = IndexedImageFormat.JXL,
+                path = currentJxlIndexPath,
+            )
             else -> null
         }
     }
@@ -509,6 +534,7 @@ fun ViewerScreen(
                     IndexedImageFormat.RAW -> rawIndexStore.status(target.path) is IndexedRawStatus.Ready
                     IndexedImageFormat.HEIF -> heifIndexStore.status(target.path) is IndexedHeifStatus.Ready
                     IndexedImageFormat.BMP -> bmpIndexStore.status(target.path) is IndexedBmpStatus.Ready
+                    IndexedImageFormat.JXL -> jxlIndexStore.status(target.path) is IndexedJxlStatus.Ready
                 }
             }
         }
@@ -1072,11 +1098,24 @@ fun ViewerScreen(
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick,
                                 )
-                            } else if (renderPlan is ViewerRenderPlan.IndexedBmp) {
-                                val bmpIndexReady = imageIndexReady == true &&
-                                    currentIndexTarget?.format == IndexedImageFormat.BMP &&
+                            } else if (
+                                renderPlan is ViewerRenderPlan.IndexedBmp ||
+                                renderPlan is ViewerRenderPlan.IndexedJxl
+                            ) {
+                                val indexedFormat = if (renderPlan is ViewerRenderPlan.IndexedJxl) {
+                                    IndexedImageFormat.JXL
+                                } else {
+                                    IndexedImageFormat.BMP
+                                }
+                                val indexedRegionKind = if (renderPlan is ViewerRenderPlan.IndexedJxl) {
+                                    ViewerRegionDecoderKind.JXL
+                                } else {
+                                    ViewerRegionDecoderKind.BMP
+                                }
+                                val rareIndexReady = imageIndexReady == true &&
+                                    currentIndexTarget?.format == indexedFormat &&
                                     currentIndexTarget.path == media.path
-                                if (!bmpIndexReady) {
+                                if (!rareIndexReady) {
                                     GlideViewerFallback(
                                         imagePath = media.path.ifEmpty { media.uri },
                                         width = media.width,
@@ -1101,7 +1140,7 @@ fun ViewerScreen(
                                         sourceWidth = media.width,
                                         sourceHeight = media.height,
                                         previewModel = media.path.ifEmpty { media.uri },
-                                        regionDecoderKind = ViewerRegionDecoderKind.BMP,
+                                        regionDecoderKind = indexedRegionKind,
                                         transformStateStore = viewerTransformStateStore,
                                         onContentReadyChanged = { fullPreviewReady = it },
                                         modifier = Modifier.fillMaxSize(),
@@ -1474,6 +1513,10 @@ fun ViewerScreen(
                                 IndexedImageFormat.BMP ->
                                     "This validates the uncompressed BMP row layout and writes a 56-byte " +
                                         "activation. Later zoom reads only scan lines crossing the viewport."
+                                IndexedImageFormat.JXL ->
+                                    "This streams the complete still JPEG XL once and builds a lossless sRGB " +
+                                        "multi-resolution tile index without holding the complete image in memory. " +
+                                        "Animated and HDR JPEG XL are not indexed yet."
                             }
                         } else {
                             "Delete the saved $formatName index for this image? Future uncached tiles will use " +
@@ -1541,6 +1584,13 @@ fun ViewerScreen(
                                                     "Unable to delete the BMP activation"
                                                 }
                                             }
+                                            IndexedImageFormat.JXL -> if (isBuild) {
+                                                jxlIndexStore.build(operationTarget.path)
+                                            } else {
+                                                check(jxlIndexStore.delete(operationTarget.path)) {
+                                                    "Unable to delete the JPEG XL index"
+                                                }
+                                            }
                                         }
                                         "$formatName index ${if (isBuild) "built" else "deleted"}"
                                     }
@@ -1563,6 +1613,8 @@ fun ViewerScreen(
                                                 heifIndexStore.status(operationTarget.path) is IndexedHeifStatus.Ready
                                             IndexedImageFormat.BMP ->
                                                 bmpIndexStore.status(operationTarget.path) is IndexedBmpStatus.Ready
+                                            IndexedImageFormat.JXL ->
+                                                jxlIndexStore.status(operationTarget.path) is IndexedJxlStatus.Ready
                                         }
                                     }
                                 }
