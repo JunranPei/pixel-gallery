@@ -15,12 +15,15 @@ val keystoreProperties = Properties()
 // by a build-wide experiment flag.
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
-val viewerMetricsEnabled = viewerTestVariant == "trace" ||
-    viewerTestVariant == "compressed" ||
-    viewerTestVariant == "zoomtrace" ||
-    viewerTestVariant == "jpegindextrace"
-val indexedImageDiagnosticsEnabled = viewerTestVariant == "jpegindex" ||
-    viewerTestVariant == "jpegindextrace"
+val viewerMetricsEnabled = !officialRelease && (
+    viewerTestVariant == "trace" ||
+        viewerTestVariant == "compressed" ||
+        viewerTestVariant == "zoomtrace" ||
+        viewerTestVariant == "jpegindextrace"
+    )
+val indexedImageDiagnosticsEnabled = !officialRelease && (
+    viewerTestVariant == "jpegindex" || viewerTestVariant == "jpegindextrace"
+    )
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -71,8 +74,8 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 2032
-        versionName = "4.3.1.5-auto-multitask"
+        versionCode = 2033
+        versionName = "4.3.2.0-auto-multitask"
     }
 
     signingConfigs {
