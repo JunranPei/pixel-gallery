@@ -84,6 +84,7 @@ import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.model.TransferSummary
+import com.pixel.gallery.model.matchesTransferDestinationQuery
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -129,14 +130,10 @@ fun TransferDestinationScreen(
             .keys
     }
     val filteredDestinations = remember(allDestinations, query) {
-        val normalized = query.trim()
-        if (normalized.isEmpty()) {
+        if (query.isBlank()) {
             allDestinations
         } else {
-            allDestinations.filter {
-                it.displayName.contains(normalized, ignoreCase = true) ||
-                    it.path.contains(normalized, ignoreCase = true)
-            }
+            allDestinations.filter { matchesTransferDestinationQuery(it, query) }
         }
     }
 
@@ -331,7 +328,7 @@ fun TransferDestinationScreen(
             }
 
             Text(
-                text = if (query.isEmpty()) "Albums" else "Search results",
+                text = if (query.isBlank()) "Albums" else "Search results",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 12.dp)
             )
@@ -345,22 +342,22 @@ fun TransferDestinationScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(148.dp),
+                    columns = GridCells.Fixed(4),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
+                        start = 12.dp,
+                        end = 12.dp,
                         top = 4.dp,
                         bottom = 24.dp
                     ),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(filteredDestinations, key = { it.stableKey }) { destination ->
                         TransferDestinationCard(
                             destination = destination,
                             selected = destination.stableKey == selectedDestination?.stableKey,
-                            showParentPath = destination.displayName.lowercase() in duplicateNames || query.isNotEmpty(),
+                            showParentPath = destination.displayName.lowercase() in duplicateNames,
                             onClick = { selectedDestination = destination }
                         )
                     }
@@ -581,7 +578,7 @@ private fun TransferDestinationCard(
         }
         Text(
             text = destination.displayName,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 10.dp)

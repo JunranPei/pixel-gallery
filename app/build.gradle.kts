@@ -12,12 +12,15 @@ import java.io.FileInputStream
 
 val keystoreProperties = Properties()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
-val viewerMetricsEnabled = viewerTestVariant == "trace" ||
-    viewerTestVariant == "compressed" ||
-    viewerTestVariant == "zoomtrace" ||
-    viewerTestVariant == "jpegindextrace"
-val indexedImageDiagnosticsEnabled = viewerTestVariant == "jpegindex" ||
-    viewerTestVariant == "jpegindextrace"
+val viewerMetricsEnabled = !officialRelease && (
+    viewerTestVariant == "trace" ||
+        viewerTestVariant == "compressed" ||
+        viewerTestVariant == "zoomtrace" ||
+        viewerTestVariant == "jpegindextrace"
+    )
+val indexedImageDiagnosticsEnabled = !officialRelease && (
+    viewerTestVariant == "jpegindex" || viewerTestVariant == "jpegindextrace"
+    )
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
@@ -66,8 +69,8 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 2032
-        versionName = "4.3.1.5-main"
+        versionCode = 2034
+        versionName = "4.3.2.1-main"
     }
 
     signingConfigs {
@@ -213,6 +216,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.commonsware.cwac:document:0.5.0")
     implementation("com.drewnoakes:metadata-extractor:2.19.0")
+    implementation("com.belerweb:pinyin4j:2.5.1")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
 
