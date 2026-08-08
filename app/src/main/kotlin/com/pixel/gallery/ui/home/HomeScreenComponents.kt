@@ -293,6 +293,10 @@ fun PhotoTile(
     val transform = remember(signatureKey) {
         { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
             requestBuilder
+                // Keep the cached 200 px resource untransformed. Compose still
+                // draws it with ContentScale.Crop, while the viewer can draw the
+                // same cached pixels with ContentScale.Fit.
+                .dontTransform()
                 .format(DecodeFormat.PREFER_RGB_565)
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)

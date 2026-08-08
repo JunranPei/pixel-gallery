@@ -59,6 +59,38 @@ class MediaTransferTest {
     }
 
     @Test
+    fun `destination search ignores case and matches only from the beginning`() {
+        val camera = destination("Camera")
+
+        assertEquals(true, matchesTransferDestinationQuery(camera, "CAM"))
+        assertEquals(false, matchesTransferDestinationQuery(camera, "mera"))
+    }
+
+    @Test
+    fun `destination search matches Chinese album names by full pinyin prefix`() {
+        assertEquals(true, matchesTransferDestinationQuery(destination("微信"), "WEI"))
+        assertEquals(true, matchesTransferDestinationQuery(destination("小红书"), "xiaohong"))
+        assertEquals(false, matchesTransferDestinationQuery(destination("小红书"), "hongshu"))
+    }
+
+    @Test
+    fun `destination search supports mixed Chinese and English album names`() {
+        assertEquals(true, matchesTransferDestinationQuery(destination("微信Backup"), "weixinb"))
+        assertEquals(true, matchesTransferDestinationQuery(destination("微信Backup"), "微信b"))
+    }
+
+    @Test
+    fun `destination search considers polyphonic Chinese prefixes`() {
+        assertEquals(true, matchesTransferDestinationQuery(destination("重庆旅行"), "chongqing"))
+    }
+
+    @Test
+    fun `destination search ignores separators and full width letter forms`() {
+        assertEquals(true, matchesTransferDestinationQuery(destination("Screen recordings"), "screen_rec"))
+        assertEquals(true, matchesTransferDestinationQuery(destination("Camera"), "ＣＡＭ"))
+    }
+
+    @Test
     fun `committed move rolls back while source still exists`() {
         assertEquals(
             ReplacementRecoveryAction.ROLLBACK_TO_BACKUP,
@@ -108,5 +140,11 @@ class MediaTransferTest {
         dateAddedSecs = 1,
         dateModifiedMillis = 1,
         bestTimestamp = id
+    )
+
+    private fun destination(name: String) = TransferDestination(
+        stableKey = name,
+        displayName = name,
+        path = "/storage/emulated/0/$name"
     )
 }

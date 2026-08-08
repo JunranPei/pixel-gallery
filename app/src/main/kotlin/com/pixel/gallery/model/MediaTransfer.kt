@@ -2,6 +2,13 @@ package com.pixel.gallery.model
 
 import com.pixel.gallery.data.local.entity.MediaEntry
 import java.io.File
+import java.text.Normalizer
+import java.util.Locale
+import net.sourceforge.pinyin4j.PinyinHelper
+import net.sourceforge.pinyin4j.format.HanyuPinyinCaseType
+import net.sourceforge.pinyin4j.format.HanyuPinyinOutputFormat
+import net.sourceforge.pinyin4j.format.HanyuPinyinToneType
+import net.sourceforge.pinyin4j.format.HanyuPinyinVCharType
 
 enum class TransferMode {
     COPY,
@@ -77,6 +84,53 @@ data class TransferSummary(
     val failed: Int get() = failures.size
     val completedAny: Boolean get() = succeeded > 0
 }
+
+private val transferSearchPinyinFormat = HanyuPinyinOutputFormat().apply {
+    caseType = HanyuPinyinCaseType.LOWERCASE
+    toneType = HanyuPinyinToneType.WITHOUT_TONE
+    vCharType = HanyuPinyinVCharType.WITH_V
+}
+
+fun matchesTransferDestinationQuery(
+    destination: TransferDestination,
+    query: String
+): Boolean {
+    val normalizedQuery = normalizeTransferSearchText(query)
+    if (normalizedQuery.isEmpty()) return true
+
+    val normalizedName = normalizeTransferSearchText(destination.displayName)
+    return normalizedName.startsWith(normalizedQuery) ||
+        transferDestinationPinyinCandidates(normalizedName).any { candidate ->
+            candidate.startsWith(normalizedQuery)
+        }
+}
+
+private fun transferDestinationPinyinCandidates(value: String): Set<String> {
+    var candidates = linkedSetOf("")
+    value.forEach { character ->
+        val pronunciations = runCatching {
+            PinyinHelper.toHanyuPinyinStringArray(character, transferSearchPinyinFormat)
+        }.getOrNull()
+            ?.map(::normalizeTransferSearchText)
+            ?.filter(String::isNotEmpty)
+            ?.distinct()
+            .orEmpty()
+            .ifEmpty { listOf(character.toString()) }
+
+        candidates = candidates
+            .flatMapTo(linkedSetOf()) { prefix ->
+                pronunciations.map { pronunciation -> prefix + pronunciation }
+            }
+            .take(64)
+            .toCollection(linkedSetOf())
+    }
+    return candidates
+}
+
+private fun normalizeTransferSearchText(value: String): String =
+    Normalizer.normalize(value.trim(), Normalizer.Form.NFKC)
+        .lowercase(Locale.ROOT)
+        .filter(Char::isLetterOrDigit)
 
 fun buildTransferDestinations(entries: List<MediaEntry>): List<TransferDestination> =
     entries
