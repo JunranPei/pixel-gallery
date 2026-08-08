@@ -74,8 +74,8 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 2033
-        versionName = "4.3.2.0-auto-multitask"
+        versionCode = 2034
+        versionName = "4.3.2.1-auto-multitask"
     }
 
     signingConfigs {
@@ -224,6 +224,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.commonsware.cwac:document:0.5.0")
     implementation("com.drewnoakes:metadata-extractor:2.19.0")
+    implementation("com.belerweb:pinyin4j:2.5.1")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
 

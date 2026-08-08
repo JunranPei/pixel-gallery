@@ -40,7 +40,31 @@ data class MediaStoreThumbnail(
     val sizeBytes: Long? = null,
     val allowPersistentCache: Boolean = true,
     val traceViewerLoad: Boolean = false,
-)
+) {
+    // These two flags control how a cache miss is handled, but they do not change
+    // the pixels produced by this model. Keeping them out of model identity lets
+    // the viewer's cache-only cover reuse the exact 200 px bitmap that Grid just
+    // displayed, without starting another source read or decode.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MediaStoreThumbnail) return false
+
+        return uri == other.uri &&
+            mimeType == other.mimeType &&
+            rotationDegrees == other.rotationDegrees &&
+            dateModifiedMillis == other.dateModifiedMillis &&
+            sizeBytes == other.sizeBytes
+    }
+
+    override fun hashCode(): Int {
+        var result = uri.hashCode()
+        result = 31 * result + mimeType.hashCode()
+        result = 31 * result + rotationDegrees
+        result = 31 * result + dateModifiedMillis.hashCode()
+        result = 31 * result + (sizeBytes?.hashCode() ?: 0)
+        return result
+    }
+}
 
 internal class MediaStoreThumbnailLoader(private val context: Context) : ModelLoader<MediaStoreThumbnail, Bitmap> {
     override fun buildLoadData(

@@ -831,6 +831,9 @@ fun ViewerScreen(
                                 // Once a pager gesture starts it may load normally so the incoming
                                 // page always has a lightweight moving placeholder.
                                 val configured = request
+                                    // Match Grid's untransformed 200 px cache entry. Compose
+                                    // applies ContentScale.Fit when drawing this cover.
+                                    .dontTransform()
                                     .format(DecodeFormat.PREFER_RGB_565)
                                     .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                     .signature(swipeThumbnailSignature)
