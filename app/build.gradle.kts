@@ -11,6 +11,7 @@ import java.util.Properties
 import java.io.FileInputStream
 
 val keystoreProperties = Properties()
+val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
 val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
