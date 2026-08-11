@@ -6,6 +6,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,6 +21,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -128,7 +131,7 @@ internal class ViewerTransformStateStore {
         val revision: Int,
     )
 
-    private val states = HashMap<String, StoredState>()
+    private val states = LinkedHashMap<String, StoredState>(16, 0.75f, true)
 
     @Synchronized
     fun get(key: String): SubsamplingScaleImageView.ViewState? = states[key]?.state
@@ -144,6 +147,14 @@ internal class ViewerTransformStateStore {
     ) {
         val revision = (states[key]?.revision ?: 0) + 1
         states[key] = StoredState(state, revision)
+        while (states.size > MAX_SAVED_TRANSFORMS) {
+            states.entries.iterator().run {
+                if (hasNext()) {
+                    next()
+                    remove()
+                }
+            }
+        }
         ViewerLoadMetrics.event(
             "TRANSFORM_STORE_SAVE",
             "revision=$revision reason=$reason scale=${state.scale} " +
@@ -151,6 +162,62 @@ internal class ViewerTransformStateStore {
                 "rotation=${state.rotationRadians}",
             imageKey = key,
         )
+    }
+
+    @Synchronized
+    internal fun saveableSnapshot(): List<Any> = buildList {
+        add(SNAPSHOT_VERSION)
+        states.forEach { (key, stored) ->
+            add(key)
+            add(stored.state.scale)
+            add(stored.state.baseFitScale)
+            add(stored.state.sourceCenter.x)
+            add(stored.state.sourceCenter.y)
+            add(stored.state.sourceWidth)
+            add(stored.state.sourceHeight)
+            add(stored.state.rotationRadians)
+            add(stored.revision)
+        }
+    }
+
+    companion object {
+        private const val SNAPSHOT_VERSION = 1
+        private const val SNAPSHOT_FIELDS_PER_STATE = 9
+        private const val MAX_SAVED_TRANSFORMS = 128
+
+        val Saver: Saver<ViewerTransformStateStore, Any> = listSaver(
+            save = { store -> store.saveableSnapshot() },
+            restore = { values -> fromSaveableSnapshot(values) },
+        )
+
+        internal fun fromSaveableSnapshot(values: List<Any>): ViewerTransformStateStore {
+            val store = ViewerTransformStateStore()
+            if ((values.firstOrNull() as? Number)?.toInt() != SNAPSHOT_VERSION) return store
+
+            values.drop(1)
+                .chunked(SNAPSHOT_FIELDS_PER_STATE)
+                .takeLast(MAX_SAVED_TRANSFORMS)
+                .forEach { fields ->
+                    if (fields.size != SNAPSHOT_FIELDS_PER_STATE) return@forEach
+                    runCatching {
+                        val key = fields[0] as String
+                        val state = SubsamplingScaleImageView.ViewState(
+                            scale = (fields[1] as Number).toFloat(),
+                            baseFitScale = (fields[2] as Number).toFloat(),
+                            sourceCenter = PointF(
+                                (fields[3] as Number).toFloat(),
+                                (fields[4] as Number).toFloat(),
+                            ),
+                            sourceWidth = (fields[5] as Number).toInt(),
+                            sourceHeight = (fields[6] as Number).toInt(),
+                            rotationRadians = (fields[7] as Number).toDouble(),
+                        )
+                        val revision = (fields[8] as Number).toInt().coerceAtLeast(1)
+                        store.states[key] = StoredState(state, revision)
+                    }
+                }
+            return store
+        }
     }
 }
 
@@ -321,6 +388,26 @@ private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boole
     return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
 
+internal fun updatePreviewInteractionCount(current: Int, delta: Int): Int =
+    (current + delta).coerceAtLeast(0)
+
+internal fun canHandoffPreviewToTiles(
+    ssivBaseDrawn: Boolean,
+    isActivePage: Boolean,
+    imageAssigned: Boolean,
+    subsamplingReady: Boolean,
+    previewGestureInProgress: Boolean,
+    previewInteractionCount: Int,
+): Boolean =
+    ssivBaseDrawn && isActivePage && imageAssigned && !subsamplingReady &&
+        !previewGestureInProgress && previewInteractionCount == 0
+
+internal fun canTilesReceiveInput(
+    isActivePage: Boolean,
+    subsamplingReady: Boolean,
+    previewOwnsTransform: Boolean,
+): Boolean = isActivePage && subsamplingReady && !previewOwnsTransform
+
 private fun previewTransformState(
     userScale: Float,
     offsetX: Float,
@@ -433,6 +520,7 @@ internal fun SimpleSubsamplingImageView(
     var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetX) }
     var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetY) }
     var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
+    var previewInteractionCount by remember(transformStateKey) { mutableIntStateOf(0) }
     var previewTransformSyncRevision by remember(transformStateKey) { mutableIntStateOf(0) }
     var previewTakeoverPending by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
@@ -651,10 +739,16 @@ internal fun SimpleSubsamplingImageView(
         imageAssigned,
         subsamplingReady,
         previewGestureInProgress,
+        previewInteractionCount,
     ) {
-        if (
-            !ssivBaseDrawn || !isActivePage || !imageAssigned || subsamplingReady ||
-            previewGestureInProgress
+        if (!canHandoffPreviewToTiles(
+                ssivBaseDrawn = ssivBaseDrawn,
+                isActivePage = isActivePage,
+                imageAssigned = imageAssigned,
+                subsamplingReady = subsamplingReady,
+                previewGestureInProgress = previewGestureInProgress,
+                previewInteractionCount = previewInteractionCount,
+            )
         ) return@LaunchedEffect
 
         // The gesture may briefly cross above fit (which starts SSIV) and then finish
@@ -994,6 +1088,12 @@ internal fun SimpleSubsamplingImageView(
                     imageKey = transformStateKey,
                 )
             },
+            onInteractionDelta = { delta ->
+                previewInteractionCount = updatePreviewInteractionCount(
+                    previewInteractionCount,
+                    delta,
+                )
+            },
             onExternalTransformSynced = {
                 if (previewTakeoverPending) {
                     imageViewRef?.let { imageView ->
@@ -1069,11 +1169,20 @@ internal fun SimpleSubsamplingImageView(
                 )
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             }
-            val ssiv = SubsamplingScaleImageView(ctx).apply ssivView@ {
+            val ssiv = object : SubsamplingScaleImageView(ctx) {
+                override fun onTouchEvent(event: MotionEvent): Boolean {
+                    // setImage() makes SSIV visible (with alpha=0) so it can prepare and draw
+                    // tiles behind the preview. A transparent View still receives touches,
+                    // though, and must not mutate its fit-scale state before the atomic handoff.
+                    if (!isEnabled) return false
+                    return super.onTouchEvent(event)
+                }
+            }.apply ssivView@ {
                 layoutParams = android.widget.FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
+                isEnabled = false
 
                 val displayMetrics = ctx.resources.displayMetrics
                 val averageDpi = (displayMetrics.xdpi + displayMetrics.ydpi) / 2
@@ -1306,7 +1415,14 @@ internal fun SimpleSubsamplingImageView(
             frameLayout
         },
         update = {
-            ssivView?.setActiveTileMemoryCache(isActivePage)
+            ssivView?.let { view ->
+                view.isEnabled = canTilesReceiveInput(
+                    isActivePage = isActivePage,
+                    subsamplingReady = subsamplingReady,
+                    previewOwnsTransform = previewOwnsTransform,
+                )
+                view.setActiveTileMemoryCache(isActivePage)
+            }
             val imageView = imageViewRef
             if (imageView != null) {
                 val layer = when {

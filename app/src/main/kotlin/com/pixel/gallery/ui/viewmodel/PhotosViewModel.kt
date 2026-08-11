@@ -83,15 +83,18 @@ class PhotosViewModel @Inject constructor(
         val filtered = all.filter { entry ->
             !hidden.any { entry.path.startsWith(it) }
         }
-        when (sort) {
-            PhotoSortOrder.DATE_DESC -> filtered.sortedWith(MEDIA_DATE_DESCENDING)
-            PhotoSortOrder.DATE_ASC -> filtered.sortedWith(MEDIA_DATE_ASCENDING)
-            PhotoSortOrder.NAME_ASC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
-            PhotoSortOrder.NAME_DESC -> filtered.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
-            PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
-            PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
-        }
+        sortMedia(filtered, sort)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Keeps ordering and time headers on the same effective timestamp. */
+    fun sortMedia(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> = when (sort) {
+        PhotoSortOrder.DATE_DESC -> entries.sortedWith(MEDIA_DATE_DESCENDING)
+        PhotoSortOrder.DATE_ASC -> entries.sortedWith(MEDIA_DATE_ASCENDING)
+        PhotoSortOrder.NAME_ASC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
+        PhotoSortOrder.NAME_DESC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
+        PhotoSortOrder.SIZE_DESC -> entries.sortedByDescending { it.sizeBytes }
+        PhotoSortOrder.SIZE_ASC -> entries.sortedBy { it.sizeBytes }
+    }
 
     val transferDestinations: StateFlow<List<TransferDestination>> = photos
         .map(::buildTransferDestinations)
@@ -196,15 +199,18 @@ class PhotosViewModel @Inject constructor(
     }
 
     fun groupMedia(entries: List<MediaEntry>, columns: Int = 3, sortOrder: PhotoSortOrder = PhotoSortOrder.DATE_DESC): List<GridItem> {
+        // Album, favourites, trash and vault all pass through here. Sorting here
+        // prevents date headers from being generated against a different order.
+        val sortedEntries = sortMedia(entries, sortOrder)
         if (sortOrder != PhotoSortOrder.DATE_DESC && sortOrder != PhotoSortOrder.DATE_ASC) {
-            return entries.map { GridItem.Photo(it) }
+            return sortedEntries.map { GridItem.Photo(it) }
         }
         val items = mutableListOf<GridItem>()
         var lastHeader = ""
         val format = if (columns >= 6) "MMMM yyyy" else "MMMM d, yyyy"
         val sdf = java.text.SimpleDateFormat(format, java.util.Locale.US)
         
-        entries.forEach { entry ->
+        sortedEntries.forEach { entry ->
             val timestamp = entry.chronologicalTimestamp()
             val date = java.util.Date(timestamp)
             val header = sdf.format(date)

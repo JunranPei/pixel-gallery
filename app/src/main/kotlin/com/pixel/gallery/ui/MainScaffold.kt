@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoAlbum
@@ -17,6 +18,7 @@ import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.FloatingToolbarExitDirection
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -35,6 +37,7 @@ import com.pixel.gallery.ui.gallery.PhotoScreen
 import com.pixel.gallery.ui.locked.LockedFolderScreen
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import com.pixel.gallery.ui.viewer.ViewerScreen
+import com.pixel.gallery.ui.viewer.ViewerTransformStateStore
 import com.pixel.gallery.ui.settings.ExcludedFoldersScreen
 import com.pixel.gallery.ui.settings.LicensesScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
@@ -76,6 +79,36 @@ import com.pixel.gallery.ui.transfer.TransferDestinationScreen
 
 // Height of the toolbar + gap, used to pad content so last items aren't hidden
 private val FloatingBarHeight = 80.dp
+
+private val AlbumGridStatesSaver = listSaver<MutableMap<String, LazyGridState>, Any>(
+    save = { states ->
+        buildList {
+            add(1) // Snapshot format version.
+            states.forEach { (albumName, state) ->
+                add(albumName)
+                add(state.firstVisibleItemIndex)
+                add(state.firstVisibleItemScrollOffset)
+            }
+        }
+    },
+    restore = { values ->
+        val states = mutableMapOf<String, LazyGridState>()
+        if ((values.firstOrNull() as? Number)?.toInt() == 1) {
+            values.drop(1).chunked(3).forEach { fields ->
+                if (fields.size == 3) {
+                    val albumName = fields[0] as? String ?: return@forEach
+                    val index = (fields[1] as? Number)?.toInt() ?: return@forEach
+                    val offset = (fields[2] as? Number)?.toInt() ?: return@forEach
+                    states[albumName] = LazyGridState(
+                        firstVisibleItemIndex = index.coerceAtLeast(0),
+                        firstVisibleItemScrollOffset = offset.coerceAtLeast(0),
+                    )
+                }
+            }
+        }
+        states
+    },
+)
 
 sealed class Screen : Parcelable {
     @Parcelize object Home : Screen()
@@ -203,9 +236,14 @@ fun MainScaffold(
     val favouritesGridState = rememberLazyGridState()
     val trashGridState = rememberLazyGridState()
     val vaultGridState = rememberLazyGridState()
-    val albumGridStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
+    val albumGridStates = rememberSaveable(saver = AlbumGridStatesSaver) {
+        mutableMapOf<String, LazyGridState>()
+    }
     val albumPhotoLists = remember {
         mutableStateMapOf<String, List<com.pixel.gallery.data.local.entity.MediaEntry>>()
+    }
+    val viewerTransformStateStore = rememberSaveable(saver = ViewerTransformStateStore.Saver) {
+        ViewerTransformStateStore()
     }
 
     val startupAtAlbums by photosViewModel.startupAtAlbums.collectAsState()
@@ -613,7 +651,7 @@ fun MainScaffold(
                 is Screen.Photo -> {
                     val albumName = (baseScreen as Screen.Photo).albumName
                     val albumState = remember(albumName) {
-                        albumGridStates.getOrPut(albumName) { androidx.compose.foundation.lazy.grid.LazyGridState() }
+                        albumGridStates.getOrPut(albumName) { LazyGridState() }
                     }
                     PhotoScreen(
                         albumName = albumName,
@@ -771,6 +809,7 @@ fun MainScaffold(
                     ViewerScreen(
                         initialId = viewer.initialId,
                         photos = photosForViewer,
+                        transformStateStore = viewerTransformStateStore,
                         onBack = { navigationStack = navigationStack.dropLast(1) },
                         allowTransfer = viewer.source !in setOf(
                             Screen.ViewerSource.Trash,
