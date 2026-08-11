@@ -30,7 +30,6 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -89,11 +88,11 @@ fun ZoomableContainer(
     val safeMinScale = minOf(minScale, maxScale)
     val safeMaxScale = maxOf(minScale, maxScale)
 
-    // Animated values for smooth double-tap transitions
+    // A single normalized animation keeps scale and both offsets on the same frame.
+    // Independent Animatables can settle on different frames, which is visible as a
+    // short pause or correction immediately before the preview-to-tile handoff.
     val startingScale = initialScale.coerceIn(safeMinScale, safeMaxScale)
-    val animScale = remember(diagnosticsKey) { Animatable(startingScale) }
-    val animOffsetX = remember(diagnosticsKey) { Animatable(initialOffsetX) }
-    val animOffsetY = remember(diagnosticsKey) { Animatable(initialOffsetY) }
+    val animProgress = remember(diagnosticsKey) { Animatable(1f) }
     var animationJob by remember(diagnosticsKey) { mutableStateOf<Job?>(null) }
     var renderScale by remember(diagnosticsKey) { mutableFloatStateOf(startingScale) }
     var renderOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetX) }
@@ -167,9 +166,7 @@ fun ZoomableContainer(
         gestureOffsetY = initialOffsetY
         doubleTapZoomedIntent = syncedScale > 1.01f
         renderFrame(syncedScale, initialOffsetX, initialOffsetY)
-        animScale.snapTo(syncedScale)
-        animOffsetX.snapTo(initialOffsetX)
-        animOffsetY.snapTo(initialOffsetY)
+        animProgress.snapTo(1f)
         onTransformChanged(syncedScale, initialOffsetX, initialOffsetY)
         trace(
             "ZOOM_PREVIEW_EXTERNAL_SYNC",
@@ -283,32 +280,21 @@ fun ZoomableContainer(
                                         "generation=$generation from=$currentScale,$currentOffsetX,$currentOffsetY " +
                                             "to=$targetScale,$targetOffsetX,$targetOffsetY",
                                     )
-                                    animScale.snapTo(currentScale)
-                                    animOffsetX.snapTo(currentOffsetX)
-                                    animOffsetY.snapTo(currentOffsetY)
-                                    coroutineScope {
-                                        launch {
-                                            animScale.animateTo(targetScale, animSpec) {
-                                                renderFrame(value, animOffsetX.value, animOffsetY.value)
-                                            }
-                                        }
-                                        launch {
-                                            animOffsetX.animateTo(targetOffsetX, animSpec) {
-                                                renderFrame(animScale.value, value, animOffsetY.value)
-                                            }
-                                        }
-                                        launch {
-                                            animOffsetY.animateTo(targetOffsetY, animSpec) {
-                                                renderFrame(animScale.value, animOffsetX.value, value)
-                                            }
-                                        }
+                                    animProgress.snapTo(0f)
+                                    animProgress.animateTo(1f, animSpec) {
+                                        val fraction = value.coerceIn(0f, 1f)
+                                        renderFrame(
+                                            scale = currentScale + (targetScale - currentScale) * fraction,
+                                            offsetX = currentOffsetX + (targetOffsetX - currentOffsetX) * fraction,
+                                            offsetY = currentOffsetY + (targetOffsetY - currentOffsetY) * fraction,
+                                        )
                                     }
                                     completed = true
                                 } finally {
                                     if (generation == animationGeneration) {
-                                        val finalScale = if (completed) targetScale else animScale.value
-                                        val rawFinalOffsetX = if (completed) targetOffsetX else animOffsetX.value
-                                        val rawFinalOffsetY = if (completed) targetOffsetY else animOffsetY.value
+                                        val finalScale = if (completed) targetScale else renderScale
+                                        val rawFinalOffsetX = if (completed) targetOffsetX else renderOffsetX
+                                        val rawFinalOffsetY = if (completed) targetOffsetY else renderOffsetY
                                         val (finalOffsetX, finalOffsetY) = clampOffset(
                                             finalScale,
                                             rawFinalOffsetX,
@@ -322,7 +308,7 @@ fun ZoomableContainer(
                                         trace(
                                             "ZOOM_PREVIEW_ANIMATION_END",
                                             "generation=$generation gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
-                                                "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                                                "progress=${animProgress.value} " +
                                                 "render=$renderScale,$renderOffsetX,$renderOffsetY",
                                         )
                                         endZoomLifecycle()
@@ -358,9 +344,9 @@ fun ZoomableContainer(
                     try {
                     trace(
                         "ZOOM_PREVIEW_POINTER_DOWN",
-                        "pointer=${firstDown.id.value} at=${firstDown.position.x},${firstDown.position.y} " +
-                            "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
-                            "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                            "pointer=${firstDown.id.value} at=${firstDown.position.x},${firstDown.position.y} " +
+                                "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                            "progress=${animProgress.value} " +
                             "render=$renderScale,$renderOffsetX,$renderOffsetY",
                     )
 

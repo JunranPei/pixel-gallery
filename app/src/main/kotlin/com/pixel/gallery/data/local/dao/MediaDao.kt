@@ -30,6 +30,12 @@ interface MediaDao {
     @Query("DELETE FROM media_entries WHERE contentId IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
 
+    @Transaction
+    suspend fun reconcileMedia(entries: List<MediaEntry>, obsoleteIds: List<Long>) {
+        if (entries.isNotEmpty()) insertAll(entries)
+        if (obsoleteIds.isNotEmpty()) deleteByIds(obsoleteIds)
+    }
+
     // --- Favourites ---
     @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId IN (SELECT id FROM favourites) ORDER BY bestTimestamp DESC")
     fun getFavourites(): Flow<List<MediaEntry>>

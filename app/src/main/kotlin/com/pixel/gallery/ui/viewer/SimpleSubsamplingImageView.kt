@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Modifier
@@ -455,6 +456,7 @@ private fun previewTransformState(
 internal fun SimpleSubsamplingImageView(
     uri: String,
     filePath: String,
+    contentId: Long? = null,
     orientationDegrees: Int = 0,
     modifier: Modifier = Modifier,
     isActivePage: Boolean = true,
@@ -483,8 +485,9 @@ internal fun SimpleSubsamplingImageView(
             uri
         }
     }
-    val transformStateKey = remember(imagePath, dateModifiedMillis) {
-        "$imagePath:$dateModifiedMillis"
+    val transformStateKey = remember(contentId, imagePath, dateModifiedMillis) {
+        val stableSource = contentId?.takeIf { it > 0L }?.let { "media:$it" } ?: imagePath
+        "$stableSource:$dateModifiedMillis"
     }
 
     // Two lifecycle states representing the two phases of Simple-Gallery:
@@ -803,7 +806,9 @@ internal fun SimpleSubsamplingImageView(
                 "intendedCenterInView=${intendedCenterInView ?: "none"}",
             imageKey = transformStateKey,
         )
-        delay(16)
+        // Align the ownership swap to the next display frame. A fixed 16 ms delay can
+        // miss vsync and leave the final preview frame frozen for nearly two frames.
+        withFrameNanos { }
         if (isActivePage && imageAssigned && ssivBaseDrawn) {
             val frameState = view.snapshotViewState()
             previewOwnsTransform = false

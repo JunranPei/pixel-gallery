@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
+import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
 import com.pixel.gallery.ui.settings.SettingsScreen
@@ -108,6 +109,17 @@ private val AlbumGridStatesSaver = listSaver<MutableMap<String, LazyGridState>, 
         states
     },
 )
+
+internal fun reconcileViewerSessionPhotos(
+    current: List<MediaEntry>,
+    latest: List<MediaEntry>,
+): List<MediaEntry> {
+    if (current.isEmpty()) return latest
+    if (latest.isEmpty()) return current
+    val latestById = latest.associateBy(MediaEntry::contentId)
+    val refreshed = current.map { entry -> latestById[entry.contentId] ?: entry }
+    return if (refreshed == current) current else refreshed
+}
 
 sealed class Screen : Parcelable {
     @Parcelize object Home : Screen()
@@ -727,7 +739,7 @@ fun MainScaffold(
                 //         emit(result)
                 //     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
                 // }.collectAsState(initial = emptyList())
-                val initialPhotosForViewer = remember(
+                val livePhotosForViewer = remember(
                     viewer,
                     allPhotos,
                     favourites,
@@ -785,19 +797,23 @@ fun MainScaffold(
                     )
                     result
                 }
-                val photosForViewer by remember(viewer, initialPhotosForViewer) {
-                    flow { emit(initialPhotosForViewer) }
-                        .onStart {
-                            ViewerLoadMetrics.event(
-                                "VIEWER_LIST_FLOW_START",
-                                "count=${initialPhotosForViewer.size}",
-                            )
-                        }
-                        .onEach {
-                            ViewerLoadMetrics.event("VIEWER_LIST_FLOW_EMIT", "count=${it.size}")
-                        }
-                        .flowOn(kotlinx.coroutines.Dispatchers.Default)
-                }.collectAsState(initial = initialPhotosForViewer)
+                // A Viewer session owns a stable sequence. Live MediaStore changes may
+                // refresh an existing item's path/metadata, but must not reorder pages
+                // underneath Pager or make the current numeric index point at another image.
+                var photosForViewer by remember(viewer) { mutableStateOf(livePhotosForViewer) }
+                LaunchedEffect(viewer, livePhotosForViewer) {
+                    val reconciled = reconcileViewerSessionPhotos(
+                        current = photosForViewer,
+                        latest = livePhotosForViewer,
+                    )
+                    if (reconciled !== photosForViewer) {
+                        photosForViewer = reconciled
+                        ViewerLoadMetrics.event(
+                            "VIEWER_SESSION_REFRESH",
+                            "sessionCount=${reconciled.size} liveCount=${livePhotosForViewer.size}",
+                        )
+                    }
+                }
 
                 if (photosForViewer.isNotEmpty()) {
                     ViewerScreen(

@@ -1134,6 +1134,7 @@ internal fun ViewerScreen(
                                     SimpleSubsamplingImageView(
                                         uri = media.uri,
                                         filePath = media.path,
+                                        contentId = media.contentId,
                                         orientationDegrees = media.sourceRotationDegrees,
                                         isActivePage = isActivePage,
                                         isPagerIdle = isPagerIdle,
@@ -1167,6 +1168,7 @@ internal fun ViewerScreen(
                                 SimpleSubsamplingImageView(
                                     uri = media.uri,
                                     filePath = media.path,
+                                    contentId = media.contentId,
                                     orientationDegrees = media.sourceRotationDegrees,
                                     isActivePage = isActivePage,
                                     isPagerIdle = isPagerIdle,
