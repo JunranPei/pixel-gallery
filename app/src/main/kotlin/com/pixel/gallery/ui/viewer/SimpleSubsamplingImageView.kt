@@ -6,6 +6,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -321,6 +322,26 @@ private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boole
     return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
 
+internal fun updatePreviewInteractionCount(current: Int, delta: Int): Int =
+    (current + delta).coerceAtLeast(0)
+
+internal fun canHandoffPreviewToTiles(
+    ssivBaseDrawn: Boolean,
+    isActivePage: Boolean,
+    imageAssigned: Boolean,
+    subsamplingReady: Boolean,
+    previewGestureInProgress: Boolean,
+    previewInteractionCount: Int,
+): Boolean =
+    ssivBaseDrawn && isActivePage && imageAssigned && !subsamplingReady &&
+        !previewGestureInProgress && previewInteractionCount == 0
+
+internal fun canTilesReceiveInput(
+    isActivePage: Boolean,
+    subsamplingReady: Boolean,
+    previewOwnsTransform: Boolean,
+): Boolean = isActivePage && subsamplingReady && !previewOwnsTransform
+
 private fun previewTransformState(
     userScale: Float,
     offsetX: Float,
@@ -433,6 +454,7 @@ internal fun SimpleSubsamplingImageView(
     var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetX) }
     var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetY) }
     var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
+    var previewInteractionCount by remember(transformStateKey) { mutableIntStateOf(0) }
     var previewTransformSyncRevision by remember(transformStateKey) { mutableIntStateOf(0) }
     var previewTakeoverPending by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
@@ -651,10 +673,16 @@ internal fun SimpleSubsamplingImageView(
         imageAssigned,
         subsamplingReady,
         previewGestureInProgress,
+        previewInteractionCount,
     ) {
-        if (
-            !ssivBaseDrawn || !isActivePage || !imageAssigned || subsamplingReady ||
-            previewGestureInProgress
+        if (!canHandoffPreviewToTiles(
+                ssivBaseDrawn = ssivBaseDrawn,
+                isActivePage = isActivePage,
+                imageAssigned = imageAssigned,
+                subsamplingReady = subsamplingReady,
+                previewGestureInProgress = previewGestureInProgress,
+                previewInteractionCount = previewInteractionCount,
+            )
         ) return@LaunchedEffect
 
         // The gesture may briefly cross above fit (which starts SSIV) and then finish
@@ -994,6 +1022,12 @@ internal fun SimpleSubsamplingImageView(
                     imageKey = transformStateKey,
                 )
             },
+            onInteractionDelta = { delta ->
+                previewInteractionCount = updatePreviewInteractionCount(
+                    previewInteractionCount,
+                    delta,
+                )
+            },
             onExternalTransformSynced = {
                 if (previewTakeoverPending) {
                     imageViewRef?.let { imageView ->
@@ -1069,11 +1103,20 @@ internal fun SimpleSubsamplingImageView(
                 )
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             }
-            val ssiv = SubsamplingScaleImageView(ctx).apply ssivView@ {
+            val ssiv = object : SubsamplingScaleImageView(ctx) {
+                override fun onTouchEvent(event: MotionEvent): Boolean {
+                    // setImage() makes SSIV visible (with alpha=0) so it can prepare and draw
+                    // tiles behind the preview. A transparent View still receives touches,
+                    // though, and must not mutate its fit-scale state before the atomic handoff.
+                    if (!isEnabled) return false
+                    return super.onTouchEvent(event)
+                }
+            }.apply ssivView@ {
                 layoutParams = android.widget.FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
+                isEnabled = false
 
                 val displayMetrics = ctx.resources.displayMetrics
                 val averageDpi = (displayMetrics.xdpi + displayMetrics.ydpi) / 2
@@ -1306,7 +1349,14 @@ internal fun SimpleSubsamplingImageView(
             frameLayout
         },
         update = {
-            ssivView?.setActiveTileMemoryCache(isActivePage)
+            ssivView?.let { view ->
+                view.isEnabled = canTilesReceiveInput(
+                    isActivePage = isActivePage,
+                    subsamplingReady = subsamplingReady,
+                    previewOwnsTransform = previewOwnsTransform,
+                )
+                view.setActiveTileMemoryCache(isActivePage)
+            }
             val imageView = imageViewRef
             if (imageView != null) {
                 val layer = when {

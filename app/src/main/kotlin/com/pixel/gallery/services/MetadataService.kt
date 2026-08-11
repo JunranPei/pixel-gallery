@@ -30,7 +30,13 @@ class MetadataService @Inject constructor(
                 "Exposure Time" to (exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME) ?: "Unknown"),
                 "ISO" to (exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "Unknown"),
                 "Focal Length" to (exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH) ?: "Unknown"),
-                "Date Taken" to (exif.getAttribute(ExifInterface.TAG_DATETIME) ?: "Unknown")
+                // Camera captures normally use DateTimeOriginal. DateTime is often
+                // omitted or updated by a later edit, so use capture-time priority.
+                "Date Taken" to listOf(
+                    ExifInterface.TAG_DATETIME_ORIGINAL,
+                    ExifInterface.TAG_DATETIME_DIGITIZED,
+                    ExifInterface.TAG_DATETIME,
+                ).firstNotNullOfOrNull(exif::getAttribute).orEmpty()
             )
         } catch (e: Exception) {
             emptyMap()

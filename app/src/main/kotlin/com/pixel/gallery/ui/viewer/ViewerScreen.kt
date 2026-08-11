@@ -1674,7 +1674,18 @@ fun InfoBottomSheet(
 
             InfoRow(Icons.Outlined.Image, media.path.substringAfterLast("/"), "${media.width} x ${media.height} • ${media.sizeBytes / 1024} KB")
             InfoRow(Icons.Outlined.Folder, "Storage Path", media.path)
-            InfoRow(Icons.Outlined.CalendarToday, "Date Taken", metadata["Date Taken"] ?: "Unknown")
+            // Sharing apps can strip EXIF while MediaStore still retains DATE_TAKEN.
+            // Fall back through the timestamps already collected for this item.
+            val dateTaken = metadata["Date Taken"]
+                ?.takeIf { it.isNotBlank() && !it.equals("Unknown", ignoreCase = true) }
+                ?: media.sourceDateTakenMillis
+                    ?.takeIf { it > 0L }
+                    ?.let(::formatPhotoDateTime)
+                ?: media.bestTimestamp
+                    .takeIf { it > 0L }
+                    ?.let(::formatPhotoDateTime)
+                ?: "Unknown"
+            InfoRow(Icons.Outlined.CalendarToday, "Date Taken", dateTaken)
 
             if (metadata["Model"] != "Unknown") {
                 Spacer(Modifier.height(24.dp))
@@ -2070,6 +2081,10 @@ private fun formatTime(millis: Long): String {
         String.format("%02d:%02d", minutes, seconds)
     }
 }
+
+private fun formatPhotoDateTime(millis: Long): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+        .format(java.util.Date(millis))
 
 @Composable
 fun ViewerAction(
