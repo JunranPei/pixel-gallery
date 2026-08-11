@@ -163,7 +163,9 @@ class IndexedHeifStore(context: Context) {
     private fun supportedSource(path: String): File? {
         val source = File(path)
         if (!source.isFile || !source.canRead() || source.length() <= 0L) return null
-        return source.takeIf { it.extension.lowercase() in EXTENSIONS }
+        return source.takeIf {
+            it.extension.lowercase() in EXTENSIONS || HeifFileType.hasCompatibleBrand(it)
+        }
     }
 
     private companion object {
