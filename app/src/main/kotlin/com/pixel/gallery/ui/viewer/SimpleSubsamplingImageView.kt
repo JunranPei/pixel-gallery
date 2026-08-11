@@ -389,19 +389,16 @@ private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boole
     return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
 
-internal fun updatePreviewInteractionCount(current: Int, delta: Int): Int =
-    (current + delta).coerceAtLeast(0)
-
 internal fun canHandoffPreviewToTiles(
     ssivBaseDrawn: Boolean,
     isActivePage: Boolean,
     imageAssigned: Boolean,
     subsamplingReady: Boolean,
     previewGestureInProgress: Boolean,
-    previewInteractionCount: Int,
+    previewPointerStrokeActive: Boolean,
 ): Boolean =
     ssivBaseDrawn && isActivePage && imageAssigned && !subsamplingReady &&
-        !previewGestureInProgress && previewInteractionCount == 0
+        !previewGestureInProgress && !previewPointerStrokeActive
 
 internal fun canTilesReceiveInput(
     isActivePage: Boolean,
@@ -523,7 +520,7 @@ internal fun SimpleSubsamplingImageView(
     var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetX) }
     var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetY) }
     var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
-    var previewInteractionCount by remember(transformStateKey) { mutableIntStateOf(0) }
+    var previewPointerStrokeActive by remember(transformStateKey) { mutableStateOf(false) }
     var previewTransformSyncRevision by remember(transformStateKey) { mutableIntStateOf(0) }
     var previewTakeoverPending by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
@@ -742,7 +739,7 @@ internal fun SimpleSubsamplingImageView(
         imageAssigned,
         subsamplingReady,
         previewGestureInProgress,
-        previewInteractionCount,
+        previewPointerStrokeActive,
     ) {
         if (!canHandoffPreviewToTiles(
                 ssivBaseDrawn = ssivBaseDrawn,
@@ -750,7 +747,7 @@ internal fun SimpleSubsamplingImageView(
                 imageAssigned = imageAssigned,
                 subsamplingReady = subsamplingReady,
                 previewGestureInProgress = previewGestureInProgress,
-                previewInteractionCount = previewInteractionCount,
+                previewPointerStrokeActive = previewPointerStrokeActive,
             )
         ) return@LaunchedEffect
 
@@ -812,6 +809,10 @@ internal fun SimpleSubsamplingImageView(
         if (isActivePage && imageAssigned && ssivBaseDrawn) {
             val frameState = view.snapshotViewState()
             previewOwnsTransform = false
+            // Do not wait for AndroidView.update to propagate the new ownership.
+            // Enabling input in the same main-thread handoff removes the one-frame
+            // dead zone where a new drag could fall through to the pager.
+            view.isEnabled = true
             view.visibility = View.VISIBLE
             view.alpha = 1f
             subsamplingReady = true
@@ -1093,11 +1094,8 @@ internal fun SimpleSubsamplingImageView(
                     imageKey = transformStateKey,
                 )
             },
-            onInteractionDelta = { delta ->
-                previewInteractionCount = updatePreviewInteractionCount(
-                    previewInteractionCount,
-                    delta,
-                )
+            onPointerStrokeActiveChanged = { active ->
+                previewPointerStrokeActive = active
             },
             onExternalTransformSynced = {
                 if (previewTakeoverPending) {
