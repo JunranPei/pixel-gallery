@@ -2,10 +2,42 @@ package com.pixel.gallery.model
 
 import com.pixel.gallery.data.local.entity.MediaEntry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaTransferTest {
+    @Test
+    fun sameTransferDirectoryRecognizesSourceDirectory() {
+        assertTrue(
+            isSameTransferDirectory(
+                sourcePath = "/storage/emulated/0/Pictures/Trips/photo.jpg",
+                destinationPath = "/storage/emulated/0/Pictures/Trips"
+            )
+        )
+    }
+
+    @Test
+    fun sameTransferDirectoryNormalizesParentSegments() {
+        assertTrue(
+            isSameTransferDirectory(
+                sourcePath = "/storage/emulated/0/Pictures/Trips/photo.jpg",
+                destinationPath = "/storage/emulated/0/Pictures/Other/../Trips"
+            )
+        )
+    }
+
+    @Test
+    fun sameTransferDirectoryRejectsDifferentDirectory() {
+        assertFalse(
+            isSameTransferDirectory(
+                sourcePath = "/storage/emulated/0/Pictures/Trips/photo.jpg",
+                destinationPath = "/storage/emulated/0/Pictures/Family"
+            )
+        )
+    }
+
 
     @Test
     fun `same album names at different paths stay separate`() {

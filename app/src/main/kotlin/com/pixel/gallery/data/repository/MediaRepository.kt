@@ -20,6 +20,7 @@ import com.pixel.gallery.data.local.entity.VaultEntry
 import com.google.gson.Gson
 import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.ConflictPolicy
+import com.pixel.gallery.model.isSameTransferDirectory
 import com.pixel.gallery.model.TransferItemFailure
 import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.model.TransferProgress
@@ -502,10 +503,10 @@ class MediaRepository @Inject constructor(
                 return@forEachIndexed
             }
 
-            if (
-                mode == TransferMode.MOVE &&
-                sourceFile.parentFile?.canonicalPath == destinationDir.canonicalPath
-            ) {
+            // Treat copying or moving a file into the directory it already
+            // occupies as a no-op. In particular, KEEP_BOTH must never turn
+            // the source itself into an accidental numbered duplicate.
+            if (isSameTransferDirectory(entry.path, destination.path)) {
                 skipped++
                 return@forEachIndexed
             }

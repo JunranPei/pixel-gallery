@@ -21,6 +21,22 @@ enum class ConflictPolicy {
     REPLACE
 }
 
+/**
+ * Returns true when transferring [sourcePath] to [destinationPath] would target
+ * the directory the source already occupies. Canonical paths also collapse
+ * aliases such as /sdcard and /storage/emulated/0 when the platform exposes
+ * them as the same directory.
+ */
+fun isSameTransferDirectory(sourcePath: String, destinationPath: String): Boolean {
+    val sourceDirectory = File(sourcePath).parentFile ?: return false
+    return transferPathIdentity(sourceDirectory) == transferPathIdentity(File(destinationPath))
+}
+
+private fun transferPathIdentity(file: File): String =
+    runCatching { file.canonicalPath }
+        .getOrElse { file.absolutePath }
+        .trimEnd('/', '\\')
+
 enum class ReplacementStage {
     CREATED,
     TEMP_READY,
