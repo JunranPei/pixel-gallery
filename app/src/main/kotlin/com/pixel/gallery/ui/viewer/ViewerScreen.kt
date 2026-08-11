@@ -211,9 +211,10 @@ private fun trackedDrawableListener(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
-fun ViewerScreen(
+internal fun ViewerScreen(
     initialId: Long,
     photos: List<MediaEntry>,
+    transformStateStore: ViewerTransformStateStore,
     onBack: () -> Unit,
     allowTransfer: Boolean = true,
     onRequestTransfer: (MediaEntry) -> Unit = {},
@@ -241,7 +242,6 @@ fun ViewerScreen(
     }
     
     val pagerState = rememberPagerState(initialPage = initialIndex) { photos.size }
-    val viewerTransformStateStore = remember { ViewerTransformStateStore() }
     var showUI by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
@@ -1096,7 +1096,7 @@ fun ViewerScreen(
                                     rawIndexReady = imageIndexReady == true &&
                                         currentIndexTarget?.format == IndexedImageFormat.RAW &&
                                         currentIndexTarget.path == media.path,
-                                    transformStateStore = viewerTransformStateStore,
+                                    transformStateStore = transformStateStore,
                                     modifier = Modifier.fillMaxSize(),
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick,
@@ -1144,7 +1144,7 @@ fun ViewerScreen(
                                         sourceHeight = media.height,
                                         previewModel = media.path.ifEmpty { media.uri },
                                         regionDecoderKind = indexedRegionKind,
-                                        transformStateStore = viewerTransformStateStore,
+                                        transformStateStore = transformStateStore,
                                         onContentReadyChanged = { fullPreviewReady = it },
                                         modifier = Modifier.fillMaxSize(),
                                         onClick = onImageClick,
@@ -1183,7 +1183,7 @@ fun ViewerScreen(
                                         "preview=${tiledPlan.previewKind} decoder=${tiledPlan.regionDecoderKind} " +
                                         "motionPending=$metadataPending",
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
-                                    transformStateStore = viewerTransformStateStore,
+                                    transformStateStore = transformStateStore,
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onUltraHdrAvailabilityChanged = { available ->
                                         ViewerLoadMetrics.event(

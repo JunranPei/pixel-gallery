@@ -21,6 +21,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -129,7 +131,7 @@ internal class ViewerTransformStateStore {
         val revision: Int,
     )
 
-    private val states = HashMap<String, StoredState>()
+    private val states = LinkedHashMap<String, StoredState>(16, 0.75f, true)
 
     @Synchronized
     fun get(key: String): SubsamplingScaleImageView.ViewState? = states[key]?.state
@@ -145,6 +147,14 @@ internal class ViewerTransformStateStore {
     ) {
         val revision = (states[key]?.revision ?: 0) + 1
         states[key] = StoredState(state, revision)
+        while (states.size > MAX_SAVED_TRANSFORMS) {
+            states.entries.iterator().run {
+                if (hasNext()) {
+                    next()
+                    remove()
+                }
+            }
+        }
         ViewerLoadMetrics.event(
             "TRANSFORM_STORE_SAVE",
             "revision=$revision reason=$reason scale=${state.scale} " +
@@ -152,6 +162,62 @@ internal class ViewerTransformStateStore {
                 "rotation=${state.rotationRadians}",
             imageKey = key,
         )
+    }
+
+    @Synchronized
+    internal fun saveableSnapshot(): List<Any> = buildList {
+        add(SNAPSHOT_VERSION)
+        states.forEach { (key, stored) ->
+            add(key)
+            add(stored.state.scale)
+            add(stored.state.baseFitScale)
+            add(stored.state.sourceCenter.x)
+            add(stored.state.sourceCenter.y)
+            add(stored.state.sourceWidth)
+            add(stored.state.sourceHeight)
+            add(stored.state.rotationRadians)
+            add(stored.revision)
+        }
+    }
+
+    companion object {
+        private const val SNAPSHOT_VERSION = 1
+        private const val SNAPSHOT_FIELDS_PER_STATE = 9
+        private const val MAX_SAVED_TRANSFORMS = 128
+
+        val Saver: Saver<ViewerTransformStateStore, Any> = listSaver(
+            save = { store -> store.saveableSnapshot() },
+            restore = { values -> fromSaveableSnapshot(values) },
+        )
+
+        internal fun fromSaveableSnapshot(values: List<Any>): ViewerTransformStateStore {
+            val store = ViewerTransformStateStore()
+            if ((values.firstOrNull() as? Number)?.toInt() != SNAPSHOT_VERSION) return store
+
+            values.drop(1)
+                .chunked(SNAPSHOT_FIELDS_PER_STATE)
+                .takeLast(MAX_SAVED_TRANSFORMS)
+                .forEach { fields ->
+                    if (fields.size != SNAPSHOT_FIELDS_PER_STATE) return@forEach
+                    runCatching {
+                        val key = fields[0] as String
+                        val state = SubsamplingScaleImageView.ViewState(
+                            scale = (fields[1] as Number).toFloat(),
+                            baseFitScale = (fields[2] as Number).toFloat(),
+                            sourceCenter = PointF(
+                                (fields[3] as Number).toFloat(),
+                                (fields[4] as Number).toFloat(),
+                            ),
+                            sourceWidth = (fields[5] as Number).toInt(),
+                            sourceHeight = (fields[6] as Number).toInt(),
+                            rotationRadians = (fields[7] as Number).toDouble(),
+                        )
+                        val revision = (fields[8] as Number).toInt().coerceAtLeast(1)
+                        store.states[key] = StoredState(state, revision)
+                    }
+                }
+            return store
+        }
     }
 }
 
