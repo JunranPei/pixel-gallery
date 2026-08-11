@@ -54,21 +54,9 @@ fun PhotoScreen(
             val filtered = all.filter { 
                 viewModel.getParentFolderName(it.path) == albumName 
             }
-            val sorted = when (photoSortOrder) {
-                PhotoSortOrder.DATE_DESC -> filtered.sortedByDescending { it.bestTimestamp }
-                PhotoSortOrder.DATE_ASC -> filtered.sortedBy { it.bestTimestamp }
-                PhotoSortOrder.NAME_ASC -> filtered.sortedBy { 
-                    val lastSlash = it.path.lastIndexOf('/')
-                    if (lastSlash >= 0) it.path.substring(lastSlash + 1) else it.path
-                }
-                PhotoSortOrder.NAME_DESC -> filtered.sortedByDescending { 
-                    val lastSlash = it.path.lastIndexOf('/')
-                    if (lastSlash >= 0) it.path.substring(lastSlash + 1) else it.path
-                }
-                PhotoSortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
-                PhotoSortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
-            }
-            viewModel.groupMedia(sorted, gridColumns, photoSortOrder)
+            // groupMedia owns ordering and grouping, so both use the same
+            // effective timestamp instead of mixing bestTimestamp and EXIF time.
+            viewModel.groupMedia(filtered, gridColumns, photoSortOrder)
         }.flowOn(kotlinx.coroutines.Dispatchers.Default)
     }.collectAsState(initial = emptyList())
 
