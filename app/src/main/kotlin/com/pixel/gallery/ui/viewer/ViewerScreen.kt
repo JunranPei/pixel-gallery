@@ -70,6 +70,7 @@ import io.github.indexedraw.IndexedRawStatus
 import io.github.indexedraw.IndexedRawStore
 import io.github.indexedheif.IndexedHeifStatus
 import io.github.indexedheif.IndexedHeifStore
+import io.github.indexedheif.HeifFileType
 import io.github.indexedbmp.IndexedBmpStatus
 import io.github.indexedbmp.IndexedBmpStore
 import io.github.indexedjxl.IndexedJxlStatus
@@ -103,6 +104,7 @@ import me.saket.telephoto.zoomable.zoomable
 import me.saket.telephoto.zoomable.DoubleClickToZoomListener
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -150,6 +152,7 @@ private enum class IndexedImageFormat(val displayName: String) {
 private data class IndexedImageTarget(
     val format: IndexedImageFormat,
     val path: String,
+    val detectedFromContent: Boolean = false,
 )
 
 private enum class IndexedImageAction { BUILD, DELETE }
@@ -167,6 +170,81 @@ private fun MediaEntry.canContainMotionPhoto(): Boolean =
     sourceMimeType.equals("image/jpeg", ignoreCase = true) ||
         path.endsWith(".jpg", ignoreCase = true) ||
         path.endsWith(".jpeg", ignoreCase = true)
+
+private val pngSignature = byteArrayOf(
+    0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+)
+
+private data class DetectedImageContent(
+    val indexedFormat: IndexedImageFormat?,
+    val displayName: String,
+)
+
+private fun File.detectImageContent(): DetectedImageContent? {
+    if (!isFile || !canRead() || length() < 2L) return null
+    return try {
+        inputStream().buffered().use { input ->
+            val header = ByteArray(512)
+            val length = input.read(header)
+            val asciiHeader = String(header, 0, length.coerceAtLeast(0), Charsets.US_ASCII)
+            when {
+                length >= 2 && header[0] == 0xff.toByte() && header[1] == 0xd8.toByte() ->
+                    DetectedImageContent(IndexedImageFormat.JPEG, "JPEG")
+                length >= pngSignature.size && header.copyOfRange(0, pngSignature.size).contentEquals(pngSignature) ->
+                    DetectedImageContent(IndexedImageFormat.PNG, "PNG")
+                length >= 4 &&
+                    ((header[0] == 0x49.toByte() && header[1] == 0x49.toByte() && header[2] == 0x2a.toByte() && header[3] == 0.toByte()) ||
+                        (header[0] == 0x4d.toByte() && header[1] == 0x4d.toByte() && header[2] == 0.toByte() && header[3] == 0x2a.toByte()) ||
+                        (header[0] == 0x49.toByte() && header[1] == 0x49.toByte() && header[2] == 0x2b.toByte() && header[3] == 0.toByte()) ||
+                        (header[0] == 0x4d.toByte() && header[1] == 0x4d.toByte() && header[2] == 0.toByte() && header[3] == 0x2b.toByte())) ->
+                    DetectedImageContent(IndexedImageFormat.TIFF, "TIFF")
+                length >= 12 && String(header, 0, 4, Charsets.US_ASCII) == "RIFF" &&
+                    String(header, 8, 4, Charsets.US_ASCII) == "WEBP" ->
+                    DetectedImageContent(IndexedImageFormat.WEBP, "WebP")
+                length >= 2 && header[0] == 0x42.toByte() && header[1] == 0x4d.toByte() ->
+                    DetectedImageContent(IndexedImageFormat.BMP, "BMP")
+                length >= 2 && header[0] == 0xff.toByte() && header[1] == 0x0a.toByte() ->
+                    DetectedImageContent(IndexedImageFormat.JXL, "JPEG XL")
+                length >= 12 && header.copyOfRange(0, 12).contentEquals(
+                    byteArrayOf(0, 0, 0, 12, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87.toByte(), 0x0a),
+                ) -> DetectedImageContent(IndexedImageFormat.JXL, "JPEG XL")
+                length >= 6 && String(header, 0, 6, Charsets.US_ASCII) in setOf("GIF87a", "GIF89a") ->
+                    DetectedImageContent(null, "GIF")
+                length >= 4 && header[0] == 0.toByte() && header[1] == 0.toByte() && header[2] in byteArrayOf(1, 2) && header[3] == 0.toByte() ->
+                    DetectedImageContent(null, if (header[2] == 1.toByte()) "ICO" else "CUR")
+                length >= 4 && String(header, 0, 4, Charsets.US_ASCII) == "8BPS" ->
+                    DetectedImageContent(null, "Photoshop PSD")
+                length >= 12 && header.copyOfRange(0, 12).contentEquals(
+                    byteArrayOf(0, 0, 0, 12, 0x6a, 0x50, 0x20, 0x20, 0x0d, 0x0a, 0x87.toByte(), 0x0a),
+                ) -> DetectedImageContent(null, "JPEG 2000")
+                length >= 4 && String(header, 0, 4, Charsets.US_ASCII) == "qoif" ->
+                    DetectedImageContent(null, "QOI")
+                length >= 5 && asciiHeader.startsWith("%PDF-") ->
+                    DetectedImageContent(null, "PDF")
+                asciiHeader.trimStart().let { it.startsWith("<svg", true) ||
+                    (it.startsWith("<?xml", true) && it.contains("<svg", true)) } ->
+                    DetectedImageContent(null, "SVG")
+                HeifFileType.hasCompatibleBrand(this@detectImageContent) ->
+                    DetectedImageContent(IndexedImageFormat.HEIF, "HEIF/AVIF")
+                else -> null
+            }
+        }
+    } catch (_: IOException) {
+        null
+    }
+}
+
+private fun IndexedImageFormat.hasMatchingExtension(path: String): Boolean = when (this) {
+    IndexedImageFormat.JPEG -> path.endsWith(".jpg", true) || path.endsWith(".jpeg", true)
+    IndexedImageFormat.PNG -> path.endsWith(".png", true)
+    IndexedImageFormat.TIFF -> path.endsWith(".tif", true) || path.endsWith(".tiff", true)
+    IndexedImageFormat.WEBP -> path.endsWith(".webp", true)
+    IndexedImageFormat.HEIF -> path.endsWith(".heic", true) || path.endsWith(".heif", true) ||
+        path.endsWith(".hif", true) || path.endsWith(".avif", true)
+    IndexedImageFormat.BMP -> path.endsWith(".bmp", true)
+    IndexedImageFormat.JXL -> path.endsWith(".jxl", true)
+    IndexedImageFormat.RAW -> true
+}
 
 private fun trackedDrawableListener(
     token: ViewerLoadMetrics.WorkToken,
@@ -362,14 +440,42 @@ internal fun ViewerScreen(
     val jxlIndexStore = remember(context.applicationContext) {
         IndexedJxlStore(context.applicationContext)
     }
-    val currentJpegIndexPath = remember(
+    val currentMediaIsRaw = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
     ) {
         currentMedia
-            ?.takeIf { it.canContainMotionPhoto() }
+            ?.let { media ->
+                MimeTypes.isRaw(media.sourceMimeType.substringBefore(';').trim().lowercase()) ||
+                    media.path.substringAfterLast('.', "").lowercase() in rawIndexExtensions
+            }
+            ?: false
+    }
+    val currentDetectedImageContent = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+    ) {
+        currentMedia
+            ?.path
+            ?.takeIf { it.isNotEmpty() }
+            ?.let(::File)
+            ?.detectImageContent()
+    }
+    val detectedIndexedFormat = currentDetectedImageContent?.indexedFormat
+    val currentJpegIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+        detectedIndexedFormat,
+        currentMediaIsRaw,
+    ) {
+        currentMedia
+            ?.takeIf {
+                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.JPEG
+            }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
@@ -378,11 +484,12 @@ internal fun ViewerScreen(
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
+        detectedIndexedFormat,
+        currentMediaIsRaw,
     ) {
         currentMedia
             ?.takeIf {
-                it.sourceMimeType.equals("image/png", ignoreCase = true) ||
-                    it.path.endsWith(".png", ignoreCase = true)
+                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.PNG
             }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
@@ -392,12 +499,12 @@ internal fun ViewerScreen(
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
+        detectedIndexedFormat,
+        currentMediaIsRaw,
     ) {
         currentMedia
             ?.takeIf {
-                it.sourceMimeType.equals("image/tiff", ignoreCase = true) ||
-                    it.path.endsWith(".tif", ignoreCase = true) ||
-                    it.path.endsWith(".tiff", ignoreCase = true)
+                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.TIFF
             }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
@@ -407,11 +514,12 @@ internal fun ViewerScreen(
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
+        detectedIndexedFormat,
+        currentMediaIsRaw,
     ) {
         currentMedia
             ?.takeIf {
-                it.sourceMimeType.equals("image/webp", ignoreCase = true) ||
-                    it.path.endsWith(".webp", ignoreCase = true)
+                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.WEBP
             }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
@@ -420,13 +528,10 @@ internal fun ViewerScreen(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
-        currentMedia?.sourceMimeType,
+        currentMediaIsRaw,
     ) {
         currentMedia
-            ?.takeIf {
-                MimeTypes.isRaw(it.sourceMimeType.substringBefore(';').trim().lowercase()) ||
-                    it.path.substringAfterLast('.', "").lowercase() in rawIndexExtensions
-            }
+            ?.takeIf { currentMediaIsRaw }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
@@ -435,11 +540,12 @@ internal fun ViewerScreen(
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
+        detectedIndexedFormat,
+        currentMediaIsRaw,
     ) {
         currentMedia
             ?.takeIf {
-                MimeTypes.isIsoBMFFImage(it.sourceMimeType.substringBefore(';').trim().lowercase()) ||
-                    it.path.substringAfterLast('.', "").lowercase() in setOf("heic", "heif", "hif", "avif")
+                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.HEIF
             }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
@@ -449,11 +555,12 @@ internal fun ViewerScreen(
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
+        detectedIndexedFormat,
+        currentMediaIsRaw,
     ) {
         currentMedia
             ?.takeIf {
-                it.sourceMimeType.equals(MimeTypes.BMP, ignoreCase = true) ||
-                    it.path.endsWith(".bmp", ignoreCase = true)
+                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.BMP
             }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
@@ -463,11 +570,12 @@ internal fun ViewerScreen(
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
+        detectedIndexedFormat,
+        currentMediaIsRaw,
     ) {
         currentMedia
             ?.takeIf {
-                it.sourceMimeType.equals("image/jxl", ignoreCase = true) ||
-                    it.path.endsWith(".jxl", ignoreCase = true)
+                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.JXL
             }
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
@@ -481,23 +589,32 @@ internal fun ViewerScreen(
         currentHeifIndexPath,
         currentBmpIndexPath,
         currentJxlIndexPath,
+        detectedIndexedFormat,
     ) {
         when {
             currentJpegIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.JPEG,
                 path = currentJpegIndexPath,
+                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.JPEG &&
+                    !IndexedImageFormat.JPEG.hasMatchingExtension(currentJpegIndexPath),
             )
             currentPngIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.PNG,
                 path = currentPngIndexPath,
+                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.PNG &&
+                    !IndexedImageFormat.PNG.hasMatchingExtension(currentPngIndexPath),
             )
             currentTiffIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.TIFF,
                 path = currentTiffIndexPath,
+                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.TIFF &&
+                    !IndexedImageFormat.TIFF.hasMatchingExtension(currentTiffIndexPath),
             )
             currentWebpIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.WEBP,
                 path = currentWebpIndexPath,
+                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.WEBP &&
+                    !IndexedImageFormat.WEBP.hasMatchingExtension(currentWebpIndexPath),
             )
             currentRawIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.RAW,
@@ -506,21 +623,32 @@ internal fun ViewerScreen(
             currentHeifIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.HEIF,
                 path = currentHeifIndexPath,
+                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.HEIF &&
+                    !IndexedImageFormat.HEIF.hasMatchingExtension(currentHeifIndexPath),
             )
             currentBmpIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.BMP,
                 path = currentBmpIndexPath,
+                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.BMP &&
+                    !IndexedImageFormat.BMP.hasMatchingExtension(currentBmpIndexPath),
             )
             currentJxlIndexPath != null -> IndexedImageTarget(
                 format = IndexedImageFormat.JXL,
                 path = currentJxlIndexPath,
+                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.JXL &&
+                    !IndexedImageFormat.JXL.hasMatchingExtension(currentJxlIndexPath),
             )
             else -> null
         }
     }
+    val currentUnsupportedImageContent = currentDetectedImageContent?.takeIf { it.indexedFormat == null }
+        ?: currentMedia
+            ?.takeIf { !currentMediaIsRaw && it.path.isNotEmpty() && File(it.path).isFile }
+            ?.let { DetectedImageContent(null, "Unrecognized image format") }
     var imageIndexReady by remember { mutableStateOf<Boolean?>(null) }
     var imageIndexAction by remember { mutableStateOf<IndexedImageAction?>(null) }
     var imageIndexBusy by remember { mutableStateOf(false) }
+    var unsupportedIndexFormat by remember(currentMediaCacheKey) { mutableStateOf<String?>(null) }
     LaunchedEffect(currentIndexTarget) {
         imageIndexAction = null
         imageIndexBusy = false
@@ -1328,6 +1456,18 @@ internal fun ViewerScreen(
                                     },
                                 )
                             }
+                            currentUnsupportedImageContent?.let { content ->
+                                DropdownMenuItem(
+                                    text = { Text("${content.displayName} indexing is not supported") },
+                                    onClick = {
+                                        showMenu = false
+                                        unsupportedIndexFormat = content.displayName
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.Info, contentDescription = null)
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Set as Wallpaper") },
                                 onClick = {
@@ -1486,6 +1626,12 @@ internal fun ViewerScreen(
             val target = currentIndexTarget ?: return@let
             val formatName = target.format.displayName
             val isBuild = action == IndexedImageAction.BUILD
+            val detectedFormatMessage = if (target.detectedFromContent) {
+                "This file is named .${File(target.path).extension}, but its actual content is $formatName. " +
+                    "It will be indexed as $formatName.\n\n"
+            } else {
+                ""
+            }
             AlertDialog(
                 onDismissRequest = { if (!imageIndexBusy) imageIndexAction = null },
                 title = {
@@ -1494,7 +1640,7 @@ internal fun ViewerScreen(
                 text = {
                     Text(
                         if (isBuild) {
-                            when (target.format) {
+                            detectedFormatMessage + when (target.format) {
                                 IndexedImageFormat.JPEG ->
                                     "This reads the complete JPEG once and may briefly use significant power. " +
                                         "The saved seek index applies only to this image and every zoom level."
@@ -1639,6 +1785,23 @@ internal fun ViewerScreen(
                     ) {
                         Text("Cancel")
                     }
+                },
+            )
+        }
+
+        unsupportedIndexFormat?.let { formatName ->
+            AlertDialog(
+                onDismissRequest = { unsupportedIndexFormat = null },
+                title = { Text("$formatName indexing is not supported") },
+                text = {
+                    Text(
+                        "This file is named .${currentMedia?.path?.let(::File)?.extension ?: ""}, " +
+                            "but its actual content is $formatName. It can still be viewed normally, " +
+                            "but a zoom index cannot be built for this format yet.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { unsupportedIndexFormat = null }) { Text("OK") }
                 },
             )
         }
