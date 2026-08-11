@@ -246,6 +246,21 @@ private fun IndexedImageFormat.hasMatchingExtension(path: String): Boolean = whe
     IndexedImageFormat.RAW -> true
 }
 
+private fun MediaEntry.declaredIndexFormat(): IndexedImageFormat? {
+    val normalizedMime = sourceMimeType.substringBefore(';').trim().lowercase()
+    return when {
+        canContainMotionPhoto() -> IndexedImageFormat.JPEG
+        normalizedMime == "image/png" || path.endsWith(".png", true) -> IndexedImageFormat.PNG
+        normalizedMime == "image/tiff" || path.endsWith(".tif", true) || path.endsWith(".tiff", true) -> IndexedImageFormat.TIFF
+        normalizedMime == "image/webp" || path.endsWith(".webp", true) -> IndexedImageFormat.WEBP
+        MimeTypes.isRaw(normalizedMime) || path.substringAfterLast('.', "").lowercase() in rawIndexExtensions -> IndexedImageFormat.RAW
+        MimeTypes.isIsoBMFFImage(normalizedMime) || path.substringAfterLast('.', "").lowercase() in setOf("heic", "heif", "hif", "avif") -> IndexedImageFormat.HEIF
+        normalizedMime == MimeTypes.BMP || path.endsWith(".bmp", true) -> IndexedImageFormat.BMP
+        normalizedMime == "image/jxl" || path.endsWith(".jxl", true) -> IndexedImageFormat.JXL
+        else -> null
+    }
+}
+
 private fun trackedDrawableListener(
     token: ViewerLoadMetrics.WorkToken,
     tokenRef: AtomicReference<ViewerLoadMetrics.WorkToken?>,
@@ -440,219 +455,49 @@ internal fun ViewerScreen(
     val jxlIndexStore = remember(context.applicationContext) {
         IndexedJxlStore(context.applicationContext)
     }
-    val currentMediaIsRaw = remember(
+    val currentLocalIndexPath = remember(
+        currentMedia?.contentId,
+        currentMedia?.dateModifiedMillis,
+        currentMedia?.path,
+    ) {
+        currentMedia
+            ?.path
+            ?.takeIf { it.isNotEmpty() && File(it).isFile }
+    }
+    val declaredIndexFormat = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
         currentMedia?.path,
         currentMedia?.sourceMimeType,
     ) {
-        currentMedia
-            ?.let { media ->
-                MimeTypes.isRaw(media.sourceMimeType.substringBefore(';').trim().lowercase()) ||
-                    media.path.substringAfterLast('.', "").lowercase() in rawIndexExtensions
-            }
-            ?: false
+        currentMedia?.declaredIndexFormat()
     }
-    val currentDetectedImageContent = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-    ) {
-        currentMedia
-            ?.path
-            ?.takeIf { it.isNotEmpty() }
-            ?.let(::File)
-            ?.detectImageContent()
-    }
-    val detectedIndexedFormat = currentDetectedImageContent?.indexedFormat
-    val currentJpegIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        detectedIndexedFormat,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf {
-                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.JPEG
-            }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
-    val currentPngIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        currentMedia?.sourceMimeType,
-        detectedIndexedFormat,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf {
-                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.PNG
-            }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
-    val currentTiffIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        currentMedia?.sourceMimeType,
-        detectedIndexedFormat,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf {
-                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.TIFF
-            }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
-    val currentWebpIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        currentMedia?.sourceMimeType,
-        detectedIndexedFormat,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf {
-                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.WEBP
-            }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
-    val currentRawIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf { currentMediaIsRaw }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
-    val currentHeifIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        currentMedia?.sourceMimeType,
-        detectedIndexedFormat,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf {
-                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.HEIF
-            }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
-    val currentBmpIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        currentMedia?.sourceMimeType,
-        detectedIndexedFormat,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf {
-                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.BMP
-            }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
-    val currentJxlIndexPath = remember(
-        currentMedia?.contentId,
-        currentMedia?.dateModifiedMillis,
-        currentMedia?.path,
-        currentMedia?.sourceMimeType,
-        detectedIndexedFormat,
-        currentMediaIsRaw,
-    ) {
-        currentMedia
-            ?.takeIf {
-                !currentMediaIsRaw && detectedIndexedFormat == IndexedImageFormat.JXL
-            }
-            ?.path
-            ?.takeIf { it.isNotEmpty() && File(it).isFile }
-    }
+    var resolvedIndexFormat by remember(currentMediaCacheKey) { mutableStateOf<IndexedImageFormat?>(null) }
+    val activeIndexFormat = resolvedIndexFormat ?: declaredIndexFormat
     val currentIndexTarget = remember(
-        currentJpegIndexPath,
-        currentPngIndexPath,
-        currentTiffIndexPath,
-        currentWebpIndexPath,
-        currentRawIndexPath,
-        currentHeifIndexPath,
-        currentBmpIndexPath,
-        currentJxlIndexPath,
-        detectedIndexedFormat,
+        currentLocalIndexPath,
+        activeIndexFormat,
+        resolvedIndexFormat,
     ) {
-        when {
-            currentJpegIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.JPEG,
-                path = currentJpegIndexPath,
-                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.JPEG &&
-                    !IndexedImageFormat.JPEG.hasMatchingExtension(currentJpegIndexPath),
-            )
-            currentPngIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.PNG,
-                path = currentPngIndexPath,
-                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.PNG &&
-                    !IndexedImageFormat.PNG.hasMatchingExtension(currentPngIndexPath),
-            )
-            currentTiffIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.TIFF,
-                path = currentTiffIndexPath,
-                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.TIFF &&
-                    !IndexedImageFormat.TIFF.hasMatchingExtension(currentTiffIndexPath),
-            )
-            currentWebpIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.WEBP,
-                path = currentWebpIndexPath,
-                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.WEBP &&
-                    !IndexedImageFormat.WEBP.hasMatchingExtension(currentWebpIndexPath),
-            )
-            currentRawIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.RAW,
-                path = currentRawIndexPath,
-            )
-            currentHeifIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.HEIF,
-                path = currentHeifIndexPath,
-                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.HEIF &&
-                    !IndexedImageFormat.HEIF.hasMatchingExtension(currentHeifIndexPath),
-            )
-            currentBmpIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.BMP,
-                path = currentBmpIndexPath,
-                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.BMP &&
-                    !IndexedImageFormat.BMP.hasMatchingExtension(currentBmpIndexPath),
-            )
-            currentJxlIndexPath != null -> IndexedImageTarget(
-                format = IndexedImageFormat.JXL,
-                path = currentJxlIndexPath,
-                detectedFromContent = detectedIndexedFormat == IndexedImageFormat.JXL &&
-                    !IndexedImageFormat.JXL.hasMatchingExtension(currentJxlIndexPath),
-            )
-            else -> null
+        currentLocalIndexPath?.let { path ->
+            activeIndexFormat?.let { format ->
+                IndexedImageTarget(
+                    format = format,
+                    path = path,
+                    detectedFromContent = resolvedIndexFormat == format && !format.hasMatchingExtension(path),
+                )
+            }
         }
     }
-    val currentUnsupportedImageContent = currentDetectedImageContent?.takeIf { it.indexedFormat == null }
-        ?: currentMedia
-            ?.takeIf { !currentMediaIsRaw && it.path.isNotEmpty() && File(it.path).isFile }
-            ?.let { DetectedImageContent(null, "Unrecognized image format") }
     var imageIndexReady by remember { mutableStateOf<Boolean?>(null) }
     var imageIndexAction by remember { mutableStateOf<IndexedImageAction?>(null) }
     var imageIndexBusy by remember { mutableStateOf(false) }
+    var pendingIndexBuildAfterResolution by remember(currentMediaCacheKey) { mutableStateOf(false) }
     var unsupportedIndexFormat by remember(currentMediaCacheKey) { mutableStateOf<String?>(null) }
     LaunchedEffect(currentIndexTarget) {
-        imageIndexAction = null
+        if (!pendingIndexBuildAfterResolution) imageIndexAction = null
         imageIndexBusy = false
-        imageIndexReady = currentIndexTarget?.let { target ->
+        val isReady = currentIndexTarget?.let { target ->
             withContext(Dispatchers.IO) {
                 when (target.format) {
                     IndexedImageFormat.JPEG -> jpegIndexStore.status(target.path) is IndexedJpegStatus.Ready
@@ -665,6 +510,15 @@ internal fun ViewerScreen(
                     IndexedImageFormat.JXL -> jxlIndexStore.status(target.path) is IndexedJxlStatus.Ready
                 }
             }
+        }
+        imageIndexReady = isReady
+        if (pendingIndexBuildAfterResolution) {
+            imageIndexAction = if (isReady == true) {
+                IndexedImageAction.DELETE
+            } else {
+                IndexedImageAction.BUILD
+            }
+            pendingIndexBuildAfterResolution = false
         }
     }
     val settledMediaCacheKey = remember(pagerState.settledPage, photos) {
@@ -1442,10 +1296,36 @@ internal fun ViewerScreen(
                                     enabled = !imageIndexBusy && !indexChecking,
                                     onClick = {
                                         showMenu = false
-                                        imageIndexAction = if (indexReady) {
-                                            IndexedImageAction.DELETE
+                                        if (indexReady) {
+                                            imageIndexAction = IndexedImageAction.DELETE
                                         } else {
-                                            IndexedImageAction.BUILD
+                                            imageIndexBusy = true
+                                            val requestedTarget = indexTarget
+                                            viewerScope.launch {
+                                                val detected = withContext(Dispatchers.IO) {
+                                                    File(requestedTarget.path).detectImageContent()
+                                                        ?: DetectedImageContent(null, "Unrecognized image format")
+                                                }
+                                                if (currentIndexTarget == requestedTarget) {
+                                                    val detectedFormat = detected.indexedFormat
+                                                    when {
+                                                        detectedFormat == null -> {
+                                                            unsupportedIndexFormat = detected.displayName
+                                                            imageIndexBusy = false
+                                                        }
+                                                        detectedFormat == requestedTarget.format -> {
+                                                            imageIndexBusy = false
+                                                            imageIndexAction = IndexedImageAction.BUILD
+                                                        }
+                                                        else -> {
+                                                            pendingIndexBuildAfterResolution = true
+                                                            resolvedIndexFormat = detectedFormat
+                                                        }
+                                                    }
+                                                } else {
+                                                    imageIndexBusy = false
+                                                }
+                                            }
                                         }
                                     },
                                     leadingIcon = {
@@ -1453,18 +1333,6 @@ internal fun ViewerScreen(
                                             if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
                                             contentDescription = null,
                                         )
-                                    },
-                                )
-                            }
-                            currentUnsupportedImageContent?.let { content ->
-                                DropdownMenuItem(
-                                    text = { Text("${content.displayName} indexing is not supported") },
-                                    onClick = {
-                                        showMenu = false
-                                        unsupportedIndexFormat = content.displayName
-                                    },
-                                    leadingIcon = {
-                                        Icon(Icons.Outlined.Info, contentDescription = null)
                                     },
                                 )
                             }
@@ -1801,7 +1669,7 @@ internal fun ViewerScreen(
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = { unsupportedIndexFormat = null }) { Text("OK") }
+                    TextButton(onClick = { unsupportedIndexFormat = null }) { Text("Got it") }
                 },
             )
         }
