@@ -159,6 +159,31 @@ private enum class IndexedImageAction { BUILD, DELETE }
 
 private fun MediaEntry.viewerCacheKey(): String = "$contentId:$dateModifiedMillis"
 
+/**
+ * Remembers a content-based format result only after its index has been built.
+ * The key includes the MediaStore modification time, so replacing or editing a file naturally
+ * falls back to its declared format and requires a fresh on-demand check.
+ */
+private object IndexedImageFormatMemory {
+    private const val PREFS = "indexed_image_format_memory"
+
+    fun get(context: android.content.Context, mediaKey: String?): IndexedImageFormat? {
+        val storedName = mediaKey?.let {
+            context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+                .getString(it, null)
+        } ?: return null
+        return runCatching { IndexedImageFormat.valueOf(storedName) }.getOrNull()
+    }
+
+    fun put(context: android.content.Context, mediaKey: String?, format: IndexedImageFormat) {
+        mediaKey ?: return
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString(mediaKey, format.name)
+            .apply()
+    }
+}
+
 private fun MediaEntry.viewerMetricsDescriptor(role: String): String {
     val fileName = Uri.encode(File(path).name)
     return "$role={id=$contentId name=$fileName mime=$sourceMimeType bytes=$sizeBytes " +
@@ -472,7 +497,12 @@ internal fun ViewerScreen(
     ) {
         currentMedia?.declaredIndexFormat()
     }
-    var resolvedIndexFormat by remember(currentMediaCacheKey) { mutableStateOf<IndexedImageFormat?>(null) }
+    val rememberedIndexFormat = remember(context.applicationContext, currentMediaCacheKey) {
+        IndexedImageFormatMemory.get(context.applicationContext, currentMediaCacheKey)
+    }
+    var resolvedIndexFormat by remember(currentMediaCacheKey, rememberedIndexFormat) {
+        mutableStateOf(rememberedIndexFormat)
+    }
     val activeIndexFormat = resolvedIndexFormat ?: declaredIndexFormat
     val currentIndexTarget = remember(
         currentLocalIndexPath,
@@ -1616,7 +1646,7 @@ internal fun ViewerScreen(
                                 }
                                 if (currentIndexTarget == operationTarget) {
                                     imageIndexBusy = false
-                                    imageIndexReady = withContext(Dispatchers.IO) {
+                                    val indexReadyAfterOperation = withContext(Dispatchers.IO) {
                                         when (operationTarget.format) {
                                             IndexedImageFormat.JPEG ->
                                                 jpegIndexStore.status(operationTarget.path) is IndexedJpegStatus.Ready
@@ -1635,6 +1665,14 @@ internal fun ViewerScreen(
                                             IndexedImageFormat.JXL ->
                                                 jxlIndexStore.status(operationTarget.path) is IndexedJxlStatus.Ready
                                         }
+                                    }
+                                    imageIndexReady = indexReadyAfterOperation
+                                    if (isBuild && result.isSuccess && indexReadyAfterOperation) {
+                                        IndexedImageFormatMemory.put(
+                                            context.applicationContext,
+                                            currentMediaCacheKey,
+                                            operationTarget.format,
+                                        )
                                     }
                                 }
                                 android.widget.Toast.makeText(
