@@ -1156,6 +1156,7 @@ internal fun ViewerScreen(
                                         sourceWidth = media.width,
                                         sourceHeight = media.height,
                                         previewModel = media.path.ifEmpty { media.uri },
+                                        intermediatePreviewModel = swipeThumbnailModel,
                                         regionDecoderKind = indexedRegionKind,
                                         transformStateStore = transformStateStore,
                                         onContentReadyChanged = { fullPreviewReady = it },
@@ -1191,6 +1192,7 @@ internal fun ViewerScreen(
                                     sourceHeight = media.height,
                                     enableUltraHdr = enableUltraHdr,
                                     previewModel = previewModel,
+                                    intermediatePreviewModel = swipeThumbnailModel,
                                     metricsDetail = "id=${media.contentId} mime=${media.sourceMimeType} " +
                                         "bytes=${media.sizeBytes} source=${media.width}x${media.height} " +
                                         "rotation=${media.sourceRotationDegrees} modified=${media.dateModifiedMillis} " +

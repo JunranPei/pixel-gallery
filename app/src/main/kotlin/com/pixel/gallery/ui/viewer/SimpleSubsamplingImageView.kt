@@ -389,6 +389,10 @@ private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boole
     return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
 
+private fun shouldUseIntermediatePreview(
+    state: SubsamplingScaleImageView.ViewState?,
+): Boolean = state == null || state.scale <= 1.001f
+
 internal fun canHandoffPreviewToTiles(
     ssivBaseDrawn: Boolean,
     isActivePage: Boolean,
@@ -465,6 +469,7 @@ internal fun SimpleSubsamplingImageView(
     sourceHeight: Int = 0,
     enableUltraHdr: Boolean = false,
     previewModel: Any? = null,
+    intermediatePreviewModel: Any? = null,
     metricsDetail: String = "",
     regionDecoderKind: ViewerRegionDecoderKind = ViewerRegionDecoderKind.PLATFORM,
     decoderSourceKey: String = "",
@@ -844,11 +849,16 @@ internal fun SimpleSubsamplingImageView(
         imageViewRef,
         dateModifiedMillis,
         previewModel,
+        intermediatePreviewModel,
         enableUltraHdr,
     ) {
         val imageView = imageViewRef
         if (imageView != null && isPreviewVisible) {
             val savedTransform = transformStateStore.get(transformStateKey)
+            // The saved SSIV scale is the actual source-pixel-to-screen scale: 1f is
+            // original pixels. A 512 px bridge is useful at original size or below,
+            // but magnifying it above 1:1 only creates a blurry, high-power detour.
+            val useIntermediatePreview = shouldUseIntermediatePreview(savedTransform)
             val previewUsesContainerTransform = previewOwnsTransform
             imageView.visibility = View.VISIBLE
             // Telephoto's Glide adapter resolves local photos through the MediaStore URI,
@@ -902,13 +912,10 @@ internal fun SimpleSubsamplingImageView(
                         if (dateModifiedMillis > 0L) opts.signature(ObjectKey(dateModifiedMillis)) else opts
                     }
 
-                Glide.with(context)
-                    // Match Simple Gallery's local-photo path exactly. Going through the
-                    // MediaStore URI selects Glide's QMediaStore loader even though SSIV
-                    // already proved that the original file is directly readable.
-                    .load(requestModel)
-                    .apply(requestOptions)
-                    .listener(object : com.bumptech.glide.request.RequestListener<Drawable> {
+                fun previewListener(
+                    onCacheMiss: (() -> Unit)? = null,
+                ): com.bumptech.glide.request.RequestListener<Drawable> =
+                    object : com.bumptech.glide.request.RequestListener<Drawable> {
                         override fun onLoadFailed(
                             e: com.bumptech.glide.load.engine.GlideException?,
                             model: Any?,
@@ -916,6 +923,16 @@ internal fun SimpleSubsamplingImageView(
                             isFirstResource: Boolean
                         ): Boolean {
                             if (!previewRequestGuard.isCurrent(imageView, transformStateKey)) return false
+                            if (onCacheMiss != null) {
+                                // A cache-only miss is expected. Start the source path after
+                                // Glide has finished dispatching this request's callback.
+                                imageView.post {
+                                    if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
+                                        onCacheMiss()
+                                    }
+                                }
+                                return true
+                            }
                             ViewerLoadMetrics.previewFailed(
                                 metricsToken,
                                 e?.rootCauses?.firstOrNull()?.javaClass?.simpleName
@@ -1003,7 +1020,54 @@ internal fun SimpleSubsamplingImageView(
                             )
                             return false
                         }
-                    })
+                    }
+
+                val requestManager = Glide.with(context)
+                val startSourceLoad = {
+                    if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
+                        val fullPreviewRequest = requestManager
+                            // Match Simple Gallery's local-photo path exactly. Going through the
+                            // MediaStore URI selects Glide's QMediaStore loader even though SSIV
+                            // already proved that the original file is directly readable.
+                            .load(requestModel)
+                            .apply(requestOptions)
+                            .listener(previewListener())
+
+                        val sourceRequest = if (useIntermediatePreview) {
+                            val thumbnailOptions = RequestOptions()
+                                .withViewerTaskCompression()
+                                .format(DecodeFormat.PREFER_RGB_565)
+                                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                .downsample(DownsampleStrategy.FIT_CENTER)
+                                .priority(Priority.IMMEDIATE)
+                                .override(512)
+                                .let { opts ->
+                                    if (dateModifiedMillis > 0L) {
+                                        opts.signature(ObjectKey(dateModifiedMillis))
+                                    } else {
+                                        opts
+                                    }
+                                }
+                            fullPreviewRequest.thumbnail(
+                                requestManager
+                                    .asDrawable()
+                                    .load(intermediatePreviewModel ?: requestModel)
+                                    .apply(thumbnailOptions)
+                            )
+                        } else {
+                            fullPreviewRequest
+                        }
+                        sourceRequest.into(imageView)
+                    }
+                }
+
+                // Probe only the existing full-preview cache first. A hit completes here,
+                // so the 512 request is never started. On a miss, the source path above
+                // decides whether the saved 1:1 scale permits the intermediate preview.
+                requestManager
+                    .load(requestModel)
+                    .apply(requestOptions.clone().onlyRetrieveFromCache(true))
+                    .listener(previewListener(onCacheMiss = startSourceLoad))
                     .into(imageView)
             } else {
                 // The request is deliberately retained across settle/active-page changes.
