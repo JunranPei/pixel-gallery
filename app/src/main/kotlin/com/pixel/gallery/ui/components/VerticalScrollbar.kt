@@ -7,7 +7,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
@@ -29,6 +32,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -143,45 +147,63 @@ fun GalleryScrollbar(
     }
     val currentPositionLabel = positionLabelProvider?.invoke(currentItemIndex)
     val scrollbarColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+    val currentSliderOffsetPx by rememberUpdatedState(sliderOffsetPx)
 
-    val tapGestureModifier = if (scrollbarVisible) {
-        Modifier.pointerInput(effectiveTrackPx) {
-            detectTapGestures(
-                onPress = { tapCoord ->
-                    val touchY = tapCoord.y
-                    val touchOnSlider = touchY in sliderOffsetPx..(sliderOffsetPx + barHeightPx)
-                    if (touchOnSlider) {
-                        touchActive = true
-                        try {
-                            awaitRelease()
-                        } finally {
-                            touchActive = false
-                        }
-                    } else {
-                        if (effectiveTrackPx > 0f) {
-                            val clickCenterY = touchY - (barHeightPx / 2)
-                            val jumpPercentage = (clickCenterY / effectiveTrackPx).coerceIn(0f, 1f)
-                            val gridInfo = lazyGridState.layoutInfo
-                            val allItemsCount = gridInfo.totalItemsCount
-                            if (allItemsCount > 0) {
-                                val targetScrollIdx = (jumpPercentage * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
-                                trackJumpLabelJob?.cancel()
-                                trackJumpFraction = jumpPercentage
-                                trackJumpItemIndex = targetScrollIdx
-                                trackJumpLabelVisible = true
-                                trackJumpLabelJob = scrollbarScope.launch {
-                                    delay(1000)
-                                    trackJumpLabelVisible = false
-                                }
-                                activeScrollJob?.cancel()
-                                activeScrollJob = scrollbarScope.launch {
-                                    lazyGridState.scrollToItem(targetScrollIdx)
-                                }
-                            }
-                        }
+    val trackDragModifier = if (scrollbarVisible) {
+        Modifier.pointerInput(effectiveTrackPx, barHeightPx) {
+            fun jumpToTrackPosition(pointerY: Float) {
+                if (effectiveTrackPx <= 0f) return
+                val sliderCenterY = pointerY - (barHeightPx / 2)
+                val jumpPercentage = (sliderCenterY / effectiveTrackPx).coerceIn(0f, 1f)
+                val allItemsCount = lazyGridState.layoutInfo.totalItemsCount
+                if (allItemsCount <= 0) return
+
+                val targetScrollIdx =
+                    (jumpPercentage * (allItemsCount - 1)).toInt().coerceIn(0, allItemsCount - 1)
+                trackJumpFraction = jumpPercentage
+                trackJumpItemIndex = targetScrollIdx
+                trackJumpLabelVisible = true
+                if (targetScrollIdx != lazyGridState.firstVisibleItemIndex) {
+                    activeScrollJob?.cancel()
+                    activeScrollJob = scrollbarScope.launch {
+                        lazyGridState.scrollToItem(targetScrollIdx)
                     }
                 }
-            )
+            }
+
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val touchOnSlider =
+                    down.position.y in currentSliderOffsetPx..(currentSliderOffsetPx + barHeightPx)
+                if (touchOnSlider) {
+                    // Leave thumb gestures to its dedicated draggable modifier.
+                    while (down.pressed) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.none { it.pressed }) break
+                    }
+                    return@awaitEachGesture
+                }
+
+                val dragStart = awaitTouchSlopOrCancellation(down.id) { change, _ ->
+                    change.consume()
+                } ?: return@awaitEachGesture
+
+                touchActive = true
+                try {
+                    jumpToTrackPosition(dragStart.position.y)
+                    drag(dragStart.id) { change ->
+                        change.consume()
+                        jumpToTrackPosition(change.position.y)
+                    }
+                } finally {
+                    touchActive = false
+                    trackJumpLabelJob?.cancel()
+                    trackJumpLabelJob = scrollbarScope.launch {
+                        delay(1000)
+                        trackJumpLabelVisible = false
+                    }
+                }
+            }
         }
     } else {
         Modifier
@@ -221,7 +243,7 @@ fun GalleryScrollbar(
                 .align(Alignment.TopEnd)
                 .fillMaxHeight()
                 .width(36.dp)
-                .then(tapGestureModifier)
+                .then(trackDragModifier)
         ) {
             Box(
                 modifier = Modifier
