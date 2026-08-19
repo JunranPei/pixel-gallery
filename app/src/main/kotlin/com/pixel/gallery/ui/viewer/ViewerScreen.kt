@@ -111,7 +111,6 @@ import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ScaleFactor
@@ -800,7 +799,7 @@ internal fun ViewerScreen(
                         fallbackDurationMillis = media.durationMillis ?: 0L,
                         firstFrameModel = firstFrameModel,
                         showUI = showUI, 
-                        isActive = pagerState.currentPage == page,
+                        isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress,
                         shouldPrepare = shouldPrepareVideo,
                         onTap = { showUI = !showUI }
                     )
@@ -1856,6 +1855,7 @@ fun VideoPlayer(
     var useNativeFallback by remember(uri) { mutableStateOf(false) }
     var nativeVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
     var hasRenderedFirstFrame by remember(uri) { mutableStateOf(false) }
+    var hasPresentedVideoSurface by remember(uri) { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     val minUserZoom = 0.333f
@@ -1890,6 +1890,7 @@ fun VideoPlayer(
 
     DisposableEffect(shouldPrepare, uri, filePath) {
         hasRenderedFirstFrame = false
+        hasPresentedVideoSurface = false
         val player = if (shouldPrepare) {
             val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
                 .setEnableDecoderFallback(true)
@@ -1951,11 +1952,16 @@ fun VideoPlayer(
         }
     }
 
-    val videoSurfaceAlpha by animateFloatAsState(
-        targetValue = if (hasRenderedFirstFrame) 1f else 0f,
-        animationSpec = tween(durationMillis = 90),
-        label = "video-first-frame-handoff",
-    )
+    LaunchedEffect(isActive, hasRenderedFirstFrame) {
+        if (isActive && hasRenderedFirstFrame) {
+            // Once a settled page has handed off to the real video surface, keep
+            // showing that paused surface while it slides out. Switching it back
+            // to the retriever-produced poster can cause an immediate color jump.
+            hasPresentedVideoSurface = true
+        }
+    }
+
+    val showVideoSurface = hasRenderedFirstFrame && hasPresentedVideoSurface
 
     Box(
         modifier = modifier
@@ -1984,7 +1990,7 @@ fun VideoPlayer(
                     transformOrigin = transformation.transformOrigin
                 }
         ) {
-            if (firstFrameModel != null && videoSurfaceAlpha < 1f) {
+            if (firstFrameModel != null && !showVideoSurface) {
                 GlideImage(
                     model = firstFrameModel,
                     contentDescription = null,
@@ -2020,7 +2026,7 @@ fun VideoPlayer(
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .alpha(videoSurfaceAlpha)
+                            .alpha(if (showVideoSurface) 1f else 0f)
                     )
                 } else {
                     AndroidView(
@@ -2048,7 +2054,7 @@ fun VideoPlayer(
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .alpha(videoSurfaceAlpha)
+                            .alpha(if (showVideoSurface) 1f else 0f)
                     )
                 }
             }
