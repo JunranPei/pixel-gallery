@@ -45,6 +45,7 @@ android {
 
     defaultConfig {
         applicationId = when (viewerTestVariant) {
+            "test" -> "com.pixel.gallery.multitask.test"
             "simplemerge" -> "com.pixel.gallery.simplegallerymerge"
             "trace" -> "com.pixel.gallery.codextrace"
             "clean" -> "com.pixel.gallery.codexclean"
@@ -58,6 +59,7 @@ android {
             else -> "com.pixel.gallery.multitask"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
+            "test" -> "Gallery Test"
             "simplemerge" -> "Gallery Test"
             "trace" -> "Pixel Trace"
             "clean" -> "Pixel Clean"

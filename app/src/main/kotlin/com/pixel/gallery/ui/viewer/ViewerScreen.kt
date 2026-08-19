@@ -52,6 +52,7 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.glide.AvesAppGlideModule
 import com.pixel.gallery.glide.SvgImage
 import com.pixel.gallery.glide.TiffImage
+import com.pixel.gallery.glide.VideoThumbnail
 import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
 import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
@@ -779,12 +780,28 @@ internal fun ViewerScreen(
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideo) {
+                    val shouldPrepareVideo by remember(pagerState, page) {
+                        derivedStateOf {
+                            page == pagerState.settledPage ||
+                                pagerState.layoutInfo.visiblePagesInfo.any { it.index == page }
+                        }
+                    }
+                    val firstFrameModel = remember(media.uri, media.dateModifiedMillis) {
+                        VideoThumbnail(
+                            context = context,
+                            uri = Uri.parse(media.uri),
+                            frameTimeMicros = 0L,
+                            cacheVersion = media.dateModifiedMillis,
+                        )
+                    }
                     VideoPlayer(
                         uri = media.uri, 
                         filePath = media.path,
                         fallbackDurationMillis = media.durationMillis ?: 0L,
+                        firstFrameModel = firstFrameModel,
                         showUI = showUI, 
                         isActive = pagerState.currentPage == page,
+                        shouldPrepare = shouldPrepareVideo,
                         onTap = { showUI = !showUI }
                     )
                 } else {
@@ -1820,14 +1837,17 @@ fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String
     }
 }
 
+@OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun VideoPlayer(
     uri: String, 
     filePath: String = "",
     fallbackDurationMillis: Long = 0L,
+    firstFrameModel: Any? = null,
     modifier: Modifier = Modifier,
     isMotionPhoto: Boolean = false,
     isActive: Boolean = true,
+    shouldPrepare: Boolean = isActive,
     showUI: Boolean = true,
     onTap: () -> Unit = {}
 ) {
@@ -1835,6 +1855,7 @@ fun VideoPlayer(
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var useNativeFallback by remember(uri) { mutableStateOf(false) }
     var nativeVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
+    var hasRenderedFirstFrame by remember(uri) { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     val minUserZoom = 0.333f
@@ -1867,8 +1888,9 @@ fun VideoPlayer(
         )
     }
 
-    DisposableEffect(isActive, uri, filePath) {
-        val player = if (isActive) {
+    DisposableEffect(shouldPrepare, uri, filePath) {
+        hasRenderedFirstFrame = false
+        val player = if (shouldPrepare) {
             val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
                 .setEnableDecoderFallback(true)
 
@@ -1895,12 +1917,17 @@ fun VideoPlayer(
                     setMediaItem(MediaItem.fromUri(primaryUri))
                     repeatMode = if (isMotionPhoto) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
                     addListener(object : Player.Listener {
+                        override fun onRenderedFirstFrame() {
+                            hasRenderedFirstFrame = true
+                        }
+
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            hasRenderedFirstFrame = false
                             useNativeFallback = true
                         }
                     })
                     prepare()
-                    playWhenReady = true
+                    playWhenReady = isActive
                 }
         } else null
         
@@ -1912,6 +1939,23 @@ fun VideoPlayer(
             player?.release()
         }
     }
+
+    LaunchedEffect(exoPlayer, nativeVideoView, isActive, useNativeFallback) {
+        exoPlayer?.playWhenReady = isActive
+        nativeVideoView?.let { view ->
+            if (isActive) {
+                if (!view.isPlaying) view.start()
+            } else if (view.isPlaying) {
+                view.pause()
+            }
+        }
+    }
+
+    val videoSurfaceAlpha by animateFloatAsState(
+        targetValue = if (hasRenderedFirstFrame) 1f else 0f,
+        animationSpec = tween(durationMillis = 90),
+        label = "video-first-frame-handoff",
+    )
 
     Box(
         modifier = modifier
@@ -1928,19 +1972,35 @@ fun VideoPlayer(
                 }
             )
     ) {
-        if (exoPlayer != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val transformation = zoomableState.contentTransformation
-                        scaleX = transformation.scale.scaleX
-                        scaleY = transformation.scale.scaleY
-                        translationX = transformation.offset.x
-                        translationY = transformation.offset.y
-                        transformOrigin = transformation.transformOrigin
-                    }
-            ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val transformation = zoomableState.contentTransformation
+                    scaleX = transformation.scale.scaleX
+                    scaleY = transformation.scale.scaleY
+                    translationX = transformation.offset.x
+                    translationY = transformation.offset.y
+                    transformOrigin = transformation.transformOrigin
+                }
+        ) {
+            if (firstFrameModel != null && videoSurfaceAlpha < 1f) {
+                GlideImage(
+                    model = firstFrameModel,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    requestBuilderTransform = { request ->
+                        request
+                            .dontTransform()
+                            .format(DecodeFormat.PREFER_RGB_565)
+                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                            .override(720)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            if (exoPlayer != null) {
                 if (useNativeFallback) {
                     AndroidView(
                         factory = { ctx ->
@@ -1948,7 +2008,8 @@ fun VideoPlayer(
                                 setVideoURI(Uri.parse(uri))
                                 setOnPreparedListener { mp ->
                                     mp.isLooping = !isMotionPhoto
-                                    mp.start()
+                                    hasRenderedFirstFrame = true
+                                    if (isActive) mp.start()
                                 }
                                 setOnErrorListener { _, _, _ -> true }
                                 nativeVideoView = this
@@ -1957,7 +2018,9 @@ fun VideoPlayer(
                         update = { view ->
                             nativeVideoView = view
                         },
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(videoSurfaceAlpha)
                     )
                 } else {
                     AndroidView(
@@ -1983,23 +2046,25 @@ fun VideoPlayer(
                         onRelease = { view ->
                             view.player = null
                         },
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(videoSurfaceAlpha)
                     )
                 }
             }
+        }
 
-            if (!isMotionPhoto) {
-                val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
-                VideoControls(
-                    player = exoPlayer,
-                    nativeVideoView = if (useNativeFallback) nativeVideoView else null,
-                    isVisible = showUI,
+        if (!isMotionPhoto) {
+            val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
+            VideoControls(
+                player = exoPlayer,
+                nativeVideoView = if (useNativeFallback) nativeVideoView else null,
+                isVisible = showUI,
                 currentZoom = currentZoom,
                 fallbackDurationMillis = fallbackDurationMillis,
                 modifier = Modifier.fillMaxSize()
             )
         }
-    }
     }
 }
 
