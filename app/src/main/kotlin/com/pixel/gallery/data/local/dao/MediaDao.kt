@@ -10,19 +10,32 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MediaDao {
-    
+
     // --- All Media ---
-    @Query("SELECT * FROM media_entries WHERE isTrashed = 0 ORDER BY bestTimestamp DESC")
-    fun getAllEntries(): Flow<List<MediaEntry>>
+    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 0")
+    fun observeAllEntriesChanges(): Flow<Int>
 
-    @Query("SELECT contentId, path, dateModifiedMillis, isTrashed FROM media_entries")
-    suspend fun getKnownEntries(): List<KnownEntry>
+    @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId > :afterContentId ORDER BY contentId LIMIT :limit")
+    suspend fun getAllEntriesPage(limit: Int, afterContentId: Long): List<MediaEntry>
 
-    @Query("SELECT * FROM media_entries")
-    suspend fun getAllMediaEntries(): List<MediaEntry>
+    @Transaction
+    suspend fun getAllEntriesPaged(): List<MediaEntry> =
+        loadAllPages(::getAllEntriesPage, MediaEntry::contentId)
+            .sortedWith(compareByDescending<MediaEntry> { it.bestTimestamp }.thenByDescending { it.contentId })
 
-    @Query("SELECT contentId, path FROM media_entries")
-    suspend fun getAllMediaPaths(): List<MediaPath>
+    @Query("SELECT contentId, path, dateModifiedMillis, isTrashed FROM media_entries WHERE contentId > :afterContentId ORDER BY contentId LIMIT :limit")
+    suspend fun getKnownEntriesPage(limit: Int, afterContentId: Long): List<KnownEntry>
+
+    @Transaction
+    suspend fun getKnownEntries(): List<KnownEntry> =
+        loadAllPages(::getKnownEntriesPage, KnownEntry::contentId)
+
+    @Query("SELECT contentId, path FROM media_entries WHERE contentId > :afterContentId ORDER BY contentId LIMIT :limit")
+    suspend fun getAllMediaPathsPage(limit: Int, afterContentId: Long): List<MediaPath>
+
+    @Transaction
+    suspend fun getAllMediaPaths(): List<MediaPath> =
+        loadAllPages(::getAllMediaPathsPage, MediaPath::contentId)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entries: List<MediaEntry>)
@@ -37,8 +50,16 @@ interface MediaDao {
     }
 
     // --- Favourites ---
-    @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId IN (SELECT id FROM favourites) ORDER BY bestTimestamp DESC")
-    fun getFavourites(): Flow<List<MediaEntry>>
+    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 0 AND contentId IN (SELECT id FROM favourites)")
+    fun observeFavouritesChanges(): Flow<Int>
+
+    @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId > :afterContentId AND contentId IN (SELECT id FROM favourites) ORDER BY contentId LIMIT :limit")
+    suspend fun getFavouritesPage(limit: Int, afterContentId: Long): List<MediaEntry>
+
+    @Transaction
+    suspend fun getFavouritesPaged(): List<MediaEntry> =
+        loadAllPages(::getFavouritesPage, MediaEntry::contentId)
+            .sortedWith(compareByDescending<MediaEntry> { it.bestTimestamp }.thenByDescending { it.contentId })
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addFavourite(favourite: FavouriteEntry)
@@ -50,8 +71,16 @@ interface MediaDao {
     fun isFavourite(id: Long): Flow<Boolean>
 
     // --- Trash ---
-    @Query("SELECT * FROM media_entries WHERE isTrashed = 1 ORDER BY bestTimestamp DESC")
-    fun getTrash(): Flow<List<MediaEntry>>
+    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 1")
+    fun observeTrashChanges(): Flow<Int>
+
+    @Query("SELECT * FROM media_entries WHERE isTrashed = 1 AND contentId > :afterContentId ORDER BY contentId LIMIT :limit")
+    suspend fun getTrashPage(limit: Int, afterContentId: Long): List<MediaEntry>
+
+    @Transaction
+    suspend fun getTrashPaged(): List<MediaEntry> =
+        loadAllPages(::getTrashPage, MediaEntry::contentId)
+            .sortedWith(compareByDescending<MediaEntry> { it.bestTimestamp }.thenByDescending { it.contentId })
 
     // --- Vault ---
     @Query("SELECT * FROM vault")
@@ -91,3 +120,20 @@ data class MediaPath(
     val contentId: Long,
     val path: String
 )
+
+private const val DATABASE_PAGE_SIZE = 256
+
+private suspend fun <T> loadAllPages(
+    loadPage: suspend (limit: Int, afterContentId: Long) -> List<T>,
+    contentIdOf: (T) -> Long
+): List<T> {
+    val result = ArrayList<T>()
+    var afterContentId = -1L
+
+    while (true) {
+        val page = loadPage(DATABASE_PAGE_SIZE, afterContentId)
+        result.addAll(page)
+        if (page.size < DATABASE_PAGE_SIZE) return result
+        afterContentId = contentIdOf(page.last())
+    }
+}

@@ -121,7 +121,7 @@ class MediaRepository @Inject constructor(
     }
 
     val allEntries: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.getAllEntries(),
+        mediaDao.observeAllEntriesChanges().map { mediaDao.getAllEntriesPaged() },
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
@@ -134,7 +134,7 @@ class MediaRepository @Inject constructor(
     )
 
     val favourites: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.getFavourites(),
+        mediaDao.observeFavouritesChanges().map { mediaDao.getFavouritesPaged() },
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
@@ -146,7 +146,9 @@ class MediaRepository @Inject constructor(
         initialValue = emptyList()
     )
 
-    val trash: StateFlow<List<MediaEntry>> = mediaDao.getTrash().stateIn(
+    val trash: StateFlow<List<MediaEntry>> = mediaDao.observeTrashChanges().map {
+        mediaDao.getTrashPaged()
+    }.stateIn(
         scope = repositoryScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList()

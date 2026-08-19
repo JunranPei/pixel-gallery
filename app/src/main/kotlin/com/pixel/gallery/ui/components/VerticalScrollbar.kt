@@ -249,11 +249,11 @@ fun GalleryScrollbar(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .offset { IntOffset(x = 0, y = sliderOffsetPx.toInt()) }
-                    .padding(end = 4.dp)
-                    .width(sliderWidth)
+                    // Simple Gallery gives the handle a much wider touch target than its
+                    // visible bar. Keep our visual treatment, but make the whole edge strip
+                    // draggable and move the visible bar slightly away from the screen edge.
+                    .width(36.dp)
                     .height(barHeightDp)
-                    .clip(CircleShape)
-                    .background(scrollbarColor)
                     .draggable(
                         orientation = Orientation.Vertical,
                         state = rememberDraggableState { dragDelta ->
@@ -281,7 +281,17 @@ fun GalleryScrollbar(
                             dragActive = false
                         }
                     )
-            )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 8.dp)
+                        .width(sliderWidth)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(scrollbarColor)
+                )
+            }
         }
     }
 }

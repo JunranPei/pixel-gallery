@@ -68,7 +68,8 @@ fun PhotosScreen(
     columns: Int = 3,
     onColumnsChange: (Int) -> Unit = {},
     bottomPadding: Dp = 0.dp,
-    state: LazyGridState = rememberLazyGridState()
+    state: LazyGridState = rememberLazyGridState(),
+    emptyMessage: String? = null,
 ) {
     var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
@@ -249,6 +250,15 @@ fun PhotosScreen(
                     }
                 }
             }
+        }
+
+        if (items.isEmpty() && emptyMessage != null) {
+            Text(
+                text = emptyMessage,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
 
         com.pixel.gallery.ui.components.GalleryScrollbar(
@@ -501,7 +511,9 @@ fun AlbumsScreen(
     onExclude: (String) -> Unit = {},
     onHide: (String) -> Unit = {},
     columns: Int = 2,
-    onColumnsChange: (Int) -> Unit = {}
+    onColumnsChange: (Int) -> Unit = {},
+    showHeaderButtons: Boolean = true,
+    emptyMessage: String? = null,
 ) {
     var isScrollbarDragging by remember { mutableStateOf(false) }
     val firstVisibleIndex by remember { derivedStateOf { gridState.firstVisibleItemIndex } }
@@ -562,26 +574,28 @@ fun AlbumsScreen(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header Buttons: Favourites and Bin
-            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columns) }) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    AlbumHeaderButton(
-                        modifier = Modifier.weight(1.0f),
-                        icon = Icons.Outlined.StarOutline,
-                        label = "Favourites",
-                        onClick = onNavigateToFavourites
-                    )
-                    AlbumHeaderButton(
-                        modifier = Modifier.weight(1.0f),
-                        icon = Icons.Outlined.DeleteOutline,
-                        label = "Recycle Bin",
-                        onClick = onNavigateToTrash
-                    )
+            if (showHeaderButtons) {
+                // Header Buttons: Favourites and Bin
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columns) }) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        AlbumHeaderButton(
+                            modifier = Modifier.weight(1.0f),
+                            icon = Icons.Outlined.StarOutline,
+                            label = "Favourites",
+                            onClick = onNavigateToFavourites
+                        )
+                        AlbumHeaderButton(
+                            modifier = Modifier.weight(1.0f),
+                            icon = Icons.Outlined.DeleteOutline,
+                            label = "Recycle Bin",
+                            onClick = onNavigateToTrash
+                        )
+                    }
                 }
             }
 
@@ -601,6 +615,15 @@ fun AlbumsScreen(
                     columns = columns
                 )
             }
+        }
+
+        if (albums.isEmpty() && emptyMessage != null) {
+            Text(
+                text = emptyMessage,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
 
         com.pixel.gallery.ui.components.GalleryScrollbar(

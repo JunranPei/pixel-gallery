@@ -76,8 +76,8 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 2040
-        versionName = "4.3.2.7-auto-multitask"
+        versionCode = 2044
+        versionName = "4.3.2.11-auto-multitask"
     }
 
     signingConfigs {
@@ -129,6 +129,12 @@ android {
             }
         }
         debug {
+            // Keep the ordinary development build alongside the installed app.
+            // Named viewer experiments already use dedicated package IDs above.
+            if (viewerTestVariant == null) {
+                applicationIdSuffix = ".test"
+                manifestPlaceholders["appLabel"] = "Gallery Test"
+            }
         }
     }
 
