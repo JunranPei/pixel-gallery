@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.BuildConfig
+import com.pixel.gallery.model.CloneMode
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -26,11 +27,13 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToExcludedFolders: () -> Unit,
     onNavigateToLicenses: () -> Unit,
+    onNavigateToShortcutManager: () -> Unit,
     onNavigateToPerformanceSettings: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val materialYou by viewModel.materialYou.collectAsState()
     val startupAtAlbums by viewModel.startupAtAlbums.collectAsState()
+    val cloneMode by viewModel.cloneMode.collectAsState()
 
     Scaffold(
         topBar = {
@@ -64,6 +67,12 @@ fun SettingsScreen(
                 )
             }
             item {
+                CloneModeItem(
+                    mode = cloneMode,
+                    onModeChange = viewModel::setCloneMode,
+                )
+            }
+            item {
                 SettingsToggleItem(
                     title = "Start at Albums",
                     description = "Open the albums tab by default",
@@ -78,6 +87,14 @@ fun SettingsScreen(
                     description = "Manage cache limit, threads and cleanup",
                     icon = Icons.Outlined.Speed,
                     onClick = onNavigateToPerformanceSettings
+                )
+            }
+            item {
+                SettingsClickItem(
+                    title = "Desktop Shortcuts",
+                    description = "Create and manage independent custom shortcuts",
+                    icon = Icons.Outlined.Tab,
+                    onClick = onNavigateToShortcutManager,
                 )
             }
 
@@ -100,6 +117,52 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun CloneModeItem(
+    mode: CloneMode,
+    onModeChange: (CloneMode) -> Unit,
+) {
+    ListItem(
+        headlineContent = {
+            Text("Clone mode", style = EmphasizedTypography.LabelLarge)
+        },
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    when (mode) {
+                        CloneMode.DISABLED -> "Normal launch; no extra tasks"
+                        CloneMode.MANUAL -> "Only custom shortcuts open separate tasks"
+                        CloneMode.AUTO -> "External/document entries open separate tasks"
+                    }
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CloneMode.entries.forEach { candidate ->
+                        FilterChip(
+                            selected = candidate == mode,
+                            onClick = { onModeChange(candidate) },
+                            label = {
+                                Text(
+                                    when (candidate) {
+                                        CloneMode.DISABLED -> "Off"
+                                        CloneMode.MANUAL -> "Manual"
+                                        CloneMode.AUTO -> "Auto"
+                                    }
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        },
+        leadingContent = {
+            Icon(Icons.Outlined.Tab, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        },
+    )
 }
 
 @Composable

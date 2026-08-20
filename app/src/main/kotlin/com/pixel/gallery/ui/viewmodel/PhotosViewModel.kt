@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.repository.MediaRepository
 import com.pixel.gallery.data.repository.SettingsRepository
+import com.pixel.gallery.model.CloneMode
+import com.pixel.gallery.utils.CustomShortcut
 import com.pixel.gallery.services.MetadataService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -635,6 +637,26 @@ class PhotosViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setAlbumSortOrder(order.name)
         }
+    }
+
+    val cloneMode: StateFlow<CloneMode> = settingsRepository.cloneMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CloneMode.DISABLED)
+
+    fun setCloneMode(mode: CloneMode) {
+        viewModelScope.launch {
+            settingsRepository.setCloneMode(mode)
+        }
+    }
+
+    val customShortcuts: StateFlow<List<CustomShortcut>> = settingsRepository.customShortcuts
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun addCustomShortcut(shortcut: CustomShortcut) {
+        viewModelScope.launch { settingsRepository.addCustomShortcut(shortcut) }
+    }
+
+    fun removeCustomShortcut(id: String) {
+        viewModelScope.launch { settingsRepository.removeCustomShortcut(id) }
     }
 
 }

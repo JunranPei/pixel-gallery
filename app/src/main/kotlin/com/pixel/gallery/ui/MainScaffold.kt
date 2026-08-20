@@ -31,6 +31,7 @@ import com.pixel.gallery.model.Album
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
 import com.pixel.gallery.ui.settings.SettingsScreen
+import com.pixel.gallery.ui.settings.ShortcutManagerScreen
 import com.pixel.gallery.ui.gallery.FavouritesScreen
 import com.pixel.gallery.ui.gallery.TrashScreen
 import com.pixel.gallery.ui.gallery.HiddenAlbumsScreen
@@ -223,6 +224,7 @@ sealed class Screen : Parcelable {
     @Parcelize object ExcludedFolders : Screen()
     @Parcelize object Licenses : Screen()
     @Parcelize data class Photo(val albumName: String) : Screen()
+    @Parcelize object ShortcutManager : Screen()
     @Parcelize object PerformanceSettings : Screen()
     @Parcelize data class TransferDestination(
         val entryIds: LongArray,
@@ -1085,7 +1087,11 @@ fun MainScaffold(
                     onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
                     onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
+                    onNavigateToShortcutManager = { navigationStack = navigationStack + Screen.ShortcutManager },
                     onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings }
+                )
+                Screen.ShortcutManager -> ShortcutManagerScreen(
+                    onBack = navigateBack
                 )
                 Screen.PerformanceSettings -> PerformanceSettingsScreen(
                     onBack = navigateBack

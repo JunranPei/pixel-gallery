@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import com.pixel.gallery.model.CloneMode
+import com.pixel.gallery.utils.CustomShortcut
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -183,6 +187,51 @@ class SettingsRepository @Inject constructor(
     suspend fun setLastSyncedGeneration(value: Long) {
         context.dataStore.edit { preferences ->
             preferences[LAST_SYNCED_GENERATION] = value
+        }
+    }
+
+    private val CLONE_MODE = stringPreferencesKey("clone_mode")
+
+    val cloneMode: Flow<CloneMode> = context.dataStore.data
+        .map { preferences -> CloneMode.fromStoredValue(preferences[CLONE_MODE]) }
+
+    suspend fun setCloneMode(mode: CloneMode) {
+        context.dataStore.edit { preferences ->
+            preferences[CLONE_MODE] = mode.name
+        }
+    }
+
+    private val CUSTOM_SHORTCUTS = stringPreferencesKey("custom_shortcuts")
+    private val shortcutsType = object : TypeToken<List<CustomShortcut>>() {}.type
+    private val gson = Gson()
+
+    val customShortcuts: Flow<List<CustomShortcut>> = context.dataStore.data
+        .map { preferences ->
+            runCatching {
+                gson.fromJson<List<CustomShortcut>>(preferences[CUSTOM_SHORTCUTS] ?: "[]", shortcutsType)
+                    ?: emptyList()
+            }.getOrDefault(emptyList())
+        }
+
+    suspend fun addCustomShortcut(shortcut: CustomShortcut) {
+        context.dataStore.edit { preferences ->
+            val current = runCatching {
+                gson.fromJson<List<CustomShortcut>>(preferences[CUSTOM_SHORTCUTS] ?: "[]", shortcutsType)
+                    ?: emptyList()
+            }.getOrDefault(emptyList()).toMutableList()
+            current.removeAll { it.id == shortcut.id }
+            current.add(shortcut)
+            preferences[CUSTOM_SHORTCUTS] = gson.toJson(current)
+        }
+    }
+
+    suspend fun removeCustomShortcut(id: String) {
+        context.dataStore.edit { preferences ->
+            val current = runCatching {
+                gson.fromJson<List<CustomShortcut>>(preferences[CUSTOM_SHORTCUTS] ?: "[]", shortcutsType)
+                    ?: emptyList()
+            }.getOrDefault(emptyList()).filterNot { it.id == id }
+            preferences[CUSTOM_SHORTCUTS] = gson.toJson(current)
         }
     }
 
