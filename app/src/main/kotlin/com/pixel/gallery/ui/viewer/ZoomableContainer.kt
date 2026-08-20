@@ -30,9 +30,7 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlin.math.abs
@@ -76,7 +74,7 @@ fun ZoomableContainer(
     onTap: () -> Unit = {},
     onZoomGestureStarted: () -> Unit = {},
     onZoomGestureEnded: () -> Unit = {},
-    onInteractionDelta: (Int) -> Unit = {},
+    onPointerStrokeActiveChanged: (Boolean) -> Unit = {},
     onExternalTransformSynced: () -> Unit = {},
     onTransformFrame: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     onTransformChanged: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
@@ -89,11 +87,11 @@ fun ZoomableContainer(
     val safeMinScale = minOf(minScale, maxScale)
     val safeMaxScale = maxOf(minScale, maxScale)
 
-    // Animated values for smooth double-tap transitions
+    // A single normalized animation keeps scale and both offsets on the same frame.
+    // Independent Animatables can settle on different frames, which is visible as a
+    // short pause or correction immediately before the preview-to-tile handoff.
     val startingScale = initialScale.coerceIn(safeMinScale, safeMaxScale)
-    val animScale = remember(diagnosticsKey) { Animatable(startingScale) }
-    val animOffsetX = remember(diagnosticsKey) { Animatable(initialOffsetX) }
-    val animOffsetY = remember(diagnosticsKey) { Animatable(initialOffsetY) }
+    val animProgress = remember(diagnosticsKey) { Animatable(1f) }
     var animationJob by remember(diagnosticsKey) { mutableStateOf<Job?>(null) }
     var renderScale by remember(diagnosticsKey) { mutableFloatStateOf(startingScale) }
     var renderOffsetX by remember(diagnosticsKey) { mutableFloatStateOf(initialOffsetX) }
@@ -107,7 +105,6 @@ fun ZoomableContainer(
         mutableStateOf(startingScale > 1.01f)
     }
     var animationGeneration by remember(diagnosticsKey) { mutableIntStateOf(0) }
-    var tapSequenceActive by remember(diagnosticsKey) { mutableStateOf(false) }
     var zoomLifecycleOpen by remember(diagnosticsKey) { mutableStateOf(false) }
 
     fun trace(name: String, detail: String) {
@@ -139,20 +136,6 @@ fun ZoomableContainer(
         }
     }
 
-    fun beginTapSequence() {
-        if (!tapSequenceActive) {
-            tapSequenceActive = true
-            onInteractionDelta(1)
-        }
-    }
-
-    fun endTapSequence() {
-        if (tapSequenceActive) {
-            tapSequenceActive = false
-            onInteractionDelta(-1)
-        }
-    }
-
     // SSIV can return ownership after a zoomed image has been shrunk back to fit or
     // below-fit. Synchronise both of this container's state representations while its
     // child layers are still hidden, then let the caller reveal the preview atomically.
@@ -167,9 +150,7 @@ fun ZoomableContainer(
         gestureOffsetY = initialOffsetY
         doubleTapZoomedIntent = syncedScale > 1.01f
         renderFrame(syncedScale, initialOffsetX, initialOffsetY)
-        animScale.snapTo(syncedScale)
-        animOffsetX.snapTo(initialOffsetX)
-        animOffsetY.snapTo(initialOffsetY)
+        animProgress.snapTo(1f)
         onTransformChanged(syncedScale, initialOffsetX, initialOffsetY)
         trace(
             "ZOOM_PREVIEW_EXTERNAL_SYNC",
@@ -214,129 +195,98 @@ fun ZoomableContainer(
             .pointerInput(enabled, scaleToOriginal, safeMinScale, safeMaxScale) {
                 if (!enabled) return@pointerInput
                 detectTapGestures(
-                    onPress = {
-                        beginTapSequence()
-                        val released = try {
-                            tryAwaitRelease()
-                        } catch (cancelled: CancellationException) {
-                            endTapSequence()
-                            throw cancelled
-                        }
-                        if (!released) endTapSequence()
-                    },
                     onTap = {
-                        try {
-                            doubleTapZoomedIntent = abs(renderScale - 1f) > 0.01f
-                            onTap()
-                        } finally {
-                            endTapSequence()
-                        }
+                        doubleTapZoomedIntent = abs(renderScale - 1f) > 0.01f
+                        onTap()
                     },
                     onDoubleTap = { tapPosition ->
-                        try {
-                            // Reverse the previous logical target, but animate from the
-                            // transform that is actually visible at this instant.
-                            val currentScale = renderScale
-                            val currentOffsetX = renderOffsetX
-                            val currentOffsetY = renderOffsetY
-                            val targetScale: Float
-                            val targetOffsetX: Float
-                            val targetOffsetY: Float
+                        // Reverse the previous logical target, but animate from the
+                        // transform that is actually visible at this instant.
+                        val currentScale = renderScale
+                        val currentOffsetX = renderOffsetX
+                        val currentOffsetY = renderOffsetY
+                        val targetScale: Float
+                        val targetOffsetX: Float
+                        val targetOffsetY: Float
 
-                            if (shouldDoubleTapReturnToFit(doubleTapZoomedIntent, currentScale)) {
-                                targetScale = 1f
-                                targetOffsetX = 0f
-                                targetOffsetY = 0f
-                            } else {
-                                targetScale = scaleToOriginal.coerceIn(safeMinScale, safeMaxScale)
-                                if (targetScale > 1.01f) {
-                                    beginZoomLifecycle()
-                                }
-                                val cx = containerSize.width / 2f
-                                val cy = containerSize.height / 2f
-                                val rawX = (cx - tapPosition.x) * (targetScale - 1f)
-                                val rawY = (cy - tapPosition.y) * (targetScale - 1f)
-                                val (clampedX, clampedY) = clampOffset(targetScale, rawX, rawY)
-                                targetOffsetX = clampedX
-                                targetOffsetY = clampedY
+                        if (shouldDoubleTapReturnToFit(doubleTapZoomedIntent, currentScale)) {
+                            targetScale = 1f
+                            targetOffsetX = 0f
+                            targetOffsetY = 0f
+                        } else {
+                            targetScale = scaleToOriginal.coerceIn(safeMinScale, safeMaxScale)
+                            if (targetScale > 1.01f) {
+                                beginZoomLifecycle()
                             }
+                            val cx = containerSize.width / 2f
+                            val cy = containerSize.height / 2f
+                            val rawX = (cx - tapPosition.x) * (targetScale - 1f)
+                            val rawY = (cy - tapPosition.y) * (targetScale - 1f)
+                            val (clampedX, clampedY) = clampOffset(targetScale, rawX, rawY)
+                            targetOffsetX = clampedX
+                            targetOffsetY = clampedY
+                        }
 
-                            doubleTapZoomedIntent = targetScale > 1.01f
-                            trace(
-                                "ZOOM_PREVIEW_DOUBLE_TAP",
-                                "tap=${tapPosition.x},${tapPosition.y} container=${containerSize.width}x${containerSize.height} " +
-                                    "from=$currentScale,$currentOffsetX,$currentOffsetY " +
-                                    "to=$targetScale,$targetOffsetX,$targetOffsetY " +
-                                    "fit=$imageFitScaleX,$imageFitScaleY",
-                            )
+                        doubleTapZoomedIntent = targetScale > 1.01f
+                        trace(
+                            "ZOOM_PREVIEW_DOUBLE_TAP",
+                            "tap=${tapPosition.x},${tapPosition.y} container=${containerSize.width}x${containerSize.height} " +
+                                "from=$currentScale,$currentOffsetX,$currentOffsetY " +
+                                "to=$targetScale,$targetOffsetX,$targetOffsetY " +
+                                "fit=$imageFitScaleX,$imageFitScaleY",
+                        )
 
-                            val animSpec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
-                            animationGeneration += 1
-                            val generation = animationGeneration
-                            animationJob?.cancel()
-                            animationJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                                onInteractionDelta(1)
-                                var completed = false
-                                try {
-                                    trace(
-                                        "ZOOM_PREVIEW_ANIMATION_START",
-                                        "generation=$generation from=$currentScale,$currentOffsetX,$currentOffsetY " +
-                                            "to=$targetScale,$targetOffsetX,$targetOffsetY",
+                        val animSpec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
+                        animationGeneration += 1
+                        val generation = animationGeneration
+                        animationJob?.cancel()
+                        animationJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                            var completed = false
+                            try {
+                                trace(
+                                    "ZOOM_PREVIEW_ANIMATION_START",
+                                    "generation=$generation from=$currentScale,$currentOffsetX,$currentOffsetY " +
+                                        "to=$targetScale,$targetOffsetX,$targetOffsetY",
+                                )
+                                animProgress.snapTo(0f)
+                                animProgress.animateTo(1f, animSpec) {
+                                    val fraction = value.coerceIn(0f, 1f)
+                                    renderFrame(
+                                        scale = currentScale + (targetScale - currentScale) * fraction,
+                                        offsetX = currentOffsetX + (targetOffsetX - currentOffsetX) * fraction,
+                                        offsetY = currentOffsetY + (targetOffsetY - currentOffsetY) * fraction,
                                     )
-                                    animScale.snapTo(currentScale)
-                                    animOffsetX.snapTo(currentOffsetX)
-                                    animOffsetY.snapTo(currentOffsetY)
-                                    coroutineScope {
-                                        launch {
-                                            animScale.animateTo(targetScale, animSpec) {
-                                                renderFrame(value, animOffsetX.value, animOffsetY.value)
-                                            }
-                                        }
-                                        launch {
-                                            animOffsetX.animateTo(targetOffsetX, animSpec) {
-                                                renderFrame(animScale.value, value, animOffsetY.value)
-                                            }
-                                        }
-                                        launch {
-                                            animOffsetY.animateTo(targetOffsetY, animSpec) {
-                                                renderFrame(animScale.value, animOffsetX.value, value)
-                                            }
-                                        }
-                                    }
-                                    completed = true
-                                } finally {
-                                    if (generation == animationGeneration) {
-                                        val finalScale = if (completed) targetScale else animScale.value
-                                        val rawFinalOffsetX = if (completed) targetOffsetX else animOffsetX.value
-                                        val rawFinalOffsetY = if (completed) targetOffsetY else animOffsetY.value
-                                        val (finalOffsetX, finalOffsetY) = clampOffset(
-                                            finalScale,
-                                            rawFinalOffsetX,
-                                            rawFinalOffsetY,
-                                        )
-                                        gestureScale = finalScale
-                                        gestureOffsetX = finalOffsetX
-                                        gestureOffsetY = finalOffsetY
-                                        renderFrame(finalScale, finalOffsetX, finalOffsetY)
-                                        onTransformChanged(finalScale, finalOffsetX, finalOffsetY)
-                                        trace(
-                                            "ZOOM_PREVIEW_ANIMATION_END",
-                                            "generation=$generation gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
-                                                "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
-                                                "render=$renderScale,$renderOffsetX,$renderOffsetY",
-                                        )
-                                        endZoomLifecycle()
-                                    } else {
-                                        trace(
-                                            "ZOOM_PREVIEW_ANIMATION_STALE",
-                                            "generation=$generation latest=$animationGeneration",
-                                        )
-                                    }
-                                    onInteractionDelta(-1)
+                                }
+                                completed = true
+                            } finally {
+                                if (generation == animationGeneration) {
+                                    val finalScale = if (completed) targetScale else renderScale
+                                    val rawFinalOffsetX = if (completed) targetOffsetX else renderOffsetX
+                                    val rawFinalOffsetY = if (completed) targetOffsetY else renderOffsetY
+                                    val (finalOffsetX, finalOffsetY) = clampOffset(
+                                        finalScale,
+                                        rawFinalOffsetX,
+                                        rawFinalOffsetY,
+                                    )
+                                    gestureScale = finalScale
+                                    gestureOffsetX = finalOffsetX
+                                    gestureOffsetY = finalOffsetY
+                                    renderFrame(finalScale, finalOffsetX, finalOffsetY)
+                                    onTransformChanged(finalScale, finalOffsetX, finalOffsetY)
+                                    trace(
+                                        "ZOOM_PREVIEW_ANIMATION_END",
+                                        "generation=$generation gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                                            "progress=${animProgress.value} " +
+                                            "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                                    )
+                                    endZoomLifecycle()
+                                } else {
+                                    trace(
+                                        "ZOOM_PREVIEW_ANIMATION_STALE",
+                                        "generation=$generation latest=$animationGeneration",
+                                    )
                                 }
                             }
-                        } finally {
-                            endTapSequence()
                         }
                     }
                 )
@@ -354,13 +304,13 @@ fun ZoomableContainer(
                 awaitEachGesture {
                     // Wait for the first finger down
                     val firstDown = awaitFirstDown(requireUnconsumed = false)
-                    onInteractionDelta(1)
+                    onPointerStrokeActiveChanged(true)
                     try {
                     trace(
                         "ZOOM_PREVIEW_POINTER_DOWN",
-                        "pointer=${firstDown.id.value} at=${firstDown.position.x},${firstDown.position.y} " +
-                            "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
-                            "anim=${animScale.value},${animOffsetX.value},${animOffsetY.value} " +
+                            "pointer=${firstDown.id.value} at=${firstDown.position.x},${firstDown.position.y} " +
+                                "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                            "progress=${animProgress.value} " +
                             "render=$renderScale,$renderOffsetX,$renderOffsetY",
                     )
 
@@ -559,7 +509,7 @@ fun ZoomableContainer(
                             "render=$renderScale,$renderOffsetX,$renderOffsetY",
                     )
                     } finally {
-                        onInteractionDelta(-1)
+                        onPointerStrokeActiveChanged(false)
                     }
                 }
             }

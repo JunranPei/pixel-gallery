@@ -39,11 +39,17 @@ class VideoThumbnailGlideModule : LibraryGlideModule() {
     }
 }
 
-class VideoThumbnail(val context: Context, val uri: Uri)
+class VideoThumbnail(
+    val context: Context,
+    val uri: Uri,
+    val frameTimeMicros: Long? = null,
+    val cacheVersion: Long = 0L,
+)
 
 internal class VideoThumbnailLoader : ModelLoader<VideoThumbnail, Bitmap> {
     override fun buildLoadData(model: VideoThumbnail, width: Int, height: Int, options: Options): ModelLoader.LoadData<Bitmap> {
-        return ModelLoader.LoadData(ObjectKey(model.uri), VideoThumbnailFetcher(model, width, height))
+        val cacheKey = "${model.uri}-${model.frameTimeMicros ?: "auto"}-${model.cacheVersion}-${width}x${height}"
+        return ModelLoader.LoadData(ObjectKey(cacheKey), VideoThumbnailFetcher(model, width, height))
     }
 
     override fun handles(model: VideoThumbnail): Boolean = true
@@ -67,11 +73,15 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
                 try {
                     var bitmap: Bitmap? = null
 
-                    retriever.embeddedPicture?.let { bytes ->
-                        try {
-                            bitmap = BitmapFactory.decodeStream(ByteArrayInputStream(bytes))
-                        } catch (_: IOException) {
-                            // ignore
+                    // A caller requesting an explicit video frame needs that exact visual.
+                    // Embedded artwork is only suitable for the generic thumbnail path.
+                    if (model.frameTimeMicros == null) {
+                        retriever.embeddedPicture?.let { bytes ->
+                            try {
+                                bitmap = BitmapFactory.decodeStream(ByteArrayInputStream(bytes))
+                            } catch (_: IOException) {
+                                // ignore
+                            }
                         }
                     }
 
@@ -79,12 +89,14 @@ internal class VideoThumbnailFetcher(private val model: VideoThumbnail, val widt
                         // there is no consistent strategy across devices to match
                         // the thumbnails returned by the content resolver / Media Store
                         // so we derive one in an arbitrary way
-                        var timeMillis: Long? = null
-                        val durationMillis = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-                        if (durationMillis != null) {
-                            timeMillis = if (durationMillis < 15000) 0 else min(durationMillis / 2, 15000)
+                        val timeMicros = model.frameTimeMicros ?: run {
+                            var timeMillis: Long? = null
+                            val durationMillis = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                            if (durationMillis != null) {
+                                timeMillis = if (durationMillis < 15000) 0 else min(durationMillis / 2, 15000)
+                            }
+                            if (timeMillis != null) timeMillis * 1000 else -1
                         }
-                        val timeMicros = if (timeMillis != null) timeMillis * 1000 else -1
                         val option = MediaMetadataRetriever.OPTION_CLOSEST_SYNC
 
                         var videoWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull()
