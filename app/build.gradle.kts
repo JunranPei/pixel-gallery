@@ -56,7 +56,7 @@ android {
             // Same package as the quiet indexed-image build so installing this trace
             // build preserves the user's already-created indexes and tile cache.
             "jpegindextrace" -> "com.pixel.gallery.jpegindextest"
-            else -> "com.pixel.gallery.multitask"
+            else -> "com.pixel.gallery.unified"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "test" -> "Gallery Test"
@@ -79,7 +79,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 2045
-        versionName = "4.3.3.1-auto-multitask"
+        versionName = "4.3.3.1-unified"
     }
 
     signingConfigs {
