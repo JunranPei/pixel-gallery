@@ -19,6 +19,7 @@ import com.pixel.gallery.model.TransferSummary
 import com.pixel.gallery.model.buildTransferDestinations
 import javax.inject.Inject
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PhotosViewModel @Inject constructor(
     private val repository: MediaRepository,
@@ -62,6 +63,8 @@ class PhotosViewModel @Inject constructor(
         _externalMedia.value = null
     }
 
+    private val resumedState = MutableStateFlow(false)
+
     val allPhotos: StateFlow<List<MediaEntry>> = repository.allEntries
 
     val hiddenFolders: StateFlow<Set<String>> = settingsRepository.hiddenFolders
@@ -75,16 +78,20 @@ class PhotosViewModel @Inject constructor(
         .map { runCatching { AlbumSortOrder.valueOf(it) }.getOrDefault(AlbumSortOrder.NAME_ASC) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AlbumSortOrder.NAME_ASC)
 
-    val photos: StateFlow<List<MediaEntry>> = combine(
-        allPhotos,
-        hiddenFolders,
-        photoSortOrder
-    ) { all, hidden, sort ->
-        val filtered = all.filter { entry ->
-            !hidden.any { entry.path.startsWith(it) }
+    val photos: StateFlow<List<MediaEntry>> = resumedState.flatMapLatest { resumed ->
+        if (!resumed) {
+            emptyFlow()
+        } else {
+            combine(allPhotos, hiddenFolders, photoSortOrder) { all, hidden, sort ->
+                val filtered = all.filter { entry ->
+                    !hidden.any { entry.path.startsWith(it) }
+                }
+                sortMedia(filtered, sort)
+            }
         }
-        sortMedia(filtered, sort)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Keeps ordering and time headers on the same effective timestamp. */
     fun sortMedia(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> = when (sort) {
@@ -231,25 +238,39 @@ class PhotosViewModel @Inject constructor(
 
     val groupedPhotos: StateFlow<List<GridItem>> = combine(photos, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val favourites: StateFlow<List<MediaEntry>> = repository.favourites
+    val favourites: StateFlow<List<MediaEntry>> = resumedState.flatMapLatest { resumed ->
+        if (resumed) repository.favourites else emptyFlow()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val trashedMedia: StateFlow<List<MediaEntry>> = repository.trash
+    val trashedMedia: StateFlow<List<MediaEntry>> = resumedState.flatMapLatest { resumed ->
+        if (resumed) repository.trash else emptyFlow()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val vaultEntries: StateFlow<List<MediaEntry>> = repository.vaultEntries
+    val vaultEntries: StateFlow<List<MediaEntry>> = resumedState.flatMapLatest { resumed ->
+        if (resumed) repository.vaultEntries else emptyFlow()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, gridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val startupAtAlbums: StateFlow<Boolean> = settingsRepository.startupAtAlbums
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -339,10 +360,8 @@ class PhotosViewModel @Inject constructor(
 
     private var contentObserver: android.database.ContentObserver? = null
 
-    private var isResumed = false
-
     fun setResumed(resumed: Boolean) {
-        isResumed = resumed
+        resumedState.value = resumed
         if (resumed) {
             refresh()
         }
@@ -356,8 +375,10 @@ class PhotosViewModel @Inject constructor(
         contentObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
                 super.onChange(selfChange)
-                if (isResumed) {
-                    refresh()
+                if (resumedState.value && !repository.isMediaMutationInProgress()) {
+                    // MediaStore commonly emits several callbacks for one committed file.
+                    // A short trailing delay coalesces them without polling.
+                    refresh(delayMillis = 120L)
                 }
             }
         }
@@ -374,14 +395,30 @@ class PhotosViewModel @Inject constructor(
     }
 
     private var syncJob: kotlinx.coroutines.Job? = null
+    private var refreshAgain = false
+    private var queuedRefreshDelayMillis = 0L
 
     fun refresh(delayMillis: Long = 0) {
-        if (syncJob?.isActive == true) return
+        val requestedDelay = delayMillis.coerceAtLeast(0L)
+        if (syncJob?.isActive == true) {
+            refreshAgain = true
+            queuedRefreshDelayMillis = maxOf(queuedRefreshDelayMillis, requestedDelay)
+            return
+        }
         syncJob = viewModelScope.launch {
-            if (delayMillis > 0) {
-                kotlinx.coroutines.delay(delayMillis)
-            }
-            repository.syncWithMediaStore()
+            var nextDelay = requestedDelay
+            do {
+                refreshAgain = false
+                if (nextDelay > 0L) kotlinx.coroutines.delay(nextDelay)
+                // A second task can resume while another one is still moving files.
+                // Wait for that atomic batch instead of scanning its intermediate state.
+                runCatching { repository.syncWhenMediaMutationsIdle() }
+                    .onFailure { error ->
+                        android.util.Log.e("PhotosViewModel", "MediaStore refresh failed", error)
+                    }
+                nextDelay = queuedRefreshDelayMillis
+                queuedRefreshDelayMillis = 0L
+            } while (refreshAgain)
         }
     }
 
@@ -400,29 +437,33 @@ class PhotosViewModel @Inject constructor(
 
     fun moveToTrash(id: Long, uri: String, path: String) {
         viewModelScope.launch {
-            repository.trashMedia(id, uri, path)
+            runCatching { repository.trashMedia(id, uri, path) }
+                .onSuccess { if (it) refresh() }
+                .onFailure { android.util.Log.e("PhotosViewModel", "Could not trash media", it) }
         }
     }
 
     fun moveToTrashBulk(uris: List<String>) {
         viewModelScope.launch {
-            if (repository.trashMediaBulk(uris)) {
-                refresh()
-            }
+            runCatching { repository.trashMediaBulk(uris) }
+                .onSuccess { if (it) refresh() }
+                .onFailure { android.util.Log.e("PhotosViewModel", "Could not trash media", it) }
         }
     }
 
     fun restoreMedia(id: Long, uri: String) {
         viewModelScope.launch {
-            repository.restoreMedia(id, uri)
+            runCatching { repository.restoreMedia(id, uri) }
+                .onSuccess { if (it) refresh() }
+                .onFailure { android.util.Log.e("PhotosViewModel", "Could not restore media", it) }
         }
     }
 
     fun restoreMediaBulk(uris: List<String>) {
         viewModelScope.launch {
-            if (repository.restoreMediaBulk(uris)) {
-                refresh()
-            }
+            runCatching { repository.restoreMediaBulk(uris) }
+                .onSuccess { if (it) refresh() }
+                .onFailure { android.util.Log.e("PhotosViewModel", "Could not restore media", it) }
         }
     }
 
@@ -457,9 +498,9 @@ class PhotosViewModel @Inject constructor(
 
     fun deleteMediaBulk(uris: List<String>) {
         viewModelScope.launch {
-            if (repository.deleteMediaBulk(uris)) {
-                refresh()
-            }
+            runCatching { repository.deleteMediaBulk(uris) }
+                .onSuccess { if (it) refresh() }
+                .onFailure { android.util.Log.e("PhotosViewModel", "Could not delete media", it) }
         }
     }
 

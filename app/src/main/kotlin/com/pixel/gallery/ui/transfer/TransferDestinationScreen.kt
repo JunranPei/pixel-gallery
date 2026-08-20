@@ -84,6 +84,7 @@ import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.model.TransferSummary
+import com.pixel.gallery.model.isSameTransferDirectory
 import com.pixel.gallery.model.matchesTransferDestinationQuery
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
@@ -114,6 +115,7 @@ fun TransferDestinationScreen(
     var folderNameError by remember { mutableStateOf<String?>(null) }
     var showConflictDialog by remember { mutableStateOf(false) }
     var pendingMode by remember { mutableStateOf<TransferMode?>(null) }
+    var pendingEntries by remember { mutableStateOf<List<MediaEntry>>(emptyList()) }
     var conflictCount by remember { mutableStateOf(0) }
     var conflictPolicy by remember { mutableStateOf(ConflictPolicy.KEEP_BOTH) }
     val permissionRequests = remember {
@@ -201,10 +203,14 @@ fun TransferDestinationScreen(
         viewModel.clearTransferState()
     }
 
-    fun executeTransfer(mode: TransferMode, policy: ConflictPolicy) {
+    fun executeTransfer(
+        mode: TransferMode,
+        policy: ConflictPolicy,
+        transferEntries: List<MediaEntry>
+    ) {
         val destination = selectedDestination ?: return
         viewModel.requestTransfer(
-            entries = entries,
+            entries = transferEntries,
             destination = destination,
             mode = mode,
             conflictPolicy = policy,
@@ -214,26 +220,26 @@ fun TransferDestinationScreen(
 
     fun startTransfer(mode: TransferMode) {
         val destination = selectedDestination ?: return
-        if (
-            mode == TransferMode.MOVE &&
-            entries.isNotEmpty() &&
-            entries.all { File(it.path).parentFile?.absolutePath == destination.path }
-        ) {
-            scope.launch { snackbarHostState.showSnackbar("Source and destination are the same") }
+        val transferEntries = entries.filterNot { entry ->
+            isSameTransferDirectory(entry.path, destination.path)
+        }
+        if (entries.isNotEmpty() && transferEntries.isEmpty()) {
+            scope.launch { snackbarHostState.showSnackbar("Selected items are already in this folder") }
             return
         }
-        val conflicts = entries.count { entry ->
+        val conflicts = transferEntries.count { entry ->
             val source = File(entry.path)
             val target = File(destination.path, source.name)
-            target.exists() && target.absolutePath != source.absolutePath
+            target.exists()
         }
         if (conflicts > 0) {
             pendingMode = mode
+            pendingEntries = transferEntries
             conflictCount = conflicts
             conflictPolicy = ConflictPolicy.KEEP_BOTH
             showConflictDialog = true
         } else {
-            executeTransfer(mode, ConflictPolicy.KEEP_BOTH)
+            executeTransfer(mode, ConflictPolicy.KEEP_BOTH, transferEntries)
         }
     }
 
@@ -426,7 +432,11 @@ fun TransferDestinationScreen(
             (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()))
         AlertDialog(
-            onDismissRequest = { showConflictDialog = false },
+            onDismissRequest = {
+                showConflictDialog = false
+                pendingMode = null
+                pendingEntries = emptyList()
+            },
             title = { Text("Items with the same name already exist") },
             text = {
                 Column {
@@ -466,14 +476,23 @@ fun TransferDestinationScreen(
             confirmButton = {
                 Button(onClick = {
                     val mode = pendingMode
+                    val transferEntries = pendingEntries
                     showConflictDialog = false
-                    if (mode != null) executeTransfer(mode, conflictPolicy)
+                    pendingMode = null
+                    pendingEntries = emptyList()
+                    if (mode != null && transferEntries.isNotEmpty()) {
+                        executeTransfer(mode, conflictPolicy, transferEntries)
+                    }
                 }) {
                     Text("Continue")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showConflictDialog = false }) {
+                TextButton(onClick = {
+                    showConflictDialog = false
+                    pendingMode = null
+                    pendingEntries = emptyList()
+                }) {
                     Text("Cancel")
                 }
             }

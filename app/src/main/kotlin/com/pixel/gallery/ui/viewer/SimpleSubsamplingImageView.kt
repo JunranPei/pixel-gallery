@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Modifier
@@ -388,8 +389,9 @@ private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boole
     return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
 
-internal fun updatePreviewInteractionCount(current: Int, delta: Int): Int =
-    (current + delta).coerceAtLeast(0)
+private fun shouldUseIntermediatePreview(
+    state: SubsamplingScaleImageView.ViewState?,
+): Boolean = state == null || state.scale <= 1.001f
 
 internal fun canHandoffPreviewToTiles(
     ssivBaseDrawn: Boolean,
@@ -397,10 +399,10 @@ internal fun canHandoffPreviewToTiles(
     imageAssigned: Boolean,
     subsamplingReady: Boolean,
     previewGestureInProgress: Boolean,
-    previewInteractionCount: Int,
+    previewPointerStrokeActive: Boolean,
 ): Boolean =
     ssivBaseDrawn && isActivePage && imageAssigned && !subsamplingReady &&
-        !previewGestureInProgress && previewInteractionCount == 0
+        !previewGestureInProgress && !previewPointerStrokeActive
 
 internal fun canTilesReceiveInput(
     isActivePage: Boolean,
@@ -455,6 +457,7 @@ private fun previewTransformState(
 internal fun SimpleSubsamplingImageView(
     uri: String,
     filePath: String,
+    contentId: Long? = null,
     orientationDegrees: Int = 0,
     modifier: Modifier = Modifier,
     isActivePage: Boolean = true,
@@ -466,6 +469,7 @@ internal fun SimpleSubsamplingImageView(
     sourceHeight: Int = 0,
     enableUltraHdr: Boolean = false,
     previewModel: Any? = null,
+    intermediatePreviewModel: Any? = null,
     metricsDetail: String = "",
     regionDecoderKind: ViewerRegionDecoderKind = ViewerRegionDecoderKind.PLATFORM,
     decoderSourceKey: String = "",
@@ -483,8 +487,9 @@ internal fun SimpleSubsamplingImageView(
             uri
         }
     }
-    val transformStateKey = remember(imagePath, dateModifiedMillis) {
-        "$imagePath:$dateModifiedMillis"
+    val transformStateKey = remember(contentId, imagePath, dateModifiedMillis) {
+        val stableSource = contentId?.takeIf { it > 0L }?.let { "media:$it" } ?: imagePath
+        "$stableSource:$dateModifiedMillis"
     }
 
     // Two lifecycle states representing the two phases of Simple-Gallery:
@@ -520,7 +525,7 @@ internal fun SimpleSubsamplingImageView(
     var previewOffsetX by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetX) }
     var previewOffsetY by remember(transformStateKey) { mutableFloatStateOf(savedPreviewOffsetY) }
     var previewGestureInProgress by remember(transformStateKey) { mutableStateOf(false) }
-    var previewInteractionCount by remember(transformStateKey) { mutableIntStateOf(0) }
+    var previewPointerStrokeActive by remember(transformStateKey) { mutableStateOf(false) }
     var previewTransformSyncRevision by remember(transformStateKey) { mutableIntStateOf(0) }
     var previewTakeoverPending by remember(transformStateKey) { mutableStateOf(false) }
     var ssivBaseDrawn by remember(transformStateKey) { mutableStateOf(false) }
@@ -739,7 +744,7 @@ internal fun SimpleSubsamplingImageView(
         imageAssigned,
         subsamplingReady,
         previewGestureInProgress,
-        previewInteractionCount,
+        previewPointerStrokeActive,
     ) {
         if (!canHandoffPreviewToTiles(
                 ssivBaseDrawn = ssivBaseDrawn,
@@ -747,7 +752,7 @@ internal fun SimpleSubsamplingImageView(
                 imageAssigned = imageAssigned,
                 subsamplingReady = subsamplingReady,
                 previewGestureInProgress = previewGestureInProgress,
-                previewInteractionCount = previewInteractionCount,
+                previewPointerStrokeActive = previewPointerStrokeActive,
             )
         ) return@LaunchedEffect
 
@@ -803,10 +808,16 @@ internal fun SimpleSubsamplingImageView(
                 "intendedCenterInView=${intendedCenterInView ?: "none"}",
             imageKey = transformStateKey,
         )
-        delay(16)
+        // Align the ownership swap to the next display frame. A fixed 16 ms delay can
+        // miss vsync and leave the final preview frame frozen for nearly two frames.
+        withFrameNanos { }
         if (isActivePage && imageAssigned && ssivBaseDrawn) {
             val frameState = view.snapshotViewState()
             previewOwnsTransform = false
+            // Do not wait for AndroidView.update to propagate the new ownership.
+            // Enabling input in the same main-thread handoff removes the one-frame
+            // dead zone where a new drag could fall through to the pager.
+            view.isEnabled = true
             view.visibility = View.VISIBLE
             view.alpha = 1f
             subsamplingReady = true
@@ -838,11 +849,16 @@ internal fun SimpleSubsamplingImageView(
         imageViewRef,
         dateModifiedMillis,
         previewModel,
+        intermediatePreviewModel,
         enableUltraHdr,
     ) {
         val imageView = imageViewRef
         if (imageView != null && isPreviewVisible) {
             val savedTransform = transformStateStore.get(transformStateKey)
+            // The saved SSIV scale is the actual source-pixel-to-screen scale: 1f is
+            // original pixels. A 512 px bridge is useful at original size or below,
+            // but magnifying it above 1:1 only creates a blurry, high-power detour.
+            val useIntermediatePreview = shouldUseIntermediatePreview(savedTransform)
             val previewUsesContainerTransform = previewOwnsTransform
             imageView.visibility = View.VISIBLE
             // Telephoto's Glide adapter resolves local photos through the MediaStore URI,
@@ -896,13 +912,10 @@ internal fun SimpleSubsamplingImageView(
                         if (dateModifiedMillis > 0L) opts.signature(ObjectKey(dateModifiedMillis)) else opts
                     }
 
-                Glide.with(context)
-                    // Match Simple Gallery's local-photo path exactly. Going through the
-                    // MediaStore URI selects Glide's QMediaStore loader even though SSIV
-                    // already proved that the original file is directly readable.
-                    .load(requestModel)
-                    .apply(requestOptions)
-                    .listener(object : com.bumptech.glide.request.RequestListener<Drawable> {
+                fun previewListener(
+                    onCacheMiss: (() -> Unit)? = null,
+                ): com.bumptech.glide.request.RequestListener<Drawable> =
+                    object : com.bumptech.glide.request.RequestListener<Drawable> {
                         override fun onLoadFailed(
                             e: com.bumptech.glide.load.engine.GlideException?,
                             model: Any?,
@@ -910,6 +923,16 @@ internal fun SimpleSubsamplingImageView(
                             isFirstResource: Boolean
                         ): Boolean {
                             if (!previewRequestGuard.isCurrent(imageView, transformStateKey)) return false
+                            if (onCacheMiss != null) {
+                                // A cache-only miss is expected. Start the source path after
+                                // Glide has finished dispatching this request's callback.
+                                imageView.post {
+                                    if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
+                                        onCacheMiss()
+                                    }
+                                }
+                                return true
+                            }
                             ViewerLoadMetrics.previewFailed(
                                 metricsToken,
                                 e?.rootCauses?.firstOrNull()?.javaClass?.simpleName
@@ -997,7 +1020,54 @@ internal fun SimpleSubsamplingImageView(
                             )
                             return false
                         }
-                    })
+                    }
+
+                val requestManager = Glide.with(context)
+                val startSourceLoad = {
+                    if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
+                        val fullPreviewRequest = requestManager
+                            // Match Simple Gallery's local-photo path exactly. Going through the
+                            // MediaStore URI selects Glide's QMediaStore loader even though SSIV
+                            // already proved that the original file is directly readable.
+                            .load(requestModel)
+                            .apply(requestOptions)
+                            .listener(previewListener())
+
+                        val sourceRequest = if (useIntermediatePreview) {
+                            val thumbnailOptions = RequestOptions()
+                                .withViewerTaskCompression()
+                                .format(DecodeFormat.PREFER_RGB_565)
+                                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                .downsample(DownsampleStrategy.FIT_CENTER)
+                                .priority(Priority.IMMEDIATE)
+                                .override(512)
+                                .let { opts ->
+                                    if (dateModifiedMillis > 0L) {
+                                        opts.signature(ObjectKey(dateModifiedMillis))
+                                    } else {
+                                        opts
+                                    }
+                                }
+                            fullPreviewRequest.thumbnail(
+                                requestManager
+                                    .asDrawable()
+                                    .load(intermediatePreviewModel ?: requestModel)
+                                    .apply(thumbnailOptions)
+                            )
+                        } else {
+                            fullPreviewRequest
+                        }
+                        sourceRequest.into(imageView)
+                    }
+                }
+
+                // Probe only the existing full-preview cache first. A hit completes here,
+                // so the 512 request is never started. On a miss, the source path above
+                // decides whether the saved 1:1 scale permits the intermediate preview.
+                requestManager
+                    .load(requestModel)
+                    .apply(requestOptions.clone().onlyRetrieveFromCache(true))
+                    .listener(previewListener(onCacheMiss = startSourceLoad))
                     .into(imageView)
             } else {
                 // The request is deliberately retained across settle/active-page changes.
@@ -1088,11 +1158,8 @@ internal fun SimpleSubsamplingImageView(
                     imageKey = transformStateKey,
                 )
             },
-            onInteractionDelta = { delta ->
-                previewInteractionCount = updatePreviewInteractionCount(
-                    previewInteractionCount,
-                    delta,
-                )
+            onPointerStrokeActiveChanged = { active ->
+                previewPointerStrokeActive = active
             },
             onExternalTransformSynced = {
                 if (previewTakeoverPending) {

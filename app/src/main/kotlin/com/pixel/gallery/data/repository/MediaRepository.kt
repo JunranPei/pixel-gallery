@@ -20,6 +20,7 @@ import com.pixel.gallery.data.local.entity.VaultEntry
 import com.google.gson.Gson
 import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.ConflictPolicy
+import com.pixel.gallery.model.isSameTransferDirectory
 import com.pixel.gallery.model.TransferItemFailure
 import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.model.TransferProgress
@@ -82,10 +83,21 @@ class MediaRepository @Inject constructor(
     private enum class TransferOutcome { COMPLETED, SKIPPED }
 
     private val gson = Gson()
-    private var lastSyncedGeneration = 0L
     private val repositoryScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val replacementRecoveryComplete = CompletableDeferred<Unit>()
-    private val transferMutex = Mutex()
+    private val mediaMutationMutex = Mutex()
+    private val syncMutex = Mutex()
+    @Volatile private var mediaMutationInProgress = false
+
+    private suspend fun <T> withMediaMutation(block: suspend () -> T): T =
+        mediaMutationMutex.withLock {
+            mediaMutationInProgress = true
+            try {
+                block()
+            } finally {
+                mediaMutationInProgress = false
+            }
+        }
 
     init {
         repositoryScope.launch(Dispatchers.IO) {
@@ -109,7 +121,7 @@ class MediaRepository @Inject constructor(
     }
 
     val allEntries: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.getAllEntries(),
+        mediaDao.observeAllEntriesChanges().map { mediaDao.getAllEntriesPaged() },
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
@@ -122,7 +134,7 @@ class MediaRepository @Inject constructor(
     )
 
     val favourites: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.getFavourites(),
+        mediaDao.observeFavouritesChanges().map { mediaDao.getFavouritesPaged() },
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
@@ -134,7 +146,9 @@ class MediaRepository @Inject constructor(
         initialValue = emptyList()
     )
 
-    val trash: StateFlow<List<MediaEntry>> = mediaDao.getTrash().stateIn(
+    val trash: StateFlow<List<MediaEntry>> = mediaDao.observeTrashChanges().map {
+        mediaDao.getTrashPaged()
+    }.stateIn(
         scope = repositoryScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList()
@@ -156,26 +170,29 @@ class MediaRepository @Inject constructor(
         trashMediaBulk(listOf(uriString))
     }
 
-    suspend fun trashMediaBulk(uriStrings: List<String>): Boolean = withContext(Dispatchers.IO) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val uris = uriStrings.map { Uri.parse(it) }
-            
-            if (Environment.isExternalStorageManager()) {
-                // If we have All Files Access, we can skip the system dialog by updating the column directly
-                val values = android.content.ContentValues().apply {
-                    put(MediaStore.MediaColumns.IS_TRASHED, 1)
+    suspend fun trashMediaBulk(uriStrings: List<String>): Boolean = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val uris = uriStrings.map { Uri.parse(it) }
+
+                if (Environment.isExternalStorageManager()) {
+                    val values = android.content.ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_TRASHED, 1)
+                    }
+                    uris.forEach { uri ->
+                        context.contentResolver.update(uri, values, null, null)
+                    }
+                    runCatching { syncWithMediaStore(force = true) }
+                        .onFailure { android.util.Log.e("MediaRepository", "Trash sync failed", it) }
+                    true
+                } else {
+                    val pendingIntent = MediaStore.createTrashRequest(context.contentResolver, uris, true)
+                    MainActivity.launchIntentSender(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
+                    false
                 }
-                uris.forEach { uri ->
-                    context.contentResolver.update(uri, values, null, null)
-                }
-                true // Handled internally
             } else {
-                val pendingIntent = MediaStore.createTrashRequest(context.contentResolver, uris, true)
-                MainActivity.launchIntentSender(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
-                false // Waiting for system activity result
+                false
             }
-        } else {
-            false
         }
     }
 
@@ -183,47 +200,48 @@ class MediaRepository @Inject constructor(
         restoreMediaBulk(listOf(uriString))
     }
 
-    suspend fun restoreMediaBulk(uriStrings: List<String>): Boolean = withContext(Dispatchers.IO) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val uris = uriStrings.map { Uri.parse(it) }
-            
-            if (Environment.isExternalStorageManager()) {
-                val values = android.content.ContentValues().apply {
-                    put(MediaStore.MediaColumns.IS_TRASHED, 0)
+    suspend fun restoreMediaBulk(uriStrings: List<String>): Boolean = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val uris = uriStrings.map { Uri.parse(it) }
+
+                if (Environment.isExternalStorageManager()) {
+                    val values = android.content.ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_TRASHED, 0)
+                    }
+                    uris.forEach { uri ->
+                        context.contentResolver.update(uri, values, null, null)
+                    }
+                    runCatching { syncWithMediaStore(force = true) }
+                        .onFailure { android.util.Log.e("MediaRepository", "Restore sync failed", it) }
+                    true
+                } else {
+                    val pendingIntent = MediaStore.createTrashRequest(context.contentResolver, uris, false)
+                    MainActivity.launchIntentSender(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
+                    false
                 }
-                uris.forEach { uri ->
-                    context.contentResolver.update(uri, values, null, null)
-                }
-                true // Handled internally
             } else {
-                val pendingIntent = MediaStore.createTrashRequest(context.contentResolver, uris, false)
-                MainActivity.launchIntentSender(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
-                false // Waiting for system activity result
+                false
             }
-        } else {
-            false
         }
     }
 
-    suspend fun deleteMediaBulk(uriStrings: List<String>): Boolean = withContext(Dispatchers.IO) {
-        val uris = uriStrings.map { Uri.parse(it) }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) {
-                uris.forEach { uri ->
-                    context.contentResolver.delete(uri, null, null)
-                }
-                true
-            } else {
+    suspend fun deleteMediaBulk(uriStrings: List<String>): Boolean = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            val uris = uriStrings.map { Uri.parse(it) }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
                 val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, uris)
                 MainActivity.launchIntentSender(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
                 false
+            } else {
+                uris.forEach { uri ->
+                    context.contentResolver.delete(uri, null, null)
+                }
+                runCatching { syncWithMediaStore(force = true) }
+                    .onFailure { android.util.Log.e("MediaRepository", "Delete sync failed", it) }
+                true
             }
-        } else {
-            uris.forEach { uri ->
-                context.contentResolver.delete(uri, null, null)
-            }
-            true
         }
     }
 
@@ -451,8 +469,8 @@ class MediaRepository @Inject constructor(
         mode: TransferMode,
         conflictPolicy: ConflictPolicy,
         onProgress: (TransferProgress) -> Unit
-    ): TransferSummary = transferMutex.withLock {
-        withContext(Dispatchers.IO) {
+    ): TransferSummary = withMediaMutation {
+            withContext(Dispatchers.IO) {
             replacementRecoveryComplete.await()
             val destinationDir = File(destination.path)
         if (
@@ -487,10 +505,10 @@ class MediaRepository @Inject constructor(
                 return@forEachIndexed
             }
 
-            if (
-                mode == TransferMode.MOVE &&
-                sourceFile.parentFile?.canonicalPath == destinationDir.canonicalPath
-            ) {
+            // Treat copying or moving a file into the directory it already
+            // occupies as a no-op. In particular, KEEP_BOTH must never turn
+            // the source itself into an accidental numbered duplicate.
+            if (isSameTransferDirectory(entry.path, destination.path)) {
                 skipped++
                 return@forEachIndexed
             }
@@ -543,6 +561,14 @@ class MediaRepository @Inject constructor(
             }
         }
 
+        if (succeeded > 0) {
+            // Do not report 100% until the final MediaStore state and Room snapshot agree.
+            // Force this pass because observer-driven syncs may have recorded an
+            // intermediate MediaStore generation while the batch was still running.
+            runCatching { syncWithMediaStore(force = true) }
+                .onFailure { android.util.Log.e("MediaRepository", "Transfer succeeded but MediaStore sync failed", it) }
+        }
+
         onProgress(
             TransferProgress(
                 mode = mode,
@@ -552,16 +578,14 @@ class MediaRepository @Inject constructor(
             )
         )
 
-        if (succeeded > 0) {
-            // MediaStore generation changes after a successful transfer. Querying here
-            // also updates paths whose DATE_MODIFIED value did not change.
-            runCatching { syncWithMediaStore() }
-                .onFailure { android.util.Log.e("MediaRepository", "Transfer succeeded but MediaStore sync failed", it) }
-        }
-
             TransferSummary(mode, succeeded, skipped, failures)
-        }
+            }
     }
+
+    fun isMediaMutationInProgress(): Boolean = mediaMutationInProgress
+
+    suspend fun syncWhenMediaMutationsIdle(force: Boolean = false) =
+        mediaMutationMutex.withLock { syncWithMediaStore(force) }
 
     private data class SafChild(
         val uri: Uri,
@@ -1053,7 +1077,8 @@ class MediaRepository @Inject constructor(
             }
         }
 
-    suspend fun syncWithMediaStore() = withContext(Dispatchers.IO) {
+    suspend fun syncWithMediaStore(force: Boolean = false) = syncMutex.withLock {
+        withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
 
 
@@ -1064,7 +1089,7 @@ class MediaRepository @Inject constructor(
             try {
                 currentGeneration = MediaStore.getGeneration(context, MediaStore.VOLUME_EXTERNAL)
                 val lastSynced = settingsRepository.lastSyncedGeneration.first()
-                if (lastSynced > 0L && currentGeneration == lastSynced) {
+                if (!force && lastSynced > 0L && currentGeneration == lastSynced) {
                     android.util.Log.d("MediaRepository", "MediaStore generation unchanged ($currentGeneration). Skipping sync.")
                     return@withContext
                 }
@@ -1100,15 +1125,11 @@ class MediaRepository @Inject constructor(
         queryMediaStore(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, false)
         queryMediaStore(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, true)
 
-        if (newEntries.isNotEmpty()) {
-            mediaDao.insertAll(newEntries)
-        }
-
-        // Handle deletions
         val obsoleteIds = knownEntries.keys.filter { it !in currentIds }
-        if (obsoleteIds.isNotEmpty()) {
-            mediaDao.deleteByIds(obsoleteIds)
-        }
+        // Publish additions/updates and removals as one Room invalidation. Emitting the
+        // intermediate "old + new" list caused two full grid reorders and could make a
+        // live Viewer briefly bind its current page to another media item.
+        mediaDao.reconcileMedia(newEntries, obsoleteIds)
 
         // Save generation after successful sync
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && currentGeneration > 0L) {
@@ -1117,6 +1138,7 @@ class MediaRepository @Inject constructor(
             } catch (e: Exception) {
                 android.util.Log.e("MediaRepository", "Failed to save synced generation", e)
             }
+        }
         }
     }
 

@@ -52,6 +52,7 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.glide.AvesAppGlideModule
 import com.pixel.gallery.glide.SvgImage
 import com.pixel.gallery.glide.TiffImage
+import com.pixel.gallery.glide.VideoThumbnail
 import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.ui.viewer.formats.ViewerFormatRegistry
 import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
@@ -110,7 +111,6 @@ import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ScaleFactor
@@ -158,6 +158,31 @@ private data class IndexedImageTarget(
 private enum class IndexedImageAction { BUILD, DELETE }
 
 private fun MediaEntry.viewerCacheKey(): String = "$contentId:$dateModifiedMillis"
+
+/**
+ * Remembers a content-based format result only after its index has been built.
+ * The key includes the MediaStore modification time, so replacing or editing a file naturally
+ * falls back to its declared format and requires a fresh on-demand check.
+ */
+private object IndexedImageFormatMemory {
+    private const val PREFS = "indexed_image_format_memory"
+
+    fun get(context: android.content.Context, mediaKey: String?): IndexedImageFormat? {
+        val storedName = mediaKey?.let {
+            context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+                .getString(it, null)
+        } ?: return null
+        return runCatching { IndexedImageFormat.valueOf(storedName) }.getOrNull()
+    }
+
+    fun put(context: android.content.Context, mediaKey: String?, format: IndexedImageFormat) {
+        mediaKey ?: return
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString(mediaKey, format.name)
+            .apply()
+    }
+}
 
 private fun MediaEntry.viewerMetricsDescriptor(role: String): String {
     val fileName = Uri.encode(File(path).name)
@@ -472,7 +497,12 @@ internal fun ViewerScreen(
     ) {
         currentMedia?.declaredIndexFormat()
     }
-    var resolvedIndexFormat by remember(currentMediaCacheKey) { mutableStateOf<IndexedImageFormat?>(null) }
+    val rememberedIndexFormat = remember(context.applicationContext, currentMediaCacheKey) {
+        IndexedImageFormatMemory.get(context.applicationContext, currentMediaCacheKey)
+    }
+    var resolvedIndexFormat by remember(currentMediaCacheKey, rememberedIndexFormat) {
+        mutableStateOf(rememberedIndexFormat)
+    }
     val activeIndexFormat = resolvedIndexFormat ?: declaredIndexFormat
     val currentIndexTarget = remember(
         currentLocalIndexPath,
@@ -749,12 +779,28 @@ internal fun ViewerScreen(
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideo) {
+                    val shouldPrepareVideo by remember(pagerState, page) {
+                        derivedStateOf {
+                            page == pagerState.settledPage ||
+                                pagerState.layoutInfo.visiblePagesInfo.any { it.index == page }
+                        }
+                    }
+                    val firstFrameModel = remember(media.uri, media.dateModifiedMillis) {
+                        VideoThumbnail(
+                            context = context,
+                            uri = Uri.parse(media.uri),
+                            frameTimeMicros = 0L,
+                            cacheVersion = media.dateModifiedMillis,
+                        )
+                    }
                     VideoPlayer(
                         uri = media.uri, 
                         filePath = media.path,
                         fallbackDurationMillis = media.durationMillis ?: 0L,
+                        firstFrameModel = firstFrameModel,
                         showUI = showUI, 
-                        isActive = pagerState.currentPage == page,
+                        isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress,
+                        shouldPrepare = shouldPrepareVideo,
                         onTap = { showUI = !showUI }
                     )
                 } else {
@@ -1116,6 +1162,7 @@ internal fun ViewerScreen(
                                     SimpleSubsamplingImageView(
                                         uri = media.uri,
                                         filePath = media.path,
+                                        contentId = media.contentId,
                                         orientationDegrees = media.sourceRotationDegrees,
                                         isActivePage = isActivePage,
                                         isPagerIdle = isPagerIdle,
@@ -1125,6 +1172,7 @@ internal fun ViewerScreen(
                                         sourceWidth = media.width,
                                         sourceHeight = media.height,
                                         previewModel = media.path.ifEmpty { media.uri },
+                                        intermediatePreviewModel = swipeThumbnailModel,
                                         regionDecoderKind = indexedRegionKind,
                                         transformStateStore = transformStateStore,
                                         onContentReadyChanged = { fullPreviewReady = it },
@@ -1149,6 +1197,7 @@ internal fun ViewerScreen(
                                 SimpleSubsamplingImageView(
                                     uri = media.uri,
                                     filePath = media.path,
+                                    contentId = media.contentId,
                                     orientationDegrees = media.sourceRotationDegrees,
                                     isActivePage = isActivePage,
                                     isPagerIdle = isPagerIdle,
@@ -1159,6 +1208,7 @@ internal fun ViewerScreen(
                                     sourceHeight = media.height,
                                     enableUltraHdr = enableUltraHdr,
                                     previewModel = previewModel,
+                                    intermediatePreviewModel = swipeThumbnailModel,
                                     metricsDetail = "id=${media.contentId} mime=${media.sourceMimeType} " +
                                         "bytes=${media.sizeBytes} source=${media.width}x${media.height} " +
                                         "rotation=${media.sourceRotationDegrees} modified=${media.dateModifiedMillis} " +
@@ -1614,7 +1664,7 @@ internal fun ViewerScreen(
                                 }
                                 if (currentIndexTarget == operationTarget) {
                                     imageIndexBusy = false
-                                    imageIndexReady = withContext(Dispatchers.IO) {
+                                    val indexReadyAfterOperation = withContext(Dispatchers.IO) {
                                         when (operationTarget.format) {
                                             IndexedImageFormat.JPEG ->
                                                 jpegIndexStore.status(operationTarget.path) is IndexedJpegStatus.Ready
@@ -1633,6 +1683,14 @@ internal fun ViewerScreen(
                                             IndexedImageFormat.JXL ->
                                                 jxlIndexStore.status(operationTarget.path) is IndexedJxlStatus.Ready
                                         }
+                                    }
+                                    imageIndexReady = indexReadyAfterOperation
+                                    if (isBuild && result.isSuccess && indexReadyAfterOperation) {
+                                        IndexedImageFormatMemory.put(
+                                            context.applicationContext,
+                                            currentMediaCacheKey,
+                                            operationTarget.format,
+                                        )
                                     }
                                 }
                                 android.widget.Toast.makeText(
@@ -1778,14 +1836,17 @@ fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String
     }
 }
 
+@OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun VideoPlayer(
     uri: String, 
     filePath: String = "",
     fallbackDurationMillis: Long = 0L,
+    firstFrameModel: Any? = null,
     modifier: Modifier = Modifier,
     isMotionPhoto: Boolean = false,
     isActive: Boolean = true,
+    shouldPrepare: Boolean = isActive,
     showUI: Boolean = true,
     onTap: () -> Unit = {}
 ) {
@@ -1793,6 +1854,8 @@ fun VideoPlayer(
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var useNativeFallback by remember(uri) { mutableStateOf(false) }
     var nativeVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
+    var hasRenderedFirstFrame by remember(uri) { mutableStateOf(false) }
+    var hasPresentedVideoSurface by remember(uri) { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     val minUserZoom = 0.333f
@@ -1825,8 +1888,10 @@ fun VideoPlayer(
         )
     }
 
-    DisposableEffect(isActive, uri, filePath) {
-        val player = if (isActive) {
+    DisposableEffect(shouldPrepare, uri, filePath) {
+        hasRenderedFirstFrame = false
+        hasPresentedVideoSurface = false
+        val player = if (shouldPrepare) {
             val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
                 .setEnableDecoderFallback(true)
 
@@ -1853,12 +1918,17 @@ fun VideoPlayer(
                     setMediaItem(MediaItem.fromUri(primaryUri))
                     repeatMode = if (isMotionPhoto) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
                     addListener(object : Player.Listener {
+                        override fun onRenderedFirstFrame() {
+                            hasRenderedFirstFrame = true
+                        }
+
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            hasRenderedFirstFrame = false
                             useNativeFallback = true
                         }
                     })
                     prepare()
-                    playWhenReady = true
+                    playWhenReady = isActive
                 }
         } else null
         
@@ -1870,6 +1940,28 @@ fun VideoPlayer(
             player?.release()
         }
     }
+
+    LaunchedEffect(exoPlayer, nativeVideoView, isActive, useNativeFallback) {
+        exoPlayer?.playWhenReady = isActive
+        nativeVideoView?.let { view ->
+            if (isActive) {
+                if (!view.isPlaying) view.start()
+            } else if (view.isPlaying) {
+                view.pause()
+            }
+        }
+    }
+
+    LaunchedEffect(isActive, hasRenderedFirstFrame) {
+        if (isActive && hasRenderedFirstFrame) {
+            // Once a settled page has handed off to the real video surface, keep
+            // showing that paused surface while it slides out. Switching it back
+            // to the retriever-produced poster can cause an immediate color jump.
+            hasPresentedVideoSurface = true
+        }
+    }
+
+    val showVideoSurface = hasRenderedFirstFrame && hasPresentedVideoSurface
 
     Box(
         modifier = modifier
@@ -1886,19 +1978,35 @@ fun VideoPlayer(
                 }
             )
     ) {
-        if (exoPlayer != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val transformation = zoomableState.contentTransformation
-                        scaleX = transformation.scale.scaleX
-                        scaleY = transformation.scale.scaleY
-                        translationX = transformation.offset.x
-                        translationY = transformation.offset.y
-                        transformOrigin = transformation.transformOrigin
-                    }
-            ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val transformation = zoomableState.contentTransformation
+                    scaleX = transformation.scale.scaleX
+                    scaleY = transformation.scale.scaleY
+                    translationX = transformation.offset.x
+                    translationY = transformation.offset.y
+                    transformOrigin = transformation.transformOrigin
+                }
+        ) {
+            if (firstFrameModel != null && !showVideoSurface) {
+                GlideImage(
+                    model = firstFrameModel,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    requestBuilderTransform = { request ->
+                        request
+                            .dontTransform()
+                            .format(DecodeFormat.PREFER_RGB_565)
+                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                            .override(720)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            if (exoPlayer != null) {
                 if (useNativeFallback) {
                     AndroidView(
                         factory = { ctx ->
@@ -1906,7 +2014,8 @@ fun VideoPlayer(
                                 setVideoURI(Uri.parse(uri))
                                 setOnPreparedListener { mp ->
                                     mp.isLooping = !isMotionPhoto
-                                    mp.start()
+                                    hasRenderedFirstFrame = true
+                                    if (isActive) mp.start()
                                 }
                                 setOnErrorListener { _, _, _ -> true }
                                 nativeVideoView = this
@@ -1915,7 +2024,9 @@ fun VideoPlayer(
                         update = { view ->
                             nativeVideoView = view
                         },
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (showVideoSurface) 1f else 0f)
                     )
                 } else {
                     AndroidView(
@@ -1941,23 +2052,25 @@ fun VideoPlayer(
                         onRelease = { view ->
                             view.player = null
                         },
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (showVideoSurface) 1f else 0f)
                     )
                 }
             }
+        }
 
-            if (!isMotionPhoto) {
-                val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
-                VideoControls(
-                    player = exoPlayer,
-                    nativeVideoView = if (useNativeFallback) nativeVideoView else null,
-                    isVisible = showUI,
+        if (!isMotionPhoto) {
+            val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
+            VideoControls(
+                player = exoPlayer,
+                nativeVideoView = if (useNativeFallback) nativeVideoView else null,
+                isVisible = showUI,
                 currentZoom = currentZoom,
                 fallbackDurationMillis = fallbackDurationMillis,
                 modifier = Modifier.fillMaxSize()
             )
         }
-    }
     }
 }
 
