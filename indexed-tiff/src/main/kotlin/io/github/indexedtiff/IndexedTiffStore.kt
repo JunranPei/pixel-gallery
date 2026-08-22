@@ -60,7 +60,7 @@ class IndexedTiffStore(context: Context) {
     }
 
     @Throws(IOException::class)
-    fun build(sourcePath: String): IndexedTiffInfo {
+    fun build(sourcePath: String): IndexedTiffInfo = synchronized(mutationLock) {
         val source = supportedSource(sourcePath)
             ?: throw IOException("A readable local TIFF or BigTIFF file is required")
         if (!buildInProgress.compareAndSet(false, true)) {
@@ -116,10 +116,38 @@ class IndexedTiffStore(context: Context) {
         }
     }
 
-    fun delete(sourcePath: String): Boolean {
-        val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
-        if (deleted) generation.incrementAndGet()
-        return deleted
+    fun delete(sourcePath: String): Boolean = synchronized(mutationLock) {
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
+            if (deleted) generation.incrementAndGet()
+            deleted
+        } finally {
+            buildInProgress.set(false)
+        }
+    }
+
+    fun relocate(sourcePath: String, destinationPath: String): Boolean = synchronized(mutationLock) {
+        if (sourcePath == destinationPath) return true
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val sourceIndex = indexFile(File(sourcePath))
+            if (!sourceIndex.isFile) return true
+            val destinationSource = supportedSource(destinationPath) ?: return false
+            val destinationIndex = indexFile(destinationSource)
+            if (sourceIndex.absolutePath == destinationIndex.absolutePath) return true
+            if (destinationIndex.exists() && !destinationIndex.delete()) return false
+            if (!sourceIndex.renameTo(destinationIndex)) return false
+            if (status(destinationPath) is IndexedTiffStatus.Ready) {
+                generation.incrementAndGet()
+                true
+            } else {
+                if (!destinationIndex.renameTo(sourceIndex)) destinationIndex.delete()
+                false
+            }
+        } finally {
+            buildInProgress.set(false)
+        }
     }
 
     fun openDecoder(sourcePath: String): IndexedTiffRegionDecoder? {
@@ -237,6 +265,7 @@ class IndexedTiffStore(context: Context) {
             byteArrayOf(0x49, 0x49, 0x2b, 0x00),
             byteArrayOf(0x4d, 0x4d, 0x00, 0x2b),
         )
+        val mutationLock = Any()
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
     }

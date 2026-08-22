@@ -14,6 +14,7 @@ import android.provider.MediaStore
 import androidx.activity.result.IntentSenderRequest
 import androidx.exifinterface.media.ExifInterface
 import com.pixel.gallery.MainActivity
+import com.pixel.gallery.data.local.dao.KnownEntry
 import com.pixel.gallery.data.local.dao.MediaDao
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.local.entity.VaultEntry
@@ -32,6 +33,14 @@ import com.pixel.gallery.model.isVerifiedTransferSize
 import com.pixel.gallery.model.replacementRecoveryAction
 import com.pixel.gallery.utils.StorageUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.indexedbmp.IndexedBmpStore
+import io.github.indexedheif.IndexedHeifStore
+import io.github.indexedjpeg.IndexedJpegStore
+import io.github.indexedjxl.IndexedJxlStore
+import io.github.indexedpng.IndexedPngStore
+import io.github.indexedraw.IndexedRawStore
+import io.github.indexedtiff.IndexedTiffStore
+import io.github.indexedwebp.IndexedWebpStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -89,6 +98,15 @@ class MediaRepository @Inject constructor(
     private val syncMutex = Mutex()
     @Volatile private var mediaMutationInProgress = false
 
+    private val jpegIndexStore by lazy { IndexedJpegStore(context) }
+    private val pngIndexStore by lazy { IndexedPngStore(context) }
+    private val tiffIndexStore by lazy { IndexedTiffStore(context) }
+    private val webpIndexStore by lazy { IndexedWebpStore(context) }
+    private val rawIndexStore by lazy { IndexedRawStore(context) }
+    private val heifIndexStore by lazy { IndexedHeifStore(context) }
+    private val bmpIndexStore by lazy { IndexedBmpStore(context) }
+    private val jxlIndexStore by lazy { IndexedJxlStore(context) }
+
     private suspend fun <T> withMediaMutation(block: suspend () -> T): T =
         mediaMutationMutex.withLock {
             mediaMutationInProgress = true
@@ -104,13 +122,20 @@ class MediaRepository @Inject constructor(
             try {
                 recoverInterruptedReplacements()
                 val allPaths = mediaDao.getAllMediaPaths()
-                val missingIds = allPaths.filter { entry ->
+                val missingEntries = allPaths.filter { entry ->
                     !java.io.File(entry.path).exists()
-                }.map { entry -> entry.contentId }
+                }
 
-                if (missingIds.isNotEmpty()) {
-                    mediaDao.deleteByIds(missingIds)
-                    android.util.Log.d("MediaRepository", "Startup physical check: Deleted ${missingIds.size} missing physical file entries from Room.")
+                if (missingEntries.isNotEmpty()) {
+                    val clearedPaths = deletePersistentIndexes(missingEntries.map { it.path })
+                    val removableEntries = missingEntries.filter { entry ->
+                        entry.path.isBlank() || entry.path in clearedPaths
+                    }
+                    mediaDao.deleteByIds(removableEntries.map { it.contentId })
+                    android.util.Log.d(
+                        "MediaRepository",
+                        "Startup physical check: Removed ${removableEntries.size} missing entries after index cleanup.",
+                    )
                 }
             } catch (e: Exception) {
                 android.util.Log.e("MediaRepository", "Failed to run startup physical check", e)
@@ -196,6 +221,56 @@ class MediaRepository @Inject constructor(
         }
     }
 
+    private fun deletePersistentIndexes(sourcePaths: Iterable<String>): Set<String> = buildSet {
+        sourcePaths.asSequence()
+            .distinct()
+            .forEach { sourcePath ->
+                if (sourcePath.isBlank()) {
+                    add(sourcePath)
+                    return@forEach
+                }
+                val failures = buildList {
+                    if (!runCatching { jpegIndexStore.delete(sourcePath) }.getOrDefault(false)) add("JPEG")
+                    if (!runCatching { pngIndexStore.delete(sourcePath) }.getOrDefault(false)) add("PNG")
+                    if (!runCatching { tiffIndexStore.delete(sourcePath) }.getOrDefault(false)) add("TIFF")
+                    if (!runCatching { webpIndexStore.delete(sourcePath) }.getOrDefault(false)) add("WebP")
+                    if (!runCatching { rawIndexStore.delete(sourcePath) }.getOrDefault(false)) add("RAW")
+                    if (!runCatching { heifIndexStore.delete(sourcePath) }.getOrDefault(false)) add("HEIF")
+                    if (!runCatching { bmpIndexStore.delete(sourcePath) }.getOrDefault(false)) add("BMP")
+                    if (!runCatching { jxlIndexStore.delete(sourcePath) }.getOrDefault(false)) add("JXL")
+                }
+                if (failures.isNotEmpty()) {
+                    android.util.Log.w(
+                        "MediaRepository",
+                        "Failed to delete ${failures.joinToString()} indexes for $sourcePath",
+                    )
+                } else {
+                    add(sourcePath)
+                }
+            }
+    }
+
+    private fun relocatePersistentIndexes(sourcePath: String, destinationPath: String): Boolean {
+        if (sourcePath == destinationPath) return true
+        val failures = buildList {
+            if (!runCatching { jpegIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("JPEG")
+            if (!runCatching { pngIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("PNG")
+            if (!runCatching { tiffIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("TIFF")
+            if (!runCatching { webpIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("WebP")
+            if (!runCatching { rawIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("RAW")
+            if (!runCatching { heifIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("HEIF")
+            if (!runCatching { bmpIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("BMP")
+            if (!runCatching { jxlIndexStore.relocate(sourcePath, destinationPath) }.getOrDefault(false)) add("JXL")
+        }
+        if (failures.isNotEmpty()) {
+            android.util.Log.w(
+                "MediaRepository",
+                "Failed to relocate ${failures.joinToString()} indexes from $sourcePath to $destinationPath",
+            )
+        }
+        return failures.isEmpty()
+    }
+
     suspend fun restoreMedia(id: Long, uriString: String) = withContext(Dispatchers.IO) {
         restoreMediaBulk(listOf(uriString))
     }
@@ -246,7 +321,8 @@ class MediaRepository @Inject constructor(
     }
 
     // --- Vault ---
-    suspend fun moveToVault(entry: MediaEntry): Boolean = withContext(Dispatchers.IO) {
+    suspend fun moveToVault(entry: MediaEntry): Boolean = withMediaMutation {
+        withContext(Dispatchers.IO) {
         val vaultDir = java.io.File(context.getExternalFilesDir(null), "vault")
         if (!vaultDir.exists()) vaultDir.mkdirs()
         
@@ -261,14 +337,19 @@ class MediaRepository @Inject constructor(
             try {
                 originalFile.copyTo(vaultFile, overwrite = true)
                 vaultFile.setLastModified(originalLastModified)
-                originalFile.delete()
-                true
+                if (originalFile.delete() && !originalFile.exists()) {
+                    true
+                } else {
+                    vaultFile.delete()
+                    false
+                }
             } catch (e: Exception) {
                 false
             }
         }
 
         if (moved) {
+            relocatePersistentIndexes(originalFile.absolutePath, vaultFile.absolutePath)
             val vaultEntry = VaultEntry(
                 id = entry.contentId,
                 vaultPath = vaultFile.absolutePath,
@@ -286,9 +367,11 @@ class MediaRepository @Inject constructor(
         } else {
             false
         }
+        }
     }
 
-    suspend fun restoreFromVault(id: Long): Boolean = withContext(Dispatchers.IO) {
+    suspend fun restoreFromVault(id: Long): Boolean = withMediaMutation {
+        withContext(Dispatchers.IO) {
         val vaultEntry = mediaDao.getVaultEntry(id) ?: return@withContext false
         val vaultFile = java.io.File(vaultEntry.vaultPath)
         if (!vaultFile.isFile) return@withContext false
@@ -330,6 +413,7 @@ class MediaRepository @Inject constructor(
         }
 
         if (restored) {
+            relocatePersistentIndexes(vaultFile.absolutePath, originalFile.absolutePath)
             val originalEntry = gson.fromJson(vaultEntry.entryJson, MediaEntry::class.java)
             mediaDao.deleteVaultEntry(id)
             
@@ -351,6 +435,7 @@ class MediaRepository @Inject constructor(
             true
         } else {
             false
+        }
         }
     }
 
@@ -621,6 +706,7 @@ class MediaRepository @Inject constructor(
         }
 
         val temporaryName = ".pixel-transfer-${UUID.randomUUID()}-${sourceFile.name}"
+        val sourceLastModified = sourceFile.lastModified()
         var targetUri = DocumentsContract.createDocument(
             context.contentResolver,
             parentUri,
@@ -637,6 +723,9 @@ class MediaRepository @Inject constructor(
                 targetUri,
                 targetName
             ) ?: throw IOException("Could not commit destination document")
+            if (sourceLastModified > 0L && targetFile.isFile) {
+                targetFile.setLastModified(sourceLastModified)
+            }
             val committedSize = queryDocumentSize(targetUri)
             if (!isVerifiedTransferSize(sourceFile.length(), committedSize)) {
                 throw IOException("Committed destination verification failed")
@@ -649,6 +738,7 @@ class MediaRepository @Inject constructor(
                 if (!removeOriginal(entry, sourceFile)) {
                     throw IOException("Destination is valid, but the source could not be removed")
                 }
+                relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
                 migrateFavourite(entry.contentId, scannedUri, wasFavourite)
             }
             return TransferOutcome.COMPLETED
@@ -799,6 +889,7 @@ class MediaRepository @Inject constructor(
         )
         var targetBackedUp = false
         var targetCommitted = false
+        val sourceLastModified = sourceFile.lastModified()
         val wasFavourite = mode == TransferMode.MOVE && mediaDao.isFavourite(entry.contentId).first()
 
         writeReplaceJournal(journalFile, journal)
@@ -820,7 +911,7 @@ class MediaRepository @Inject constructor(
             targetCommitted = true
             journal = journal.copy(stage = ReplacementStage.TARGET_COMMITTED)
             writeReplaceJournal(journalFile, journal)
-            targetFile.setLastModified(entry.dateModifiedMillis)
+            targetFile.setLastModified(sourceLastModified)
 
             val targetUri = scanFile(targetFile, entry.sourceMimeType)
                 ?: throw IOException("Replacement could not be indexed; original files were kept")
@@ -828,6 +919,7 @@ class MediaRepository @Inject constructor(
                 if (!removeOriginal(entry, sourceFile)) {
                     throw IOException("Replacement was rolled back because the source could not be removed")
                 }
+                relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
                 journal = journal.copy(stage = ReplacementStage.SOURCE_REMOVED)
                 writeReplaceJournal(journalFile, journal)
                 migrateFavourite(entry.contentId, targetUri, wasFavourite)
@@ -946,6 +1038,7 @@ class MediaRepository @Inject constructor(
     }
 
     private suspend fun moveEntry(entry: MediaEntry, sourceFile: File, targetFile: File) {
+        val sourceLastModified = sourceFile.lastModified()
         val sourceVolume = StorageUtils.getVolumePath(context, sourceFile.absolutePath)
         val targetVolume = StorageUtils.getVolumePath(context, targetFile.absolutePath)
         val sameVolume = sourceVolume != null && sourceVolume == targetVolume
@@ -965,7 +1058,7 @@ class MediaRepository @Inject constructor(
 
         val wasFavourite = mediaDao.isFavourite(entry.contentId).first()
         if (sameVolume && sourceFile.renameTo(targetFile)) {
-            targetFile.setLastModified(entry.dateModifiedMillis)
+            targetFile.setLastModified(sourceLastModified)
             val scannedUri = scanFile(targetFile, entry.sourceMimeType)
             if (scannedUri == null) {
                 if (targetFile.renameTo(sourceFile)) scanFile(sourceFile, entry.sourceMimeType)
@@ -976,6 +1069,7 @@ class MediaRepository @Inject constructor(
                 runCatching { context.contentResolver.delete(sourceUri, null, null) }
                 migrateFavourite(entry.contentId, scannedUri, wasFavourite)
             }
+            relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
             return
         }
 
@@ -989,6 +1083,7 @@ class MediaRepository @Inject constructor(
             throw IOException("Move was rolled back because the source could not be removed")
         }
 
+        relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
         migrateFavourite(entry.contentId, copiedUri, wasFavourite)
     }
 
@@ -1002,7 +1097,7 @@ class MediaRepository @Inject constructor(
         }
 
         copyFileVerified(sourceFile, targetFile)
-        targetFile.setLastModified(entry.dateModifiedMillis)
+        targetFile.setLastModified(sourceFile.lastModified())
         return scanFile(targetFile, entry.sourceMimeType) ?: run {
             targetFile.delete()
             throw IOException("Destination could not be indexed; source was kept")
@@ -1039,6 +1134,9 @@ class MediaRepository @Inject constructor(
                 null
             )
             if (published != 1) throw IOException("Could not publish destination media")
+            if (targetFile.isFile) {
+                targetFile.setLastModified(sourceFile.lastModified())
+            }
             return targetUri
         } catch (error: Exception) {
             runCatching { resolver.delete(targetUri, null, null) }
@@ -1101,6 +1199,8 @@ class MediaRepository @Inject constructor(
         val knownEntries = mediaDao.getKnownEntries().associateBy { it.contentId }
         val newEntries = mutableListOf<MediaEntry>()
         val currentIds = mutableSetOf<Long>()
+        val currentPaths = mutableSetOf<String>()
+        val currentPathsById = mutableMapOf<Long, String>()
 
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
@@ -1118,21 +1218,44 @@ class MediaRepository @Inject constructor(
         )
 
         // Query Images
-        queryMediaStore(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, false)
-        queryMediaStore(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, true)
+        queryMediaStore(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, currentPaths, currentPathsById, false)
+        queryMediaStore(resolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, currentPaths, currentPathsById, true)
         
         // Query Videos
-        queryMediaStore(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, false)
-        queryMediaStore(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, true)
+        queryMediaStore(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, currentPaths, currentPathsById, false)
+        queryMediaStore(resolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, knownEntries, newEntries, currentIds, currentPaths, currentPathsById, true)
 
-        val obsoleteIds = knownEntries.keys.filter { it !in currentIds }
+        val failedRelocationIds = mutableSetOf<Long>()
+        relocatedIndexSourcePaths(knownEntries.values, currentPathsById).forEach { relocation ->
+            if (!relocatePersistentIndexes(relocation.sourcePath, relocation.destinationPath)) {
+                failedRelocationIds.add(relocation.contentId)
+            }
+        }
+        val deletedSourcePaths = deletedIndexSourcePaths(
+            knownEntries = knownEntries.values,
+            currentIds = currentIds,
+            currentPaths = currentPaths,
+        )
+        val clearedPaths = deletePersistentIndexes(deletedSourcePaths)
+        val obsoleteIds = knownEntries.values.asSequence()
+            .filter { known -> known.contentId !in currentIds }
+            .filter { known ->
+                known.path.isBlank() || known.path in currentPaths || known.path in clearedPaths
+            }
+            .map { it.contentId }
+            .toList()
+        if (failedRelocationIds.isNotEmpty()) {
+            newEntries.removeAll { entry -> entry.contentId in failedRelocationIds }
+        }
         // Publish additions/updates and removals as one Room invalidation. Emitting the
         // intermediate "old + new" list caused two full grid reorders and could make a
         // live Viewer briefly bind its current page to another media item.
         mediaDao.reconcileMedia(newEntries, obsoleteIds)
 
         // Save generation after successful sync
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && currentGeneration > 0L) {
+        val indexMaintenanceComplete =
+            failedRelocationIds.isEmpty() && deletedSourcePaths.all { it in clearedPaths }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && currentGeneration > 0L && indexMaintenanceComplete) {
             try {
                 settingsRepository.setLastSyncedGeneration(currentGeneration)
             } catch (e: Exception) {
@@ -1146,9 +1269,11 @@ class MediaRepository @Inject constructor(
         resolver: ContentResolver,
         uri: android.net.Uri,
         projection: Array<String>,
-        knownEntries: Map<Long, com.pixel.gallery.data.local.dao.KnownEntry>,
+        knownEntries: Map<Long, KnownEntry>,
         newEntries: MutableList<MediaEntry>,
         currentIds: MutableSet<Long>,
+        currentPaths: MutableSet<String>,
+        currentPathsById: MutableMap<Long, String>,
         queryTrashed: Boolean
     ) {
         val queryArgs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1197,6 +1322,10 @@ class MediaRepository @Inject constructor(
                 currentIds.add(id)
                 val modified = cursor.getLong(modifiedColumn) * 1000
                 val path = cursor.getString(dataColumn) ?: ""
+                if (path.isNotEmpty()) {
+                    currentPaths.add(path)
+                    currentPathsById[id] = path
+                }
                 val mimeType = cursor.getString(mimeColumn) ?: "image/jpeg"
 
                 // Also update if trashing status changed
@@ -1271,3 +1400,35 @@ class MediaRepository @Inject constructor(
         }
     }
 }
+
+internal fun deletedIndexSourcePaths(
+    knownEntries: Collection<KnownEntry>,
+    currentIds: Set<Long>,
+    currentPaths: Set<String>,
+): List<String> = knownEntries.asSequence()
+    .filter { known -> known.contentId !in currentIds }
+    .map { it.path }
+    .filter { it.isNotBlank() && it !in currentPaths }
+    .distinct()
+    .toList()
+
+internal data class IndexPathRelocation(
+    val contentId: Long,
+    val sourcePath: String,
+    val destinationPath: String,
+)
+
+internal fun relocatedIndexSourcePaths(
+    knownEntries: Collection<KnownEntry>,
+    currentPathsById: Map<Long, String>,
+): List<IndexPathRelocation> = knownEntries.asSequence()
+    .mapNotNull { known ->
+        val currentPath = currentPathsById[known.contentId]
+        if (known.path.isBlank() || currentPath.isNullOrBlank() || currentPath == known.path) {
+            null
+        } else {
+            IndexPathRelocation(known.contentId, known.path, currentPath)
+        }
+    }
+    .distinct()
+    .toList()

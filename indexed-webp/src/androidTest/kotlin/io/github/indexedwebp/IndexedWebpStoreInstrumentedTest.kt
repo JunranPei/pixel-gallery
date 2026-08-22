@@ -41,11 +41,53 @@ class IndexedWebpStoreInstrumentedTest {
             assertRegion(decoder.decodeRegion(region, 16), region, 16)
         }
 
+        val relocated = File(context.cacheDir, "indexed-webp-fixture-relocated.webp")
+        store.delete(relocated.absolutePath)
+        relocated.delete()
+        assertTrue(source.renameTo(relocated))
+        assertTrue(store.relocate(source.absolutePath, relocated.absolutePath))
+        assertTrue(store.status(relocated.absolutePath) is IndexedWebpStatus.Ready)
+        assertTrue(relocated.renameTo(source))
+        assertTrue(store.relocate(relocated.absolutePath, source.absolutePath))
+        assertTrue(store.status(source.absolutePath) is IndexedWebpStatus.Ready)
+
         assertTrue(source.setLastModified(source.lastModified() + 2_000L))
         assertTrue(store.status(source.absolutePath) is IndexedWebpStatus.Invalid)
         assertEquals(null, store.openDecoder(source.absolutePath))
         assertTrue(store.delete(source.absolutePath))
         assertEquals(IndexedWebpStatus.Absent, store.status(source.absolutePath))
+    }
+
+    @Test
+    fun relocatePreservesReadyIndex() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-webp-relocate-source.webp")
+        val destination = File(context.cacheDir, "indexed-webp-relocate-destination.webp")
+        createFixture(source)
+        val store = IndexedWebpStore(context)
+        store.delete(source.absolutePath)
+        store.delete(destination.absolutePath)
+        destination.delete()
+
+        try {
+            store.build(source.absolutePath)
+            assertTrue(source.renameTo(destination))
+            assertTrue(store.relocate(source.absolutePath, destination.absolutePath))
+            assertTrue(store.status(destination.absolutePath) is IndexedWebpStatus.Ready)
+            store.openDecoder(destination.absolutePath).use { decoder ->
+                assertNotNull(decoder)
+                val decoded = decoder!!.decodeRegion(Rect(10, 20, 210, 120), 2)
+                assertNotNull(decoded)
+                assertEquals(100, decoded!!.width)
+                assertEquals(50, decoded.height)
+                decoded.recycle()
+            }
+        } finally {
+            store.delete(source.absolutePath)
+            store.delete(destination.absolutePath)
+            source.delete()
+            destination.delete()
+        }
     }
 
     private fun assertRegion(bitmap: Bitmap?, region: Rect, sample: Int) {

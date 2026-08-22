@@ -43,6 +43,16 @@ class IndexedBmpStoreInstrumentedTest {
             assertRegion(decoder.decodeRegion(region, 16), region, 16)
         }
 
+        val relocated = File(context.cacheDir, "indexed-bmp-fixture-relocated.bmp")
+        store.delete(relocated.absolutePath)
+        relocated.delete()
+        assertTrue(source.renameTo(relocated))
+        assertTrue(store.relocate(source.absolutePath, relocated.absolutePath))
+        assertTrue(store.status(relocated.absolutePath) is IndexedBmpStatus.Ready)
+        assertTrue(relocated.renameTo(source))
+        assertTrue(store.relocate(relocated.absolutePath, source.absolutePath))
+        assertTrue(store.status(source.absolutePath) is IndexedBmpStatus.Ready)
+
         assertTrue(source.setLastModified(source.lastModified() + 2_000L))
         assertTrue(store.status(source.absolutePath) is IndexedBmpStatus.Invalid)
         assertEquals(null, store.openDecoder(source.absolutePath))

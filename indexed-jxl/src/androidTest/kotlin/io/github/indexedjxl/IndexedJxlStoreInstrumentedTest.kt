@@ -49,6 +49,18 @@ class IndexedJxlStoreInstrumentedTest {
                 assertEquals((info.sourceHeight + sample - 1) / sample, bitmap.height)
                 bitmap.recycle()
             }
+
+            val relocated = File(context.cacheDir, "indexed-jxl-fixture-relocated.jxl")
+            store.delete(relocated.absolutePath)
+            relocated.delete()
+            assertTrue(source.renameTo(relocated))
+            assertTrue(store.relocate(source.absolutePath, relocated.absolutePath))
+            assertTrue(store.status(relocated.absolutePath) is IndexedJxlStatus.Ready)
+            assertTrue(relocated.renameTo(source))
+            assertTrue(store.relocate(relocated.absolutePath, source.absolutePath))
+            assertTrue(store.status(source.absolutePath) is IndexedJxlStatus.Ready)
+            assertTrue(store.delete(source.absolutePath))
+            assertTrue(store.status(source.absolutePath) is IndexedJxlStatus.Absent)
         } finally {
             store.delete(source.absolutePath)
             source.delete()
