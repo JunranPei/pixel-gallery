@@ -61,6 +61,16 @@ class IndexedJpegStoreInstrumentedTest {
             )
         }
 
+        val relocated = File(context.cacheDir, "indexed-jpeg-fixture-relocated.jpg")
+        store.delete(relocated.absolutePath)
+        relocated.delete()
+        assertTrue(source.renameTo(relocated))
+        assertTrue(store.relocate(source.absolutePath, relocated.absolutePath))
+        assertTrue(store.status(relocated.absolutePath) is IndexedJpegStatus.Ready)
+        assertTrue(relocated.renameTo(source))
+        assertTrue(store.relocate(relocated.absolutePath, source.absolutePath))
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+
         assertTrue(source.setLastModified(source.lastModified() + 2_000L))
         assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Invalid)
         assertEquals(null, store.openDecoder(source.absolutePath))

@@ -53,6 +53,19 @@ class IndexedTiffStoreInstrumentedTest {
             assertRegion(decoder.decodeRegion(region, 4), region, 4)
         }
 
+        val relocated = File(
+            context.cacheDir,
+            "indexed-tiff-${if (tiled) "tiles" else "strips"}-relocated.tif",
+        )
+        store.delete(relocated.absolutePath)
+        relocated.delete()
+        assertTrue(source.renameTo(relocated))
+        assertTrue(store.relocate(source.absolutePath, relocated.absolutePath))
+        assertTrue(store.status(relocated.absolutePath) is IndexedTiffStatus.Ready)
+        assertTrue(relocated.renameTo(source))
+        assertTrue(store.relocate(relocated.absolutePath, source.absolutePath))
+        assertTrue(store.status(source.absolutePath) is IndexedTiffStatus.Ready)
+
         assertTrue(source.setLastModified(source.lastModified() + 2_000L))
         assertTrue(store.status(source.absolutePath) is IndexedTiffStatus.Invalid)
         assertEquals(null, store.openDecoder(source.absolutePath))
