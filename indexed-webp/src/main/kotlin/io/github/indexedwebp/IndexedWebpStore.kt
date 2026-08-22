@@ -49,7 +49,7 @@ class IndexedWebpStore(context: Context) {
     }
 
     @Throws(IOException::class)
-    fun build(sourcePath: String): IndexedWebpInfo {
+    fun build(sourcePath: String): IndexedWebpInfo = synchronized(mutationLock) {
         val source = supportedSource(sourcePath)
             ?: throw IOException("A readable local WebP file is required")
         if (!buildInProgress.compareAndSet(false, true)) {
@@ -92,10 +92,38 @@ class IndexedWebpStore(context: Context) {
         }
     }
 
-    fun delete(sourcePath: String): Boolean {
-        val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
-        if (deleted) generation.incrementAndGet()
-        return deleted
+    fun delete(sourcePath: String): Boolean = synchronized(mutationLock) {
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
+            if (deleted) generation.incrementAndGet()
+            deleted
+        } finally {
+            buildInProgress.set(false)
+        }
+    }
+
+    fun relocate(sourcePath: String, destinationPath: String): Boolean = synchronized(mutationLock) {
+        if (sourcePath == destinationPath) return true
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val sourceIndex = indexFile(File(sourcePath))
+            if (!sourceIndex.isFile) return true
+            val destinationSource = supportedSource(destinationPath) ?: return false
+            val destinationIndex = indexFile(destinationSource)
+            if (sourceIndex.absolutePath == destinationIndex.absolutePath) return true
+            if (destinationIndex.exists() && !destinationIndex.delete()) return false
+            if (!sourceIndex.renameTo(destinationIndex)) return false
+            if (status(destinationPath) is IndexedWebpStatus.Ready) {
+                generation.incrementAndGet()
+                true
+            } else {
+                if (!destinationIndex.renameTo(sourceIndex)) destinationIndex.delete()
+                false
+            }
+        } finally {
+            buildInProgress.set(false)
+        }
     }
 
     fun openDecoder(sourcePath: String): IndexedWebpRegionDecoder? {
@@ -150,6 +178,7 @@ class IndexedWebpStore(context: Context) {
         const val WEBP_HEADER_BYTES = 12
         val RIFF = "RIFF".toByteArray(Charsets.US_ASCII)
         val WEBP = "WEBP".toByteArray(Charsets.US_ASCII)
+        val mutationLock = Any()
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
     }

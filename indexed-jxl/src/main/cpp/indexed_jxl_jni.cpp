@@ -484,7 +484,8 @@ bool readIndex(
     std::vector<uint8_t> directory(static_cast<size_t>(header.entryCount * kEntryBytes));
     if (!preadAll(fd, directory.data(), directory.size(), header.directoryOffset)) return false;
     std::vector<Entry> entries(static_cast<size_t>(header.entryCount));
-    uint64_t nextPayloadOffset = header.payloadOffset;
+    std::vector<std::pair<uint64_t, uint64_t>> payloadRanges;
+    payloadRanges.reserve(entries.size());
     for (size_t i = 0; i < entries.size(); ++i) {
         const size_t offset = i * kEntryBytes;
         Entry& entry = entries[i];
@@ -497,11 +498,18 @@ bool readIndex(
         entry.compressedBytes = getU32(directory.data(), offset + 32);
         entry.rawBytes = getU32(directory.data(), offset + 36);
         entry.crc = getU32(directory.data(), offset + 40);
-        if (entry.offset != nextPayloadOffset || entry.compressedBytes == 0 ||
-            nextPayloadOffset > header.totalBytes - entry.compressedBytes) {
+        if (entry.compressedBytes == 0 || entry.offset < header.payloadOffset ||
+            entry.offset > header.totalBytes ||
+            entry.compressedBytes > header.totalBytes - entry.offset) {
             return false;
         }
-        nextPayloadOffset += entry.compressedBytes;
+        payloadRanges.emplace_back(entry.offset, entry.offset + entry.compressedBytes);
+    }
+    std::sort(payloadRanges.begin(), payloadRanges.end());
+    uint64_t nextPayloadOffset = header.payloadOffset;
+    for (const auto& range : payloadRanges) {
+        if (range.first != nextPayloadOffset) return false;
+        nextPayloadOffset = range.second;
     }
     if (nextPayloadOffset != header.totalBytes) return false;
 
@@ -526,8 +534,9 @@ struct Builder {
     Header header;
     std::vector<Level> levels;
     std::vector<Entry> entries;
-    size_t nextBaseEntry = 0;
     size_t baseEntryCount = 0;
+    size_t writtenBaseEntryCount = 0;
+    std::vector<uint8_t> writtenBaseEntries;
     bool finished = false;
 
     Builder(
@@ -540,6 +549,7 @@ struct Builder {
         levels = makeLevels(width, height);
         entries = makeEntries(levels);
         baseEntryCount = static_cast<size_t>(levels.front().columns) * levels.front().rows;
+        writtenBaseEntries.assign(baseEntryCount, 0);
         header.sourceBytes = sourceBytes;
         header.sourceModifiedMillis = sourceModifiedMillis;
         header.width = width;
@@ -562,23 +572,23 @@ struct Builder {
         if (output != nullptr) fclose(output);
     }
 
-    void appendBand(const uint8_t* pixels, uint32_t top, uint32_t height) {
-        if (finished || pixels == nullptr || height == 0 || top >= header.height) {
-            throw std::runtime_error("Unexpected JPEG XL base band");
+    void appendBaseTile(uint32_t tileX, uint32_t tileY, const std::vector<uint8_t>& pixels) {
+        if (finished || tileX >= levels.front().columns || tileY >= levels.front().rows) {
+            throw std::runtime_error("Unexpected JPEG XL base tile");
         }
         const Level& base = levels.front();
-        const uint32_t expectedTop = static_cast<uint32_t>(nextBaseEntry / base.columns) * kTileSize;
-        const uint32_t expectedHeight = std::min(kTileSize, header.height - expectedTop);
-        if (top != expectedTop || height != expectedHeight) {
-            throw std::runtime_error("JPEG XL base bands are out of order");
+        const size_t index = static_cast<size_t>(tileY) * base.columns + tileX;
+        if (writtenBaseEntries[index] != 0) {
+            throw std::runtime_error("JPEG XL decoder produced a duplicate base tile");
         }
-        writeBand(output, base, entries, pixels, top, height);
-        nextBaseEntry += base.columns;
+        writeTile(output, entries[index], pixels);
+        writtenBaseEntries[index] = 1;
+        ++writtenBaseEntryCount;
     }
 
     std::array<jint, 4> finish() {
         if (finished) throw std::runtime_error("JPEG XL index is already finished");
-        if (nextBaseEntry != baseEntryCount) {
+        if (writtenBaseEntryCount != baseEntryCount) {
             throw std::runtime_error("JPEG XL base level is incomplete");
         }
         generateLowerLevels(output, levels, entries);
@@ -636,59 +646,38 @@ private:
     size_t size_ = 0;
 };
 
-struct JxlBandSink {
+struct JxlTileSink {
+    struct PendingTile {
+        uint32_t tileX;
+        uint32_t tileY;
+        uint32_t width;
+        uint32_t height;
+        uint32_t completedRows = 0;
+        std::vector<uint8_t> pixels;
+        std::vector<uint32_t> nextX;
+
+        PendingTile(uint32_t x, uint32_t y, uint32_t widthValue, uint32_t heightValue)
+            : tileX(x), tileY(y), width(widthValue), height(heightValue),
+              pixels(static_cast<size_t>(widthValue) * heightValue * 4, 0),
+              nextX(heightValue, 0) {}
+    };
+
+    static constexpr size_t kMaxPendingTiles = 16;
     Builder* builder;
     uint32_t width;
     uint32_t height;
-    uint32_t bandTop = 0;
-    uint32_t bandHeight = 0;
-    std::vector<uint8_t> pixels;
-    std::vector<uint32_t> nextX;
+    uint32_t columns;
+    std::unordered_map<size_t, PendingTile> pendingTiles;
     bool failed = false;
     std::string error;
 
-    JxlBandSink(Builder* builderValue, uint32_t widthValue, uint32_t heightValue)
-        : builder(builderValue), width(widthValue), height(heightValue) {
-        resetBand();
-    }
+    JxlTileSink(Builder* builderValue, uint32_t widthValue, uint32_t heightValue)
+        : builder(builderValue), width(widthValue), height(heightValue),
+          columns(ceilDiv(widthValue, kTileSize)) {}
 
     void reject(const char* message) {
         if (!failed) error = message;
         failed = true;
-    }
-
-    void resetBand() {
-        if (bandTop >= height) {
-            bandHeight = 0;
-            pixels.clear();
-            nextX.clear();
-            return;
-        }
-        bandHeight = std::min(kTileSize, height - bandTop);
-        const uint64_t byteCount = static_cast<uint64_t>(width) * bandHeight * 4;
-        if (byteCount > std::numeric_limits<size_t>::max()) {
-            throw std::runtime_error("JPEG XL work band is too large");
-        }
-        pixels.assign(static_cast<size_t>(byteCount), 0);
-        nextX.assign(bandHeight, 0);
-    }
-
-    bool flushBand() {
-        if (failed || bandHeight == 0) return !failed;
-        if (!std::all_of(nextX.begin(), nextX.end(), [this](uint32_t value) { return value == width; })) {
-            reject("JPEG XL decoder produced an incomplete image band");
-            return false;
-        }
-        try {
-            builder->appendBand(pixels.data(), bandTop, bandHeight);
-        } catch (const std::exception& exception) {
-            error = exception.what();
-            failed = true;
-            return false;
-        }
-        bandTop += bandHeight;
-        resetBand();
-        return true;
     }
 
     void accept(size_t x, size_t y, size_t count, const void* sourcePixels) {
@@ -697,31 +686,77 @@ struct JxlBandSink {
             reject("JPEG XL decoder returned an invalid pixel span");
             return;
         }
-        while (y >= static_cast<size_t>(bandTop) + bandHeight) {
-            if (!flushBand()) return;
-        }
-        if (y < bandTop || bandHeight == 0) {
-            reject("JPEG XL decoder returned image rows out of order");
-            return;
-        }
-        const uint32_t localY = static_cast<uint32_t>(y) - bandTop;
-        if (nextX[localY] != x) {
-            reject("JPEG XL decoder returned overlapping or out-of-order row spans");
-            return;
-        }
-        uint8_t* destination = pixels.data() +
-            (static_cast<size_t>(localY) * width + x) * 4;
-        memcpy(destination, sourcePixels, count * 4);
-        nextX[localY] += static_cast<uint32_t>(count);
-        if (nextX[localY] == width) {
-            premultiplyRow(pixels.data() + static_cast<size_t>(localY) * width * 4, width);
+        const auto* source = static_cast<const uint8_t*>(sourcePixels);
+        size_t currentX = x;
+        size_t remaining = count;
+        size_t sourceOffset = 0;
+        while (remaining > 0) {
+            const uint32_t tileX = static_cast<uint32_t>(currentX / kTileSize);
+            const uint32_t tileY = static_cast<uint32_t>(y / kTileSize);
+            const uint32_t localX = static_cast<uint32_t>(currentX % kTileSize);
+            const uint32_t localY = static_cast<uint32_t>(y % kTileSize);
+            const uint32_t tileWidth = std::min(kTileSize, width - tileX * kTileSize);
+            const uint32_t tileHeight = std::min(kTileSize, height - tileY * kTileSize);
+            const uint32_t span = static_cast<uint32_t>(
+                std::min(remaining, static_cast<size_t>(tileWidth - localX))
+            );
+            const size_t key = static_cast<size_t>(tileY) * columns + tileX;
+            auto found = pendingTiles.find(key);
+            if (found == pendingTiles.end()) {
+                if (pendingTiles.size() >= kMaxPendingTiles) {
+                    reject("JPEG XL decoder output ordering exceeded the bounded tile buffer");
+                    return;
+                }
+                found = pendingTiles.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(key),
+                    std::forward_as_tuple(tileX, tileY, tileWidth, tileHeight)
+                ).first;
+            }
+            PendingTile& tile = found->second;
+            if (localY >= tile.height || localX >= tile.width ||
+                span == 0 || span > tile.width - localX || tile.nextX[localY] != localX) {
+                reject("JPEG XL decoder returned overlapping or out-of-order tile spans");
+                return;
+            }
+            memcpy(
+                tile.pixels.data() + (static_cast<size_t>(localY) * tile.width + localX) * 4,
+                source + sourceOffset * 4,
+                static_cast<size_t>(span) * 4
+            );
+            tile.nextX[localY] += span;
+            if (tile.nextX[localY] == tile.width) {
+                premultiplyRow(
+                    tile.pixels.data() + static_cast<size_t>(localY) * tile.width * 4,
+                    tile.width
+                );
+                ++tile.completedRows;
+                if (tile.completedRows == tile.height) {
+                    try {
+                        builder->appendBaseTile(tile.tileX, tile.tileY, tile.pixels);
+                    } catch (const std::exception& exception) {
+                        error = exception.what();
+                        failed = true;
+                        return;
+                    }
+                    pendingTiles.erase(found);
+                }
+            }
+            currentX += span;
+            remaining -= span;
+            sourceOffset += span;
         }
     }
 
     void finish() {
         if (failed) throw std::runtime_error(error);
-        if (bandTop < height && !flushBand()) throw std::runtime_error(error);
-        if (bandTop != height) throw std::runtime_error("JPEG XL base image is incomplete");
+        if (!pendingTiles.empty()) {
+            const PendingTile& tile = pendingTiles.begin()->second;
+            throw std::runtime_error(
+                "JPEG XL decoder produced an incomplete base tile at (" +
+                std::to_string(tile.tileX) + ", " + std::to_string(tile.tileY) + ")"
+            );
+        }
     }
 };
 
@@ -732,7 +767,7 @@ void jxlImageOutCallback(
     size_t numPixels,
     const void* pixels
 ) {
-    static_cast<JxlBandSink*>(opaque)->accept(x, y, numPixels, pixels);
+    static_cast<JxlTileSink*>(opaque)->accept(x, y, numPixels, pixels);
 }
 
 std::array<jint, 4> buildJxlIndex(
@@ -778,7 +813,7 @@ std::array<jint, 4> buildJxlIndex(
     JxlDecoderCloseInput(decoder);
 
     std::unique_ptr<Builder> builder;
-    std::unique_ptr<JxlBandSink> sink;
+    std::unique_ptr<JxlTileSink> sink;
     std::array<jint, 4> result{};
     bool imageComplete = false;
     const JxlPixelFormat format = {4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
@@ -811,7 +846,7 @@ std::array<jint, 4> buildJxlIndex(
                 info.xsize,
                 info.ysize
             );
-            sink = std::make_unique<JxlBandSink>(builder.get(), info.xsize, info.ysize);
+            sink = std::make_unique<JxlTileSink>(builder.get(), info.xsize, info.ysize);
         } else if (status == JXL_DEC_COLOR_ENCODING) {
             JxlColorEncoding srgb{};
             srgb.color_space = JXL_COLOR_SPACE_RGB;

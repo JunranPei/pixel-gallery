@@ -42,7 +42,7 @@ class IndexedRawStore(context: Context) {
     }
 
     @Throws(IOException::class)
-    fun build(sourcePath: String): IndexedRawInfo {
+    fun build(sourcePath: String): IndexedRawInfo = synchronized(mutationLock) {
         val source = supportedSource(sourcePath)
             ?: throw IOException("A readable local camera RAW file is required")
         if (!buildInProgress.compareAndSet(false, true)) {
@@ -85,10 +85,38 @@ class IndexedRawStore(context: Context) {
         }
     }
 
-    fun delete(sourcePath: String): Boolean {
-        val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
-        if (deleted) generation.incrementAndGet()
-        return deleted
+    fun delete(sourcePath: String): Boolean = synchronized(mutationLock) {
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
+            if (deleted) generation.incrementAndGet()
+            deleted
+        } finally {
+            buildInProgress.set(false)
+        }
+    }
+
+    fun relocate(sourcePath: String, destinationPath: String): Boolean = synchronized(mutationLock) {
+        if (sourcePath == destinationPath) return true
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val sourceIndex = indexFile(File(sourcePath))
+            if (!sourceIndex.isFile) return true
+            val destinationSource = supportedSource(destinationPath) ?: return false
+            val destinationIndex = indexFile(destinationSource)
+            if (sourceIndex.absolutePath == destinationIndex.absolutePath) return true
+            if (destinationIndex.exists() && !destinationIndex.delete()) return false
+            if (!sourceIndex.renameTo(destinationIndex)) return false
+            if (status(destinationPath) is IndexedRawStatus.Ready) {
+                generation.incrementAndGet()
+                true
+            } else {
+                if (!destinationIndex.renameTo(sourceIndex)) destinationIndex.delete()
+                false
+            }
+        } finally {
+            buildInProgress.set(false)
+        }
     }
 
     fun openDecoder(sourcePath: String): IndexedRawRegionDecoder? {
@@ -137,6 +165,7 @@ class IndexedRawStore(context: Context) {
             "mos", "mrw", "nef", "nrw", "obm", "orf", "pef", "ptx", "pxn", "r3d",
             "raf", "raw", "rw2", "rwl", "rwz", "sr2", "srf", "srw", "x3f",
         )
+        val mutationLock = Any()
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
     }
