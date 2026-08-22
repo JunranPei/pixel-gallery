@@ -55,6 +55,16 @@ class IndexedPngStoreInstrumentedTest {
             assertDecodedSize(decoder.decodeRegion(region, 16), 36, 29)
         }
 
+        val relocated = File(context.cacheDir, "indexed-png-fixture-relocated.png")
+        store.delete(relocated.absolutePath)
+        relocated.delete()
+        assertTrue(source.renameTo(relocated))
+        assertTrue(store.relocate(source.absolutePath, relocated.absolutePath))
+        assertTrue(store.status(relocated.absolutePath) is IndexedPngStatus.Ready)
+        assertTrue(relocated.renameTo(source))
+        assertTrue(store.relocate(relocated.absolutePath, source.absolutePath))
+        assertTrue(store.status(source.absolutePath) is IndexedPngStatus.Ready)
+
         assertTrue(source.setLastModified(source.lastModified() + 2_000L))
         assertTrue(store.status(source.absolutePath) is IndexedPngStatus.Invalid)
         assertEquals(null, store.openDecoder(source.absolutePath))

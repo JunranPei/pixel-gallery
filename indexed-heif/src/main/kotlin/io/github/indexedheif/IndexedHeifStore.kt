@@ -44,7 +44,7 @@ class IndexedHeifStore(context: Context) {
     }
 
     @Throws(IOException::class)
-    fun build(sourcePath: String): IndexedHeifInfo {
+    fun build(sourcePath: String): IndexedHeifInfo = synchronized(mutationLock) {
         val source = supportedSource(sourcePath)
             ?: throw IOException("A readable local HEIF/HEIC/AVIF file is required")
         if (!buildInProgress.compareAndSet(false, true)) {
@@ -130,10 +130,38 @@ class IndexedHeifStore(context: Context) {
         }
     }
 
-    fun delete(sourcePath: String): Boolean {
-        val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
-        if (deleted) generation.incrementAndGet()
-        return deleted
+    fun delete(sourcePath: String): Boolean = synchronized(mutationLock) {
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val deleted = indexFile(File(sourcePath)).let { !it.exists() || it.delete() }
+            if (deleted) generation.incrementAndGet()
+            deleted
+        } finally {
+            buildInProgress.set(false)
+        }
+    }
+
+    fun relocate(sourcePath: String, destinationPath: String): Boolean = synchronized(mutationLock) {
+        if (sourcePath == destinationPath) return true
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val sourceIndex = indexFile(File(sourcePath))
+            if (!sourceIndex.isFile) return true
+            val destinationSource = supportedSource(destinationPath) ?: return false
+            val destinationIndex = indexFile(destinationSource)
+            if (sourceIndex.absolutePath == destinationIndex.absolutePath) return true
+            if (destinationIndex.exists() && !destinationIndex.delete()) return false
+            if (!sourceIndex.renameTo(destinationIndex)) return false
+            if (status(destinationPath) is IndexedHeifStatus.Ready) {
+                generation.incrementAndGet()
+                true
+            } else {
+                if (!destinationIndex.renameTo(sourceIndex)) destinationIndex.delete()
+                false
+            }
+        } finally {
+            buildInProgress.set(false)
+        }
     }
 
     fun openDecoder(sourcePath: String): IndexedHeifRegionDecoder? {
@@ -173,6 +201,7 @@ class IndexedHeifStore(context: Context) {
         const val INDEX_SUFFIX = ".ihx"
         const val TILE_SIZE = 512
         val EXTENSIONS = setOf("heic", "heif", "hif", "avif")
+        val mutationLock = Any()
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
     }

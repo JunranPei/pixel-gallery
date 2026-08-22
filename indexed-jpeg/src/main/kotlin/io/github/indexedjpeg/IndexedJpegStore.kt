@@ -51,7 +51,7 @@ class IndexedJpegStore(context: Context) {
     }
 
     @Throws(IOException::class)
-    fun build(sourcePath: String): IndexedJpegInfo {
+    fun build(sourcePath: String): IndexedJpegInfo = synchronized(mutationLock) {
         val source = supportedSource(sourcePath)
             ?: throw IOException("A readable local JPEG file is required")
         if (!buildInProgress.compareAndSet(false, true)) {
@@ -92,11 +92,39 @@ class IndexedJpegStore(context: Context) {
         }
     }
 
-    fun delete(sourcePath: String): Boolean {
-        val source = File(sourcePath)
-        val deleted = indexFile(source).let { !it.exists() || it.delete() }
-        if (deleted) generation.incrementAndGet()
-        return deleted
+    fun delete(sourcePath: String): Boolean = synchronized(mutationLock) {
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val source = File(sourcePath)
+            val deleted = indexFile(source).let { !it.exists() || it.delete() }
+            if (deleted) generation.incrementAndGet()
+            deleted
+        } finally {
+            buildInProgress.set(false)
+        }
+    }
+
+    fun relocate(sourcePath: String, destinationPath: String): Boolean = synchronized(mutationLock) {
+        if (sourcePath == destinationPath) return true
+        if (!buildInProgress.compareAndSet(false, true)) return false
+        return try {
+            val sourceIndex = indexFile(File(sourcePath))
+            if (!sourceIndex.isFile) return true
+            val destinationSource = supportedSource(destinationPath) ?: return false
+            val destinationIndex = indexFile(destinationSource)
+            if (sourceIndex.absolutePath == destinationIndex.absolutePath) return true
+            if (destinationIndex.exists() && !destinationIndex.delete()) return false
+            if (!sourceIndex.renameTo(destinationIndex)) return false
+            if (status(destinationPath) is IndexedJpegStatus.Ready) {
+                generation.incrementAndGet()
+                true
+            } else {
+                if (!destinationIndex.renameTo(sourceIndex)) destinationIndex.delete()
+                false
+            }
+        } finally {
+            buildInProgress.set(false)
+        }
     }
 
     fun openDecoder(sourcePath: String): IndexedJpegRegionDecoder? {
@@ -143,6 +171,7 @@ class IndexedJpegStore(context: Context) {
     private companion object {
         const val DIRECTORY_NAME = "indexed-jpeg"
         const val INDEX_SUFFIX = ".ijx"
+        val mutationLock = Any()
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
     }
