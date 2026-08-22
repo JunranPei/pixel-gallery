@@ -13,7 +13,6 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -21,17 +20,10 @@ import com.pixel.gallery.ui.MainScaffold
 import com.pixel.gallery.ui.Screen
 import com.pixel.gallery.ui.theme.PixelGalleryTheme
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
-import com.pixel.gallery.data.repository.SettingsRepository
-import com.pixel.gallery.model.CloneMode
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
-
-    @javax.inject.Inject
-    lateinit var settingsRepository: SettingsRepository
 
     private val viewModel: PhotosViewModel by viewModels()
 
@@ -78,10 +70,7 @@ class MainActivity : FragmentActivity() {
         checkPermissions()
         checkNotificationListenerPermission()
 
-        lifecycleScope.launch {
-            val mode = settingsRepository.cloneMode.first()
-            routeIntent(intent, mode)
-        }
+        handleIntent(intent)
 
     }
 
@@ -190,35 +179,12 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         updateTaskDescriptionFromIntent(intent)
-        lifecycleScope.launch {
-            val mode = settingsRepository.cloneMode.first()
-            if (shortcutRoute(intent) != null) {
-                // Recreate so the shortcut target becomes the initial navigation entry.
-                recreate()
-            } else {
-                routeIntent(intent, mode, forceNewTask = isLauncherIntent(intent))
-            }
+        if (shortcutRoute(intent) != null) {
+            // Recreate so the shortcut target becomes the initial navigation entry.
+            recreate()
+        } else {
+            handleIntent(intent)
         }
-    }
-
-    private fun routeIntent(intent: Intent, mode: CloneMode, forceNewTask: Boolean = false) {
-        if (mode == CloneMode.AUTO && (isExternalViewIntent(intent) || forceNewTask) &&
-            !intent.getBooleanExtra(EXTRA_AUTO_ROUTED, false)
-        ) {
-            val forwarded = Intent(this, MainActivity::class.java).apply {
-                action = intent.action
-                data = intent.data
-                type = intent.type
-                clipData = intent.clipData
-                putExtra(EXTRA_AUTO_ROUTED, true)
-                intent.categories?.forEach { addCategory(it) }
-                addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-            }
-            startActivity(forwarded)
-            finish()
-            return
-        }
-        handleIntent(intent)
     }
 
     private fun handleIntent(intent: Intent) {
@@ -230,12 +196,6 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
-
-    private fun isExternalViewIntent(intent: Intent): Boolean =
-        intent.action == Intent.ACTION_VIEW && intent.data != null
-
-    private fun isLauncherIntent(intent: Intent): Boolean =
-        intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER)
 
     private fun updateTaskDescriptionFromIntent(intent: Intent) {
         val title = intent.getStringExtra("extra_title")
@@ -269,7 +229,6 @@ class MainActivity : FragmentActivity() {
     companion object {
         private const val EXTRA_SCREEN = "extra_screen"
         private const val EXTRA_PARAM = "extra_param"
-        private const val EXTRA_AUTO_ROUTED = "extra_auto_routed"
         const val DOCUMENT_TREE_ACCESS_REQUEST = 1
         const val MEDIA_WRITE_BULK_PERMISSION_REQUEST = 2
 

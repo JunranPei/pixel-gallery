@@ -192,12 +192,25 @@ class SettingsRepository @Inject constructor(
 
     private val CLONE_MODE = stringPreferencesKey("clone_mode")
 
+    /** Whether new launcher/external entries should be opened in independent tasks. */
+    val autoCloneEnabled: Flow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            CloneMode.automaticEnabledFromStoredValue(preferences[CLONE_MODE])
+        }
+
+    /** Kept for callers that still need to read the legacy three-state value. */
     val cloneMode: Flow<CloneMode> = context.dataStore.data
         .map { preferences -> CloneMode.fromStoredValue(preferences[CLONE_MODE]) }
 
     suspend fun setCloneMode(mode: CloneMode) {
         context.dataStore.edit { preferences ->
             preferences[CLONE_MODE] = mode.name
+        }
+    }
+
+    suspend fun setAutoCloneEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[CLONE_MODE] = if (enabled) CloneMode.AUTO.name else CloneMode.DISABLED.name
         }
     }
 

@@ -1,6 +1,6 @@
 package com.pixel.gallery.model
 
-/** Controls how new gallery entries are mapped to Android tasks. */
+/** Legacy storage values for the automatic-clone preference. */
 enum class CloneMode {
     DISABLED,
     MANUAL,
@@ -9,5 +9,8 @@ enum class CloneMode {
     companion object {
         fun fromStoredValue(value: String?): CloneMode =
             entries.firstOrNull { it.name == value } ?: DISABLED
+
+        fun automaticEnabledFromStoredValue(value: String?): Boolean =
+            value == AUTO.name
     }
 }

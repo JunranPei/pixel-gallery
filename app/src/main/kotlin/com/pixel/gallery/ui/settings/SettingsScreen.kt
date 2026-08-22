@@ -5,20 +5,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.AddToHomeScreen
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Tab
+import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.BuildConfig
-import com.pixel.gallery.model.CloneMode
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,7 +33,7 @@ fun SettingsScreen(
 ) {
     val materialYou by viewModel.materialYou.collectAsState()
     val startupAtAlbums by viewModel.startupAtAlbums.collectAsState()
-    val cloneMode by viewModel.cloneMode.collectAsState()
+    val autoCloneEnabled by viewModel.autoCloneEnabled.collectAsState()
 
     Scaffold(
         topBar = {
@@ -67,16 +67,27 @@ fun SettingsScreen(
                 )
             }
             item {
-                CloneModeItem(
-                    mode = cloneMode,
-                    onModeChange = viewModel::setCloneMode,
+                SettingsToggleItem(
+                    title = "Automatic clones",
+                    description = "Open launcher and external entries in separate tasks; existing windows stay open",
+                    icon = Icons.Outlined.AutoAwesome,
+                    checked = autoCloneEnabled,
+                    onCheckedChange = viewModel::setAutoCloneEnabled,
+                )
+            }
+            item {
+                SettingsClickItem(
+                    title = "Desktop Shortcuts",
+                    description = "Create and manage independent custom shortcuts",
+                    icon = Icons.AutoMirrored.Outlined.AddToHomeScreen,
+                    onClick = onNavigateToShortcutManager,
                 )
             }
             item {
                 SettingsToggleItem(
                     title = "Start at Albums",
                     description = "Open the albums tab by default",
-                    icon = Icons.Outlined.Tab,
+                    icon = Icons.Outlined.PhotoAlbum,
                     checked = startupAtAlbums,
                     onCheckedChange = { viewModel.setStartupAtAlbums(it) }
                 )
@@ -89,15 +100,6 @@ fun SettingsScreen(
                     onClick = onNavigateToPerformanceSettings
                 )
             }
-            item {
-                SettingsClickItem(
-                    title = "Desktop Shortcuts",
-                    description = "Create and manage independent custom shortcuts",
-                    icon = Icons.Outlined.Tab,
-                    onClick = onNavigateToShortcutManager,
-                )
-            }
-
             item {
                 SettingsClickItem(
                     title = "Excluded Folders",
@@ -117,52 +119,6 @@ fun SettingsScreen(
             }
         }
     }
-}
-
-@Composable
-private fun CloneModeItem(
-    mode: CloneMode,
-    onModeChange: (CloneMode) -> Unit,
-) {
-    ListItem(
-        headlineContent = {
-            Text("Clone mode", style = EmphasizedTypography.LabelLarge)
-        },
-        supportingContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    when (mode) {
-                        CloneMode.DISABLED -> "Normal launch; no extra tasks"
-                        CloneMode.MANUAL -> "Only custom shortcuts open separate tasks"
-                        CloneMode.AUTO -> "External/document entries open separate tasks"
-                    }
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    CloneMode.entries.forEach { candidate ->
-                        FilterChip(
-                            selected = candidate == mode,
-                            onClick = { onModeChange(candidate) },
-                            label = {
-                                Text(
-                                    when (candidate) {
-                                        CloneMode.DISABLED -> "Off"
-                                        CloneMode.MANUAL -> "Manual"
-                                        CloneMode.AUTO -> "Auto"
-                                    }
-                                )
-                            },
-                        )
-                    }
-                }
-            }
-        },
-        leadingContent = {
-            Icon(Icons.Outlined.Tab, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        },
-    )
 }
 
 @Composable

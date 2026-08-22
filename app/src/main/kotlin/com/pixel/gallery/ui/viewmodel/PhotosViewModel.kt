@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.repository.MediaRepository
 import com.pixel.gallery.data.repository.SettingsRepository
-import com.pixel.gallery.model.CloneMode
 import com.pixel.gallery.utils.CustomShortcut
 import com.pixel.gallery.services.MetadataService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -639,12 +638,12 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    val cloneMode: StateFlow<CloneMode> = settingsRepository.cloneMode
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CloneMode.DISABLED)
+    val autoCloneEnabled: StateFlow<Boolean> = settingsRepository.autoCloneEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    fun setCloneMode(mode: CloneMode) {
+    fun setAutoCloneEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            settingsRepository.setCloneMode(mode)
+            settingsRepository.setAutoCloneEnabled(enabled)
         }
     }
 
