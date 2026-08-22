@@ -228,6 +228,18 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         invalidate()
     }
 
+    private fun borrowedPreviewCoversCurrentScale(): Boolean {
+        if (!bitmapIsBorrowedPreview) return false
+        val preview = bitmap?.takeUnless { it.isRecycled } ?: return false
+        val sourceWidth = sWidth().takeIf { it > 0 } ?: return false
+        val sourceHeight = sHeight().takeIf { it > 0 } ?: return false
+        val previewPixelsPerSourcePixel = min(
+            preview.width.toFloat() / sourceWidth,
+            preview.height.toFloat() / sourceHeight,
+        )
+        return scale <= previewPixelsPerSourcePixel * 1.001f
+    }
+
     private fun getRequiredRotation() = if (orientation == ORIENTATION_USE_EXIF) sOrientation else orientation
 
     private fun getCenter(): PointF? {
@@ -1281,10 +1293,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 .asSequence()
                 .filter {
                     it.visible && !it.loading && it.bitmap == null && it.failedAttempts < 2 &&
-                        // The borrowed fit preview already contains every pixel needed at
-                        // the base sampling level. Decoding the same layer from the original
-                        // JPEG was pure entry-time work and could take more than a second.
-                        !(bitmapIsBorrowedPreview && sampleSize == fullImageSampleSize)
+                        // At fit-screen the borrowed preview already contains every displayed
+                        // pixel, so decoding the same base layer is wasted entry-time work.
+                        // Once the user zooms beyond the preview's real pixel density, however,
+                        // the source tile must load even when sampleSize equals the base level.
+                        !(sampleSize == fullImageSampleSize && borrowedPreviewCoversCurrentScale())
                 }
                 .sortedWith(
                     compareByDescending<Tile> { tile ->
@@ -2397,7 +2410,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val hasLoadingTile = currentTiles.any { it.loading }
         val hasMissingTile = currentTiles.any { tile ->
             tile.bitmap == null && tile.failedAttempts < 2 &&
-                !(bitmapIsBorrowedPreview && currentSampleSize == fullImageSampleSize)
+                !(currentSampleSize == fullImageSampleSize && borrowedPreviewCoversCurrentScale())
         }
         diagnosticsListener?.invoke(
             "tile=LOAD_APPLIED sample=$currentSampleSize visible=${currentTiles.size} " +
