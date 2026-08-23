@@ -43,23 +43,29 @@ android {
 
     defaultConfig {
         applicationId = when (viewerTestVariant) {
+            "test" -> "com.pixel.gallery.shortcuts.test"
             "simplemerge" -> "com.pixel.gallery.shortcuts.simplegallerymerge"
             "trace" -> "com.pixel.gallery.shortcuts.codextrace"
             "clean" -> "com.pixel.gallery.shortcuts.codexclean"
             "compressed" -> "com.pixel.gallery.shortcuts.codexcompressed"
             "zoomtrace" -> "com.pixel.gallery.shortcuts.zoomtrace"
             "jpegindex" -> "com.pixel.gallery.shortcuts.jpegindextest"
+            "fastpreview" -> "com.pixel.gallery.shortcuts.fastpreviewtest"
+            "ssivlite" -> "com.pixel.gallery.shortcuts.ssivlite.test"
             "jpegindextrace" -> "com.pixel.gallery.shortcuts.jpegindextest"
             else -> "com.pixel.gallery.shortcuts"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "simplemerge" -> "Gallery Test"
+            "test" -> "Gallery Shortcuts Test"
             "trace" -> "Pixel Shortcuts Trace"
             "clean" -> "Pixel Shortcuts Clean"
             "compressed" -> "Pixel Shortcuts Compressed"
             "zoomtrace" -> "Pixel Shortcuts Zoom Trace"
             "jpegindex" -> "Pixel Shortcuts Indexed Image"
             "jpegindextrace" -> "Pixel Shortcuts Indexed Trace"
+            "fastpreview" -> "Pixel Shortcuts Fast Preview"
+            "ssivlite" -> "Pixel Shortcuts SSIV Lite Test"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
