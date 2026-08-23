@@ -5,6 +5,7 @@ import android.graphics.*
 import android.graphics.Paint.Style
 import android.net.Uri
 import android.os.AsyncTask
+import android.os.Build
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
@@ -991,6 +992,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                         if (!tileVisible(tile)) {
                             // Keep the decoded bitmap in the bounded CPU cache, but stop
                             // pinning an invisible GPU display list immediately.
+                            discardTileRenderNode(tile)
                             continue
                         }
                         sourceToViewRect(tile.sRect!!, tile.vRect!!)
@@ -1018,7 +1020,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             }
                             objectMatrix!!.setPolyToPoly(srcArray, 0, dstArray, 0, 4)
                             objectMatrix!!.postRotate(Math.toDegrees(imageRotation).toFloat(), width / 2f, height / 2f)
-                            canvas.drawBitmap(tile.bitmap!!, objectMatrix!!, bitmapPaint)
+                            drawTileBitmap(canvas, tile, objectMatrix!!)
                             drawnTileCount += 1
                             drawnTileBytes += tileBytes(tile)
                             imageDrawnThisFrame = true
@@ -1404,8 +1406,64 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (load) scheduleStableTileCachePersistence()
     }
 
+    /**
+     * Record a visible software bitmap once, then let RenderThread reuse that child
+     * display list while only the parent matrix changes during pan/zoom. The node is
+     * discarded as soon as the tile leaves the viewport; the independent CPU bitmap
+     * cache remains bounded by [trimTileMemoryCache].
+     */
+    private fun drawTileBitmap(canvas: Canvas, tile: Tile, matrix: Matrix) {
+        val bitmap = tile.bitmap ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canvas.isHardwareAccelerated) {
+            drawTileRenderNode(canvas, tile, bitmap, matrix)
+        } else {
+            canvas.drawBitmap(bitmap, matrix, bitmapPaint)
+        }
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private fun drawTileRenderNode(canvas: Canvas, tile: Tile, bitmap: Bitmap, matrix: Matrix) {
+        var node = tile.renderNode as? RenderNode
+        if (node == null || tile.renderNodeBitmap !== bitmap || !node.hasDisplayList()) {
+            node?.discardDisplayList()
+            node = RenderNode("ssiv-tile-${tile.sampleSize}").apply {
+                setPosition(0, 0, bitmap.width, bitmap.height)
+                val recordingCanvas = beginRecording(bitmap.width, bitmap.height)
+                recordingCanvas.drawBitmap(bitmap, 0f, 0f, bitmapPaint)
+                endRecording()
+            }
+            tile.renderNode = node
+            tile.renderNodeBitmap = bitmap
+            diagnosticsListener?.invoke(
+                "tile=RENDER_NODE_RECORD sample=${tile.sampleSize} " +
+                    "bitmap=${bitmap.width}x${bitmap.height} bytes=${tileBytes(tile)}",
+            )
+        }
+        val saveCount = canvas.save()
+        canvas.concat(matrix)
+        canvas.drawRenderNode(node)
+        canvas.restoreToCount(saveCount)
+    }
+
+    private fun discardTileRenderNode(tile: Tile) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            discardTileRenderNodeApi29(tile)
+        } else {
+            tile.renderNode = null
+            tile.renderNodeBitmap = null
+        }
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
+    private fun discardTileRenderNodeApi29(tile: Tile) {
+        (tile.renderNode as? RenderNode)?.discardDisplayList()
+        tile.renderNode = null
+        tile.renderNodeBitmap = null
+    }
+
     private fun clearTileBitmap(tile: Tile, recycleBitmap: Boolean) {
         val previous = tile.bitmap
+        discardTileRenderNode(tile)
         tile.bitmap = null
         if (recycleBitmap && previous?.isRecycled == false) {
             previous.recycle()
@@ -2857,6 +2915,10 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         var sRect: Rect? = null
         var sampleSize = 0
         var bitmap: Bitmap? = null
+        // Kept as Any so loading this class remains safe on API 26-28 where RenderNode's
+        // public drawing API does not exist. Access is guarded by SDK checks above.
+        var renderNode: Any? = null
+        var renderNodeBitmap: Bitmap? = null
         var loading = false
         var visible = false
         var vRect: Rect? = null
