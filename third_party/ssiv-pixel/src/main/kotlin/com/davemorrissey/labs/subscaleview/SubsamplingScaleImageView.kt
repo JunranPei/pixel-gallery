@@ -5,7 +5,6 @@ import android.graphics.*
 import android.graphics.Paint.Style
 import android.net.Uri
 import android.os.AsyncTask
-import android.os.Build
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
@@ -52,7 +51,6 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val ANIMATION_DURATION = 200L
         private const val FLING_DURATION = 300L
         private const val INSTANT_ANIMATION_DURATION = 10L
-        private const val TARGET_DECODED_TILE_SIZE = 1024
         private const val ARGB_8888_BYTES_PER_PIXEL = 4L
         // A source miss is decoded into one temporary sampled fragment and then split
         // into the visible tiles it covers. Keeping this below 24MB bounds the transient
@@ -993,7 +991,6 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                         if (!tileVisible(tile)) {
                             // Keep the decoded bitmap in the bounded CPU cache, but stop
                             // pinning an invisible GPU display list immediately.
-                            discardTileRenderNode(tile)
                             continue
                         }
                         sourceToViewRect(tile.sRect!!, tile.vRect!!)
@@ -1021,7 +1018,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             }
                             objectMatrix!!.setPolyToPoly(srcArray, 0, dstArray, 0, 4)
                             objectMatrix!!.postRotate(Math.toDegrees(imageRotation).toFloat(), width / 2f, height / 2f)
-                            drawTileBitmap(canvas, tile, objectMatrix!!)
+                            canvas.drawBitmap(tile.bitmap!!, objectMatrix!!, bitmapPaint)
                             drawnTileCount += 1
                             drawnTileBytes += tileBytes(tile)
                             imageDrawnThisFrame = true
@@ -1407,64 +1404,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (load) scheduleStableTileCachePersistence()
     }
 
-    /**
-     * Record a visible software bitmap once, then let RenderThread reuse that child
-     * display list while only the parent matrix changes during pan/zoom. The node is
-     * discarded as soon as the tile leaves the viewport; the independent CPU bitmap
-     * cache remains bounded by [trimTileMemoryCache].
-     */
-    private fun drawTileBitmap(canvas: Canvas, tile: Tile, matrix: Matrix) {
-        val bitmap = tile.bitmap ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canvas.isHardwareAccelerated) {
-            drawTileRenderNode(canvas, tile, bitmap, matrix)
-        } else {
-            canvas.drawBitmap(bitmap, matrix, bitmapPaint)
-        }
-    }
-
-    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
-    private fun drawTileRenderNode(canvas: Canvas, tile: Tile, bitmap: Bitmap, matrix: Matrix) {
-        var node = tile.renderNode as? RenderNode
-        if (node == null || tile.renderNodeBitmap !== bitmap || !node.hasDisplayList()) {
-            node?.discardDisplayList()
-            node = RenderNode("ssiv-tile-${tile.sampleSize}").apply {
-                setPosition(0, 0, bitmap.width, bitmap.height)
-                val recordingCanvas = beginRecording(bitmap.width, bitmap.height)
-                recordingCanvas.drawBitmap(bitmap, 0f, 0f, bitmapPaint)
-                endRecording()
-            }
-            tile.renderNode = node
-            tile.renderNodeBitmap = bitmap
-            diagnosticsListener?.invoke(
-                "tile=RENDER_NODE_RECORD sample=${tile.sampleSize} " +
-                    "bitmap=${bitmap.width}x${bitmap.height} bytes=${tileBytes(tile)}",
-            )
-        }
-        val saveCount = canvas.save()
-        canvas.concat(matrix)
-        canvas.drawRenderNode(node)
-        canvas.restoreToCount(saveCount)
-    }
-
-    private fun discardTileRenderNode(tile: Tile) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            discardTileRenderNodeApi29(tile)
-        } else {
-            tile.renderNode = null
-            tile.renderNodeBitmap = null
-        }
-    }
-
-    @android.annotation.TargetApi(Build.VERSION_CODES.Q)
-    private fun discardTileRenderNodeApi29(tile: Tile) {
-        (tile.renderNode as? RenderNode)?.discardDisplayList()
-        tile.renderNode = null
-        tile.renderNodeBitmap = null
-    }
-
     private fun clearTileBitmap(tile: Tile, recycleBitmap: Boolean) {
         val previous = tile.bitmap
-        discardTileRenderNode(tile)
         tile.bitmap = null
         if (recycleBitmap && previous?.isRecycled == false) {
             previous.recycle()
@@ -1998,29 +1939,34 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         debug("initialiseTileMap maxTileDimensions=${maxTileDimensions.x}x${maxTileDimensions.y}")
         tileMap = LinkedHashMap()
         var sampleSize = fullImageSampleSize
+        var xTiles = 1
+        var yTiles = 1
 
         while (true) {
-            // Telephoto's stable grid keeps the decoded output of every sampling level
-            // roughly constant. For example, a sample=8 tile covers a larger source rect
-            // than sample=1, but both decode to about a 1024-class bitmap. SSIV's default
-            // screen-sized tiles made sample=1 bitmaps around three times larger.
-            val levelRatio = sampleSize.toFloat() / fullImageSampleSize.coerceAtLeast(1)
-            val stableSourceTileWidth = max(
-                TARGET_DECODED_TILE_SIZE,
-                (sWidth() * levelRatio).toInt(),
-            )
-            val stableSourceTileHeight = max(
-                TARGET_DECODED_TILE_SIZE,
-                (sHeight() * levelRatio).toInt(),
-            )
-            // Match Telephoto/0713: the source-space grid is determined only by image
-            // size, base sample and the 1024px minimum. Its decoded tile dimensions are
-            // naturally near the fit-screen bitmap size. SSIV's old half-decoder cap
-            // split 0713's ~1600/3200px source tiles into many 1024/2048px tiles.
-            val sTileWidth = stableSourceTileWidth
-            val sTileHeight = stableSourceTileHeight
-            val xTiles = (sWidth() / sTileWidth).coerceAtLeast(1)
-            val yTiles = (sHeight() / sTileHeight).coerceAtLeast(1)
+            // Use the original SSIV grid rule: constrain decoded tiles by both the
+            // decoder maximum and the current viewport. The viewport constraint is
+            // important because a max texture size is only an upper bound; using it as
+            // the actual tile size creates unnecessarily large GPU uploads.
+            var sTileWidth = sWidth() / xTiles
+            var sTileHeight = sHeight() / yTiles
+            var decodedTileWidth = sTileWidth / sampleSize
+            var decodedTileHeight = sTileHeight / sampleSize
+            while (
+                decodedTileWidth + xTiles + 1 > maxTileDimensions.x ||
+                (decodedTileWidth > width * 1.25f && sampleSize < fullImageSampleSize)
+            ) {
+                xTiles += 1
+                sTileWidth = sWidth() / xTiles
+                decodedTileWidth = sTileWidth / sampleSize
+            }
+            while (
+                decodedTileHeight + yTiles + 1 > maxTileDimensions.y ||
+                (decodedTileHeight > height * 1.25f && sampleSize < fullImageSampleSize)
+            ) {
+                yTiles += 1
+                sTileHeight = sHeight() / yTiles
+                decodedTileHeight = sTileHeight / sampleSize
+            }
 
             val tileGrid = ArrayList<Tile>(xTiles * yTiles)
             for (x in 0 until xTiles) {
@@ -2045,8 +1991,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             diagnosticsListener?.invoke(
                 "tile=GRID sample=$sampleSize sourceTile=${sTileWidth}x$sTileHeight " +
                     "grid=${xTiles}x$yTiles count=${tileGrid.size} " +
-                    "decodedTarget=${(sTileWidth + sampleSize - 1) / sampleSize}x" +
-                    "${(sTileHeight + sampleSize - 1) / sampleSize} " +
+                    "decodedTarget=${decodedTileWidth}x${decodedTileHeight} " +
                     "base=$fullImageSampleSize viewport=${width}x$height source=${sWidth()}x${sHeight()}",
             )
             if (sampleSize == 1) {
@@ -2912,10 +2857,6 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         var sRect: Rect? = null
         var sampleSize = 0
         var bitmap: Bitmap? = null
-        // Kept as Any so loading this class remains safe on API 26-28 where RenderNode's
-        // public drawing API does not exist. Access is guarded by SDK checks above.
-        var renderNode: Any? = null
-        var renderNodeBitmap: Bitmap? = null
         var loading = false
         var visible = false
         var vRect: Rect? = null
