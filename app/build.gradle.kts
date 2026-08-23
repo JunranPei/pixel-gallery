@@ -43,23 +43,29 @@ android {
 
     defaultConfig {
         applicationId = when (viewerTestVariant) {
+            "test" -> "com.pixel.gallery.main.test"
             "simplemerge" -> "com.pixel.gallery.main.simplegallerymerge"
             "trace" -> "com.pixel.gallery.main.codextrace"
             "clean" -> "com.pixel.gallery.main.codexclean"
             "compressed" -> "com.pixel.gallery.main.codexcompressed"
             "zoomtrace" -> "com.pixel.gallery.main.zoomtrace"
             "jpegindex" -> "com.pixel.gallery.main.jpegindextest"
+            "fastpreview" -> "com.pixel.gallery.main.fastpreviewtest"
+            "ssivlite" -> "com.pixel.gallery.main.ssivlite.test"
             "jpegindextrace" -> "com.pixel.gallery.main.jpegindextest"
             else -> "com.pixel.gallery"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "simplemerge" -> "Gallery Test"
+            "test" -> "Gallery Main Test"
             "trace" -> "Pixel Main Trace"
             "clean" -> "Pixel Main Clean"
             "compressed" -> "Pixel Main Compressed"
             "zoomtrace" -> "Pixel Main Zoom Trace"
             "jpegindex" -> "Pixel Main Indexed Image"
             "jpegindextrace" -> "Pixel Main Indexed Trace"
+            "fastpreview" -> "Pixel Main Fast Preview"
+            "ssivlite" -> "Pixel Main SSIV Lite Test"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
