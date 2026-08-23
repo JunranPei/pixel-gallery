@@ -53,6 +53,7 @@ android {
             "zoomtrace" -> "com.pixel.gallery.zoomtrace"
             "jpegindex" -> "com.pixel.gallery.jpegindextest"
             "fastpreview" -> "com.pixel.gallery.fastpreviewtest"
+            "ssivlite" -> "com.pixel.gallery.ssivlite.test"
             // Same package as the quiet indexed-image build so installing this trace
             // build preserves the user's already-created indexes and tile cache.
             "jpegindextrace" -> "com.pixel.gallery.jpegindextest"
@@ -68,6 +69,7 @@ android {
             "jpegindex" -> "Pixel Indexed Image"
             "jpegindextrace" -> "Pixel Indexed Trace"
             "fastpreview" -> "Pixel Fast Preview"
+            "ssivlite" -> "Pixel SSIV Lite Test"
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
