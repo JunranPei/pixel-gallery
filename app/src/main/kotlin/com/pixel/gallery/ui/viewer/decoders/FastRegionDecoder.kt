@@ -10,16 +10,21 @@ import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import com.davemorrissey.labs.subscaleview.BatchedImageRegionDecoder
+import com.davemorrissey.labs.subscaleview.RegionDecoderCapabilities
 import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import io.github.indexedjpeg.IndexedJpegRegionDecoder
 import io.github.indexedjpeg.IndexedJpegStore
+import io.github.indexedjpeg.IndexedJpegStatus
 import io.github.indexedpng.IndexedPngRegionDecoder
 import io.github.indexedpng.IndexedPngStore
+import io.github.indexedpng.IndexedPngStatus
 import io.github.indexedwebp.IndexedWebpRegionDecoder
 import io.github.indexedwebp.IndexedWebpStore
+import io.github.indexedwebp.IndexedWebpStatus
 import io.github.indexedheif.IndexedHeifRegionDecoder
 import io.github.indexedheif.IndexedHeifStore
+import io.github.indexedheif.IndexedHeifStatus
 import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
@@ -106,11 +111,29 @@ class FastRegionDecoder(
     private val knownSourceWidth: Int = 0,
     private val knownSourceHeight: Int = 0,
 ) : BatchedImageRegionDecoder {
-    private companion object {
+    companion object {
         const val RAW_TILE_MAGIC = 0x50475854
         const val RAW_TILE_VERSION = 1
         const val RAW_TILE_HEADER_BYTES = 20
         const val ARGB_8888_BYTES_PER_PIXEL = 4
+
+        /** Source/header validation only; checking this never builds an index. */
+        internal fun hasReadyPersistentIndex(context: Context, sourcePath: String): Boolean {
+            val source = File(sourcePath)
+            if (!source.isFile || !source.canRead()) return false
+            val appContext = context.applicationContext
+            return IndexedJpegStore(appContext).status(sourcePath) is IndexedJpegStatus.Ready ||
+                IndexedPngStore(appContext).status(sourcePath) is IndexedPngStatus.Ready ||
+                IndexedWebpStore(appContext).status(sourcePath) is IndexedWebpStatus.Ready ||
+                IndexedHeifStore(appContext).status(sourcePath) is IndexedHeifStatus.Ready
+        }
+    }
+
+    private enum class IndexedBackend(val persistentTilePyramid: Boolean) {
+        JPEG(false),
+        PNG(true),
+        WEBP(true),
+        HEIF(true),
     }
 
     private var decoder: BitmapRegionDecoder? = null
@@ -141,6 +164,7 @@ class FastRegionDecoder(
     private var indexedHeifDecoder: IndexedHeifRegionDecoder? = null
     private var indexedHeifGeneration = Long.MIN_VALUE
     private var indexedHeifDecodeFailed = false
+    @Volatile private var activeIndexedBackend: IndexedBackend? = null
     @Volatile private var initialized = false
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
@@ -163,6 +187,7 @@ class FastRegionDecoder(
         indexedPngStore = IndexedPngStore(appContext)
         indexedWebpStore = IndexedWebpStore(appContext)
         indexedHeifStore = IndexedHeifStore(appContext)
+        activeIndexedBackend = resolveIndexedBackend()
         metricsKey = imageVersion
         metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
@@ -275,6 +300,14 @@ class FastRegionDecoder(
         }
     }
 
+    override fun capabilities(): RegionDecoderCapabilities {
+        val persistentPyramid = activeIndexedBackend?.persistentTilePyramid == true
+        return RegionDecoderCapabilities(
+            batchSourceMisses = !persistentPyramid,
+            persistDecodedTiles = !persistentPyramid,
+        )
+    }
+
     override fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean {
         if (!initialized) return false
         return tileCacheFiles(sRect, effectiveSampleSize(sRect, sampleSize)).argb8888.isFile
@@ -283,6 +316,9 @@ class FastRegionDecoder(
     override fun decodeRegions(sRects: List<Rect>, sampleSize: Int): List<Bitmap> {
         require(sRects.isNotEmpty()) { "At least one source region is required" }
         if (sRects.size == 1) return listOf(decodeRegion(sRects.first(), sampleSize))
+        if (!capabilities().batchSourceMisses) {
+            return sRects.map { decodeRegion(it, sampleSize) }
+        }
 
         synchronized(decoderLock) {
             val actualSamples = sRects.map { effectiveSampleSize(it, sampleSize) }
@@ -383,6 +419,7 @@ class FastRegionDecoder(
     override fun cacheRegion(sRect: Rect, sampleSize: Int, bitmap: Bitmap): Boolean {
         synchronized(cacheWriteLock) {
             if (!initialized || bitmap.isRecycled) return false
+            if (!capabilities().persistDecodedTiles) return true
             val actualSample = effectiveSampleSize(sRect, sampleSize)
             val cacheFiles = tileCacheFiles(sRect, actualSample)
             if (cacheFiles.argb8888.isFile) return true
@@ -423,6 +460,7 @@ class FastRegionDecoder(
             indexedHeifStore = null
             indexedHeifGeneration = Long.MIN_VALUE
             indexedHeifDecodeFailed = false
+            activeIndexedBackend = null
             initialized = false
         }
         ViewerLoadMetrics.workReady(token)
@@ -546,6 +584,7 @@ class FastRegionDecoder(
             indexed.close()
             indexedDecoder = null
             indexedDecodeFailed = true
+            if (activeIndexedBackend == IndexedBackend.JPEG) activeIndexedBackend = null
             ViewerLoadMetrics.event(
                 "INDEXED_JPEG_FALLBACK",
                 "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
@@ -585,6 +624,7 @@ class FastRegionDecoder(
             indexed.close()
             indexedPngDecoder = null
             indexedPngDecodeFailed = true
+            if (activeIndexedBackend == IndexedBackend.PNG) activeIndexedBackend = null
             ViewerLoadMetrics.event(
                 "INDEXED_PNG_FALLBACK",
                 "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
@@ -624,6 +664,7 @@ class FastRegionDecoder(
             indexed.close()
             indexedWebpDecoder = null
             indexedWebpDecodeFailed = true
+            if (activeIndexedBackend == IndexedBackend.WEBP) activeIndexedBackend = null
             ViewerLoadMetrics.event(
                 "INDEXED_WEBP_FALLBACK",
                 "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
@@ -663,6 +704,7 @@ class FastRegionDecoder(
             indexed.close()
             indexedHeifDecoder = null
             indexedHeifDecodeFailed = true
+            if (activeIndexedBackend == IndexedBackend.HEIF) activeIndexedBackend = null
             ViewerLoadMetrics.event(
                 "INDEXED_HEIF_FALLBACK",
                 "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize",
@@ -673,6 +715,14 @@ class FastRegionDecoder(
         val bitmap = openDecoder(fallbackReason).decodeRegion(rect, options)
             ?: throw RuntimeException("Region decoder returned null bitmap")
         return bitmap to "SOURCE_REGION_DECODE"
+    }
+
+    private fun resolveIndexedBackend(): IndexedBackend? {
+        if (refreshIndexedDecoder() != null) return IndexedBackend.JPEG
+        if (refreshIndexedPngDecoder() != null) return IndexedBackend.PNG
+        if (refreshIndexedWebpDecoder() != null) return IndexedBackend.WEBP
+        if (refreshIndexedHeifDecoder() != null) return IndexedBackend.HEIF
+        return null
     }
 
     private fun refreshIndexedDecoder(): IndexedJpegRegionDecoder? {
@@ -689,12 +739,14 @@ class FastRegionDecoder(
             indexedDecoder = null
             indexedGeneration = generation
             indexedDecodeFailed = false
+            if (activeIndexedBackend == IndexedBackend.JPEG) activeIndexedBackend = null
         }
         if (indexedDecodeFailed) {
             ViewerLoadMetrics.event("INDEX_BYPASS", "format=JPEG reason=previous-failure", imageKey = imageVersion)
             return null
         }
         indexedDecoder?.let {
+            activeIndexedBackend = IndexedBackend.JPEG
             ViewerLoadMetrics.event("INDEX_REUSE", "format=JPEG generation=$generation", imageKey = imageVersion)
             return it
         }
@@ -704,6 +756,7 @@ class FastRegionDecoder(
             null
         }
         if (indexedDecoder == null) indexedDecodeFailed = true
+        if (indexedDecoder != null) activeIndexedBackend = IndexedBackend.JPEG
         logIndexOpen("JPEG", sourcePath, indexedDecoder != null)
         return indexedDecoder
     }
@@ -722,12 +775,14 @@ class FastRegionDecoder(
             indexedPngDecoder = null
             indexedPngGeneration = generation
             indexedPngDecodeFailed = false
+            if (activeIndexedBackend == IndexedBackend.PNG) activeIndexedBackend = null
         }
         if (indexedPngDecodeFailed) {
             ViewerLoadMetrics.event("INDEX_BYPASS", "format=PNG reason=previous-failure", imageKey = imageVersion)
             return null
         }
         indexedPngDecoder?.let {
+            activeIndexedBackend = IndexedBackend.PNG
             ViewerLoadMetrics.event("INDEX_REUSE", "format=PNG generation=$generation", imageKey = imageVersion)
             return it
         }
@@ -737,6 +792,7 @@ class FastRegionDecoder(
             null
         }
         if (indexedPngDecoder == null) indexedPngDecodeFailed = true
+        if (indexedPngDecoder != null) activeIndexedBackend = IndexedBackend.PNG
         logIndexOpen("PNG", sourcePath, indexedPngDecoder != null)
         return indexedPngDecoder
     }
@@ -755,12 +811,14 @@ class FastRegionDecoder(
             indexedWebpDecoder = null
             indexedWebpGeneration = generation
             indexedWebpDecodeFailed = false
+            if (activeIndexedBackend == IndexedBackend.WEBP) activeIndexedBackend = null
         }
         if (indexedWebpDecodeFailed) {
             ViewerLoadMetrics.event("INDEX_BYPASS", "format=WEBP reason=previous-failure", imageKey = imageVersion)
             return null
         }
         indexedWebpDecoder?.let {
+            activeIndexedBackend = IndexedBackend.WEBP
             ViewerLoadMetrics.event("INDEX_REUSE", "format=WEBP generation=$generation", imageKey = imageVersion)
             return it
         }
@@ -770,6 +828,7 @@ class FastRegionDecoder(
             null
         }
         if (indexedWebpDecoder == null) indexedWebpDecodeFailed = true
+        if (indexedWebpDecoder != null) activeIndexedBackend = IndexedBackend.WEBP
         logIndexOpen("WEBP", sourcePath, indexedWebpDecoder != null)
         return indexedWebpDecoder
     }
@@ -788,12 +847,14 @@ class FastRegionDecoder(
             indexedHeifDecoder = null
             indexedHeifGeneration = generation
             indexedHeifDecodeFailed = false
+            if (activeIndexedBackend == IndexedBackend.HEIF) activeIndexedBackend = null
         }
         if (indexedHeifDecodeFailed) {
             ViewerLoadMetrics.event("INDEX_BYPASS", "format=HEIF_AVIF reason=previous-failure", imageKey = imageVersion)
             return null
         }
         indexedHeifDecoder?.let {
+            activeIndexedBackend = IndexedBackend.HEIF
             ViewerLoadMetrics.event("INDEX_REUSE", "format=HEIF_AVIF generation=$generation", imageKey = imageVersion)
             return it
         }
@@ -803,6 +864,7 @@ class FastRegionDecoder(
             null
         }
         if (indexedHeifDecoder == null) indexedHeifDecodeFailed = true
+        if (indexedHeifDecoder != null) activeIndexedBackend = IndexedBackend.HEIF
         logIndexOpen("HEIF_AVIF", sourcePath, indexedHeifDecoder != null)
         return indexedHeifDecoder
     }

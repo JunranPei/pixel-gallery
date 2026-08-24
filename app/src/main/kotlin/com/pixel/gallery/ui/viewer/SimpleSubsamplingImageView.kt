@@ -653,17 +653,29 @@ internal fun SimpleSubsamplingImageView(
                     ssivBaseDrawn = false
                     view.background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
                     val regionSourcePath = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
-                        val sourceModel = uri
-                            .takeIf { it.isNotBlank() }
-                            ?.let(Uri::parse)
-                            ?: imagePath
-                        resolveGlideDataCacheFile(
-                            context = context,
-                            model = sourceModel,
-                            dateModifiedMillis = dateModifiedMillis,
-                            fallbackPath = imagePath,
-                            imageKey = transformStateKey,
-                        )
+                        val hasReadyLocalIndex = withContext(Dispatchers.IO) {
+                            FastRegionDecoder.hasReadyPersistentIndex(context, imagePath)
+                        }
+                        if (hasReadyLocalIndex) {
+                            ViewerLoadMetrics.event(
+                                "REGION_SOURCE_FILE",
+                                "source=INDEXED_LOCAL_DIRECT file=${File(imagePath).name}",
+                                imageKey = transformStateKey,
+                            )
+                            imagePath
+                        } else {
+                            val sourceModel = uri
+                                .takeIf { it.isNotBlank() }
+                                ?.let(Uri::parse)
+                                ?: imagePath
+                            resolveGlideDataCacheFile(
+                                context = context,
+                                model = sourceModel,
+                                dateModifiedMillis = dateModifiedMillis,
+                                fallbackPath = imagePath,
+                                imageKey = transformStateKey,
+                            )
+                        }
                     } else {
                         imagePath
                     }
