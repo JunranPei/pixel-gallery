@@ -50,6 +50,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.glide.AvesAppGlideModule
+import com.pixel.gallery.glide.IndexedPngScreenPreview
 import com.pixel.gallery.glide.SvgImage
 import com.pixel.gallery.glide.TiffImage
 import com.pixel.gallery.glide.VideoThumbnail
@@ -442,6 +443,16 @@ internal fun ViewerScreen(
         pagerState.isScrollInProgress &&
             !pagerIsDragged &&
             pagerState.targetPage == pagerState.settledPage
+
+    LaunchedEffect(pagerState.isScrollInProgress) {
+        ViewerLoadMetrics.snapshotEvent(
+            if (pagerState.isScrollInProgress) "PAGER_SCROLL_START" else "PAGER_SCROLL_END",
+            "current=${pagerState.currentPage} settled=${pagerState.settledPage} " +
+                "target=${pagerState.targetPage} offset=${pagerState.currentPageOffsetFraction} " +
+                "dragged=$pagerIsDragged",
+            imageKey = photos.getOrNull(pagerState.currentPage)?.viewerCacheKey(),
+        )
+    }
 
     LaunchedEffect(pagerReturningToSettledPage) {
         ViewerLoadMetrics.event(
@@ -1166,11 +1177,7 @@ internal fun ViewerScreen(
                                         orientationDegrees = media.sourceRotationDegrees,
                                         isActivePage = isActivePage,
                                         isPagerIdle = isPagerIdle,
-                                        // The incoming page already has a lightweight 200px cover.
-                                        // Load its screen-sized preview only after it settles; doing
-                                        // both source decodes during the pager gesture caused sporadic
-                                        // high-power swipes between otherwise unzoomed large images.
-                                        isPreviewVisible = isActivePage,
+                                        isPreviewVisible = isPreviewVisible,
                                         enableSubsampling = !metadataPending,
                                         dateModifiedMillis = media.dateModifiedMillis,
                                         sourceWidth = media.width,
@@ -1198,6 +1205,37 @@ internal fun ViewerScreen(
                                         ViewerPreviewKind.TIFF -> TiffImage(context, sourceUri)
                                     }
                                 }
+                                val indexedFitPreviewModel = remember(
+                                    tiledPlan.previewKind,
+                                    media.path,
+                                    media.sourceMimeType,
+                                    media.width,
+                                    media.height,
+                                    media.sourceRotationDegrees,
+                                    media.dateModifiedMillis,
+                                ) {
+                                    val normalizedMime = media.sourceMimeType
+                                        .substringBefore(';')
+                                        .trim()
+                                        .lowercase()
+                                    val isPng = normalizedMime == MimeTypes.PNG ||
+                                        media.path.endsWith(".png", ignoreCase = true)
+                                    if (
+                                        tiledPlan.previewKind == ViewerPreviewKind.DEFAULT &&
+                                        isPng && media.path.isNotEmpty() &&
+                                        media.width > 0 && media.height > 0
+                                    ) {
+                                        IndexedPngScreenPreview(
+                                            sourcePath = media.path,
+                                            sourceWidth = media.width,
+                                            sourceHeight = media.height,
+                                            rotationDegrees = media.sourceRotationDegrees,
+                                            dateModifiedMillis = media.dateModifiedMillis,
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                }
                                 SimpleSubsamplingImageView(
                                     uri = media.uri,
                                     filePath = media.path,
@@ -1205,13 +1243,14 @@ internal fun ViewerScreen(
                                     orientationDegrees = media.sourceRotationDegrees,
                                     isActivePage = isActivePage,
                                     isPagerIdle = isPagerIdle,
-                                    isPreviewVisible = isActivePage,
+                                    isPreviewVisible = isPreviewVisible,
                                     enableSubsampling = !metadataPending,
                                     dateModifiedMillis = media.dateModifiedMillis,
                                     sourceWidth = media.width,
                                     sourceHeight = media.height,
                                     enableUltraHdr = enableUltraHdr,
                                     previewModel = previewModel,
+                                    indexedFitPreviewModel = indexedFitPreviewModel,
                                     intermediatePreviewModel = swipeThumbnailModel,
                                     metricsDetail = "id=${media.contentId} mime=${media.sourceMimeType} " +
                                         "bytes=${media.sizeBytes} source=${media.width}x${media.height} " +

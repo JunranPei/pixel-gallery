@@ -52,12 +52,15 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val ANIMATION_DURATION = 200L
         private const val FLING_DURATION = 300L
         private const val INSTANT_ANIMATION_DURATION = 10L
+        private const val TARGET_DECODED_TILE_SIZE = 1024
         private const val ARGB_8888_BYTES_PER_PIXEL = 4L
         // A source miss is decoded into one temporary sampled fragment and then split
-        // into the visible tiles it covers. Keeping this below 24MB bounds the transient
-        // fragment + split copies to roughly the existing 48MB tile-memory budget.
-        private const val MAX_SOURCE_MISS_FRAGMENT_BYTES = 24L * 1024L * 1024L
-        private const val MAX_SOURCE_MISS_TILES_PER_FRAGMENT = 4
+        // into the visible tiles it covers. Two 1024-class ARGB tiles keep one decode wave
+        // near 8MB and the transient fragment + split copies near 16MB. This preserves the
+        // scan-amortisation benefit without recreating the 30-60MB allocation bursts seen
+        // in the power trace.
+        private const val MAX_SOURCE_MISS_FRAGMENT_BYTES = 12L * 1024L * 1024L
+        private const val MAX_SOURCE_MISS_TILES_PER_FRAGMENT = 2
         private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 40L
         private const val TILE_CACHE_ADMISSION_DELAY_MS = 1200L
         private const val MAX_PENDING_TILE_CACHE_WRITES = 4
@@ -970,6 +973,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         var imageDrawnThisFrame = bitmapIsBorrowedPreview && drawBaseBitmapLayer(canvas)
         var drawnTileCount = 0
         var drawnTileBytes = 0L
+        var drawnFallbackSampleSize: Int? = null
         val hasReadyTile = tileMap?.values?.any { grid ->
             grid.any { it.bitmap?.isRecycled == false }
         } == true
@@ -986,8 +990,37 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 }
             }
 
+            // While a zoom crosses a sample boundary, the target grid is incomplete for a
+            // short time. Drawing every retained grid as a fallback stacks several complete
+            // layers of large bitmaps and makes zooming much more expensive than panning.
+            // Keep exactly one closest ready fallback. Prefer the coarser grid on an equal
+            // distance because it covers the viewport with fewer textures; the borrowed
+            // preview underneath still fills any uncovered area.
+            drawnFallbackSampleSize = if (hasMissingTiles) {
+                tileMap!!.keys
+                    .asSequence()
+                    .filter { it != sampleSize }
+                    .filter { candidate ->
+                        tileMap!![candidate].orEmpty().any { tile ->
+                            tile.bitmap?.isRecycled == false && tileVisible(tile)
+                        }
+                    }
+                    .minWithOrNull(
+                        compareBy<Int> {
+                            kotlin.math.abs(
+                                Integer.numberOfTrailingZeros(it) -
+                                    Integer.numberOfTrailingZeros(sampleSize),
+                            )
+                        }.thenBy { candidate ->
+                            if (candidate > sampleSize) 0 else 1
+                        },
+                    )
+            } else {
+                null
+            }
+
             for ((key, value) in tileMap!!) {
-                if (key == sampleSize || hasMissingTiles) {
+                if (key == sampleSize || key == drawnFallbackSampleSize) {
                     for (tile in value) {
                         // A decoded off-screen tile may remain in the CPU-side LRU, but it
                         // must not enter this frame's display list. Telephoto/0713 keeps its
@@ -1139,6 +1172,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     "tile=DRAW durationMs=$drawMs sample=$sampleSize visible=${visibleTiles.size} " +
                         "loaded=$loaded loading=$loading missing=${visibleTiles.size - loaded} " +
                         "retained=$retained drawn=$drawnTileCount drawnBytes=$drawnTileBytes " +
+                        "fallbackSample=${drawnFallbackSampleSize ?: "none"} " +
                         "preview=$bitmapIsBorrowedPreview scale=$scale " +
                         "translate=${vTranslate?.x},${vTranslate?.y} center=${getCenter()} " +
                         "gesture=${isZooming || isPanning} anim=${anim != null}",
@@ -1830,9 +1864,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     }
 
     /**
-     * Select a tile level using Telephoto's power-of-two boundaries and 12% hysteresis.
-     * This prevents a small pinch fluctuation around 1/2, 1/4, etc. from discarding one
-     * sampling layer and immediately requesting another.
+     * Select a tile level using Telephoto's power-of-two boundaries. Keep hysteresis only
+     * while moving to a clearer level: the coarser level remains pixel-complete until the
+     * scale has crossed the boundary, so a small zoom-in buffer prevents level thrashing.
+     * While zooming out, retaining the finer level below that boundary cannot add visible
+     * detail and multiplies decoded/drawn pixels, so switch to the coarser level immediately.
      */
     private fun calculateRequiredTileSampleSize(): Int {
         if (fullImageSampleSize <= 0) return 1
@@ -1856,7 +1892,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             }
             else -> {
                 val blurrierBoundary = 1f / target.toFloat()
-                if (effectiveScale < blurrierBoundary * (1f - SAMPLE_SIZE_HYSTERESIS)) target else current
+                if (effectiveScale <= blurrierBoundary) target else current
             }
         }.coerceIn(1, fullImageSampleSize)
 
@@ -2009,34 +2045,24 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         debug("initialiseTileMap maxTileDimensions=${maxTileDimensions.x}x${maxTileDimensions.y}")
         tileMap = LinkedHashMap()
         var sampleSize = fullImageSampleSize
-        var xTiles = 1
-        var yTiles = 1
 
         while (true) {
-            // Use the original SSIV grid rule: constrain decoded tiles by both the
-            // decoder maximum and the current viewport. The viewport constraint is
-            // important because a max texture size is only an upper bound; using it as
-            // the actual tile size creates unnecessarily large GPU uploads.
-            var sTileWidth = sWidth() / xTiles
-            var sTileHeight = sHeight() / yTiles
-            var decodedTileWidth = sTileWidth / sampleSize
-            var decodedTileHeight = sTileHeight / sampleSize
-            while (
-                decodedTileWidth + xTiles + 1 > maxTileDimensions.x ||
-                (decodedTileWidth > width * 1.25f && sampleSize < fullImageSampleSize)
-            ) {
-                xTiles += 1
-                sTileWidth = sWidth() / xTiles
-                decodedTileWidth = sTileWidth / sampleSize
-            }
-            while (
-                decodedTileHeight + yTiles + 1 > maxTileDimensions.y ||
-                (decodedTileHeight > height * 1.25f && sampleSize < fullImageSampleSize)
-            ) {
-                yTiles += 1
-                sTileHeight = sHeight() / yTiles
-                decodedTileHeight = sTileHeight / sampleSize
-            }
+            // Keep decoded tiles close to Telephoto's stable 1024-class grid at every
+            // sampling level. The experimental viewport-sized grid produced 7-10MB
+            // bitmaps and made every stable refresh allocate and upload tens of MB in a
+            // short burst. Smaller, level-stable tiles preserve the same source detail
+            // while bounding each decode/upload independently of the device viewport.
+            val levelRatio = sampleSize.toFloat() / fullImageSampleSize.coerceAtLeast(1)
+            val sTileWidth = max(
+                TARGET_DECODED_TILE_SIZE,
+                (sWidth() * levelRatio).toInt(),
+            )
+            val sTileHeight = max(
+                TARGET_DECODED_TILE_SIZE,
+                (sHeight() * levelRatio).toInt(),
+            )
+            val xTiles = (sWidth() / sTileWidth).coerceAtLeast(1)
+            val yTiles = (sHeight() / sTileHeight).coerceAtLeast(1)
 
             val tileGrid = ArrayList<Tile>(xTiles * yTiles)
             for (x in 0 until xTiles) {
@@ -2061,7 +2087,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             diagnosticsListener?.invoke(
                 "tile=GRID sample=$sampleSize sourceTile=${sTileWidth}x$sTileHeight " +
                     "grid=${xTiles}x$yTiles count=${tileGrid.size} " +
-                    "decodedTarget=${decodedTileWidth}x${decodedTileHeight} " +
+                    "decodedTarget=${(sTileWidth + sampleSize - 1) / sampleSize}x" +
+                    "${(sTileHeight + sampleSize - 1) / sampleSize} " +
                     "base=$fullImageSampleSize viewport=${width}x$height source=${sWidth()}x${sHeight()}",
             )
             if (sampleSize == 1) {

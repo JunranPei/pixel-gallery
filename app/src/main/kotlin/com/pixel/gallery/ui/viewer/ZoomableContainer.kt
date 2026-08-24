@@ -125,6 +125,12 @@ fun ZoomableContainer(
     fun beginZoomLifecycle() {
         if (!zoomLifecycleOpen) {
             zoomLifecycleOpen = true
+            ViewerLoadMetrics.snapshotEvent(
+                "PREVIEW_ZOOM_START",
+                "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                    "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                imageKey = diagnosticsKey,
+            )
             onZoomGestureStarted()
         }
     }
@@ -132,6 +138,12 @@ fun ZoomableContainer(
     fun endZoomLifecycle() {
         if (zoomLifecycleOpen) {
             zoomLifecycleOpen = false
+            ViewerLoadMetrics.snapshotEvent(
+                "PREVIEW_ZOOM_END",
+                "gesture=$gestureScale,$gestureOffsetX,$gestureOffsetY " +
+                    "render=$renderScale,$renderOffsetX,$renderOffsetY",
+                imageKey = diagnosticsKey,
+            )
             onZoomGestureEnded()
         }
     }
