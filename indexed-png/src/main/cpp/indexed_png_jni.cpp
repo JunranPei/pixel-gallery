@@ -827,19 +827,34 @@ Java_io_github_indexedpng_IndexedPngNative_decode(
             uint8_t* outputRow = pixels + static_cast<size_t>(y) * bitmapInfo.stride;
             const uint32_t sourceY = static_cast<uint32_t>(top) + y * sampleSize;
             const uint32_t levelY = sourceY / selected->sample;
-            for (uint32_t x = 0; x < expectedWidth; ++x) {
-                const uint32_t sourceX = static_cast<uint32_t>(left) + x * sampleSize;
-                const uint32_t levelX = sourceX / selected->sample;
-                const uint8_t* sourcePixel = pixelAt(
-                    *selected,
-                    decoder->entries,
-                    decoder->fd,
-                    cache,
-                    levelX,
-                    levelY
-                );
-                if (sourcePixel == nullptr) throw std::runtime_error("PNG index pixel is missing");
-                memcpy(outputRow + static_cast<size_t>(x) * 4, sourcePixel, 4);
+            if (selected->sample == static_cast<uint32_t>(sampleSize)) {
+                uint32_t x = 0;
+                while (x < expectedWidth) {
+                    const uint32_t sourceX = static_cast<uint32_t>(left) + x * sampleSize;
+                    const uint32_t levelX = sourceX / selected->sample;
+                    const uint8_t* sourcePixel = pixelAt(
+                        *selected, decoder->entries, decoder->fd, cache, levelX, levelY
+                    );
+                    if (sourcePixel == nullptr) throw std::runtime_error("PNG index pixel is missing");
+                    uint32_t run = std::min(expectedWidth - x, kTileSize - levelX % kTileSize);
+                    run = std::min(run, selected->width - levelX);
+                    memcpy(
+                        outputRow + static_cast<size_t>(x) * 4,
+                        sourcePixel,
+                        static_cast<size_t>(run) * 4
+                    );
+                    x += run;
+                }
+            } else {
+                for (uint32_t x = 0; x < expectedWidth; ++x) {
+                    const uint32_t sourceX = static_cast<uint32_t>(left) + x * sampleSize;
+                    const uint32_t levelX = sourceX / selected->sample;
+                    const uint8_t* sourcePixel = pixelAt(
+                        *selected, decoder->entries, decoder->fd, cache, levelX, levelY
+                    );
+                    if (sourcePixel == nullptr) throw std::runtime_error("PNG index pixel is missing");
+                    memcpy(outputRow + static_cast<size_t>(x) * 4, sourcePixel, 4);
+                }
             }
         }
     } catch (const std::exception& error) {

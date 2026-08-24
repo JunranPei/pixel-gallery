@@ -15,6 +15,7 @@ import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import com.pixel.gallery.utils.BitmapUtils.applyExifOrientation
 import io.github.indexedpng.IndexedPngStore
 import java.io.FileNotFoundException
+import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -95,6 +96,9 @@ private class IndexedPngScreenPreviewFetcher(
                 finishCleared(token, "cancelled-before-open")
                 return
             }
+            if (!isSdrSrgbStillPng(model.sourcePath)) {
+                throw IllegalArgumentException("PNG colour or animation semantics require the source decoder")
+            }
             val decoder = IndexedPngStore(context.applicationContext)
                 .openDecoder(model.sourcePath)
                 ?: throw FileNotFoundException("No ready PNG index")
@@ -155,6 +159,39 @@ private class IndexedPngScreenPreviewFetcher(
     override fun getDataClass(): Class<Bitmap> = Bitmap::class.java
 
     override fun getDataSource(): DataSource = DataSource.LOCAL
+}
+
+/**
+ * Version 1 of the PNG pyramid stores premultiplied RGBA8 pixels but no colour-profile or APNG
+ * metadata. Keep the indexed fit preview on inputs whose display interpretation is unambiguous;
+ * other PNGs fall back to Glide's source decoder. SSIV's existing region policy is unchanged.
+ */
+internal fun isSdrSrgbStillPng(sourcePath: String): Boolean = try {
+    RandomAccessFile(sourcePath, "r").use { input ->
+        if (input.length() < 20L) return@use false
+        input.seek(8L)
+        var hasSrgbChunk = false
+        var hasGammaOrChromaticities = false
+        while (input.filePointer + 12L <= input.length()) {
+            val chunkBytes = input.readInt().toLong() and 0xffff_ffffL
+            val typeBytes = ByteArray(4)
+            input.readFully(typeBytes)
+            val type = typeBytes.toString(Charsets.US_ASCII)
+            val remaining = input.length() - input.filePointer
+            if (chunkBytes > remaining - 4L) return@use false
+            when (type) {
+                "acTL", "iCCP", "cICP", "mDCV", "cLLI" -> return@use false
+                "sRGB" -> hasSrgbChunk = true
+                "gAMA", "cHRM" -> hasGammaOrChromaticities = true
+                "IDAT" -> return@use hasSrgbChunk || !hasGammaOrChromaticities
+                "IEND" -> return@use false
+            }
+            input.seek(input.filePointer + chunkBytes + 4L)
+        }
+        false
+    }
+} catch (_: Exception) {
+    false
 }
 
 private fun fitScreenSampleSize(
