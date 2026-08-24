@@ -57,8 +57,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         // into the visible tiles it covers. Keeping this below 24MB bounds the transient
         // fragment + split copies to roughly the existing 48MB tile-memory budget.
         private const val MAX_SOURCE_MISS_FRAGMENT_BYTES = 24L * 1024L * 1024L
-        private const val MAX_SOURCE_MISS_TILES_PER_FRAGMENT = 4
-        private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 80L
+        // The byte/density limits below already bound the temporary union bitmap and its
+        // split copies. Do not also cap the number of adaptive-grid tiles: smaller tiles can
+        // safely share one fragment, and forcing groups of four stretches one decode burst
+        // into several waves without reducing its total work.
+        private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 16L
         private const val TILE_CACHE_ADMISSION_DELAY_MS = 1200L
         private const val MAX_PENDING_TILE_CACHE_WRITES = 4
         private const val SAMPLE_SIZE_HYSTERESIS = 0.12f
@@ -1355,8 +1358,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 // Submit one bounded source fragment per wave. BitmapRegionDecoder has to
                 // advance through a JPEG stream to reach a vertical region, so decoding
                 // every visible tile independently repeats much of that work. A dense 2D
-                // fragment amortizes the scan across up to four tiles. The next wave starts
-                // only after this one finishes, avoiding a long queue of obsolete misses.
+                // fragment amortizes the scan across every dense tile that still fits the
+                // byte limit. The next wave starts only after this one finishes, avoiding a
+                // long queue of obsolete misses while keeping the work in one compact burst.
                 val fragment = buildSourceMissFragment(sourceMissTiles)
                 if (fragment.isNotEmpty()) {
                     diagnosticsListener?.invoke(
@@ -1484,7 +1488,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val first = candidates.firstOrNull() ?: return emptyList()
         val fragment = mutableListOf(first)
         val remaining = candidates.drop(1).toMutableList()
-        while (fragment.size < MAX_SOURCE_MISS_TILES_PER_FRAGMENT) {
+        while (remaining.isNotEmpty()) {
             val nextIndex = remaining.indices
                 .filter { canExtendSourceMissFragment(fragment, remaining[it]) }
                 .minByOrNull { index -> sourceMissFragmentBytes(fragment + remaining[index]) }
