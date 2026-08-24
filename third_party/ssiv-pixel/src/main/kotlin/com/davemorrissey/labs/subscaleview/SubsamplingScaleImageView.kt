@@ -1358,6 +1358,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     scheduledCount += 1
                 }
             } else {
+                val decoderCapabilities = batchDecoder.capabilities()
                 val cacheProbeDetails = if (diagnosticsListener != null) {
                     ArrayList<String>(prioritizedTiles.size)
                 } else {
@@ -1404,12 +1405,14 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                             "deferred=${sourceMissTiles.size - fragment.size}",
                     )
                 }
-                if (fragment.size > 1) {
+                if (fragment.size > 1 && decoderCapabilities.batchSourceMisses) {
                     execute(TileBatchLoadTask(this, batchDecoder, fragment))
                     scheduledCount += fragment.size
-                } else if (fragment.size == 1) {
-                    execute(TileLoadTask(this, decoder!!, fragment.first()))
-                    scheduledCount += 1
+                } else {
+                    for (tile in fragment) {
+                        execute(TileLoadTask(this, decoder!!, tile))
+                        scheduledCount += 1
+                    }
                 }
             }
         }
@@ -1641,6 +1644,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             }
 
             val sampleSize = calculateRequiredTileSampleSize()
+            val decoderCapabilities = cacheDecoder.capabilities()
+            if (!decoderCapabilities.persistDecodedTiles) {
+                diagnosticsListener?.invoke(
+                    "tile=CACHE_SKIP generation=$generation reason=PERSISTENT_REGION_SOURCE",
+                )
+                return@postDelayed
+            }
             val sourceFocus = getCenter() ?: PointF(sWidth() / 2f, sHeight() / 2f)
             val candidates = tileMap!!.values
                 .flatten()

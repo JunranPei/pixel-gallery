@@ -16,8 +16,22 @@ interface ImageRegionDecoder {
     fun recycle()
 }
 
+/**
+ * Describes which source-miss optimisations are useful for a batched decoder.
+ *
+ * A persistent tile pyramid has already paid the cost of splitting and storing regions. Merging
+ * its misses into a larger bitmap and persisting the decoded result again only adds allocations
+ * and I/O. Sequential source codecs keep the original behaviour through these defaults.
+ */
+data class RegionDecoderCapabilities(
+    val batchSourceMisses: Boolean = true,
+    val persistDecodedTiles: Boolean = true,
+)
+
 /** Optional extension for amortizing adjacent source-cache misses. */
 interface BatchedImageRegionDecoder : ImageRegionDecoder {
+    fun capabilities(): RegionDecoderCapabilities = RegionDecoderCapabilities()
+
     fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean
 
     fun decodeRegions(sRects: List<Rect>, sampleSize: Int): List<Bitmap>
