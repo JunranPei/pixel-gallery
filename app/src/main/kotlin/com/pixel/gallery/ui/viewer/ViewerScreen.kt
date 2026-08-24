@@ -1166,7 +1166,11 @@ internal fun ViewerScreen(
                                         orientationDegrees = media.sourceRotationDegrees,
                                         isActivePage = isActivePage,
                                         isPagerIdle = isPagerIdle,
-                                        isPreviewVisible = isPreviewVisible,
+                                        // The incoming page already has a lightweight 200px cover.
+                                        // Load its screen-sized preview only after it settles; doing
+                                        // both source decodes during the pager gesture caused sporadic
+                                        // high-power swipes between otherwise unzoomed large images.
+                                        isPreviewVisible = isActivePage,
                                         enableSubsampling = !metadataPending,
                                         dateModifiedMillis = media.dateModifiedMillis,
                                         sourceWidth = media.width,
@@ -1201,7 +1205,7 @@ internal fun ViewerScreen(
                                     orientationDegrees = media.sourceRotationDegrees,
                                     isActivePage = isActivePage,
                                     isPagerIdle = isPagerIdle,
-                                    isPreviewVisible = isPreviewVisible,
+                                    isPreviewVisible = isActivePage,
                                     enableSubsampling = !metadataPending,
                                     dateModifiedMillis = media.dateModifiedMillis,
                                     sourceWidth = media.width,
