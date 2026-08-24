@@ -9,13 +9,17 @@ that sequential representation into independently compressed 512-pixel tiles.
 
 ## Build lifecycle
 
-1. libspng validates the PNG and decodes it once to premultiplied RGBA8.
-2. Non-interlaced images are consumed a bounded band at a time. Adam7 images use
+1. A shared source policy verifies that the image is a static SDR sRGB PNG whose display
+   semantics can be represented by the RGBA8 index. Untagged PNGs, explicit `sRGB`, canonical
+   full-range sRGB `cICP`, and canonical `gAMA` + `cHRM` are accepted; animation, ICC, wide-gamut,
+   limited-range, and mastering-display metadata fail closed to the platform decoder.
+2. libspng validates the PNG and decodes it once to premultiplied RGBA8.
+3. Non-interlaced images are consumed a bounded band at a time. Adam7 images use
    a temporary row store because passes revisit rows non-sequentially.
-3. Level 1 tiles are independently compressed with zlib.
-4. Lower-resolution levels are generated losslessly from the preceding level,
+4. Level 1 tiles are independently compressed with zlib.
+5. Lower-resolution levels are generated losslessly from the preceding level,
    keeping peak memory bounded to a handful of tiles.
-5. A fixed-width little-endian directory is written only after every payload is
+6. A fixed-width little-endian directory is written only after every payload is
    complete, then the host atomically publishes the temporary index.
 
 ## Decode lifecycle

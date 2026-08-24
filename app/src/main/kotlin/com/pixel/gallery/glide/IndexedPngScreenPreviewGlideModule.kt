@@ -13,9 +13,10 @@ import com.bumptech.glide.load.model.MultiModelLoaderFactory
 import com.bumptech.glide.signature.ObjectKey
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import com.pixel.gallery.utils.BitmapUtils.applyExifOrientation
+import io.github.indexedpng.IndexedPngSourcePolicy
 import io.github.indexedpng.IndexedPngStore
+import java.io.File
 import java.io.FileNotFoundException
-import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -41,8 +42,10 @@ internal class IndexedPngScreenPreviewLoader(
         height: Int,
         options: Options,
     ): ModelLoader.LoadData<Bitmap> {
+        val source = File(model.sourcePath)
         val cacheKey = ObjectKey(
-            "indexed-png-screen:${model.sourcePath}:${model.dateModifiedMillis}:" +
+            "indexed-png-screen:v${IndexedPngSourcePolicy.CACHE_POLICY_VERSION}:" +
+                "${model.sourcePath}:${model.dateModifiedMillis}:${source.length()}:${source.lastModified()}:" +
                 "${model.sourceWidth}x${model.sourceHeight}:${model.rotationDegrees}:${width}x$height",
         )
         return ModelLoader.LoadData(
@@ -96,8 +99,14 @@ private class IndexedPngScreenPreviewFetcher(
                 finishCleared(token, "cancelled-before-open")
                 return
             }
-            if (!isSdrSrgbStillPng(model.sourcePath)) {
-                throw IllegalArgumentException("PNG colour or animation semantics require the source decoder")
+            val compatibility = IndexedPngSourcePolicy.inspect(model.sourcePath)
+            if (!compatibility.canUseSrgbTilePyramid) {
+                ViewerLoadMetrics.event(
+                    "INDEXED_PNG_PREVIEW_BYPASS",
+                    "reason=${compatibility.name}",
+                    imageKey = imageKey,
+                )
+                throw IllegalArgumentException("PNG index cannot preserve ${compatibility.description}")
             }
             val decoder = IndexedPngStore(context.applicationContext)
                 .openDecoder(model.sourcePath)
@@ -161,40 +170,7 @@ private class IndexedPngScreenPreviewFetcher(
     override fun getDataSource(): DataSource = DataSource.LOCAL
 }
 
-/**
- * Version 1 of the PNG pyramid stores premultiplied RGBA8 pixels but no colour-profile or APNG
- * metadata. Keep the indexed fit preview on inputs whose display interpretation is unambiguous;
- * other PNGs fall back to Glide's source decoder. SSIV's existing region policy is unchanged.
- */
-internal fun isSdrSrgbStillPng(sourcePath: String): Boolean = try {
-    RandomAccessFile(sourcePath, "r").use { input ->
-        if (input.length() < 20L) return@use false
-        input.seek(8L)
-        var hasSrgbChunk = false
-        var hasGammaOrChromaticities = false
-        while (input.filePointer + 12L <= input.length()) {
-            val chunkBytes = input.readInt().toLong() and 0xffff_ffffL
-            val typeBytes = ByteArray(4)
-            input.readFully(typeBytes)
-            val type = typeBytes.toString(Charsets.US_ASCII)
-            val remaining = input.length() - input.filePointer
-            if (chunkBytes > remaining - 4L) return@use false
-            when (type) {
-                "acTL", "iCCP", "cICP", "mDCV", "cLLI" -> return@use false
-                "sRGB" -> hasSrgbChunk = true
-                "gAMA", "cHRM" -> hasGammaOrChromaticities = true
-                "IDAT" -> return@use hasSrgbChunk || !hasGammaOrChromaticities
-                "IEND" -> return@use false
-            }
-            input.seek(input.filePointer + chunkBytes + 4L)
-        }
-        false
-    }
-} catch (_: Exception) {
-    false
-}
-
-private fun fitScreenSampleSize(
+internal fun fitScreenSampleSize(
     sourceWidth: Int,
     sourceHeight: Int,
     rotationDegrees: Int,

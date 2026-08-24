@@ -35,8 +35,12 @@ class IndexedPngStore(context: Context) {
     private val directory = File(context.applicationContext.noBackupFilesDir, DIRECTORY_NAME)
 
     fun status(sourcePath: String): IndexedPngStatus {
-        val source = supportedSource(sourcePath)
+        val source = readableSource(sourcePath)
             ?: return IndexedPngStatus.Unsupported("A readable local PNG file is required")
+        val compatibility = IndexedPngSourcePolicy.inspect(source.absolutePath)
+        if (!compatibility.canUseSrgbTilePyramid) {
+            return IndexedPngStatus.Unsupported("PNG index cannot preserve ${compatibility.description}")
+        }
         val index = indexFile(source)
         if (!index.isFile) return IndexedPngStatus.Absent
         return if (
@@ -54,8 +58,12 @@ class IndexedPngStore(context: Context) {
 
     @Throws(IOException::class)
     fun build(sourcePath: String): IndexedPngInfo = synchronized(mutationLock) {
-        val source = supportedSource(sourcePath)
+        val source = readableSource(sourcePath)
             ?: throw IOException("A readable local PNG file is required")
+        val compatibility = IndexedPngSourcePolicy.inspect(source.absolutePath)
+        if (!compatibility.canUseSrgbTilePyramid) {
+            throw IOException("PNG index cannot preserve ${compatibility.description}")
+        }
         if (!buildInProgress.compareAndSet(false, true)) {
             throw IOException("Another PNG index build is already running")
         }
@@ -114,7 +122,7 @@ class IndexedPngStore(context: Context) {
         return try {
             val sourceIndex = indexFile(File(sourcePath))
             if (!sourceIndex.isFile) return true
-            val destinationSource = supportedSource(destinationPath) ?: return false
+            val destinationSource = compatibleSource(destinationPath) ?: return false
             val destinationIndex = indexFile(destinationSource)
             if (sourceIndex.absolutePath == destinationIndex.absolutePath) return true
             if (destinationIndex.exists() && !destinationIndex.delete()) return false
@@ -132,7 +140,7 @@ class IndexedPngStore(context: Context) {
     }
 
     fun openDecoder(sourcePath: String): IndexedPngRegionDecoder? {
-        val source = supportedSource(sourcePath) ?: return null
+        val source = compatibleSource(sourcePath) ?: return null
         val index = indexFile(source)
         if (!index.isFile) return null
         val handle = IndexedPngNative.open(
@@ -159,7 +167,11 @@ class IndexedPngStore(context: Context) {
             .joinToString("") { "%02x".format(it) }
     }
 
-    private fun supportedSource(path: String): File? {
+    private fun compatibleSource(path: String): File? = readableSource(path)?.takeIf { source ->
+        IndexedPngSourcePolicy.inspect(source.absolutePath).canUseSrgbTilePyramid
+    }
+
+    private fun readableSource(path: String): File? {
         val source = File(path)
         if (!source.isFile || !source.canRead() || source.length() < PNG_SIGNATURE.size) return null
         return try {
