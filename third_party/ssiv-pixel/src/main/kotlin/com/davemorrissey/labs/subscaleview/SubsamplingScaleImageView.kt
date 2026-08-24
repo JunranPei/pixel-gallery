@@ -58,7 +58,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         // fragment + split copies to roughly the existing 48MB tile-memory budget.
         private const val MAX_SOURCE_MISS_FRAGMENT_BYTES = 24L * 1024L * 1024L
         private const val MAX_SOURCE_MISS_TILES_PER_FRAGMENT = 4
-        private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 16L
+        private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 40L
         private const val TILE_CACHE_ADMISSION_DELAY_MS = 1200L
         private const val MAX_PENDING_TILE_CACHE_WRITES = 4
         private const val SAMPLE_SIZE_HYSTERESIS = 0.12f
@@ -81,6 +81,11 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     var diagnosticsListener: ((String) -> Unit)? = null
     var doubleTapZoomScale = 1f
     var cacheTaskExecutor: Executor? = null
+    /**
+     * A caller with a complete fit-screen preview can take rendering ownership back at fit.
+     * In that mode, do not decode a lower-resolution tile wave that will immediately be hidden.
+     */
+    var deferTileLoadsAtOrBelowFit = false
 
     /**
      * Minimum zoom relative to fit-screen. The upstream value is 1f.
@@ -1552,10 +1557,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 "panning=$isPanning anim=${anim != null}",
         )
         postDelayed({
+            val deferredToFitPreview = shouldDeferTileLoadsToFitPreview()
             if (
                 generation == stableTileRefreshGeneration &&
                 decoder != null && tileMap != null &&
-                anim == null && !isZooming && !isPanning
+                anim == null && !isZooming && !isPanning &&
+                !deferredToFitPreview
             ) {
                 diagnosticsListener?.invoke(
                     "tile=REFRESH_FIRE generation=$generation sample=${calculateRequiredTileSampleSize()}",
@@ -1566,11 +1573,16 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 diagnosticsListener?.invoke(
                     "tile=REFRESH_SKIP generation=$generation current=$stableTileRefreshGeneration " +
                         "decoder=${decoder != null} tileMap=${tileMap != null} zooming=$isZooming " +
-                        "panning=$isPanning anim=${anim != null}",
+                        "panning=$isPanning anim=${anim != null} fitPreview=$deferredToFitPreview",
                 )
             }
         }, delayMillis)
     }
+
+    private fun shouldDeferTileLoadsToFitPreview(): Boolean =
+        deferTileLoadsAtOrBelowFit &&
+            kotlin.math.abs(imageRotation) <= 0.001 &&
+            scale <= getFullScale() * 1.02f
 
     private fun scheduleStableTileCachePersistence() {
         val generation = ++stableTileCacheGeneration
@@ -2422,7 +2434,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 "retained=${tileMap?.values.orEmpty().flatten().count { it.bitmap?.isRecycled == false }} " +
                 "preview=$bitmapIsBorrowedPreview",
         )
-        if (!hasLoadingTile && hasMissingTile) {
+        if (!hasLoadingTile && hasMissingTile && !shouldDeferTileLoadsToFitPreview()) {
             scheduleStableTileRefresh(SOURCE_MISS_NEXT_WAVE_DELAY_MS)
         }
         invalidate()

@@ -1136,14 +1136,6 @@ internal fun SimpleSubsamplingImageView(
             onTap = onClick,
             onZoomGestureStarted = {
                 previewGestureInProgress = true
-                if (!deepZoomRequested && enableSubsampling) {
-                    ViewerLoadMetrics.event(
-                        "DEEP_ZOOM_REQUEST",
-                        "reason=user-gesture previewLoaded=$previewLoaded pagerIdle=$isPagerIdle",
-                        imageKey = transformStateKey,
-                    )
-                    deepZoomRequested = true
-                }
             },
             onZoomGestureEnded = {
                 previewGestureInProgress = false
@@ -1151,6 +1143,17 @@ internal fun SimpleSubsamplingImageView(
                     // A gesture that briefly crossed fit no longer needs a renderer
                     // handoff when it finishes below fit.
                     deepZoomRequested = false
+                } else if (!deepZoomRequested && enableSubsampling) {
+                    // Keep the active pinch/double-tap animation preview-only. Starting the
+                    // region source and tile decoder during that same gesture stacks CPU decode
+                    // work on top of continuous GPU transforms and creates avoidable peaks.
+                    ViewerLoadMetrics.event(
+                        "DEEP_ZOOM_REQUEST",
+                        "reason=gesture-settled previewScale=$previewUserScale " +
+                            "previewLoaded=$previewLoaded pagerIdle=$isPagerIdle",
+                        imageKey = transformStateKey,
+                    )
+                    deepZoomRequested = true
                 }
                 ViewerLoadMetrics.event(
                     "DEEP_ZOOM_GESTURE_END",
@@ -1263,6 +1266,7 @@ internal fun SimpleSubsamplingImageView(
                 taskExecutor = tileDecodeExecutor
                 cacheTaskExecutor = tileCacheWriteExecutor
                 setActiveTileMemoryCache(isActivePage)
+                deferTileLoadsAtOrBelowFit = !indexedOnlyRenderer
                 rotationEnabled = true
                 doubleTapReturnsToFit = true
                 // Direct fit-preview gestures already clamp at their configured minimum.
