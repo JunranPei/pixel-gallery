@@ -469,6 +469,7 @@ internal fun SimpleSubsamplingImageView(
     sourceHeight: Int = 0,
     enableUltraHdr: Boolean = false,
     previewModel: Any? = null,
+    indexedFitPreviewModel: Any? = null,
     intermediatePreviewModel: Any? = null,
     metricsDetail: String = "",
     regionDecoderKind: ViewerRegionDecoderKind = ViewerRegionDecoderKind.PLATFORM,
@@ -849,6 +850,7 @@ internal fun SimpleSubsamplingImageView(
         imageViewRef,
         dateModifiedMillis,
         previewModel,
+        indexedFitPreviewModel,
         intermediatePreviewModel,
         enableUltraHdr,
     ) {
@@ -861,10 +863,9 @@ internal fun SimpleSubsamplingImageView(
             val useIntermediatePreview = shouldUseIntermediatePreview(savedTransform)
             val previewUsesContainerTransform = previewOwnsTransform
             imageView.visibility = View.VISIBLE
-            // Telephoto's Glide adapter resolves local photos through the MediaStore URI,
-            // forces DATA caching, then gives its private cache file to the region decoder.
-            // Keep format-specific models unchanged, but use that same route for platform
-            // JPEG/PNG decoding instead of decoding every tile from shared external storage.
+            // Resolve ordinary local photos through their MediaStore URI so scoped-storage
+            // access and Glide signatures stay consistent. The original DATA-cache handoff
+            // is intentionally deferred until deep zoom is actually requested.
             val requestModel = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
                 uri.takeIf { it.isNotBlank() }?.let(Uri::parse) ?: imagePath
             } else {
@@ -892,13 +893,12 @@ internal fun SimpleSubsamplingImageView(
                 val requestOptions = RequestOptions()
                     .withViewerTaskCompression()
                     .format(DecodeFormat.PREFER_ARGB_8888)
-                    .diskCacheStrategy(
-                        if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
-                            DiskCacheStrategy.ALL
-                        } else {
-                            DiskCacheStrategy.RESOURCE
-                        },
-                    )
+                    // Fit-screen display only needs the transformed resource. Caching a
+                    // second copy of a 100MB-class original here made every unzoomed swipe
+                    // pay region-source preparation even if the user never zoomed. The
+                    // original DATA cache is now populated only by the on-demand deep-zoom
+                    // handoff in resolveGlideDataCacheFile().
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                     .downsample(DownsampleStrategy.FIT_CENTER)
                     .priority(if (isActivePage) Priority.IMMEDIATE else Priority.NORMAL)
                     .let { opts ->
@@ -913,7 +913,9 @@ internal fun SimpleSubsamplingImageView(
                     }
 
                 fun previewListener(
+                    phase: String,
                     onCacheMiss: (() -> Unit)? = null,
+                    deferFailureToFallback: Boolean = false,
                 ): com.bumptech.glide.request.RequestListener<Drawable> =
                     object : com.bumptech.glide.request.RequestListener<Drawable> {
                         override fun onLoadFailed(
@@ -923,7 +925,22 @@ internal fun SimpleSubsamplingImageView(
                             isFirstResource: Boolean
                         ): Boolean {
                             if (!previewRequestGuard.isCurrent(imageView, transformStateKey)) return false
+                            if (deferFailureToFallback) {
+                                ViewerLoadMetrics.snapshotEvent(
+                                    "PREVIEW_INDEX_FALLBACK",
+                                    "request=${metricsToken.id} phase=$phase " +
+                                        "error=${e?.rootCauses?.firstOrNull()?.javaClass?.simpleName ?: "index-miss"}",
+                                    imageKey = transformStateKey,
+                                )
+                                return false
+                            }
                             if (onCacheMiss != null) {
+                                ViewerLoadMetrics.snapshotEvent(
+                                    "PREVIEW_CACHE_MISS",
+                                    "request=${metricsToken.id} phase=$phase " +
+                                        "error=${e?.rootCauses?.firstOrNull()?.javaClass?.simpleName ?: "cache-miss"}",
+                                    imageKey = transformStateKey,
+                                )
                                 // A cache-only miss is expected. Start the source path after
                                 // Glide has finished dispatching this request's callback.
                                 imageView.post {
@@ -938,6 +955,12 @@ internal fun SimpleSubsamplingImageView(
                                 e?.rootCauses?.firstOrNull()?.javaClass?.simpleName
                                     ?: e?.javaClass?.simpleName
                                     ?: "unknown",
+                            )
+                            ViewerLoadMetrics.snapshotEvent(
+                                "PREVIEW_PHASE_FAILED",
+                                "request=${metricsToken.id} phase=$phase " +
+                                    "error=${e?.rootCauses?.firstOrNull()?.javaClass?.simpleName ?: "unknown"}",
+                                imageKey = transformStateKey,
                             )
                             previewDrawable = null
                             imageView.alpha = 1f
@@ -1016,7 +1039,13 @@ internal fun SimpleSubsamplingImageView(
                             ViewerLoadMetrics.previewReady(
                                 token = metricsToken,
                                 source = dataSource.name,
-                                detail = "view=${imageView.width}x${imageView.height} ${drawableMetrics(resource)}",
+                                detail = "phase=$phase view=${imageView.width}x${imageView.height} ${drawableMetrics(resource)}",
+                            )
+                            ViewerLoadMetrics.snapshotEvent(
+                                "PREVIEW_PHASE_READY",
+                                "request=${metricsToken.id} phase=$phase source=${dataSource.name} " +
+                                    drawableMetrics(resource),
+                                imageKey = transformStateKey,
                             )
                             return false
                         }
@@ -1025,13 +1054,36 @@ internal fun SimpleSubsamplingImageView(
                 val requestManager = Glide.with(context)
                 val startSourceLoad = {
                     if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
-                        val fullPreviewRequest = requestManager
+                        ViewerLoadMetrics.snapshotEvent(
+                            "PREVIEW_SOURCE_START",
+                            "request=${metricsToken.id} intermediate=$useIntermediatePreview " +
+                                "active=$isActivePage model=${requestModel.javaClass.simpleName}",
+                            imageKey = transformStateKey,
+                        )
+                        val fullSourcePreviewRequest = requestManager
                             // Match Simple Gallery's local-photo path exactly. Going through the
                             // MediaStore URI selects Glide's QMediaStore loader even though SSIV
                             // already proved that the original file is directly readable.
                             .load(requestModel)
                             .apply(requestOptions)
-                            .listener(previewListener())
+                            .listener(previewListener(phase = "FULL_SOURCE"))
+
+                        val fullPreviewRequest = indexedFitPreviewModel?.let { indexedModel ->
+                            requestManager
+                                .asDrawable()
+                                .load(indexedModel)
+                                .apply(
+                                    requestOptions.clone()
+                                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE),
+                                )
+                                .listener(
+                                    previewListener(
+                                        phase = "INDEXED_PNG_SOURCE",
+                                        deferFailureToFallback = true,
+                                    ),
+                                )
+                                .error(fullSourcePreviewRequest)
+                        } ?: fullSourcePreviewRequest
 
                         val sourceRequest = if (useIntermediatePreview) {
                             val thumbnailOptions = RequestOptions()
@@ -1053,6 +1105,44 @@ internal fun SimpleSubsamplingImageView(
                                     .asDrawable()
                                     .load(intermediatePreviewModel ?: requestModel)
                                     .apply(thumbnailOptions)
+                                    .listener(
+                                        object : com.bumptech.glide.request.RequestListener<Drawable> {
+                                            private val startedAtNanos = android.os.SystemClock.elapsedRealtimeNanos()
+
+                                            override fun onLoadFailed(
+                                                e: com.bumptech.glide.load.engine.GlideException?,
+                                                model: Any?,
+                                                target: com.bumptech.glide.request.target.Target<Drawable>,
+                                                isFirstResource: Boolean,
+                                            ): Boolean {
+                                                ViewerLoadMetrics.snapshotEvent(
+                                                    "PREVIEW_512_FAILED",
+                                                    "request=${metricsToken.id} durationMs=${
+                                                        (android.os.SystemClock.elapsedRealtimeNanos() - startedAtNanos) / 1_000_000L
+                                                    } error=${e?.rootCauses?.firstOrNull()?.javaClass?.simpleName ?: "unknown"}",
+                                                    imageKey = transformStateKey,
+                                                )
+                                                return false
+                                            }
+
+                                            override fun onResourceReady(
+                                                resource: Drawable,
+                                                model: Any,
+                                                target: com.bumptech.glide.request.target.Target<Drawable>,
+                                                dataSource: com.bumptech.glide.load.DataSource,
+                                                isFirstResource: Boolean,
+                                            ): Boolean {
+                                                ViewerLoadMetrics.snapshotEvent(
+                                                    "PREVIEW_512_READY",
+                                                    "request=${metricsToken.id} durationMs=${
+                                                        (android.os.SystemClock.elapsedRealtimeNanos() - startedAtNanos) / 1_000_000L
+                                                    } source=${dataSource.name} ${drawableMetrics(resource)}",
+                                                    imageKey = transformStateKey,
+                                                )
+                                                return false
+                                            }
+                                        },
+                                    )
                             )
                         } else {
                             fullPreviewRequest
@@ -1061,14 +1151,42 @@ internal fun SimpleSubsamplingImageView(
                     }
                 }
 
-                // Probe only the existing full-preview cache first. A hit completes here,
-                // so the 512 request is never started. On a miss, the source path above
-                // decides whether the saved 1:1 scale permits the intermediate preview.
-                requestManager
+                // Probe only an already-transformed full-preview resource. Using ALL here
+                // also admitted Glide's cached original file; a resource miss could then
+                // spend nearly a second decoding a huge PNG inside what was meant to be a
+                // cheap probe, bypassing the indexed-preview source path below.
+                ViewerLoadMetrics.snapshotEvent(
+                    "PREVIEW_CACHE_PROBE_START",
+                    "request=${metricsToken.id} active=$isActivePage view=${imageView.width}x${imageView.height} " +
+                        "intermediate=$useIntermediatePreview model=${requestModel.javaClass.simpleName}",
+                    imageKey = transformStateKey,
+                )
+                val sourceCacheProbe = requestManager
                     .load(requestModel)
-                    .apply(requestOptions.clone().onlyRetrieveFromCache(true))
-                    .listener(previewListener(onCacheMiss = startSourceLoad))
-                    .into(imageView)
+                    .apply(
+                        requestOptions.clone()
+                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                            .onlyRetrieveFromCache(true),
+                    )
+                    .listener(previewListener(phase = "FULL_CACHE_PROBE", onCacheMiss = startSourceLoad))
+                val cacheProbe = indexedFitPreviewModel?.let { indexedModel ->
+                    requestManager
+                        .asDrawable()
+                        .load(indexedModel)
+                        .apply(
+                            requestOptions.clone()
+                                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                .onlyRetrieveFromCache(true),
+                        )
+                        .listener(
+                            previewListener(
+                                phase = "INDEXED_PNG_CACHE_PROBE",
+                                deferFailureToFallback = true,
+                            ),
+                        )
+                        .error(sourceCacheProbe)
+                } ?: sourceCacheProbe
+                cacheProbe.into(imageView)
             } else {
                 // The request is deliberately retained across settle/active-page changes.
                 // Do not reveal the 200 px cover when no new preview was started.

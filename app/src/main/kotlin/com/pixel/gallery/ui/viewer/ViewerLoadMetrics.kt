@@ -194,6 +194,27 @@ internal object ViewerLoadMetrics {
         )
     }
 
+    /** Records an expensive process/power snapshot only at diagnostic phase boundaries. */
+    fun snapshotEvent(
+        name: String,
+        detail: String = "",
+        imageKey: String? = null,
+        entryId: Long = currentEntryId(),
+    ) {
+        if (!isEnabled) return
+        val power = latestContinuousPower.get()
+        emit(
+            entryId,
+            "SNAPSHOT entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms name=$name " +
+                "key=${imageKey ?: "none"} thread=${threadLabel()} " +
+                "currentUa=${power?.currentUa ?: "unsupported"} " +
+                "voltageMv=${power?.voltageMv ?: "unsupported"} " +
+                "signedDischargeMw=${power?.signedDischargeMw()?.let {
+                    String.format(Locale.US, "%.1f", it)
+                } ?: "unsupported"} ${snapshotDetail()} $detail"
+        )
+    }
+
     fun checkpoint(context: Context, entryId: Long, label: String) {
         if (!isEnabled) return
         emit(

@@ -17,7 +17,8 @@ val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
         viewerTestVariant == "compressed" ||
         viewerTestVariant == "zoomtrace" ||
-        viewerTestVariant == "jpegindextrace"
+        viewerTestVariant == "jpegindextrace" ||
+        viewerTestVariant == "ssivlite"
     )
 val indexedImageDiagnosticsEnabled = !officialRelease && (
     viewerTestVariant == "jpegindex" || viewerTestVariant == "jpegindextrace"
