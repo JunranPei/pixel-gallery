@@ -674,13 +674,14 @@ internal fun ViewerScreen(
         }
     }
 
-    // Auto-hide UI timer
-    LaunchedEffect(showUI, pagerState.currentPage, isPlayingMotion) {
+    // Keep controls and their popup alive while the overflow menu is open. Closing the
+    // menu starts a fresh timeout instead of letting the old timer dispose the popup.
+    LaunchedEffect(showUI, showMenu, pagerState.currentPage, isPlayingMotion) {
         ViewerLoadMetrics.event(
             "UI_AUTO_HIDE_SCHEDULE",
             "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
         )
-        if (showUI && !isPlayingMotion) {
+        if (showUI && !showMenu && !isPlayingMotion) {
             delay(3000)
             showUI = false
             ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
@@ -818,14 +819,24 @@ internal fun ViewerScreen(
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val isActivePage = pagerState.settledPage == page
                         val isPagerIdle = !pagerState.isScrollInProgress
+                        val isPageActuallyVisible by remember(pagerState, page) {
+                            derivedStateOf {
+                                val layoutInfo = pagerState.layoutInfo
+                                layoutInfo.visiblePagesInfo.any { pageInfo ->
+                                    pageInfo.index == page &&
+                                        pageInfo.offset < layoutInfo.viewportEndOffset &&
+                                        pageInfo.offset + layoutInfo.pageSize > layoutInfo.viewportStartOffset
+                                }
+                            }
+                        }
                         val isPreviewVisible by remember(pagerState, page) {
                             derivedStateOf {
                                 pagerState.settledPage == page ||
-                                    (pagerState.isScrollInProgress &&
-                                        kotlin.math.abs(pagerState.currentPage - page) <= 1)
+                                    (pagerState.isScrollInProgress && isPageActuallyVisible)
                             }
                         }
-                        val allowSwipeThumbnailSourceLoad = pagerState.isScrollInProgress
+                        val allowSwipeThumbnailSourceLoad =
+                            pagerState.isScrollInProgress && isPageActuallyVisible
                         val swipeThumbnailModel = remember(
                             media.uri,
                             media.sourceMimeType,
