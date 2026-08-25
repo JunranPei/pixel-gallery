@@ -499,6 +499,16 @@ internal fun ViewerScreen(
     val jxlIndexStore = remember(context.applicationContext) {
         IndexedJxlStore(context.applicationContext)
     }
+    val jpegIndexGenerations = remember { mutableStateMapOf<String, Long>() }
+    var localIndexCapabilityRevision by remember { mutableLongStateOf(0L) }
+    DisposableEffect(jpegIndexStore, viewerScope) {
+        val registration = jpegIndexStore.addChangeListener { change ->
+            viewerScope.launch {
+                jpegIndexGenerations[change.sourcePath] = change.generation
+            }
+        }
+        onDispose(registration::close)
+    }
     val currentLocalIndexPath = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -508,6 +518,11 @@ internal fun ViewerScreen(
             ?.path
             ?.takeIf { it.isNotEmpty() && File(it).isFile }
     }
+    val currentJpegIndexGeneration = currentLocalIndexPath?.let { path ->
+        val normalizedPath = File(path).absolutePath
+        jpegIndexGenerations[normalizedPath]
+            ?: jpegIndexStore.currentGenerationFor(normalizedPath)
+    } ?: 0L
     val declaredIndexFormat = remember(
         currentMedia?.contentId,
         currentMedia?.dateModifiedMillis,
@@ -547,7 +562,7 @@ internal fun ViewerScreen(
     var imageIndexBusy by remember { mutableStateOf(false) }
     var pendingIndexBuildAfterResolution by remember(currentMediaCacheKey) { mutableStateOf(false) }
     var unsupportedIndexFormat by remember(currentMediaCacheKey) { mutableStateOf<String?>(null) }
-    LaunchedEffect(currentIndexTarget) {
+    LaunchedEffect(currentIndexTarget, currentJpegIndexGeneration) {
         if (!pendingIndexBuildAfterResolution) imageIndexAction = null
         imageIndexBusy = false
         val availability = currentIndexTarget?.let { target ->
@@ -784,6 +799,14 @@ internal fun ViewerScreen(
             key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
+            val mediaIndexPath = remember(media.path) {
+                media.path.takeIf { it.isNotEmpty() }?.let { File(it).absolutePath }
+            }
+            val mediaJpegIndexGeneration = mediaIndexPath?.let { path ->
+                jpegIndexGenerations[path] ?: jpegIndexStore.currentGenerationFor(path)
+            } ?: 0L
+            val mediaIndexCapabilityRevision =
+                mediaJpegIndexGeneration * 31L + localIndexCapabilityRevision
             val pageKey = remember(media.contentId, media.dateModifiedMillis) {
                 media.viewerCacheKey()
             }
@@ -1262,6 +1285,7 @@ internal fun ViewerScreen(
                                     media.sourceRotationDegrees,
                                     media.dateModifiedMillis,
                                     enableUltraHdr,
+                                    mediaJpegIndexGeneration,
                                 ) {
                                     val normalizedMime = media.sourceMimeType
                                         .substringBefore(';')
@@ -1291,6 +1315,7 @@ internal fun ViewerScreen(
                                                 sourceHeight = media.height,
                                                 rotationDegrees = media.sourceRotationDegrees,
                                                 dateModifiedMillis = media.dateModifiedMillis,
+                                                indexGeneration = mediaJpegIndexGeneration,
                                             )
                                             else -> null
                                         }
@@ -1320,6 +1345,7 @@ internal fun ViewerScreen(
                                         "preview=${tiledPlan.previewKind} decoder=${tiledPlan.regionDecoderKind} " +
                                         "motionPending=$metadataPending",
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
+                                    indexCapabilityRevision = mediaIndexCapabilityRevision,
                                     transformStateStore = transformStateStore,
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onUltraHdrAvailabilityChanged = { available ->
@@ -1825,6 +1851,9 @@ internal fun ViewerScreen(
                                             "$formatName index ${if (isBuild) "built" else "deleted"}"
                                         }
                                     }
+                                }
+                                if (result.isSuccess) {
+                                    localIndexCapabilityRevision += 1L
                                 }
                                 if (currentIndexTarget == operationTarget) {
                                     imageIndexBusy = false

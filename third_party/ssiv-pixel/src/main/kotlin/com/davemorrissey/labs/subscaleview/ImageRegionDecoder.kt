@@ -31,6 +31,12 @@ data class RegionDecoderCapabilities(
 
 /** Optional extension for amortizing adjacent source-cache misses. */
 interface BatchedImageRegionDecoder : ImageRegionDecoder {
+    /**
+     * Changes when decoder capabilities that affect SSIV's tile grid may have changed.
+     * Implementations must keep this read cheap; SSIV may query it during drawing.
+     */
+    fun capabilityRevision(): Long = 0L
+
     fun capabilities(sampleSize: Int): RegionDecoderCapabilities = RegionDecoderCapabilities()
 
     fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean
