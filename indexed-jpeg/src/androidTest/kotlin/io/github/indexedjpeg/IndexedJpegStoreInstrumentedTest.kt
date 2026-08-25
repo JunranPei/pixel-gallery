@@ -371,6 +371,51 @@ class IndexedJpegStoreInstrumentedTest {
         source.delete()
     }
 
+    @Test
+    fun highPyramidLevelsAreaFilterAlternatingBandsAndOddEdges() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-area-filter-fixture.jpg")
+        createAlternatingBandFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+
+        val info = store.buildForViewport(
+            sourcePath = source.absolutePath,
+            viewportWidth = 60,
+            viewportHeight = 60,
+        )
+        val layers = store.pyramidLayers(source.absolutePath)
+        assertEquals(listOf(2, 4, 8, 16, 32), layers.map { it.sampleSize })
+
+        store.openOverviewDecoder(source.absolutePath).use { decoder ->
+            val active = requireNotNull(decoder)
+            listOf(16, 32).forEach { sampleSize ->
+                val decoded = active.decodeRegion(
+                    Rect(0, 0, info.sourceWidth, info.sourceHeight),
+                    sampleSize,
+                )
+                assertNotNull(decoded)
+                decoded!!
+                assertEquals(ceilDiv(info.sourceWidth, sampleSize), decoded.width)
+                assertEquals(ceilDiv(info.sourceHeight, sampleSize), decoded.height)
+                val y = decoded.height / 2
+                for (x in 2 until decoded.width - 2) {
+                    val color = decoded.getPixel(x, y)
+                    assertTrue(
+                        "sample=$sampleSize x=$x was ${Color.red(color)} instead of area-filtered gray",
+                        Color.red(color) in 60..195 &&
+                            Color.green(color) in 60..195 &&
+                            Color.blue(color) in 60..195,
+                    )
+                }
+                decoded.recycle()
+            }
+        }
+
+        assertTrue(store.delete(source.absolutePath))
+        source.delete()
+    }
+
     private fun assertBuildAndDecodeOverview(
         store: IndexedJpegStore,
         source: File,
@@ -716,6 +761,22 @@ class IndexedJpegStoreInstrumentedTest {
         }
         FileOutputStream(destination).use { output ->
             assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output))
+        }
+        bitmap.recycle()
+    }
+
+    private fun createAlternatingBandFixture(destination: File) {
+        val width = 2049
+        val height = 257
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val row = IntArray(width) { x ->
+            if ((x / 8) % 2 == 0) Color.BLACK else Color.WHITE
+        }
+        for (y in 0 until height) {
+            bitmap.setPixels(row, 0, width, 0, y, width, 1)
+        }
+        FileOutputStream(destination).use { output ->
+            assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output))
         }
         bitmap.recycle()
     }

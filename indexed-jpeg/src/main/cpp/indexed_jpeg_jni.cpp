@@ -482,6 +482,7 @@ bool encodeScaledTilesFromSource(
     bool decoderCreated = false;
     unsigned char* decodedRow = nullptr;
     unsigned char* outputRow = nullptr;
+    uint64_t* accumulatedRow = nullptr;
     auto* encoders = static_cast<jpeg_compress_struct*>(
         calloc(tilesAcross, sizeof(jpeg_compress_struct)));
     auto* encoded = static_cast<unsigned char**>(
@@ -505,6 +506,7 @@ bool encodeScaledTilesFromSource(
         free(encoderCreated);
         free(decodedRow);
         if (outputRow != decodedRow) free(outputRow);
+        free(accumulatedRow);
         if (decoderCreated) jpeg_destroy_decompress(&decoder);
         fclose(input);
     };
@@ -536,7 +538,12 @@ bool encodeScaledTilesFromSource(
     const size_t decodedRowBytes = static_cast<size_t>(decoder.output_width) * 3u;
     const size_t outputRowBytes = static_cast<size_t>(expectedWidth) * 3u;
     if (decodedRowBytes / 3u != decoder.output_width ||
-        outputRowBytes / 3u != expectedWidth) {
+        outputRowBytes / 3u != expectedWidth ||
+        decoder.output_width < expectedWidth ||
+        decoder.output_height < expectedHeight ||
+        (postSample == 1u &&
+         (decoder.output_width != expectedWidth ||
+          decoder.output_height != expectedHeight))) {
         cleanup();
         return false;
     }
@@ -544,7 +551,18 @@ bool encodeScaledTilesFromSource(
     outputRow = postSample == 1u
         ? decodedRow
         : static_cast<unsigned char*>(malloc(outputRowBytes));
-    if (decodedRow == nullptr || outputRow == nullptr) {
+    if (postSample > 1u) {
+        const size_t accumulatedItems = static_cast<size_t>(expectedWidth) * 3u;
+        if (accumulatedItems / 3u != expectedWidth ||
+            accumulatedItems > SIZE_MAX / sizeof(uint64_t)) {
+            cleanup();
+            return false;
+        }
+        accumulatedRow = static_cast<uint64_t*>(
+            calloc(accumulatedItems, sizeof(uint64_t)));
+    }
+    if (decodedRow == nullptr || outputRow == nullptr ||
+        (postSample > 1u && accumulatedRow == nullptr)) {
         cleanup();
         return false;
     }
@@ -560,7 +578,6 @@ bool encodeScaledTilesFromSource(
     layer->tiles.clear();
     layer->tiles.reserve(static_cast<size_t>(tileCount));
 
-    uint32_t decodedY = 0;
     for (uint32_t outputY = 0; outputY < expectedHeight; ++outputY) {
         const uint32_t tileY = outputY / kPyramidTileSize;
         const uint32_t localY = outputY % kPyramidTileSize;
@@ -589,30 +606,61 @@ bool encodeScaledTilesFromSource(
             }
         }
 
-        const uint32_t targetY = std::min<uint32_t>(
-            outputY * postSample,
-            static_cast<uint32_t>(decoder.output_height - 1u));
-        while (decoder.output_scanline <= targetY) {
+        if (postSample == 1u) {
             JSAMPROW row = decodedRow;
             if (jpeg_read_scanlines(&decoder, &row, 1) != 1) {
                 cleanup();
                 return false;
             }
-            decodedY = static_cast<uint32_t>(decoder.output_scanline - 1u);
-        }
-        if (decodedY != targetY) {
-            cleanup();
-            return false;
-        }
-        if (postSample > 1u) {
+        } else {
+            const uint32_t sourceYStart = outputY * postSample;
+            const uint32_t sourceYEnd = std::min<uint32_t>(
+                decoder.output_height,
+                sourceYStart + postSample);
+            if (decoder.output_scanline != sourceYStart ||
+                sourceYStart >= sourceYEnd) {
+                cleanup();
+                return false;
+            }
+            std::memset(
+                accumulatedRow,
+                0,
+                static_cast<size_t>(expectedWidth) * 3u * sizeof(uint64_t));
+            for (uint32_t sourceY = sourceYStart; sourceY < sourceYEnd; ++sourceY) {
+                JSAMPROW row = decodedRow;
+                if (jpeg_read_scanlines(&decoder, &row, 1) != 1) {
+                    cleanup();
+                    return false;
+                }
+                for (uint32_t outputX = 0; outputX < expectedWidth; ++outputX) {
+                    const uint32_t sourceXStart = outputX * postSample;
+                    const uint32_t sourceXEnd = std::min<uint32_t>(
+                        decoder.output_width,
+                        sourceXStart + postSample);
+                    for (uint32_t sourceX = sourceXStart; sourceX < sourceXEnd; ++sourceX) {
+                        const size_t inputOffset = static_cast<size_t>(sourceX) * 3u;
+                        const size_t outputOffset = static_cast<size_t>(outputX) * 3u;
+                        accumulatedRow[outputOffset] += decodedRow[inputOffset];
+                        accumulatedRow[outputOffset + 1u] += decodedRow[inputOffset + 1u];
+                        accumulatedRow[outputOffset + 2u] += decodedRow[inputOffset + 2u];
+                    }
+                }
+            }
+            const uint64_t rowsInBox = sourceYEnd - sourceYStart;
             for (uint32_t outputX = 0; outputX < expectedWidth; ++outputX) {
-                const uint32_t inputX = std::min<uint32_t>(
-                    outputX * postSample,
-                    static_cast<uint32_t>(decoder.output_width - 1u));
-                std::memcpy(
-                    outputRow + static_cast<size_t>(outputX) * 3u,
-                    decodedRow + static_cast<size_t>(inputX) * 3u,
-                    3u);
+                const uint32_t sourceXStart = outputX * postSample;
+                const uint32_t sourceXEnd = std::min<uint32_t>(
+                    decoder.output_width,
+                    sourceXStart + postSample);
+                const uint64_t pixelCount =
+                    rowsInBox * static_cast<uint64_t>(sourceXEnd - sourceXStart);
+                const size_t offset = static_cast<size_t>(outputX) * 3u;
+                outputRow[offset] = static_cast<unsigned char>(
+                    (accumulatedRow[offset] + pixelCount / 2u) / pixelCount);
+                outputRow[offset + 1u] = static_cast<unsigned char>(
+                    (accumulatedRow[offset + 1u] + pixelCount / 2u) / pixelCount);
+                outputRow[offset + 2u] = static_cast<unsigned char>(
+                    (accumulatedRow[offset + 2u] + pixelCount / 2u) / pixelCount);
             }
         }
         for (uint32_t tileX = 0; tileX < tilesAcross; ++tileX) {
@@ -669,8 +717,11 @@ bool encodeScaledTilesFromSource(
     fclose(input);
     input = nullptr;
     free(decodedRow);
+    if (outputRow != decodedRow) free(outputRow);
+    free(accumulatedRow);
     decodedRow = nullptr;
     outputRow = nullptr;
+    accumulatedRow = nullptr;
     free(encoders);
     free(encoded);
     free(encodedBytes);
