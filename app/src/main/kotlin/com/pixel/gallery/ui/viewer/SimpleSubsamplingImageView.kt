@@ -1090,7 +1090,7 @@ internal fun SimpleSubsamplingImageView(
                                 )
                                 .listener(
                                     previewListener(
-                                        phase = "INDEXED_PNG_SOURCE",
+                                        phase = "INDEXED_FIT_SOURCE",
                                         deferFailureToFallback = true,
                                     ),
                                 )
@@ -1192,7 +1192,7 @@ internal fun SimpleSubsamplingImageView(
                         )
                         .listener(
                             previewListener(
-                                phase = "INDEXED_PNG_CACHE_PROBE",
+                                phase = "INDEXED_FIT_CACHE_PROBE",
                                 deferFailureToFallback = true,
                             ),
                         )

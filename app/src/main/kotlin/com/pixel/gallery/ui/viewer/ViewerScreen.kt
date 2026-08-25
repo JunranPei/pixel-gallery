@@ -50,6 +50,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.glide.AvesAppGlideModule
+import com.pixel.gallery.glide.IndexedJpegScreenPreview
 import com.pixel.gallery.glide.IndexedPngScreenPreview
 import com.pixel.gallery.glide.SvgImage
 import com.pixel.gallery.glide.TiffImage
@@ -1224,6 +1225,7 @@ internal fun ViewerScreen(
                                     media.height,
                                     media.sourceRotationDegrees,
                                     media.dateModifiedMillis,
+                                    enableUltraHdr,
                                 ) {
                                     val normalizedMime = media.sourceMimeType
                                         .substringBefore(';')
@@ -1231,18 +1233,31 @@ internal fun ViewerScreen(
                                         .lowercase()
                                     val isPng = normalizedMime == MimeTypes.PNG ||
                                         media.path.endsWith(".png", ignoreCase = true)
+                                    val isJpeg = normalizedMime == MimeTypes.JPEG ||
+                                        media.path.endsWith(".jpg", ignoreCase = true) ||
+                                        media.path.endsWith(".jpeg", ignoreCase = true)
                                     if (
                                         tiledPlan.previewKind == ViewerPreviewKind.DEFAULT &&
-                                        isPng && media.path.isNotEmpty() &&
+                                        media.path.isNotEmpty() &&
                                         media.width > 0 && media.height > 0
                                     ) {
-                                        IndexedPngScreenPreview(
-                                            sourcePath = media.path,
-                                            sourceWidth = media.width,
-                                            sourceHeight = media.height,
-                                            rotationDegrees = media.sourceRotationDegrees,
-                                            dateModifiedMillis = media.dateModifiedMillis,
-                                        )
+                                        when {
+                                            isPng -> IndexedPngScreenPreview(
+                                                sourcePath = media.path,
+                                                sourceWidth = media.width,
+                                                sourceHeight = media.height,
+                                                rotationDegrees = media.sourceRotationDegrees,
+                                                dateModifiedMillis = media.dateModifiedMillis,
+                                            )
+                                            isJpeg && !enableUltraHdr -> IndexedJpegScreenPreview(
+                                                sourcePath = media.path,
+                                                sourceWidth = media.width,
+                                                sourceHeight = media.height,
+                                                rotationDegrees = media.sourceRotationDegrees,
+                                                dateModifiedMillis = media.dateModifiedMillis,
+                                            )
+                                            else -> null
+                                        }
                                     } else {
                                         null
                                     }
@@ -1615,7 +1630,8 @@ internal fun ViewerScreen(
                             detectedFormatMessage + when (target.format) {
                                 IndexedImageFormat.JPEG ->
                                     "This reads the complete JPEG once and may briefly use significant power. " +
-                                        "The saved seek index applies only to this image and every zoom level."
+                                        "The saved seek index and compact fit-screen layer apply only to this " +
+                                        "image; both are produced by the same scan."
                                 IndexedImageFormat.PNG ->
                                     "This decodes the complete PNG once and builds a lossless multi-resolution " +
                                         "tile index. It may temporarily use significant power and storage."

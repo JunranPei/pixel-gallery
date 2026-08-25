@@ -14,6 +14,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 
 @RunWith(AndroidJUnit4::class)
 class IndexedJpegStoreInstrumentedTest {
@@ -30,6 +31,7 @@ class IndexedJpegStoreInstrumentedTest {
         assertEquals(512, info.sourceWidth)
         assertEquals(384, info.sourceHeight)
         assertTrue(info.indexBytes > 0L)
+        assertEquals(0, info.pyramidLayerCount)
         assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
 
         store.openDecoder(source.absolutePath).use { decoder ->
@@ -91,6 +93,7 @@ class IndexedJpegStoreInstrumentedTest {
 
         val info = store.build(source.absolutePath)
         assertTrue(info.scanCount > 1)
+        assertEquals(0L, info.overviewBytes)
         store.openDecoder(source.absolutePath).use { decoder ->
             assertNotNull(decoder)
             val region = Rect(64, 48, 448, 336)
@@ -98,8 +101,363 @@ class IndexedJpegStoreInstrumentedTest {
             assertDecodedSize(decoder.decodeRegion(region, 4), 96, 72)
         }
 
+        // Version 3 indexes without an overview used the original checkpoint
+        // path and remain safe; only the affected v3 overview files are rejected.
+        val index = persistedIndexFile(context, source)
+        val version3 = index.readBytes()
+        writeLittleEndianInt(version3, 8, 3)
+        index.writeBytes(version3)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        store.openDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            assertDecodedSize(decoder!!.decodeRegion(Rect(64, 48, 448, 336), 4), 96, 72)
+        }
+
         assertTrue(store.delete(source.absolutePath))
     }
+
+    @Test
+    fun version2IndexRemainsUsableForTilesWithoutOverview() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-v2-compatibility-fixture.jpg")
+        createFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+
+        val info = store.buildForViewport(
+            sourcePath = source.absolutePath,
+            viewportWidth = 120,
+            viewportHeight = 160,
+        )
+        assertTrue(info.overviewBytes > 0L)
+        val index = persistedIndexFile(context, source)
+        val region = Rect(320, 48, 500, 336)
+        store.openDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            assertRegionMatchesPlatform(
+                source = source,
+                indexed = decoder!!,
+                region = region,
+                sampleSize = 1,
+            )
+        }
+        val currentVersion = index.readBytes()
+        writeLittleEndianInt(currentVersion, 8, 3)
+        index.writeBytes(currentVersion)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Invalid)
+        assertEquals(null, store.openDecoder(source.absolutePath))
+
+        writeLittleEndianInt(currentVersion, 8, 6)
+        convertCurrentPyramidToSingleLayer(index, currentVersion, version = 4)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        val legacyOverview = store.decodeScreenOverview(source.absolutePath, 0, 120, 160)
+        assertNotNull(legacyOverview)
+        legacyOverview!!.recycle()
+        assertEquals(null, store.openOverviewDecoder(source.absolutePath))
+
+        convertCurrentPyramidToSingleLayer(index, currentVersion, version = 5)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        store.openOverviewDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+        }
+        index.writeBytes(currentVersion)
+        downgradeCurrentIndexToVersion2(index)
+
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        assertEquals(
+            null,
+            store.decodeScreenOverview(
+                sourcePath = source.absolutePath,
+                rotationDegrees = 0,
+                requestedWidth = 120,
+                requestedHeight = 160,
+            ),
+        )
+        store.openDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            assertRegionMatchesPlatform(
+                source = source,
+                indexed = decoder!!,
+                region = region,
+                sampleSize = 1,
+            )
+        }
+
+        assertTrue(store.delete(source.absolutePath))
+        source.delete()
+    }
+
+    @Test
+    fun baselineBuildEmbedsAndDecodesFitOverview() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-overview-fixture.jpg")
+        createOverviewFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+
+        assertBuildAndDecodeOverview(
+            store = store,
+            source = source,
+            viewportWidth = 500,
+            viewportHeight = 700,
+            expectedSamples = listOf(2),
+        )
+        assertBuildAndDecodeOverview(
+            store = store,
+            source = source,
+            viewportWidth = 250,
+            viewportHeight = 350,
+            expectedSamples = listOf(2, 4),
+        )
+        assertBuildAndDecodeOverview(
+            store = store,
+            source = source,
+            viewportWidth = 120,
+            viewportHeight = 160,
+            expectedSamples = listOf(2, 4, 8),
+        )
+
+        val relocated = File(context.cacheDir, "indexed-jpeg-overview-relocated.jpg")
+        store.delete(relocated.absolutePath)
+        relocated.delete()
+        assertTrue(source.renameTo(relocated))
+        assertTrue(store.relocate(source.absolutePath, relocated.absolutePath))
+        val relocatedOverview = store.decodeScreenOverview(
+            sourcePath = relocated.absolutePath,
+            rotationDegrees = 0,
+            requestedWidth = 120,
+            requestedHeight = 160,
+        )
+        assertNotNull(relocatedOverview)
+        relocatedOverview!!.recycle()
+        assertTrue(relocated.renameTo(source))
+        assertTrue(store.relocate(relocated.absolutePath, source.absolutePath))
+
+        // The embedded layer is never stretched beyond its available resolution.
+        assertEquals(
+            null,
+            store.decodeScreenOverview(
+                sourcePath = source.absolutePath,
+                rotationDegrees = 0,
+                requestedWidth = 3000,
+                requestedHeight = 3000,
+            ),
+        )
+        assertTrue(store.delete(source.absolutePath))
+        assertEquals(
+            null,
+            store.decodeScreenOverview(source.absolutePath, 0, 120, 160),
+        )
+        source.delete()
+    }
+
+    private fun assertBuildAndDecodeOverview(
+        store: IndexedJpegStore,
+        source: File,
+        viewportWidth: Int,
+        viewportHeight: Int,
+        expectedSamples: List<Int>,
+    ) {
+        val info = store.buildForViewport(
+            sourcePath = source.absolutePath,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight,
+        )
+        assertTrue(info.overviewBytes > 0L)
+        assertEquals(expectedSamples.size, info.pyramidLayerCount)
+        assertEquals(2, info.overviewSampleSize)
+        assertEquals(ceilDiv(info.sourceWidth, 2), info.overviewWidth)
+        assertEquals(ceilDiv(info.sourceHeight, 2), info.overviewHeight)
+        val layers = store.pyramidLayers(source.absolutePath)
+        assertEquals(expectedSamples, layers.map { it.sampleSize })
+        layers.forEach { layer ->
+            assertEquals(ceilDiv(info.sourceWidth, layer.sampleSize), layer.width)
+            assertEquals(ceilDiv(info.sourceHeight, layer.sampleSize), layer.height)
+            assertTrue(layer.bytes > 0)
+        }
+        val overview = store.decodeScreenOverview(
+            sourcePath = source.absolutePath,
+            rotationDegrees = 0,
+            requestedWidth = viewportWidth,
+            requestedHeight = viewportHeight,
+        )
+        assertNotNull(overview)
+        overview!!
+        assertTrue(overview.width <= layers.last().width)
+        assertTrue(overview.height <= layers.last().height)
+        assertTrue(
+            overviewCoversFit(
+                overviewWidth = overview.width,
+                overviewHeight = overview.height,
+                sourceWidth = info.sourceWidth,
+                sourceHeight = info.sourceHeight,
+                rotationDegrees = 0,
+                requestedWidth = viewportWidth,
+                requestedHeight = viewportHeight,
+            ),
+        )
+        assertOverviewColorsArePlausible(overview)
+        val decodeSample = (info.sourceWidth / overview.width).coerceAtLeast(1)
+        assertOverviewMatchesSampledSource(
+            source,
+            overview,
+            decodeSample,
+        )
+        overview.recycle()
+
+        store.openOverviewDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            val activeDecoder = requireNotNull(decoder)
+            val splitX = info.sourceWidth / 2
+            val splitY = info.sourceHeight / 2
+            layers.forEach { layer ->
+                val full = activeDecoder.decodeRegion(
+                    Rect(0, 0, info.sourceWidth, info.sourceHeight),
+                    layer.sampleSize,
+                )
+                assertNotNull(full)
+                assertEquals(layer.width, full!!.width)
+                assertEquals(layer.height, full.height)
+                assertOverviewMatchesSampledSource(source, full, layer.sampleSize)
+                full.recycle()
+
+                listOf(
+                    Rect(0, 0, splitX, splitY),
+                    Rect(splitX, 0, info.sourceWidth, splitY),
+                    Rect(0, splitY, splitX, info.sourceHeight),
+                    Rect(splitX, splitY, info.sourceWidth, info.sourceHeight),
+                ).forEach { rect ->
+                    val tile = activeDecoder.decodeRegion(rect, layer.sampleSize)
+                    assertNotNull(tile)
+                    assertEquals(ceilDiv(rect.width(), layer.sampleSize), tile!!.width)
+                    assertEquals(ceilDiv(rect.height(), layer.sampleSize), tile.height)
+                    tile.recycle()
+                }
+            }
+            assertEquals(
+                null,
+                activeDecoder.decodeRegion(
+                    Rect(0, 0, info.sourceWidth, info.sourceHeight),
+                    1,
+                ),
+            )
+        }
+    }
+
+    private fun persistedIndexFile(
+        context: android.content.Context,
+        source: File,
+    ): File {
+        val stablePath = source.canonicalPath
+        val key = MessageDigest.getInstance("SHA-256")
+            .digest(stablePath.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return File(File(context.noBackupFilesDir, "indexed-jpeg"), "$key.ijx")
+            .also { assertTrue(it.isFile) }
+    }
+
+    private fun convertCurrentPyramidToSingleLayer(
+        index: File,
+        current: ByteArray,
+        version: Int,
+    ) {
+        val headerBytes = 64
+        val pyramidBytes = readLittleEndianInt(current, 60)
+        assertEquals(6, readLittleEndianInt(current, 8))
+        assertTrue(pyramidBytes > 0)
+        val overviewMarkerOffset = current.size - Int.SIZE_BYTES - pyramidBytes - Int.SIZE_BYTES
+        assertEquals(0x3152564f, readLittleEndianInt(current, overviewMarkerOffset))
+        val payloadOffset = overviewMarkerOffset + Int.SIZE_BYTES
+        assertEquals(0x31525950, readLittleEndianInt(current, payloadOffset))
+        val count = readLittleEndianInt(current, payloadOffset + Int.SIZE_BYTES)
+        assertTrue(count > 0)
+        val selectedDirectory = payloadOffset + 2 * Int.SIZE_BYTES + (count - 1) * 16
+        val sampleSize = readLittleEndianInt(current, selectedDirectory)
+        val width = readLittleEndianInt(current, selectedDirectory + 4)
+        val height = readLittleEndianInt(current, selectedDirectory + 8)
+        val encodedBytes = readLittleEndianInt(current, selectedDirectory + 12)
+        var encodedOffset = payloadOffset + 2 * Int.SIZE_BYTES + count * 16
+        repeat(count - 1) { position ->
+            encodedOffset += readLittleEndianInt(
+                current,
+                payloadOffset + 2 * Int.SIZE_BYTES + position * 16 + 12,
+            )
+        }
+
+        val recordsBytes = overviewMarkerOffset - headerBytes
+        val single = ByteArray(
+            headerBytes + recordsBytes + Int.SIZE_BYTES + encodedBytes + Int.SIZE_BYTES,
+        )
+        current.copyInto(single, endIndex = headerBytes)
+        writeLittleEndianInt(single, 8, version)
+        writeLittleEndianInt(single, 48, width)
+        writeLittleEndianInt(single, 52, height)
+        writeLittleEndianInt(single, 56, sampleSize)
+        writeLittleEndianInt(single, 60, encodedBytes)
+        current.copyInto(
+            destination = single,
+            destinationOffset = headerBytes,
+            startIndex = headerBytes,
+            endIndex = overviewMarkerOffset,
+        )
+        val singleMarkerOffset = headerBytes + recordsBytes
+        writeLittleEndianInt(single, singleMarkerOffset, 0x3152564f)
+        current.copyInto(
+            destination = single,
+            destinationOffset = singleMarkerOffset + Int.SIZE_BYTES,
+            startIndex = encodedOffset,
+            endIndex = encodedOffset + encodedBytes,
+        )
+        writeLittleEndianInt(single, single.size - Int.SIZE_BYTES, 0x31444e45)
+        index.writeBytes(single)
+    }
+
+    private fun downgradeCurrentIndexToVersion2(index: File) {
+        val current = index.readBytes()
+        val versionOffset = 8
+        val currentHeaderBytes = 64
+        val version2HeaderBytes = 48
+        val overviewBytes = readLittleEndianInt(current, 60)
+        assertEquals(6, readLittleEndianInt(current, versionOffset))
+        assertTrue(overviewBytes > 0)
+
+        val overviewMarkerOffset = current.size - Int.SIZE_BYTES - overviewBytes - Int.SIZE_BYTES
+        assertEquals(0x3152564f, readLittleEndianInt(current, overviewMarkerOffset))
+        assertEquals(0x31444e45, readLittleEndianInt(current, current.size - Int.SIZE_BYTES))
+
+        val recordsBytes = overviewMarkerOffset - currentHeaderBytes
+        val version2 = ByteArray(version2HeaderBytes + recordsBytes + Int.SIZE_BYTES)
+        current.copyInto(version2, endIndex = version2HeaderBytes)
+        writeLittleEndianInt(version2, versionOffset, 2)
+        current.copyInto(
+            destination = version2,
+            destinationOffset = version2HeaderBytes,
+            startIndex = currentHeaderBytes,
+            endIndex = overviewMarkerOffset,
+        )
+        current.copyInto(
+            destination = version2,
+            destinationOffset = version2.size - Int.SIZE_BYTES,
+            startIndex = current.size - Int.SIZE_BYTES,
+        )
+        index.writeBytes(version2)
+    }
+
+    private fun readLittleEndianInt(bytes: ByteArray, offset: Int): Int =
+        (bytes[offset].toInt() and 0xff) or
+            ((bytes[offset + 1].toInt() and 0xff) shl 8) or
+            ((bytes[offset + 2].toInt() and 0xff) shl 16) or
+            ((bytes[offset + 3].toInt() and 0xff) shl 24)
+
+    private fun writeLittleEndianInt(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = value.toByte()
+        bytes[offset + 1] = (value ushr 8).toByte()
+        bytes[offset + 2] = (value ushr 16).toByte()
+        bytes[offset + 3] = (value ushr 24).toByte()
+    }
+
+    private fun ceilDiv(value: Int, divisor: Int): Int =
+        ((value.toLong() + divisor - 1L) / divisor).toInt()
 
     private fun assertDecodedSize(bitmap: Bitmap?, width: Int, height: Int) {
         assertNotNull(bitmap)
@@ -182,5 +540,75 @@ class IndexedJpegStoreInstrumentedTest {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 91, output))
         }
         bitmap.recycle()
+    }
+
+    private fun createOverviewFixture(destination: File) {
+        val width = 2048
+        val height = 1536
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val row = IntArray(width)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                row[x] = Color.rgb(
+                    24 + x * 200 / (width - 1),
+                    20 + y * 210 / (height - 1),
+                    32 + (x + y) * 180 / (width + height - 2),
+                )
+            }
+            bitmap.setPixels(row, 0, width, 0, y, width, 1)
+        }
+        FileOutputStream(destination).use { output ->
+            assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output))
+        }
+        bitmap.recycle()
+    }
+
+    private fun assertOverviewColorsArePlausible(bitmap: Bitmap) {
+        val topLeft = bitmap.getPixel(bitmap.width / 8, bitmap.height / 8)
+        val bottomRight = bitmap.getPixel(bitmap.width * 7 / 8, bitmap.height * 7 / 8)
+        assertTrue(Color.red(bottomRight) > Color.red(topLeft) + 100)
+        assertTrue(Color.green(bottomRight) > Color.green(topLeft) + 100)
+        assertTrue(Color.blue(bottomRight) > Color.blue(topLeft) + 80)
+    }
+
+    private fun assertOverviewMatchesSampledSource(
+        source: File,
+        overview: Bitmap,
+        sampleSize: Int,
+    ) {
+        val sampled = BitmapFactory.decodeFile(
+            source.absolutePath,
+            BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        )
+        assertNotNull(sampled)
+        sampled!!
+        val expected = if (sampled.width == overview.width && sampled.height == overview.height) {
+            sampled
+        } else {
+            Bitmap.createScaledBitmap(sampled, overview.width, overview.height, true)
+        }
+        assertEquals(expected.width, overview.width)
+        assertEquals(expected.height, overview.height)
+        var totalDifference = 0L
+        var channelSamples = 0L
+        val stepX = (overview.width / 32).coerceAtLeast(1)
+        val stepY = (overview.height / 32).coerceAtLeast(1)
+        for (y in 0 until overview.height step stepY) {
+            for (x in 0 until overview.width step stepX) {
+                val actualColor = overview.getPixel(x, y)
+                val expectedColor = expected.getPixel(x, y)
+                totalDifference += kotlin.math.abs(Color.red(actualColor) - Color.red(expectedColor))
+                totalDifference += kotlin.math.abs(Color.green(actualColor) - Color.green(expectedColor))
+                totalDifference += kotlin.math.abs(Color.blue(actualColor) - Color.blue(expectedColor))
+                channelSamples += 3
+            }
+        }
+        val meanDifference = totalDifference.toDouble() / channelSamples.coerceAtLeast(1)
+        if (expected !== sampled) expected.recycle()
+        sampled.recycle()
+        assertTrue("Overview mean RGB difference was $meanDifference", meanDifference <= 12.0)
     }
 }

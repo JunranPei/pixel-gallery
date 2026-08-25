@@ -14,6 +14,7 @@ import com.davemorrissey.labs.subscaleview.RegionDecoderCapabilities
 import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import io.github.indexedjpeg.IndexedJpegRegionDecoder
+import io.github.indexedjpeg.IndexedJpegOverviewRegionDecoder
 import io.github.indexedjpeg.IndexedJpegStore
 import io.github.indexedjpeg.IndexedJpegStatus
 import io.github.indexedpng.IndexedPngRegionDecoder
@@ -150,8 +151,11 @@ class FastRegionDecoder(
     private var localSourcePath: String? = null
     private var indexedStore: IndexedJpegStore? = null
     private var indexedDecoder: IndexedJpegRegionDecoder? = null
+    private var indexedOverviewDecoder: IndexedJpegOverviewRegionDecoder? = null
     private var indexedGeneration = Long.MIN_VALUE
+    private var indexedOverviewGeneration = Long.MIN_VALUE
     private var indexedDecodeFailed = false
+    private var indexedOverviewDecodeFailed = false
     private var indexedPngStore: IndexedPngStore? = null
     private var indexedPngDecoder: IndexedPngRegionDecoder? = null
     private var indexedPngGeneration = Long.MIN_VALUE
@@ -442,9 +446,13 @@ class FastRegionDecoder(
             decoderInputStream = null
             indexedDecoder?.close()
             indexedDecoder = null
+            indexedOverviewDecoder?.close()
+            indexedOverviewDecoder = null
             indexedStore = null
             indexedGeneration = Long.MIN_VALUE
+            indexedOverviewGeneration = Long.MIN_VALUE
             indexedDecodeFailed = false
+            indexedOverviewDecodeFailed = false
             indexedPngDecoder?.close()
             indexedPngDecoder = null
             indexedPngStore = null
@@ -552,6 +560,42 @@ class FastRegionDecoder(
                 "heif=open:${indexedHeifDecoder != null},failed:$indexedHeifDecodeFailed,generation:$indexedHeifGeneration",
             imageKey = imageVersion,
         )
+        if (sampleSize >= 2) {
+            refreshIndexedOverviewDecoder()?.let { overview ->
+                if (overview.supports(rect, sampleSize)) {
+                    val startedAt = if (ViewerLoadMetrics.isEnabled) {
+                        SystemClock.elapsedRealtimeNanos()
+                    } else {
+                        0L
+                    }
+                    val bitmap = try {
+                        overview.decodeRegion(rect, sampleSize)
+                    } catch (error: Throwable) {
+                        ViewerLoadMetrics.event(
+                            "INDEXED_JPEG_OVERVIEW_DECODE_ERROR",
+                            "sample=$sampleSize error=${error.javaClass.simpleName}:${error.message}",
+                            imageKey = imageVersion,
+                        )
+                        null
+                    }
+                    if (bitmap != null) {
+                        if (ViewerLoadMetrics.isEnabled) {
+                            ViewerLoadMetrics.event(
+                                "INDEXED_JPEG_OVERVIEW_REGION_DECODE",
+                                "sample=$sampleSize layerSample=${overview.layerSampleSize(sampleSize)} " +
+                                    "bitmap=${bitmap.width}x${bitmap.height} duration=" +
+                                    "${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
+                                imageKey = imageVersion,
+                            )
+                        }
+                        return bitmap to "INDEXED_JPEG_OVERVIEW_REGION_DECODE"
+                    }
+                    overview.close()
+                    indexedOverviewDecoder = null
+                    indexedOverviewDecodeFailed = true
+                }
+            }
+        }
         refreshIndexedDecoder()?.let { indexed ->
             val startedAt = if (ViewerLoadMetrics.isEnabled) {
                 SystemClock.elapsedRealtimeNanos()
@@ -759,6 +803,40 @@ class FastRegionDecoder(
         if (indexedDecoder != null) activeIndexedBackend = IndexedBackend.JPEG
         logIndexOpen("JPEG", sourcePath, indexedDecoder != null)
         return indexedDecoder
+    }
+
+    private fun refreshIndexedOverviewDecoder(): IndexedJpegOverviewRegionDecoder? {
+        val store = indexedStore ?: return null
+        val sourcePath = indexedSourcePath ?: return null
+        val generation = store.currentGeneration
+        if (indexedOverviewGeneration != generation) {
+            indexedOverviewDecoder?.close()
+            indexedOverviewDecoder = null
+            indexedOverviewGeneration = generation
+            indexedOverviewDecodeFailed = false
+        }
+        if (indexedOverviewDecodeFailed) return null
+        indexedOverviewDecoder?.let { return it }
+        indexedOverviewDecoder = try {
+            store.openOverviewDecoder(sourcePath)
+        } catch (_: Throwable) {
+            null
+        }
+        if (indexedOverviewDecoder == null) indexedOverviewDecodeFailed = true
+        ViewerLoadMetrics.event(
+            "INDEX_OPEN",
+            "format=JPEG_PYRAMID result=${if (indexedOverviewDecoder != null) "HIT" else "MISS"} " +
+                "layers=${indexedOverviewDecoder?.availableSampleSizes?.joinToString() ?: "none"}",
+            imageKey = imageVersion,
+        )
+        if (BuildConfig.INDEXED_IMAGE_DIAGNOSTICS_ENABLED) {
+            Log.i(
+                "IndexedImageDecode",
+                "INDEX_OPEN format=JPEG_OVERVIEW result=" +
+                    (if (indexedOverviewDecoder != null) "HIT" else "MISS"),
+            )
+        }
+        return indexedOverviewDecoder
     }
 
     private fun refreshIndexedPngDecoder(): IndexedPngRegionDecoder? {
