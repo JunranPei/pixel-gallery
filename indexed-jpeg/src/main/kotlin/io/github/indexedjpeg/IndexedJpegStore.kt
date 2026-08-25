@@ -11,6 +11,9 @@ import android.view.WindowManager
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -18,9 +21,29 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
+const val INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION = 7
+
+enum class IndexedJpegPyramidType {
+    SEEK_ONLY,
+    FIT_PREVIEW,
+    WHOLE_JPEG_LAYERS,
+    ADDRESSABLE_TILES,
+}
+
 sealed interface IndexedJpegStatus {
     data object Absent : IndexedJpegStatus
-    data class Ready(val bytes: Long) : IndexedJpegStatus
+    data class Ready(
+        val bytes: Long,
+        val formatVersion: Int,
+        val pyramidType: IndexedJpegPyramidType,
+        val pyramidLayerCount: Int,
+    ) : IndexedJpegStatus {
+        val hasAddressablePyramid: Boolean
+            get() = pyramidType == IndexedJpegPyramidType.ADDRESSABLE_TILES
+
+        val canUpgradeToAddressablePyramid: Boolean
+            get() = formatVersion < INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION
+    }
     data class Unsupported(val reason: String) : IndexedJpegStatus
     data class Invalid(val reason: String) : IndexedJpegStatus
 }
@@ -35,6 +58,12 @@ data class IndexedJpegInfo(
     val overviewHeight: Int = 0,
     val overviewSampleSize: Int = 0,
     val pyramidLayerCount: Int = 0,
+    val formatVersion: Int = INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION,
+    val pyramidType: IndexedJpegPyramidType = if (pyramidLayerCount > 0) {
+        IndexedJpegPyramidType.ADDRESSABLE_TILES
+    } else {
+        IndexedJpegPyramidType.SEEK_ONLY
+    },
 )
 
 data class IndexedJpegPyramidLayer(
@@ -69,20 +98,55 @@ class IndexedJpegStore(context: Context) {
     private val directory = File(appContext.noBackupFilesDir, DIRECTORY_NAME)
 
     fun status(sourcePath: String): IndexedJpegStatus {
+        cleanupStaleTemporaryFiles()
         val source = supportedSource(sourcePath)
             ?: return IndexedJpegStatus.Unsupported("A readable local JPEG file is required")
         val index = indexFile(source)
         if (!index.isFile) return IndexedJpegStatus.Absent
-        return if (IndexedJpegNative.validateIndex(
+        if (!IndexedJpegNative.validateIndex(
                 index.absolutePath,
                 source.length(),
                 source.lastModified(),
             )
         ) {
-            IndexedJpegStatus.Ready(index.length())
-        } else {
-            IndexedJpegStatus.Invalid("The image changed or the index is incompatible")
+            return IndexedJpegStatus.Invalid("The image changed or the index is incomplete")
         }
+        val metadata = IndexedJpegNative.readIndexMetadata(
+            index.absolutePath,
+            source.length(),
+            source.lastModified(),
+        )
+        if (metadata == null || metadata.size < INDEX_METADATA_SIZE) {
+            return IndexedJpegStatus.Invalid("The JPEG index metadata is unreadable")
+        }
+        val formatVersion = metadata[0]
+        val overviewBytes = metadata[6]
+        val pyramid = if (
+            formatVersion >= MULTI_LAYER_PYRAMID_FORMAT_VERSION && overviewBytes > 0
+        ) {
+            readPyramidMetadata(index, source)
+                ?: return IndexedJpegStatus.Invalid("The JPEG pyramid directory is incomplete")
+        } else {
+            null
+        }
+        val pyramidType = when {
+            formatVersion >= ADDRESSABLE_PYRAMID_FORMAT_VERSION && pyramid != null ->
+                IndexedJpegPyramidType.ADDRESSABLE_TILES
+            formatVersion >= MULTI_LAYER_PYRAMID_FORMAT_VERSION && pyramid != null ->
+                IndexedJpegPyramidType.WHOLE_JPEG_LAYERS
+            formatVersion == SINGLE_LAYER_OVERVIEW_FORMAT_VERSION && overviewBytes > 0 ->
+                IndexedJpegPyramidType.WHOLE_JPEG_LAYERS
+            formatVersion == FIT_OVERVIEW_FORMAT_VERSION && overviewBytes > 0 ->
+                IndexedJpegPyramidType.FIT_PREVIEW
+            else -> IndexedJpegPyramidType.SEEK_ONLY
+        }
+        return IndexedJpegStatus.Ready(
+            bytes = index.length(),
+            formatVersion = formatVersion,
+            pyramidType = pyramidType,
+            pyramidLayerCount = pyramid?.layers?.size
+                ?: if (pyramidType == IndexedJpegPyramidType.WHOLE_JPEG_LAYERS) 1 else 0,
+        )
     }
 
     @Throws(IOException::class)
@@ -112,7 +176,10 @@ class IndexedJpegStore(context: Context) {
             throw IOException("Another JPEG index build is already running")
         }
         try {
-            directory.mkdirs()
+            if (!directory.isDirectory && !directory.mkdirs()) {
+                throw IOException("Unable to create the JPEG index directory")
+            }
+            cleanupStaleTemporaryFiles(force = true)
             val destination = indexFile(source)
             val temporary = File(directory, destination.name + ".tmp-${System.nanoTime()}")
             try {
@@ -133,12 +200,7 @@ class IndexedJpegStore(context: Context) {
                 if (!temporary.isFile || temporary.length() <= 0L) {
                     throw IOException("The native index writer produced no data")
                 }
-                if (destination.exists() && !destination.delete()) {
-                    throw IOException("Unable to replace the previous index")
-                }
-                if (!temporary.renameTo(destination)) {
-                    throw IOException("Unable to publish the completed index")
-                }
+                publishCompletedFile(temporary, destination)
                 legacyOverviewFile(source).delete()
                 generation.incrementAndGet()
                 return IndexedJpegInfo(
@@ -183,17 +245,23 @@ class IndexedJpegStore(context: Context) {
             val destinationSource = supportedSource(destinationPath) ?: return false
             val destinationIndex = indexFile(destinationSource)
             if (sourceIndex.absolutePath == destinationIndex.absolutePath) return true
-            if (destinationIndex.exists() && !destinationIndex.delete()) return false
-            if (!sourceIndex.renameTo(destinationIndex)) return false
+            if (!IndexedJpegNative.validateIndex(
+                    sourceIndex.absolutePath,
+                    destinationSource.length(),
+                    destinationSource.lastModified(),
+                )
+            ) {
+                return false
+            }
+            try {
+                publishCompletedFile(sourceIndex, destinationIndex)
+            } catch (_: IOException) {
+                return false
+            }
             legacyOverviewFile(File(sourcePath)).delete()
             legacyOverviewFile(destinationSource).delete()
-            if (status(destinationPath) is IndexedJpegStatus.Ready) {
-                generation.incrementAndGet()
-                true
-            } else {
-                if (!destinationIndex.renameTo(sourceIndex)) destinationIndex.delete()
-                false
-            }
+            generation.incrementAndGet()
+            true
         } finally {
             buildInProgress.set(false)
         }
@@ -509,7 +577,70 @@ class IndexedJpegStore(context: Context) {
         // generation counter resets after every app restart and therefore made an unchanged
         // overview miss the disk cache once per process. The published index file is replaced
         // atomically, so its length and modification time are the stable cross-process identity.
-        return "${index.length()}:${index.lastModified()}"
+        return "$CACHE_SIGNATURE_VERSION:${index.length()}:${index.lastModified()}"
+    }
+
+    @Throws(IOException::class)
+    private fun publishCompletedFile(source: File, destination: File) {
+        try {
+            Files.move(
+                source.toPath(),
+                destination.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+            return
+        } catch (_: AtomicMoveNotSupportedException) {
+            // The files are always in the same private directory, so Android filesystems
+            // normally take the atomic path. Keep a recoverable fallback for unusual providers.
+        }
+
+        val backup = File(directory, destination.name + ".backup-${System.nanoTime()}")
+        var previousMoved = false
+        try {
+            if (destination.exists()) {
+                Files.move(
+                    destination.toPath(),
+                    backup.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+                previousMoved = true
+            }
+            Files.move(
+                source.toPath(),
+                destination.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (publishFailure: IOException) {
+            if (previousMoved && backup.exists()) {
+                runCatching {
+                    Files.move(
+                        backup.toPath(),
+                        destination.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }.exceptionOrNull()?.let(publishFailure::addSuppressed)
+            }
+            throw publishFailure
+        }
+        if (backup.exists()) backup.delete()
+    }
+
+    private fun cleanupStaleTemporaryFiles(
+        force: Boolean = false,
+        nowMillis: Long = System.currentTimeMillis(),
+    ) {
+        val previousCleanup = lastTemporaryCleanupMillis.get()
+        if (!force && nowMillis - previousCleanup < TEMPORARY_CLEANUP_INTERVAL_MILLIS) return
+        if (!lastTemporaryCleanupMillis.compareAndSet(previousCleanup, nowMillis)) return
+        directory.listFiles()?.forEach { candidate ->
+            val temporary = candidate.name.contains(".tmp-") ||
+                candidate.name.contains(".backup-")
+            val age = nowMillis - candidate.lastModified()
+            if (temporary && candidate.isFile && age >= TEMPORARY_STALE_AGE_MILLIS) {
+                candidate.delete()
+            }
+        }
     }
 
     private fun indexFile(source: File): File = File(directory, sourceKey(source) + INDEX_SUFFIX)
@@ -577,12 +708,18 @@ class IndexedJpegStore(context: Context) {
         const val LEGACY_OVERVIEW_SUFFIX = ".fit-v1.jpg"
         const val DEFAULT_VIEWPORT_WIDTH = 1080
         const val DEFAULT_VIEWPORT_HEIGHT = 1920
+        const val INDEX_METADATA_SIZE = 7
+        const val FIT_OVERVIEW_FORMAT_VERSION = 4
         const val SINGLE_LAYER_OVERVIEW_FORMAT_VERSION = 5
         const val MULTI_LAYER_PYRAMID_FORMAT_VERSION = 6
-        const val ADDRESSABLE_PYRAMID_FORMAT_VERSION = 7
+        const val ADDRESSABLE_PYRAMID_FORMAT_VERSION = INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION
+        const val CACHE_SIGNATURE_VERSION = "jpeg-index-v7-addressable"
+        const val TEMPORARY_CLEANUP_INTERVAL_MILLIS = 6L * 60L * 60L * 1000L
+        const val TEMPORARY_STALE_AGE_MILLIS = 24L * 60L * 60L * 1000L
         val mutationLock = Any()
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
+        val lastTemporaryCleanupMillis = AtomicLong(0L)
     }
 }
 
@@ -984,6 +1121,12 @@ private object IndexedJpegNative {
         sourceBytes: Long,
         sourceModifiedMillis: Long,
     ): Boolean
+
+    external fun readIndexMetadata(
+        indexPath: String,
+        sourceBytes: Long,
+        sourceModifiedMillis: Long,
+    ): IntArray?
 
     external fun readOverview(
         indexPath: String,

@@ -14,6 +14,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unistd.h>
 
 extern "C" {
 #include "jpeglib.h"
@@ -806,7 +807,9 @@ bool writeIndex(
             }
         }
     }
-    return writeU32(file.get(), kEndMarker) && fflush(file.get()) == 0;
+    if (!writeU32(file.get(), kEndMarker) || fflush(file.get()) != 0) return false;
+    const int descriptor = fileno(file.get());
+    return descriptor >= 0 && fsync(descriptor) == 0;
 }
 
 bool readHeader(FILE* file, Header* header) {
@@ -952,7 +955,7 @@ bool readIndex(
     return true;
 }
 
-bool seekOverviewPayload(FILE* file, Header* header) {
+bool skipIndexRecords(FILE* file, const Header* header) {
     for (uint32_t scanNo = 0; scanNo < header->scanCount; ++scanNo) {
         uint64_t scanBitstreamOffset;
         uint32_t comps, mcus, mcuRows, records;
@@ -973,6 +976,11 @@ bool seekOverviewPayload(FILE* file, Header* header) {
             return false;
         }
     }
+    return true;
+}
+
+bool seekOverviewPayload(FILE* file, Header* header) {
+    if (!skipIndexRecords(file, header)) return false;
     uint32_t marker;
     if (!readU32(file, &marker) || marker != kOverviewMarker) return false;
     header->overviewOffset = ftell(file);
@@ -1139,6 +1147,42 @@ bool readPyramidDirectory(
     return true;
 }
 
+bool validateIndexStructure(
+    const char* path,
+    int64_t expectedBytes,
+    int64_t expectedModified,
+    Header* header
+) {
+    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(path, "rb"), fclose);
+    if (!file || !readHeader(file.get(), header) ||
+        header->sourceBytes != expectedBytes ||
+        header->sourceModifiedMillis != expectedModified) {
+        return false;
+    }
+
+    if ((header->formatVersion == kWholeLayerPyramidFormatVersion ||
+         header->formatVersion == kFormatVersion) &&
+        header->overviewBytes > 0) {
+        std::vector<PyramidLayer> layers;
+        long dataOffset = 0;
+        return readPyramidDirectory(file.get(), header, &layers, &dataOffset);
+    }
+
+    if (header->formatVersion == kLegacyTileFormatVersion) {
+        if (!skipIndexRecords(file.get(), header)) return false;
+    } else if (!seekOverviewPayload(file.get(), header)) {
+        return false;
+    }
+
+    if (header->overviewBytes > 0 &&
+        fseek(file.get(), static_cast<long>(header->overviewBytes), SEEK_CUR) != 0) {
+        return false;
+    }
+    uint32_t marker;
+    return readU32(file.get(), &marker) && marker == kEndMarker &&
+           fgetc(file.get()) == EOF;
+}
+
 bool readPyramid(
     const char* path,
     int64_t expectedBytes,
@@ -1303,29 +1347,42 @@ Java_io_github_indexedjpeg_IndexedJpegNative_validateIndex(
     UtfChars indexPath(env, indexPathValue);
     if (indexPath.get() == nullptr) return JNI_FALSE;
     Header header{};
-    huffman_index unused{};
-    if (!readIndex(
+    return validateIndexStructure(
         indexPath.get(), static_cast<int64_t>(sourceBytes),
-        static_cast<int64_t>(sourceModifiedMillis), &header, &unused, true)) {
-        return JNI_FALSE;
+        static_cast<int64_t>(sourceModifiedMillis), &header)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jintArray JNICALL
+Java_io_github_indexedjpeg_IndexedJpegNative_readIndexMetadata(
+    JNIEnv* env,
+    jobject,
+    jstring indexPathValue,
+    jlong sourceBytes,
+    jlong sourceModifiedMillis
+) {
+    UtfChars indexPath(env, indexPathValue);
+    if (indexPath.get() == nullptr) return nullptr;
+    std::unique_ptr<FILE, decltype(&fclose)> file(
+        fopen(indexPath.get(), "rb"), fclose);
+    Header header{};
+    if (!file || !readHeader(file.get(), &header) ||
+        header.sourceBytes != static_cast<int64_t>(sourceBytes) ||
+        header.sourceModifiedMillis != static_cast<int64_t>(sourceModifiedMillis)) {
+        return nullptr;
     }
-    // Version 7's directory is the address map used for every low-frequency
-    // decode. Validate its complete shape and terminal marker during status
-    // checks so a truncated/corrupt payload is never advertised as ready.
-    if (header.formatVersion == kFormatVersion && header.overviewBytes > 0) {
-        std::unique_ptr<FILE, decltype(&fclose)> file(
-            fopen(indexPath.get(), "rb"), fclose);
-        std::vector<PyramidLayer> layers;
-        long dataOffset = 0;
-        Header parsed{};
-        if (!file || !readHeader(file.get(), &parsed) ||
-            parsed.sourceBytes != static_cast<int64_t>(sourceBytes) ||
-            parsed.sourceModifiedMillis != static_cast<int64_t>(sourceModifiedMillis) ||
-            !readPyramidDirectory(file.get(), &parsed, &layers, &dataOffset)) {
-            return JNI_FALSE;
-        }
-    }
-    return JNI_TRUE;
+    jint values[7] = {
+        static_cast<jint>(header.formatVersion),
+        static_cast<jint>(header.width),
+        static_cast<jint>(header.height),
+        static_cast<jint>(header.overviewWidth),
+        static_cast<jint>(header.overviewHeight),
+        static_cast<jint>(header.overviewSampleSize),
+        static_cast<jint>(header.overviewBytes),
+    };
+    jintArray result = env->NewIntArray(7);
+    if (result != nullptr) env->SetIntArrayRegion(result, 0, 7, values);
+    return result;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
