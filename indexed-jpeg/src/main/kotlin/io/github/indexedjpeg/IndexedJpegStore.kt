@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
+import android.graphics.Canvas
 import android.graphics.Rect
 import android.os.Build
 import android.view.WindowManager
@@ -41,6 +42,7 @@ data class IndexedJpegPyramidLayer(
     val width: Int,
     val height: Int,
     val bytes: Int,
+    val tileSize: Int = 0,
 )
 
 private data class IndexedJpegPyramidMetadata(
@@ -215,6 +217,28 @@ class IndexedJpegStore(context: Context) {
         val index = indexFile(source)
         if (!index.isFile) return null
         readPyramidMetadata(index, source)?.let { pyramid ->
+            if (pyramid.formatVersion >= ADDRESSABLE_PYRAMID_FORMAT_VERSION) {
+                val handle = IndexedJpegNative.openPyramidTiles(
+                    index.absolutePath,
+                    source.length(),
+                    source.lastModified(),
+                )
+                if (handle == 0L) return null
+                return IndexedJpegOverviewRegionDecoder(
+                    sourceWidth = pyramid.sourceWidth,
+                    sourceHeight = pyramid.sourceHeight,
+                    layers = pyramid.layers,
+                    tileLoader = { sampleSize, tileX, tileY ->
+                        IndexedJpegNative.readPyramidTile(
+                            handle,
+                            sampleSize,
+                            tileX,
+                            tileY,
+                        )
+                    },
+                    tileContainerHandle = handle,
+                )
+            }
             return IndexedJpegOverviewRegionDecoder(
                 sourceWidth = pyramid.sourceWidth,
                 sourceHeight = pyramid.sourceHeight,
@@ -299,23 +323,53 @@ class IndexedJpegStore(context: Context) {
         val sourceWidth = pyramid?.sourceWidth ?: legacyMetadata?.getOrNull(1) ?: return null
         val sourceHeight = pyramid?.sourceHeight ?: legacyMetadata?.getOrNull(2) ?: return null
         if (sourceWidth <= 0 || sourceHeight <= 0) return null
-        val encoded = if (pyramid != null) {
-            val layer = pyramid.layers.asReversed().firstOrNull {
-                overviewCoversFit(
-                    overviewWidth = it.width,
-                    overviewHeight = it.height,
+        val selectedLayer = pyramid?.layers?.asReversed()?.firstOrNull {
+            overviewCoversFit(
+                overviewWidth = it.width,
+                overviewHeight = it.height,
+                sourceWidth = sourceWidth,
+                sourceHeight = sourceHeight,
+                rotationDegrees = rotationDegrees,
+                requestedWidth = requestedWidth,
+                requestedHeight = requestedHeight,
+            )
+        }
+        if (pyramid != null && selectedLayer == null) return null
+        if ((pyramid?.formatVersion ?: 0) >= ADDRESSABLE_PYRAMID_FORMAT_VERSION) {
+            val decoded = openOverviewDecoder(source.absolutePath)?.use { decoder ->
+                decoder.decodeRegion(
+                    Rect(0, 0, sourceWidth, sourceHeight),
+                    selectedLayer!!.sampleSize,
+                )
+            } ?: return null
+            if (!overviewCoversFit(
+                    overviewWidth = decoded.width,
+                    overviewHeight = decoded.height,
                     sourceWidth = sourceWidth,
                     sourceHeight = sourceHeight,
                     rotationDegrees = rotationDegrees,
                     requestedWidth = requestedWidth,
                     requestedHeight = requestedHeight,
                 )
-            } ?: return null
+            ) {
+                decoded.recycle()
+                return null
+            }
+            return reduceOverviewToFit(
+                decoded,
+                sourceWidth,
+                sourceHeight,
+                rotationDegrees,
+                requestedWidth,
+                requestedHeight,
+            )
+        }
+        val encoded = if (pyramid != null) {
             IndexedJpegNative.readPyramidLayer(
                 index.absolutePath,
                 source.length(),
                 source.lastModified(),
-                layer.sampleSize,
+                selectedLayer!!.sampleSize,
             ) ?: return null
         } else {
             IndexedJpegNative.readOverview(
@@ -368,6 +422,42 @@ class IndexedJpegStore(context: Context) {
         )
     }
 
+    private fun reduceOverviewToFit(
+        bitmap: Bitmap,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        rotationDegrees: Int,
+        requestedWidth: Int,
+        requestedHeight: Int,
+    ): Bitmap {
+        var reduction = 1
+        while (reduction <= Int.MAX_VALUE / 2) {
+            val next = reduction * 2
+            if (!overviewCoversFit(
+                    overviewWidth = ceilDiv(bitmap.width, next),
+                    overviewHeight = ceilDiv(bitmap.height, next),
+                    sourceWidth = sourceWidth,
+                    sourceHeight = sourceHeight,
+                    rotationDegrees = rotationDegrees,
+                    requestedWidth = requestedWidth,
+                    requestedHeight = requestedHeight,
+                )
+            ) {
+                break
+            }
+            reduction = next
+        }
+        if (reduction == 1) return bitmap
+        val reduced = Bitmap.createScaledBitmap(
+            bitmap,
+            ceilDiv(bitmap.width, reduction),
+            ceilDiv(bitmap.height, reduction),
+            true,
+        )
+        if (reduced !== bitmap) bitmap.recycle()
+        return reduced
+    }
+
     private fun readPyramidMetadata(
         index: File,
         source: File,
@@ -378,21 +468,23 @@ class IndexedJpegStore(context: Context) {
             source.length(),
             source.lastModified(),
         ) ?: return null
-        if (values.size < 9 || values[0] < MULTI_LAYER_PYRAMID_FORMAT_VERSION) return null
+        if (values.size < 10 || values[0] < MULTI_LAYER_PYRAMID_FORMAT_VERSION) return null
         val count = values[3]
-        if (count <= 0 || values.size != 5 + count * 4 || values[4] <= 0) return null
+        if (count <= 0 || values.size != 5 + count * 5 || values[4] <= 0) return null
         val layers = ArrayList<IndexedJpegPyramidLayer>(count)
         repeat(count) { position ->
-            val offset = 5 + position * 4
+            val offset = 5 + position * 5
             val layer = IndexedJpegPyramidLayer(
                 sampleSize = values[offset],
                 width = values[offset + 1],
                 height = values[offset + 2],
                 bytes = values[offset + 3],
+                tileSize = values[offset + 4],
             )
             if (
                 layer.sampleSize <= 0 || layer.width <= 0 ||
-                layer.height <= 0 || layer.bytes <= 0
+                layer.height <= 0 || layer.bytes <= 0 ||
+                (values[0] >= ADDRESSABLE_PYRAMID_FORMAT_VERSION && layer.tileSize <= 0)
             ) {
                 return null
             }
@@ -487,6 +579,7 @@ class IndexedJpegStore(context: Context) {
         const val DEFAULT_VIEWPORT_HEIGHT = 1920
         const val SINGLE_LAYER_OVERVIEW_FORMAT_VERSION = 5
         const val MULTI_LAYER_PYRAMID_FORMAT_VERSION = 6
+        const val ADDRESSABLE_PYRAMID_FORMAT_VERSION = 7
         val mutationLock = Any()
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
@@ -564,6 +657,8 @@ class IndexedJpegOverviewRegionDecoder private constructor(
     val sourceHeight: Int,
     private val layers: List<IndexedJpegPyramidLayer>,
     private val encodedLoader: ((Int) -> ByteArray?)?,
+    private val tileLoader: ((Int, Int, Int) -> ByteArray?)?,
+    private var tileContainerHandle: Long,
     legacyDecoder: BitmapRegionDecoder?,
 ) : Closeable {
     private val decoders = HashMap<Int, BitmapRegionDecoder>().apply {
@@ -589,6 +684,8 @@ class IndexedJpegOverviewRegionDecoder private constructor(
             ),
         ),
         encodedLoader = null,
+        tileLoader = null,
+        tileContainerHandle = 0L,
         legacyDecoder = decoder,
     )
 
@@ -602,8 +699,29 @@ class IndexedJpegOverviewRegionDecoder private constructor(
         sourceHeight = sourceHeight,
         layers = layers,
         encodedLoader = encodedLoader,
+        tileLoader = null,
+        tileContainerHandle = 0L,
         legacyDecoder = null,
     )
+
+    internal constructor(
+        sourceWidth: Int,
+        sourceHeight: Int,
+        layers: List<IndexedJpegPyramidLayer>,
+        tileLoader: (Int, Int, Int) -> ByteArray?,
+        tileContainerHandle: Long,
+    ) : this(
+        sourceWidth = sourceWidth,
+        sourceHeight = sourceHeight,
+        layers = layers,
+        encodedLoader = null,
+        tileLoader = tileLoader,
+        tileContainerHandle = tileContainerHandle,
+        legacyDecoder = null,
+    )
+
+    val isAddressableTiled: Boolean
+        get() = tileLoader != null
 
     val overviewSampleSize: Int
         get() = layers.firstOrNull()?.sampleSize ?: 0
@@ -613,6 +731,22 @@ class IndexedJpegOverviewRegionDecoder private constructor(
 
     fun layerSampleSize(sampleSize: Int): Int? =
         layers.firstOrNull { it.sampleSize == sampleSize }?.sampleSize
+
+    fun addressableTileSize(sampleSize: Int): Int? = if (tileLoader != null) {
+        layers.firstOrNull { it.sampleSize == sampleSize }?.tileSize?.takeIf { it > 0 }
+    } else {
+        null
+    }
+
+    fun addressableTileCount(rect: Rect, sampleSize: Int): Int? {
+        if (tileLoader == null || !supports(rect, sampleSize)) return null
+        val layer = layers.firstOrNull { it.sampleSize == sampleSize } ?: return null
+        val mapped = mapToAddressableLayer(rect, layer)
+        if (mapped.isEmpty || layer.tileSize <= 0) return null
+        val across = (mapped.right - 1) / layer.tileSize - mapped.left / layer.tileSize + 1
+        val down = (mapped.bottom - 1) / layer.tileSize - mapped.top / layer.tileSize + 1
+        return across * down
+    }
 
     fun supports(rect: Rect, sampleSize: Int): Boolean {
         if (
@@ -641,17 +775,26 @@ class IndexedJpegOverviewRegionDecoder private constructor(
         if (!supports(rect, sampleSize)) return null
         val exactLayer = layers.firstOrNull { it.sampleSize == sampleSize }
         val layer = exactLayer ?: layers.singleOrNull() ?: return null
-        val active = decoderFor(layer) ?: return null
         val relativeSample = sampleSize / layer.sampleSize
-        val overviewRect = mapToOverview(rect, active.width, active.height)
-        val decoded = active.decodeRegion(
-            overviewRect,
-            BitmapFactory.Options().apply {
-                inSampleSize = relativeSample
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-                inScaled = false
-            },
-        ) ?: return null
+        val overviewRect = if (tileLoader != null) {
+            mapToAddressableLayer(rect, layer)
+        } else {
+            mapToOverview(rect, layer.width, layer.height)
+        }
+        val decoded = if (tileLoader != null) {
+            if (relativeSample != 1) return null
+            decodeTiledRegion(layer, overviewRect)
+        } else {
+            val active = decoderFor(layer) ?: return null
+            active.decodeRegion(
+                overviewRect,
+                BitmapFactory.Options().apply {
+                    inSampleSize = relativeSample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inScaled = false
+                },
+            )
+        } ?: return null
         val expectedWidth = ceilDiv(rect.width(), sampleSize)
         val expectedHeight = ceilDiv(rect.height(), sampleSize)
         if (decoded.width == expectedWidth && decoded.height == expectedHeight) return decoded
@@ -664,6 +807,80 @@ class IndexedJpegOverviewRegionDecoder private constructor(
     override fun close() {
         decoders.values.forEach { decoder -> decoder.recycle() }
         decoders.clear()
+        val handle = tileContainerHandle
+        tileContainerHandle = 0L
+        if (handle != 0L) IndexedJpegNative.closePyramidTiles(handle)
+    }
+
+    private fun decodeTiledRegion(
+        layer: IndexedJpegPyramidLayer,
+        overviewRect: Rect,
+    ): Bitmap? {
+        val loader = tileLoader ?: return null
+        if (layer.tileSize <= 0 || overviewRect.isEmpty) return null
+        val destination = runCatching {
+            Bitmap.createBitmap(
+                overviewRect.width(),
+                overviewRect.height(),
+                Bitmap.Config.ARGB_8888,
+            )
+        }.getOrNull() ?: return null
+        val canvas = Canvas(destination)
+        val firstTileX = overviewRect.left / layer.tileSize
+        val lastTileX = (overviewRect.right - 1) / layer.tileSize
+        val firstTileY = overviewRect.top / layer.tileSize
+        val lastTileY = (overviewRect.bottom - 1) / layer.tileSize
+        for (tileY in firstTileY..lastTileY) {
+            for (tileX in firstTileX..lastTileX) {
+                val encoded = loader(layer.sampleSize, tileX, tileY)
+                if (encoded == null) {
+                    destination.recycle()
+                    return null
+                }
+                val tileBitmap = BitmapFactory.decodeByteArray(
+                    encoded,
+                    0,
+                    encoded.size,
+                    BitmapFactory.Options().apply {
+                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                        inScaled = false
+                    },
+                )
+                val tileLeft = tileX * layer.tileSize
+                val tileTop = tileY * layer.tileSize
+                val expectedTileWidth = min(layer.tileSize, layer.width - tileLeft)
+                val expectedTileHeight = min(layer.tileSize, layer.height - tileTop)
+                if (
+                    tileBitmap == null || tileBitmap.width != expectedTileWidth ||
+                    tileBitmap.height != expectedTileHeight
+                ) {
+                    tileBitmap?.recycle()
+                    destination.recycle()
+                    return null
+                }
+                val intersection = Rect(
+                    max(overviewRect.left, tileLeft),
+                    max(overviewRect.top, tileTop),
+                    min(overviewRect.right, tileLeft + tileBitmap.width),
+                    min(overviewRect.bottom, tileTop + tileBitmap.height),
+                )
+                val sourceRect = Rect(
+                    intersection.left - tileLeft,
+                    intersection.top - tileTop,
+                    intersection.right - tileLeft,
+                    intersection.bottom - tileTop,
+                )
+                val destinationRect = Rect(
+                    intersection.left - overviewRect.left,
+                    intersection.top - overviewRect.top,
+                    intersection.right - overviewRect.left,
+                    intersection.bottom - overviewRect.top,
+                )
+                canvas.drawBitmap(tileBitmap, sourceRect, destinationRect, null)
+                tileBitmap.recycle()
+            }
+        }
+        return destination
     }
 
     private fun decoderFor(layer: IndexedJpegPyramidLayer): BitmapRegionDecoder? {
@@ -693,6 +910,16 @@ class IndexedJpegOverviewRegionDecoder private constructor(
         mapCoordinate(rect.top, sourceHeight, overviewHeight),
         mapCoordinate(rect.right, sourceWidth, overviewWidth),
         mapCoordinate(rect.bottom, sourceHeight, overviewHeight),
+    )
+
+    private fun mapToAddressableLayer(
+        rect: Rect,
+        layer: IndexedJpegPyramidLayer,
+    ): Rect = Rect(
+        (rect.left / layer.sampleSize).coerceIn(0, layer.width),
+        (rect.top / layer.sampleSize).coerceIn(0, layer.height),
+        ceilDiv(rect.right, layer.sampleSize).coerceIn(0, layer.width),
+        ceilDiv(rect.bottom, layer.sampleSize).coerceIn(0, layer.height),
     )
 
     private fun mapCoordinate(coordinate: Int, sourceExtent: Int, overviewExtent: Int): Int =
@@ -782,6 +1009,21 @@ private object IndexedJpegNative {
         sourceModifiedMillis: Long,
         sampleSize: Int,
     ): ByteArray?
+
+    external fun openPyramidTiles(
+        indexPath: String,
+        sourceBytes: Long,
+        sourceModifiedMillis: Long,
+    ): Long
+
+    external fun readPyramidTile(
+        handle: Long,
+        sampleSize: Int,
+        tileX: Int,
+        tileY: Int,
+    ): ByteArray?
+
+    external fun closePyramidTiles(handle: Long)
 
     external fun open(
         sourcePath: String,

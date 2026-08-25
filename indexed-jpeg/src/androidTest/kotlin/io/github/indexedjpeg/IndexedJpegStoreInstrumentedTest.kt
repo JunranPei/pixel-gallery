@@ -147,7 +147,7 @@ class IndexedJpegStoreInstrumentedTest {
         assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Invalid)
         assertEquals(null, store.openDecoder(source.absolutePath))
 
-        writeLittleEndianInt(currentVersion, 8, 6)
+        writeLittleEndianInt(currentVersion, 8, 7)
         convertCurrentPyramidToSingleLayer(index, currentVersion, version = 4)
         assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
         val legacyOverview = store.decodeScreenOverview(source.absolutePath, 0, 120, 160)
@@ -251,6 +251,62 @@ class IndexedJpegStoreInstrumentedTest {
         source.delete()
     }
 
+    @Test
+    fun addressablePyramidDecodesAcrossStoredTileBoundaries() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-addressable-pyramid-fixture.jpg")
+        createLargeOverviewFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+
+        val info = store.buildForViewport(
+            sourcePath = source.absolutePath,
+            viewportWidth = 1000,
+            viewportHeight = 1200,
+        )
+        val layer = store.pyramidLayers(source.absolutePath).single()
+        assertEquals(2, layer.sampleSize)
+        assertEquals(1024, layer.tileSize)
+        assertTrue(layer.width > layer.tileSize)
+        assertTrue(layer.height > layer.tileSize)
+
+        store.openOverviewDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            val active = requireNotNull(decoder)
+            assertTrue(active.isAddressableTiled)
+            val crossing = Rect(1800, 1800, 2400, 2250)
+            assertEquals(4, active.addressableTileCount(crossing, layer.sampleSize))
+            val decoded = active.decodeRegion(crossing, layer.sampleSize)
+            assertNotNull(decoded)
+            assertEquals(ceilDiv(crossing.width(), layer.sampleSize), decoded!!.width)
+            assertEquals(ceilDiv(crossing.height(), layer.sampleSize), decoded.height)
+            val topLeft = decoded.getPixel(0, 0)
+            val bottomRight = decoded.getPixel(decoded.width - 1, decoded.height - 1)
+            assertTrue(Color.red(bottomRight) > Color.red(topLeft) + 20)
+            assertTrue(Color.green(bottomRight) > Color.green(topLeft) + 20)
+            decoded.recycle()
+        }
+
+        val index = persistedIndexFile(context, source)
+        val validIndex = index.readBytes()
+        val payloadBytes = readLittleEndianInt(validIndex, 60)
+        val overviewMarkerOffset =
+            validIndex.size - Int.SIZE_BYTES - payloadBytes - Int.SIZE_BYTES
+        val corruptIndex = validIndex.copyOf()
+        writeLittleEndianInt(
+            corruptIndex,
+            overviewMarkerOffset + Int.SIZE_BYTES,
+            0x32525951,
+        )
+        index.writeBytes(corruptIndex)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Invalid)
+        index.writeBytes(validIndex)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+
+        assertTrue(store.delete(source.absolutePath))
+        source.delete()
+    }
+
     private fun assertBuildAndDecodeOverview(
         store: IndexedJpegStore,
         source: File,
@@ -274,6 +330,7 @@ class IndexedJpegStoreInstrumentedTest {
             assertEquals(ceilDiv(info.sourceWidth, layer.sampleSize), layer.width)
             assertEquals(ceilDiv(info.sourceHeight, layer.sampleSize), layer.height)
             assertTrue(layer.bytes > 0)
+            assertEquals(1024, layer.tileSize)
         }
         val overview = store.decodeScreenOverview(
             sourcePath = source.absolutePath,
@@ -363,24 +420,39 @@ class IndexedJpegStoreInstrumentedTest {
     ) {
         val headerBytes = 64
         val pyramidBytes = readLittleEndianInt(current, 60)
-        assertEquals(6, readLittleEndianInt(current, 8))
+        assertEquals(7, readLittleEndianInt(current, 8))
         assertTrue(pyramidBytes > 0)
         val overviewMarkerOffset = current.size - Int.SIZE_BYTES - pyramidBytes - Int.SIZE_BYTES
         assertEquals(0x3152564f, readLittleEndianInt(current, overviewMarkerOffset))
         val payloadOffset = overviewMarkerOffset + Int.SIZE_BYTES
-        assertEquals(0x31525950, readLittleEndianInt(current, payloadOffset))
+        assertEquals(0x32525950, readLittleEndianInt(current, payloadOffset))
         val count = readLittleEndianInt(current, payloadOffset + Int.SIZE_BYTES)
         assertTrue(count > 0)
-        val selectedDirectory = payloadOffset + 2 * Int.SIZE_BYTES + (count - 1) * 16
+        val layerRecordBytes = 28
+        val tileRecordBytes = 20
+        val selectedDirectory =
+            payloadOffset + 2 * Int.SIZE_BYTES + (count - 1) * layerRecordBytes
         val sampleSize = readLittleEndianInt(current, selectedDirectory)
         val width = readLittleEndianInt(current, selectedDirectory + 4)
         val height = readLittleEndianInt(current, selectedDirectory + 8)
         val encodedBytes = readLittleEndianInt(current, selectedDirectory + 12)
-        var encodedOffset = payloadOffset + 2 * Int.SIZE_BYTES + count * 16
+        val tilesAcross = readLittleEndianInt(current, selectedDirectory + 20)
+        val tilesDown = readLittleEndianInt(current, selectedDirectory + 24)
+        assertEquals(1, tilesAcross * tilesDown)
+        var totalTileRecords = 0
+        repeat(count) { position ->
+            val directory = payloadOffset + 2 * Int.SIZE_BYTES + position * layerRecordBytes
+            totalTileRecords +=
+                readLittleEndianInt(current, directory + 20) *
+                    readLittleEndianInt(current, directory + 24)
+        }
+        var encodedOffset =
+            payloadOffset + 2 * Int.SIZE_BYTES + count * layerRecordBytes +
+                totalTileRecords * tileRecordBytes
         repeat(count - 1) { position ->
             encodedOffset += readLittleEndianInt(
                 current,
-                payloadOffset + 2 * Int.SIZE_BYTES + position * 16 + 12,
+                payloadOffset + 2 * Int.SIZE_BYTES + position * layerRecordBytes + 12,
             )
         }
 
@@ -418,7 +490,7 @@ class IndexedJpegStoreInstrumentedTest {
         val currentHeaderBytes = 64
         val version2HeaderBytes = 48
         val overviewBytes = readLittleEndianInt(current, 60)
-        assertEquals(6, readLittleEndianInt(current, versionOffset))
+        assertEquals(7, readLittleEndianInt(current, versionOffset))
         assertTrue(overviewBytes > 0)
 
         val overviewMarkerOffset = current.size - Int.SIZE_BYTES - overviewBytes - Int.SIZE_BYTES
@@ -545,6 +617,27 @@ class IndexedJpegStoreInstrumentedTest {
     private fun createOverviewFixture(destination: File) {
         val width = 2048
         val height = 1536
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val row = IntArray(width)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                row[x] = Color.rgb(
+                    24 + x * 200 / (width - 1),
+                    20 + y * 210 / (height - 1),
+                    32 + (x + y) * 180 / (width + height - 2),
+                )
+            }
+            bitmap.setPixels(row, 0, width, 0, y, width, 1)
+        }
+        FileOutputStream(destination).use { output ->
+            assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output))
+        }
+        bitmap.recycle()
+    }
+
+    private fun createLargeOverviewFixture(destination: File) {
+        val width = 2560
+        val height = 2304
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val row = IntArray(width)
         for (y in 0 until height) {
