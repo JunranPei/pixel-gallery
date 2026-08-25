@@ -29,15 +29,20 @@ constexpr uint8_t kMagic[8] = {'I', 'J', 'X', 'M', 'C', 'U', '0', '1'};
 // path, whose read-ahead made the recorded seek checkpoints unreliable. Version
 // 4 keeps the same overview layout while preserving the original index path.
 // Version 5 stores one complete power-of-two low-frequency layer. Version 6
-// stores every power-of-two layer from 1/2 through the fit-screen level, so
-// each SSIV sampling tier can decode from its own compact source.
+// stores every power-of-two layer from 1/2 through the fit-screen level.
+// Version 7 stores the generated levels as independently decodable JPEG tiles
+// in one indexed container. A viewer can therefore read only the two-
+// dimensional blocks intersecting its viewport instead of region-decoding a
+// complete overview JPEG stream from its beginning.
 constexpr uint32_t kLegacyTileFormatVersion = 2;
 constexpr uint32_t kBrokenOverviewFormatVersion = 3;
 constexpr uint32_t kFitOverviewFormatVersion = 4;
 constexpr uint32_t kSingleLayerFormatVersion = 5;
-constexpr uint32_t kFormatVersion = 6;
+constexpr uint32_t kWholeLayerPyramidFormatVersion = 6;
+constexpr uint32_t kFormatVersion = 7;
 constexpr uint32_t kOverviewMarker = 0x3152564F;  // OVR1
 constexpr uint32_t kPyramidMarker = 0x31525950;  // PYR1
+constexpr uint32_t kIndexedPyramidMarker = 0x32525950;  // PYR2
 constexpr uint32_t kEndMarker = 0x31444E45;  // END1
 constexpr uint32_t kMaxScans = 1024;
 constexpr uint32_t kMaxRows = 1u << 20;
@@ -46,6 +51,8 @@ constexpr uint32_t kMaxOverviewPixels = 12u * 1024u * 1024u;
 constexpr uint32_t kMaxOverviewBytes = 24u * 1024u * 1024u;
 constexpr uint32_t kMaxPyramidBytes = 128u * 1024u * 1024u;
 constexpr uint32_t kMaxPyramidLayers = 16u;
+constexpr uint32_t kMaxPyramidTiles = 1u << 18;
+constexpr uint32_t kPyramidTileSize = 1024u;
 constexpr int kOverviewJpegQuality = 90;
 constexpr uint64_t kSerializedOffsetBytes = 27u;
 
@@ -86,12 +93,37 @@ struct Header {
     long overviewOffset = 0;
 };
 
+struct PyramidTile {
+    uint32_t x = 0;
+    uint32_t y = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t bytes = 0;
+    uint64_t dataOffset = 0;
+    std::vector<uint8_t> encoded;
+};
+
 struct PyramidLayer {
     uint32_t sampleSize = 0;
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t bytes = 0;
+    uint32_t tileSize = 0;
+    uint32_t tilesAcross = 0;
+    uint32_t tilesDown = 0;
     std::vector<uint8_t> encoded;
+    std::vector<PyramidTile> tiles;
+};
+
+struct PyramidHandle {
+    FILE* file = nullptr;
+    uint32_t sourceWidth = 0;
+    uint32_t sourceHeight = 0;
+    std::vector<PyramidLayer> layers;
+
+    ~PyramidHandle() {
+        if (file != nullptr) fclose(file);
+    }
 };
 
 class UtfChars {
@@ -214,7 +246,7 @@ void freeIndex(huffman_index* index) {
 }
 
 uint32_t ceilDiv(uint32_t value, uint32_t divisor) {
-    return (value + divisor - 1u) / divisor;
+    return value / divisor + (value % divisor == 0u ? 0u : 1u);
 }
 
 uint32_t maximumPyramidSample(
@@ -419,6 +451,232 @@ std::vector<uint8_t> encodeScaledJpegFromSource(
     return result;
 }
 
+bool encodeScaledTilesFromSource(
+    const char* sourcePath,
+    uint32_t sampleSize,
+    uint32_t expectedWidth,
+    uint32_t expectedHeight,
+    PyramidLayer* layer
+) {
+    if (sourcePath == nullptr || layer == nullptr || sampleSize < 2u ||
+        (sampleSize & (sampleSize - 1u)) != 0u ||
+        expectedWidth == 0 || expectedHeight == 0) {
+        return false;
+    }
+    const uint32_t tilesAcross = ceilDiv(expectedWidth, kPyramidTileSize);
+    const uint32_t tilesDown = ceilDiv(expectedHeight, kPyramidTileSize);
+    const uint64_t tileCount = static_cast<uint64_t>(tilesAcross) * tilesDown;
+    if (tilesAcross == 0 || tilesDown == 0 || tileCount > kMaxPyramidTiles) {
+        return false;
+    }
+
+    FILE* input = fopen(sourcePath, "rb");
+    if (input == nullptr) return false;
+    jpeg_decompress_struct decoder{};
+    JpegError decodeError{};
+    JpegError encodeError{};
+    decoder.err = jpeg_std_error(&decodeError.base);
+    decodeError.base.error_exit = errorExit;
+    encodeError.base.error_exit = errorExit;
+    bool decoderCreated = false;
+    unsigned char* decodedRow = nullptr;
+    unsigned char* outputRow = nullptr;
+    auto* encoders = static_cast<jpeg_compress_struct*>(
+        calloc(tilesAcross, sizeof(jpeg_compress_struct)));
+    auto* encoded = static_cast<unsigned char**>(
+        calloc(tilesAcross, sizeof(unsigned char*)));
+    auto* encodedBytes = static_cast<unsigned long*>(
+        calloc(tilesAcross, sizeof(unsigned long)));
+    auto* encoderCreated = static_cast<uint8_t*>(calloc(tilesAcross, 1u));
+
+    auto cleanup = [&]() {
+        if (encoders != nullptr && encoderCreated != nullptr) {
+            for (uint32_t x = 0; x < tilesAcross; ++x) {
+                if (encoderCreated[x] != 0u) jpeg_destroy_compress(&encoders[x]);
+            }
+        }
+        if (encoded != nullptr) {
+            for (uint32_t x = 0; x < tilesAcross; ++x) free(encoded[x]);
+        }
+        free(encoders);
+        free(encoded);
+        free(encodedBytes);
+        free(encoderCreated);
+        free(decodedRow);
+        if (outputRow != decodedRow) free(outputRow);
+        if (decoderCreated) jpeg_destroy_decompress(&decoder);
+        fclose(input);
+    };
+
+    if (encoders == nullptr || encoded == nullptr || encodedBytes == nullptr ||
+        encoderCreated == nullptr || setjmp(decodeError.jump) ||
+        setjmp(encodeError.jump)) {
+        cleanup();
+        return false;
+    }
+
+    jpeg_create_decompress(&decoder);
+    decoderCreated = true;
+    jpeg_stdio_src(&decoder, input);
+    if (jpeg_read_header(&decoder, TRUE) != JPEG_HEADER_OK || decoder.arith_code) {
+        cleanup();
+        return false;
+    }
+    const uint32_t nativeSample = std::min<uint32_t>(sampleSize, 8u);
+    const uint32_t postSample = sampleSize / nativeSample;
+    decoder.scale_num = 1;
+    decoder.scale_denom = static_cast<unsigned int>(nativeSample);
+    decoder.out_color_space = JCS_EXT_RGB;
+    if (!jpeg_start_decompress(&decoder) || decoder.output_components != 3 ||
+        decoder.output_width == 0 || decoder.output_height == 0) {
+        cleanup();
+        return false;
+    }
+    const size_t decodedRowBytes = static_cast<size_t>(decoder.output_width) * 3u;
+    const size_t outputRowBytes = static_cast<size_t>(expectedWidth) * 3u;
+    if (decodedRowBytes / 3u != decoder.output_width ||
+        outputRowBytes / 3u != expectedWidth) {
+        cleanup();
+        return false;
+    }
+    decodedRow = static_cast<unsigned char*>(malloc(decodedRowBytes));
+    outputRow = postSample == 1u
+        ? decodedRow
+        : static_cast<unsigned char*>(malloc(outputRowBytes));
+    if (decodedRow == nullptr || outputRow == nullptr) {
+        cleanup();
+        return false;
+    }
+
+    layer->sampleSize = sampleSize;
+    layer->width = expectedWidth;
+    layer->height = expectedHeight;
+    layer->tileSize = kPyramidTileSize;
+    layer->tilesAcross = tilesAcross;
+    layer->tilesDown = tilesDown;
+    layer->bytes = 0;
+    layer->encoded.clear();
+    layer->tiles.clear();
+    layer->tiles.reserve(static_cast<size_t>(tileCount));
+
+    uint32_t decodedY = 0;
+    for (uint32_t outputY = 0; outputY < expectedHeight; ++outputY) {
+        const uint32_t tileY = outputY / kPyramidTileSize;
+        const uint32_t localY = outputY % kPyramidTileSize;
+        const uint32_t tileHeight = std::min(
+            kPyramidTileSize, expectedHeight - tileY * kPyramidTileSize);
+        if (localY == 0u) {
+            for (uint32_t tileX = 0; tileX < tilesAcross; ++tileX) {
+                encoders[tileX] = jpeg_compress_struct{};
+                encoders[tileX].err = jpeg_std_error(&encodeError.base);
+                encodeError.base.error_exit = errorExit;
+                encoded[tileX] = nullptr;
+                encodedBytes[tileX] = 0;
+                jpeg_create_compress(&encoders[tileX]);
+                encoderCreated[tileX] = 1u;
+                jpeg_mem_dest(
+                    &encoders[tileX], &encoded[tileX], &encodedBytes[tileX]);
+                encoders[tileX].image_width = std::min(
+                    kPyramidTileSize,
+                    expectedWidth - tileX * kPyramidTileSize);
+                encoders[tileX].image_height = tileHeight;
+                encoders[tileX].input_components = 3;
+                encoders[tileX].in_color_space = JCS_RGB;
+                jpeg_set_defaults(&encoders[tileX]);
+                jpeg_set_quality(&encoders[tileX], kOverviewJpegQuality, TRUE);
+                jpeg_start_compress(&encoders[tileX], TRUE);
+            }
+        }
+
+        const uint32_t targetY = std::min<uint32_t>(
+            outputY * postSample,
+            static_cast<uint32_t>(decoder.output_height - 1u));
+        while (decoder.output_scanline <= targetY) {
+            JSAMPROW row = decodedRow;
+            if (jpeg_read_scanlines(&decoder, &row, 1) != 1) {
+                cleanup();
+                return false;
+            }
+            decodedY = static_cast<uint32_t>(decoder.output_scanline - 1u);
+        }
+        if (decodedY != targetY) {
+            cleanup();
+            return false;
+        }
+        if (postSample > 1u) {
+            for (uint32_t outputX = 0; outputX < expectedWidth; ++outputX) {
+                const uint32_t inputX = std::min<uint32_t>(
+                    outputX * postSample,
+                    static_cast<uint32_t>(decoder.output_width - 1u));
+                std::memcpy(
+                    outputRow + static_cast<size_t>(outputX) * 3u,
+                    decodedRow + static_cast<size_t>(inputX) * 3u,
+                    3u);
+            }
+        }
+        for (uint32_t tileX = 0; tileX < tilesAcross; ++tileX) {
+            JSAMPROW row = outputRow +
+                static_cast<size_t>(tileX) * kPyramidTileSize * 3u;
+            if (jpeg_write_scanlines(&encoders[tileX], &row, 1) != 1) {
+                cleanup();
+                return false;
+            }
+        }
+
+        if (localY + 1u == tileHeight) {
+            for (uint32_t tileX = 0; tileX < tilesAcross; ++tileX) {
+                jpeg_finish_compress(&encoders[tileX]);
+                if (encoded[tileX] == nullptr || encodedBytes[tileX] == 0 ||
+                    encodedBytes[tileX] > UINT32_MAX) {
+                    cleanup();
+                    return false;
+                }
+                PyramidTile tile;
+                tile.x = tileX;
+                tile.y = tileY;
+                tile.width = std::min(
+                    kPyramidTileSize,
+                    expectedWidth - tileX * kPyramidTileSize);
+                tile.height = tileHeight;
+                tile.bytes = static_cast<uint32_t>(encodedBytes[tileX]);
+                tile.encoded.assign(
+                    encoded[tileX], encoded[tileX] + encodedBytes[tileX]);
+                free(encoded[tileX]);
+                encoded[tileX] = nullptr;
+                encodedBytes[tileX] = 0;
+                jpeg_destroy_compress(&encoders[tileX]);
+                encoderCreated[tileX] = 0u;
+                const uint64_t nextBytes =
+                    static_cast<uint64_t>(layer->bytes) + tile.bytes;
+                if (nextBytes > kMaxPyramidBytes || nextBytes > UINT32_MAX) {
+                    cleanup();
+                    return false;
+                }
+                layer->bytes = static_cast<uint32_t>(nextBytes);
+                layer->tiles.push_back(std::move(tile));
+            }
+        }
+    }
+
+    while (decoder.output_scanline < decoder.output_height) {
+        JSAMPROW row = decodedRow;
+        if (jpeg_read_scanlines(&decoder, &row, 1) != 1) break;
+    }
+    jpeg_finish_decompress(&decoder);
+    decoderCreated = false;
+    jpeg_destroy_decompress(&decoder);
+    fclose(input);
+    input = nullptr;
+    free(decodedRow);
+    decodedRow = nullptr;
+    outputRow = nullptr;
+    free(encoders);
+    free(encoded);
+    free(encodedBytes);
+    free(encoderCreated);
+    return layer->tiles.size() == tileCount && layer->bytes > 0;
+}
+
 std::vector<PyramidLayer> encodePyramidFromSource(
     const char* sourcePath,
     uint32_t sourceWidth,
@@ -433,13 +691,12 @@ std::vector<PyramidLayer> encodePyramidFromSource(
     for (uint32_t sample = 2u; sample != 0u && sample <= maximumSample;
          sample *= 2u) {
         PyramidLayer layer;
-        layer.sampleSize = sample;
-        layer.width = ceilDiv(sourceWidth, sample);
-        layer.height = ceilDiv(sourceHeight, sample);
-        layer.encoded = encodeScaledJpegFromSource(
-            sourcePath, sample, layer.width, layer.height);
-        if (layer.encoded.empty() || layer.encoded.size() > UINT32_MAX) return {};
-        layer.bytes = static_cast<uint32_t>(layer.encoded.size());
+        const uint32_t layerWidth = ceilDiv(sourceWidth, sample);
+        const uint32_t layerHeight = ceilDiv(sourceHeight, sample);
+        if (!encodeScaledTilesFromSource(
+                sourcePath, sample, layerWidth, layerHeight, &layer)) {
+            return {};
+        }
         totalBytes += layer.bytes;
         if (totalBytes > kMaxPyramidBytes || layers.size() >= kMaxPyramidLayers) {
             return {};
@@ -452,8 +709,15 @@ std::vector<PyramidLayer> encodePyramidFromSource(
 
 uint32_t pyramidPayloadBytes(const std::vector<PyramidLayer>& layers) {
     if (layers.empty() || layers.size() > kMaxPyramidLayers) return 0;
-    uint64_t total = 8u + static_cast<uint64_t>(layers.size()) * 16u;
-    for (const auto& layer : layers) total += layer.encoded.size();
+    uint64_t total = 8u + static_cast<uint64_t>(layers.size()) * 28u;
+    for (const auto& layer : layers) {
+        if (layer.tiles.empty() ||
+            layer.tiles.size() != static_cast<uint64_t>(layer.tilesAcross) * layer.tilesDown) {
+            return 0;
+        }
+        total += static_cast<uint64_t>(layer.tiles.size()) * 20u;
+        for (const auto& tile : layer.tiles) total += tile.encoded.size();
+    }
     return total <= kMaxPyramidBytes && total <= UINT32_MAX
         ? static_cast<uint32_t>(total) : 0u;
 }
@@ -509,7 +773,7 @@ bool writeIndex(
     }
     if (!writeU32(file.get(), kOverviewMarker)) return false;
     if (!layers.empty()) {
-        if (!writeU32(file.get(), kPyramidMarker) ||
+        if (!writeU32(file.get(), kIndexedPyramidMarker) ||
             !writeU32(file.get(), static_cast<uint32_t>(layers.size()))) {
             return false;
         }
@@ -517,13 +781,28 @@ bool writeIndex(
             if (!writeU32(file.get(), layer.sampleSize) ||
                 !writeU32(file.get(), layer.width) ||
                 !writeU32(file.get(), layer.height) ||
-                !writeU32(file.get(), layer.bytes)) {
+                !writeU32(file.get(), layer.bytes) ||
+                !writeU32(file.get(), layer.tileSize) ||
+                !writeU32(file.get(), layer.tilesAcross) ||
+                !writeU32(file.get(), layer.tilesDown)) {
                 return false;
             }
         }
         for (const auto& layer : layers) {
-            if (!writeBytes(file.get(), layer.encoded.data(), layer.encoded.size())) {
-                return false;
+            for (const auto& tile : layer.tiles) {
+                if (!writeU32(file.get(), tile.x) || !writeU32(file.get(), tile.y) ||
+                    !writeU32(file.get(), tile.width) ||
+                    !writeU32(file.get(), tile.height) ||
+                    !writeU32(file.get(), tile.bytes)) {
+                    return false;
+                }
+            }
+        }
+        for (const auto& layer : layers) {
+            for (const auto& tile : layer.tiles) {
+                if (!writeBytes(file.get(), tile.encoded.data(), tile.encoded.size())) {
+                    return false;
+                }
             }
         }
     }
@@ -541,6 +820,7 @@ bool readHeader(FILE* file, Header* header) {
          version != kBrokenOverviewFormatVersion &&
          version != kFitOverviewFormatVersion &&
          version != kSingleLayerFormatVersion &&
+         version != kWholeLayerPyramidFormatVersion &&
          version != kFormatVersion) ||
         !readU64(file, &sourceBytes) || !readU64(file, &sourceModified) ||
         !readU32(file, &header->width) || !readU32(file, &header->height) ||
@@ -558,9 +838,11 @@ bool readHeader(FILE* file, Header* header) {
          !readU32(file, &header->overviewBytes))) {
         return false;
     }
-    const uint32_t maximumOverviewBytes = version == kFormatVersion
+    const uint32_t maximumOverviewBytes =
+        (version == kWholeLayerPyramidFormatVersion || version == kFormatVersion)
         ? kMaxPyramidBytes : kMaxOverviewBytes;
-    const bool pyramidDimensionsValid = version != kFormatVersion ||
+    const bool pyramidDimensionsValid =
+        (version != kWholeLayerPyramidFormatVersion && version != kFormatVersion) ||
         (header->overviewSampleSize == 2u &&
          header->overviewWidth == ceilDiv(header->width, 2u) &&
          header->overviewHeight == ceilDiv(header->height, 2u));
@@ -571,7 +853,7 @@ bool readHeader(FILE* file, Header* header) {
           header->overviewWidth > 0 && header->overviewHeight > 0 &&
           header->overviewSampleSize >= 2 &&
           (header->overviewSampleSize & (header->overviewSampleSize - 1u)) == 0 &&
-          (version == kFormatVersion ||
+          (version == kWholeLayerPyramidFormatVersion || version == kFormatVersion ||
            static_cast<uint64_t>(header->overviewWidth) * header->overviewHeight <=
                kMaxOverviewPixels) &&
           pyramidDimensionsValid;
@@ -706,6 +988,7 @@ bool readOverview(
 ) {
     std::unique_ptr<FILE, decltype(&fclose)> file(fopen(path, "rb"), fclose);
     if (!file || !readHeader(file.get(), header) ||
+        header->formatVersion == kWholeLayerPyramidFormatVersion ||
         header->formatVersion == kFormatVersion ||
         header->sourceBytes != expectedBytes ||
         header->sourceModifiedMillis != expectedModified ||
@@ -730,18 +1013,22 @@ bool readPyramidDirectory(
     std::vector<PyramidLayer>* layers,
     long* dataOffset
 ) {
-    if (header->formatVersion != kFormatVersion || header->overviewBytes == 0 ||
+    const bool tiled = header->formatVersion == kFormatVersion;
+    if ((!tiled && header->formatVersion != kWholeLayerPyramidFormatVersion) ||
+        header->overviewBytes == 0 ||
         !seekOverviewPayload(file, header)) {
         return false;
     }
     uint32_t marker, count;
-    if (!readU32(file, &marker) || marker != kPyramidMarker ||
+    const uint32_t expectedMarker = tiled ? kIndexedPyramidMarker : kPyramidMarker;
+    if (!readU32(file, &marker) || marker != expectedMarker ||
         !readU32(file, &count) || count == 0 || count > kMaxPyramidLayers) {
         return false;
     }
     layers->clear();
     layers->reserve(count);
-    uint64_t payloadBytes = 8u + static_cast<uint64_t>(count) * 16u;
+    const uint32_t layerRecordBytes = tiled ? 28u : 16u;
+    uint64_t payloadBytes = 8u + static_cast<uint64_t>(count) * layerRecordBytes;
     uint32_t expectedSample = 2u;
     for (uint32_t i = 0; i < count; ++i) {
         PyramidLayer layer;
@@ -755,10 +1042,20 @@ bool readPyramidDirectory(
             layers->clear();
             return false;
         }
-        payloadBytes += layer.bytes;
-        if (payloadBytes > kMaxPyramidBytes || payloadBytes > UINT32_MAX) {
-            layers->clear();
-            return false;
+        if (tiled) {
+            if (!readU32(file, &layer.tileSize) ||
+                !readU32(file, &layer.tilesAcross) ||
+                !readU32(file, &layer.tilesDown) ||
+                layer.tileSize != kPyramidTileSize ||
+                layer.tilesAcross != ceilDiv(layer.width, layer.tileSize) ||
+                layer.tilesDown != ceilDiv(layer.height, layer.tileSize) ||
+                static_cast<uint64_t>(layer.tilesAcross) * layer.tilesDown >
+                    kMaxPyramidTiles) {
+                layers->clear();
+                return false;
+            }
+        } else {
+            payloadBytes += layer.bytes;
         }
         layers->push_back(std::move(layer));
         if (expectedSample > UINT32_MAX / 2u && i + 1u < count) {
@@ -766,6 +1063,46 @@ bool readPyramidDirectory(
             return false;
         }
         expectedSample *= 2u;
+    }
+    if (tiled) {
+        for (auto& layer : *layers) {
+            const uint64_t tileCount =
+                static_cast<uint64_t>(layer.tilesAcross) * layer.tilesDown;
+            payloadBytes += tileCount * 20u;
+            layer.tiles.reserve(static_cast<size_t>(tileCount));
+            uint64_t layerBytes = 0;
+            for (uint32_t y = 0; y < layer.tilesDown; ++y) {
+                for (uint32_t x = 0; x < layer.tilesAcross; ++x) {
+                    PyramidTile tile;
+                    const uint32_t expectedWidth = std::min(
+                        layer.tileSize, layer.width - x * layer.tileSize);
+                    const uint32_t expectedHeight = std::min(
+                        layer.tileSize, layer.height - y * layer.tileSize);
+                    if (!readU32(file, &tile.x) || !readU32(file, &tile.y) ||
+                        !readU32(file, &tile.width) ||
+                        !readU32(file, &tile.height) ||
+                        !readU32(file, &tile.bytes) ||
+                        tile.x != x || tile.y != y ||
+                        tile.width != expectedWidth ||
+                        tile.height != expectedHeight || tile.bytes == 0) {
+                        layers->clear();
+                        return false;
+                    }
+                    layerBytes += tile.bytes;
+                    payloadBytes += tile.bytes;
+                    if (layerBytes > UINT32_MAX || payloadBytes > kMaxPyramidBytes ||
+                        payloadBytes > UINT32_MAX) {
+                        layers->clear();
+                        return false;
+                    }
+                    layer.tiles.push_back(std::move(tile));
+                }
+            }
+            if (layerBytes != layer.bytes) {
+                layers->clear();
+                return false;
+            }
+        }
     }
     if (payloadBytes != header->overviewBytes ||
         layers->front().width != header->overviewWidth ||
@@ -779,7 +1116,20 @@ bool readPyramidDirectory(
         layers->clear();
         return false;
     }
-    uint64_t encodedBytes = payloadBytes - (8u + static_cast<uint64_t>(count) * 16u);
+    uint64_t encodedBytes = 0;
+    if (tiled) {
+        uint64_t offset = static_cast<uint64_t>(*dataOffset);
+        for (auto& layer : *layers) {
+            for (auto& tile : layer.tiles) {
+                tile.dataOffset = offset;
+                offset += tile.bytes;
+                encodedBytes += tile.bytes;
+            }
+        }
+    } else {
+        encodedBytes = payloadBytes -
+            (8u + static_cast<uint64_t>(count) * layerRecordBytes);
+    }
     if (encodedBytes > static_cast<uint64_t>(LONG_MAX) ||
         fseek(file, static_cast<long>(encodedBytes), SEEK_CUR) != 0 ||
         !readU32(file, &marker) || marker != kEndMarker || fgetc(file) != EOF) {
@@ -807,6 +1157,7 @@ bool readPyramid(
     long dataOffset = 0;
     if (!readPyramidDirectory(file.get(), header, layers, &dataOffset)) return false;
     if (encoded == nullptr) return true;
+    if (header->formatVersion == kFormatVersion) return false;
     uint64_t skip = 0;
     const PyramidLayer* selected = nullptr;
     for (const auto& layer : *layers) {
@@ -953,10 +1304,28 @@ Java_io_github_indexedjpeg_IndexedJpegNative_validateIndex(
     if (indexPath.get() == nullptr) return JNI_FALSE;
     Header header{};
     huffman_index unused{};
-    return readIndex(
+    if (!readIndex(
         indexPath.get(), static_cast<int64_t>(sourceBytes),
-        static_cast<int64_t>(sourceModifiedMillis), &header, &unused, true)
-        ? JNI_TRUE : JNI_FALSE;
+        static_cast<int64_t>(sourceModifiedMillis), &header, &unused, true)) {
+        return JNI_FALSE;
+    }
+    // Version 7's directory is the address map used for every low-frequency
+    // decode. Validate its complete shape and terminal marker during status
+    // checks so a truncated/corrupt payload is never advertised as ready.
+    if (header.formatVersion == kFormatVersion && header.overviewBytes > 0) {
+        std::unique_ptr<FILE, decltype(&fclose)> file(
+            fopen(indexPath.get(), "rb"), fclose);
+        std::vector<PyramidLayer> layers;
+        long dataOffset = 0;
+        Header parsed{};
+        if (!file || !readHeader(file.get(), &parsed) ||
+            parsed.sourceBytes != static_cast<int64_t>(sourceBytes) ||
+            parsed.sourceModifiedMillis != static_cast<int64_t>(sourceModifiedMillis) ||
+            !readPyramidDirectory(file.get(), &parsed, &layers, &dataOffset)) {
+            return JNI_FALSE;
+        }
+    }
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -1004,6 +1373,7 @@ Java_io_github_indexedjpeg_IndexedJpegNative_readOverviewMetadata(
         fopen(indexPath.get(), "rb"), fclose);
     Header header{};
     if (!file || !readHeader(file.get(), &header) ||
+        header.formatVersion == kWholeLayerPyramidFormatVersion ||
         header.formatVersion == kFormatVersion ||
         header.sourceBytes != static_cast<int64_t>(sourceBytes) ||
         header.sourceModifiedMillis != static_cast<int64_t>(sourceModifiedMillis) ||
@@ -1043,18 +1413,19 @@ Java_io_github_indexedjpeg_IndexedJpegNative_readPyramidMetadata(
             0u, &header, &layers, nullptr)) {
         return nullptr;
     }
-    std::vector<jint> values(5u + layers.size() * 4u);
+    std::vector<jint> values(5u + layers.size() * 5u);
     values[0] = static_cast<jint>(header.formatVersion);
     values[1] = static_cast<jint>(header.width);
     values[2] = static_cast<jint>(header.height);
     values[3] = static_cast<jint>(layers.size());
     values[4] = static_cast<jint>(header.overviewBytes);
     for (size_t i = 0; i < layers.size(); ++i) {
-        const size_t offset = 5u + i * 4u;
+        const size_t offset = 5u + i * 5u;
         values[offset] = static_cast<jint>(layers[i].sampleSize);
         values[offset + 1u] = static_cast<jint>(layers[i].width);
         values[offset + 2u] = static_cast<jint>(layers[i].height);
         values[offset + 3u] = static_cast<jint>(layers[i].bytes);
+        values[offset + 4u] = static_cast<jint>(layers[i].tileSize);
     }
     jintArray result = env->NewIntArray(static_cast<jsize>(values.size()));
     if (result != nullptr) {
@@ -1093,6 +1464,89 @@ Java_io_github_indexedjpeg_IndexedJpegNative_readPyramidLayer(
             reinterpret_cast<const jbyte*>(encoded.data()));
     }
     return result;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_io_github_indexedjpeg_IndexedJpegNative_openPyramidTiles(
+    JNIEnv* env,
+    jobject,
+    jstring indexPathValue,
+    jlong sourceBytes,
+    jlong sourceModifiedMillis
+) {
+    UtfChars indexPath(env, indexPathValue);
+    if (indexPath.get() == nullptr) return 0;
+    std::unique_ptr<FILE, decltype(&fclose)> file(
+        fopen(indexPath.get(), "rb"), fclose);
+    Header header{};
+    auto handle = std::make_unique<PyramidHandle>();
+    long dataOffset = 0;
+    if (!file || !readHeader(file.get(), &header) ||
+        header.formatVersion != kFormatVersion ||
+        header.sourceBytes != static_cast<int64_t>(sourceBytes) ||
+        header.sourceModifiedMillis != static_cast<int64_t>(sourceModifiedMillis) ||
+        !readPyramidDirectory(
+            file.get(), &header, &handle->layers, &dataOffset)) {
+        return 0;
+    }
+    handle->file = file.release();
+    handle->sourceWidth = header.width;
+    handle->sourceHeight = header.height;
+    return reinterpret_cast<jlong>(handle.release());
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_io_github_indexedjpeg_IndexedJpegNative_readPyramidTile(
+    JNIEnv* env,
+    jobject,
+    jlong handleValue,
+    jint sampleSize,
+    jint tileX,
+    jint tileY
+) {
+    auto* handle = reinterpret_cast<PyramidHandle*>(handleValue);
+    if (handle == nullptr || sampleSize <= 0 || tileX < 0 || tileY < 0) {
+        return nullptr;
+    }
+    const PyramidLayer* selected = nullptr;
+    for (const auto& layer : handle->layers) {
+        if (layer.sampleSize == static_cast<uint32_t>(sampleSize)) {
+            selected = &layer;
+            break;
+        }
+    }
+    if (selected == nullptr || static_cast<uint32_t>(tileX) >= selected->tilesAcross ||
+        static_cast<uint32_t>(tileY) >= selected->tilesDown) {
+        return nullptr;
+    }
+    const size_t position = static_cast<size_t>(tileY) * selected->tilesAcross +
+                            static_cast<size_t>(tileX);
+    if (position >= selected->tiles.size()) return nullptr;
+    const PyramidTile& tile = selected->tiles[position];
+    if (tile.dataOffset > static_cast<uint64_t>(LONG_MAX) ||
+        tile.bytes > static_cast<uint32_t>(INT_MAX)) {
+        return nullptr;
+    }
+    if (handle->file == nullptr || fseek(
+            handle->file, static_cast<long>(tile.dataOffset), SEEK_SET) != 0) {
+        return nullptr;
+    }
+    std::vector<uint8_t> encoded(tile.bytes);
+    if (!readBytes(handle->file, encoded.data(), encoded.size())) return nullptr;
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(encoded.size()));
+    if (result != nullptr) {
+        env->SetByteArrayRegion(
+            result, 0, static_cast<jsize>(encoded.size()),
+            reinterpret_cast<const jbyte*>(encoded.data()));
+    }
+    return result;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_github_indexedjpeg_IndexedJpegNative_closePyramidTiles(
+    JNIEnv*, jobject, jlong handleValue
+) {
+    delete reinterpret_cast<PyramidHandle*>(handleValue);
 }
 
 extern "C" JNIEXPORT jlong JNICALL
