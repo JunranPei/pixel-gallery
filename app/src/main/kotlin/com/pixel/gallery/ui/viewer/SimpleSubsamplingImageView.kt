@@ -474,6 +474,7 @@ internal fun SimpleSubsamplingImageView(
     metricsDetail: String = "",
     regionDecoderKind: ViewerRegionDecoderKind = ViewerRegionDecoderKind.PLATFORM,
     decoderSourceKey: String = "",
+    indexCapabilityRevision: Long = 0L,
     transformStateStore: ViewerTransformStateStore,
     onContentReadyChanged: (Boolean) -> Unit = {},
     onUltraHdrAvailabilityChanged: (Boolean) -> Unit = {},
@@ -1617,6 +1618,9 @@ internal fun SimpleSubsamplingImageView(
         },
         update = {
             ssivView?.let { view ->
+                // Reading the revision here makes an index mutation invalidate an already-open
+                // AndroidView. SSIV performs the actual comparison and preserves its transform.
+                view.refreshDecoderCapabilities(indexCapabilityRevision)
                 view.isEnabled = canTilesReceiveInput(
                     isActivePage = isActivePage,
                     subsamplingReady = subsamplingReady,

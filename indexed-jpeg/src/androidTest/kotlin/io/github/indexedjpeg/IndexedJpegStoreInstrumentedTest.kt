@@ -19,6 +19,35 @@ import java.security.MessageDigest
 @RunWith(AndroidJUnit4::class)
 class IndexedJpegStoreInstrumentedTest {
     @Test
+    fun changeListenerReportsPublishedAndDeletedIndex() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-change-listener-fixture.jpg")
+        createFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+        val unrelatedPath = File(context.cacheDir, "indexed-jpeg-unrelated.jpg").absolutePath
+        val unrelatedGeneration = store.currentGenerationFor(unrelatedPath)
+        val changes = mutableListOf<IndexedJpegChange>()
+        val registration = store.addChangeListener(changes::add)
+        try {
+            store.build(source.absolutePath)
+            assertEquals(1, changes.size)
+            assertEquals(source.absolutePath, changes.single().sourcePath)
+            assertEquals(store.currentGeneration, changes.single().generation)
+            assertEquals(changes.single().generation, store.currentGenerationFor(source.absolutePath))
+            assertEquals(unrelatedGeneration, store.currentGenerationFor(unrelatedPath))
+
+            assertTrue(store.delete(source.absolutePath))
+            assertEquals(2, changes.size)
+            assertTrue(changes[1].generation > changes[0].generation)
+        } finally {
+            registration.close()
+            store.delete(source.absolutePath)
+            source.delete()
+        }
+    }
+
+    @Test
     fun buildPersistDecodeMultipleSamplesAndDelete() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val source = File(context.cacheDir, "indexed-jpeg-fixture.jpg")

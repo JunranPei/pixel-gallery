@@ -124,6 +124,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var uri: Uri? = null
     private var fullImageSampleSize = 0
     private var tileMap: MutableMap<Int, List<Tile>>? = null
+    private var tileMapCapabilityRevision = Long.MIN_VALUE
+    private var hostCapabilityRevision = Long.MIN_VALUE
     private var tileAccessSequence = 0L
     private var lastRequiredSampleSize = 0
     private var stableTileRefreshGeneration = 0L
@@ -369,6 +371,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             }
         }
         tileMap = null
+        tileMapCapabilityRevision = Long.MIN_VALUE
         tileAccessSequence = 0L
         setGestureDetector(context)
     }
@@ -913,6 +916,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (tileMap == null && decoder != null) {
             initialiseBaseLayer(getMaxBitmapDimensions(canvas))
         }
+        refreshTileMapForDecoderCapabilities(getMaxBitmapDimensions(canvas))
 
         if (!checkReady()) {
             return
@@ -2015,6 +2019,16 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         invalidate()
     }
 
+    /**
+     * Requests a cheap capability check on the next frame. If a persistent index changed,
+     * SSIV rebuilds only its tile grid; the live scale, source centre and rotation are retained.
+     */
+    fun refreshDecoderCapabilities(hostRevision: Long = 0L) {
+        if (hostCapabilityRevision == hostRevision) return
+        hostCapabilityRevision = hostRevision
+        invalidate()
+    }
+
     fun animateToBounds(forceInstantRefresh: Boolean = false) {
         isPanning = false
         val degrees = Math.toDegrees(imageRotation)
@@ -2129,6 +2143,46 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 sampleSize /= 2
             }
         }
+        tileMapCapabilityRevision = (decoder as? BatchedImageRegionDecoder)
+            ?.capabilityRevision()
+            ?: 0L
+    }
+
+    @Synchronized
+    private fun refreshTileMapForDecoderCapabilities(maxTileDimensions: Point) {
+        val batchDecoder = decoder as? BatchedImageRegionDecoder ?: return
+        val currentMap = tileMap ?: run {
+            tileMapCapabilityRevision = batchDecoder.capabilityRevision()
+            return
+        }
+        val revision = batchDecoder.capabilityRevision()
+        if (revision == tileMapCapabilityRevision) return
+        if (isZooming || isPanning || isQuickScaling || anim != null) {
+            postInvalidateOnAnimation()
+            return
+        }
+
+        val previousRevision = tileMapCapabilityRevision
+        imageGeneration += 1
+        stableTileRefreshGeneration += 1
+        stableTileCacheGeneration += 1
+        currentMap.values.flatten().forEach { tile ->
+            tile.visible = false
+            tile.loading = false
+            // RenderThread may still hold the previous display list. Drop SSIV's ownership
+            // without synchronously recycling the backing Bitmap on the UI thread.
+            clearTileBitmap(tile, recycleBitmap = false)
+        }
+        tileMap = null
+        tileAccessSequence = 0L
+        isImageLoaded = false
+        initialiseTileMap(maxTileDimensions)
+        diagnosticsListener?.invoke(
+            "tile=CAPABILITY_REBUILD from=$previousRevision to=$tileMapCapabilityRevision " +
+                "scale=$scale center=${getCenter()} base=$fullImageSampleSize",
+        )
+        refreshRequiredTiles(true)
+        invalidate()
     }
 
     private class TilesInitTask internal constructor(

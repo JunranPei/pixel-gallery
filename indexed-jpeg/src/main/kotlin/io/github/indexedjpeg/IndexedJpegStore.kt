@@ -15,6 +15,8 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.ceil
@@ -85,6 +87,11 @@ private data class IndexedJpegPyramidMetadata(
 data class IndexedJpegOverviewSize(
     val width: Int,
     val height: Int,
+)
+
+data class IndexedJpegChange(
+    val sourcePath: String,
+    val generation: Long,
 )
 
 /**
@@ -202,7 +209,7 @@ class IndexedJpegStore(context: Context) {
                 }
                 publishCompletedFile(temporary, destination)
                 legacyOverviewFile(source).delete()
-                generation.incrementAndGet()
+                notifyIndexChanged(source.absolutePath)
                 return IndexedJpegInfo(
                     indexBytes = destination.length(),
                     sourceWidth = nativeInfo[0],
@@ -226,10 +233,11 @@ class IndexedJpegStore(context: Context) {
         if (!buildInProgress.compareAndSet(false, true)) return false
         return try {
             val source = File(sourcePath)
+            val hadIndex = indexFile(source).exists() || legacyOverviewFile(source).exists()
             val indexDeleted = indexFile(source).let { !it.exists() || it.delete() }
             val overviewDeleted = legacyOverviewFile(source).let { !it.exists() || it.delete() }
             val deleted = indexDeleted && overviewDeleted
-            if (deleted) generation.incrementAndGet()
+            if (deleted && hadIndex) notifyIndexChanged(source.absolutePath)
             deleted
         } finally {
             buildInProgress.set(false)
@@ -260,7 +268,8 @@ class IndexedJpegStore(context: Context) {
             }
             legacyOverviewFile(File(sourcePath)).delete()
             legacyOverviewFile(destinationSource).delete()
-            generation.incrementAndGet()
+            notifyIndexChanged(File(sourcePath).absolutePath)
+            notifyIndexChanged(destinationSource.absolutePath)
             true
         } finally {
             buildInProgress.set(false)
@@ -570,6 +579,19 @@ class IndexedJpegStore(context: Context) {
     val currentGeneration: Long
         get() = generation.get()
 
+    /** Process-local mutation revision scoped to one physical source path. */
+    fun currentGenerationFor(sourcePath: String): Long =
+        sourceGenerations[File(sourcePath).absolutePath] ?: 0L
+
+    /**
+     * Observes process-wide JPEG index mutations. Callbacks run on the mutation thread;
+     * UI hosts should dispatch to their main scope before updating observable state.
+     */
+    fun addChangeListener(listener: (IndexedJpegChange) -> Unit): Closeable {
+        changeListeners += listener
+        return Closeable { changeListeners -= listener }
+    }
+
     /** Changes whenever the persisted index is replaced, moved, or deleted. */
     fun indexCacheSignature(sourcePath: String): String {
         val index = indexFile(File(sourcePath))
@@ -641,6 +663,14 @@ class IndexedJpegStore(context: Context) {
                 candidate.delete()
             }
         }
+    }
+
+    private fun notifyIndexChanged(sourcePath: String) {
+        val nextGeneration = generation.incrementAndGet()
+        val normalizedPath = File(sourcePath).absolutePath
+        sourceGenerations[normalizedPath] = nextGeneration
+        val change = IndexedJpegChange(normalizedPath, nextGeneration)
+        changeListeners.forEach { listener -> runCatching { listener(change) } }
     }
 
     private fun indexFile(source: File): File = File(directory, sourceKey(source) + INDEX_SUFFIX)
@@ -720,6 +750,8 @@ class IndexedJpegStore(context: Context) {
         val buildInProgress = AtomicBoolean(false)
         val generation = AtomicLong(0L)
         val lastTemporaryCleanupMillis = AtomicLong(0L)
+        val sourceGenerations = ConcurrentHashMap<String, Long>()
+        val changeListeners = CopyOnWriteArraySet<(IndexedJpegChange) -> Unit>()
     }
 }
 

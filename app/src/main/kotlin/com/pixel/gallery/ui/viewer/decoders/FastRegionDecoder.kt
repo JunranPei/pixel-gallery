@@ -169,6 +169,7 @@ class FastRegionDecoder(
     private var indexedHeifGeneration = Long.MIN_VALUE
     private var indexedHeifDecodeFailed = false
     @Volatile private var activeIndexedBackend: IndexedBackend? = null
+    @Volatile private var resolvedCapabilityRevision = Long.MIN_VALUE
     @Volatile private var initialized = false
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
@@ -192,6 +193,7 @@ class FastRegionDecoder(
         indexedWebpStore = IndexedWebpStore(appContext)
         indexedHeifStore = IndexedHeifStore(appContext)
         activeIndexedBackend = resolveIndexedBackend()
+        resolvedCapabilityRevision = indexStoresRevision()
         metricsKey = imageVersion
         metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
@@ -309,16 +311,21 @@ class FastRegionDecoder(
         }
     }
 
+    override fun capabilityRevision(): Long = indexStoresRevision()
+
     override fun capabilities(sampleSize: Int): RegionDecoderCapabilities {
-        val addressableJpegTileSize = addressableJpegPyramidTileSize(sampleSize)
-        val persistentPyramid =
-            activeIndexedBackend?.persistentTilePyramid == true ||
-                addressableJpegTileSize != null
-        return RegionDecoderCapabilities(
-            batchSourceMisses = !persistentPyramid,
-            persistDecodedTiles = !persistentPyramid,
-            preferredDecodedTileSize = addressableJpegTileSize,
-        )
+        return synchronized(decoderLock) {
+            refreshBackendForCapabilityRevision()
+            val addressableJpegTileSize = addressableJpegPyramidTileSize(sampleSize)
+            val persistentPyramid =
+                activeIndexedBackend?.persistentTilePyramid == true ||
+                    addressableJpegTileSize != null
+            RegionDecoderCapabilities(
+                batchSourceMisses = !persistentPyramid,
+                persistDecodedTiles = !persistentPyramid,
+                preferredDecodedTileSize = addressableJpegTileSize,
+            )
+        }
     }
 
     override fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean {
@@ -484,6 +491,7 @@ class FastRegionDecoder(
             indexedHeifGeneration = Long.MIN_VALUE
             indexedHeifDecodeFailed = false
             activeIndexedBackend = null
+            resolvedCapabilityRevision = Long.MIN_VALUE
             initialized = false
         }
         ViewerLoadMetrics.workReady(token)
@@ -786,10 +794,35 @@ class FastRegionDecoder(
         return null
     }
 
+    private fun indexStoresRevision(): Long {
+        val sourcePath = indexedSourcePath
+        var revision = if (sourcePath != null) {
+            indexedStore?.currentGenerationFor(sourcePath) ?: 0L
+        } else {
+            0L
+        }
+        revision = revision * 31L + (indexedPngStore?.currentGeneration ?: 0L)
+        revision = revision * 31L + (indexedWebpStore?.currentGeneration ?: 0L)
+        revision = revision * 31L + (indexedHeifStore?.currentGeneration ?: 0L)
+        return revision
+    }
+
+    private fun refreshBackendForCapabilityRevision() {
+        val revision = indexStoresRevision()
+        if (revision == resolvedCapabilityRevision) return
+        activeIndexedBackend = resolveIndexedBackend()
+        resolvedCapabilityRevision = revision
+        ViewerLoadMetrics.event(
+            "INDEX_CAPABILITY_REVISION",
+            "revision=$revision backend=${activeIndexedBackend?.name ?: "NONE"}",
+            imageKey = imageVersion,
+        )
+    }
+
     private fun refreshIndexedDecoder(): IndexedJpegRegionDecoder? {
         val store = indexedStore ?: return null
         val sourcePath = indexedSourcePath ?: return null
-        val generation = store.currentGeneration
+        val generation = store.currentGenerationFor(sourcePath)
         if (indexedGeneration != generation) {
             ViewerLoadMetrics.event(
                 "INDEX_GENERATION_CHANGE",
@@ -825,7 +858,7 @@ class FastRegionDecoder(
     private fun refreshIndexedOverviewDecoder(): IndexedJpegOverviewRegionDecoder? {
         val store = indexedStore ?: return null
         val sourcePath = indexedSourcePath ?: return null
-        val generation = store.currentGeneration
+        val generation = store.currentGenerationFor(sourcePath)
         if (indexedOverviewGeneration != generation) {
             indexedOverviewDecoder?.close()
             indexedOverviewDecoder = null

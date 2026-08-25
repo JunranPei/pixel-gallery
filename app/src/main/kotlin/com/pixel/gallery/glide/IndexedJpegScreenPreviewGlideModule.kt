@@ -20,8 +20,9 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * A fit-screen preview backed only by the low-frequency layer embedded in a ready JPEG index.
  *
- * Missing and legacy indexes deliberately fail so Glide can fall back to the ordinary JPEG
- * source. Displaying an image never creates or updates an index.
+ * Missing indexes, or indexes without a layer covering the requested viewport, deliberately
+ * fail so Glide can fall back to the ordinary JPEG source. Displaying an image never creates or
+ * updates an index.
  */
 data class IndexedJpegScreenPreview(
     val sourcePath: String,
@@ -29,6 +30,7 @@ data class IndexedJpegScreenPreview(
     val sourceHeight: Int,
     val rotationDegrees: Int,
     val dateModifiedMillis: Long,
+    val indexGeneration: Long,
 )
 
 internal class IndexedJpegScreenPreviewLoader(
@@ -43,7 +45,8 @@ internal class IndexedJpegScreenPreviewLoader(
         val source = File(model.sourcePath)
         val indexSignature = IndexedJpegStore(context).indexCacheSignature(model.sourcePath)
         val cacheKey = ObjectKey(
-            "indexed-jpeg-screen:v5-fit-source:$indexSignature:${model.sourcePath}:${model.dateModifiedMillis}:" +
+            "indexed-jpeg-screen:v7-addressable:$indexSignature:${model.indexGeneration}:" +
+                "${model.sourcePath}:${model.dateModifiedMillis}:" +
                 "${source.length()}:${source.lastModified()}:" +
                 "${model.sourceWidth}x${model.sourceHeight}:${model.rotationDegrees}:${width}x$height",
         )
