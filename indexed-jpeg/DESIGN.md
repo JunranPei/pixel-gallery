@@ -21,8 +21,9 @@ therefore replace the UI or extract this directory into its own repository.
 3. `openDecoder()` validates the source version and loads the pointer-free
    index into a native handle.
 4. `decodeRegion()` uses the same source index for every power-of-two sample
-   size. Samples above the JPEG DCT limit use indexed 1/8 decode followed by
-   bounded sampling into the requested tile.
+   size. Pyramid construction uses libjpeg DCT scaling through 1/8; higher
+   levels stream that 1/8 output through an area/box filter so thin lines and
+   repeated patterns are not lost to fixed-phase point sampling.
 5. Any native failure returns `null`; the host remains responsible for its
    ordinary decoder fallback.
 
