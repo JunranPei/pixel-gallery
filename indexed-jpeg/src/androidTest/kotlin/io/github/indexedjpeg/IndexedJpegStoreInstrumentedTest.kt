@@ -25,16 +25,20 @@ class IndexedJpegStoreInstrumentedTest {
         createFixture(source)
         val store = IndexedJpegStore(context)
         store.delete(source.absolutePath)
+        val observingStore = IndexedJpegStore(context)
         val unrelatedPath = File(context.cacheDir, "indexed-jpeg-unrelated.jpg").absolutePath
         val unrelatedGeneration = store.currentGenerationFor(unrelatedPath)
         val changes = mutableListOf<IndexedJpegChange>()
-        val registration = store.addChangeListener(changes::add)
+        val registration = observingStore.addChangeListener(changes::add)
         try {
             store.build(source.absolutePath)
             assertEquals(1, changes.size)
             assertEquals(source.absolutePath, changes.single().sourcePath)
             assertEquals(store.currentGeneration, changes.single().generation)
-            assertEquals(changes.single().generation, store.currentGenerationFor(source.absolutePath))
+            assertEquals(
+                changes.single().generation,
+                observingStore.currentGenerationFor(source.absolutePath),
+            )
             assertEquals(unrelatedGeneration, store.currentGenerationFor(unrelatedPath))
 
             assertTrue(store.delete(source.absolutePath))
@@ -152,6 +156,52 @@ class IndexedJpegStoreInstrumentedTest {
     }
 
     @Test
+    fun failedBuildKeepsPublishedIndexAndCleanupRespectsTemporaryFileAge() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-publication-fixture.jpg")
+        createFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+        store.build(source.absolutePath)
+        val index = persistedIndexFile(context, source)
+        val published = index.readBytes()
+        val originalSource = source.readBytes()
+        val originalModified = source.lastModified()
+
+        source.writeBytes(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte()))
+        var failed = false
+        try {
+            store.build(source.absolutePath)
+        } catch (_: java.io.IOException) {
+            failed = true
+        }
+        assertTrue("Malformed JPEG build unexpectedly succeeded", failed)
+        assertTrue("Failed build replaced the published index", published.contentEquals(index.readBytes()))
+
+        source.writeBytes(originalSource)
+        assertTrue(source.setLastModified(originalModified))
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+
+        val directory = index.parentFile!!
+        val now = System.currentTimeMillis()
+        val stale = File(directory, index.name + ".tmp-test-stale").apply {
+            writeText("stale")
+            assertTrue(setLastModified(now - 25L * 60L * 60L * 1000L))
+        }
+        val recent = File(directory, index.name + ".backup-test-recent").apply {
+            writeText("recent")
+            assertTrue(setLastModified(now))
+        }
+        store.build(source.absolutePath)
+        assertTrue("Stale temporary file was not removed", !stale.exists())
+        assertTrue("Recent temporary file was removed", recent.exists())
+
+        recent.delete()
+        assertTrue(store.delete(source.absolutePath))
+        source.delete()
+    }
+
+    @Test
     fun version2IndexRemainsUsableForTilesWithoutOverview() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val source = File(context.cacheDir, "indexed-jpeg-v2-compatibility-fixture.jpg")
@@ -201,6 +251,24 @@ class IndexedJpegStoreInstrumentedTest {
         store.openOverviewDecoder(source.absolutePath).use { decoder ->
             assertNotNull(decoder)
         }
+
+        convertCurrentPyramidToVersion6SingleLayer(index, currentVersion)
+        val version6Status = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(6, version6Status.formatVersion)
+        assertEquals(IndexedJpegPyramidType.WHOLE_JPEG_LAYERS, version6Status.pyramidType)
+        assertEquals(1, version6Status.pyramidLayerCount)
+        assertTrue(version6Status.canUpgradeToAddressablePyramid)
+        store.openOverviewDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            val active = requireNotNull(decoder)
+            val sampleSize = active.availableSampleSizes.single()
+            assertDecodedSize(
+                active.decodeRegion(Rect(0, 0, info.sourceWidth, info.sourceHeight), sampleSize),
+                ceilDiv(info.sourceWidth, sampleSize),
+                ceilDiv(info.sourceHeight, sampleSize),
+            )
+        }
+
         index.writeBytes(currentVersion)
         downgradeCurrentIndexToVersion2(index)
 
@@ -330,6 +398,14 @@ class IndexedJpegStoreInstrumentedTest {
             assertEquals(layer.tileSize, direct.height)
             direct.recycle()
 
+            val alignedEdgeTile = Rect(2048, 2048, info.sourceWidth, info.sourceHeight)
+            assertEquals(1, active.addressableTileCount(alignedEdgeTile, layer.sampleSize))
+            val edge = active.decodeRegion(alignedEdgeTile, layer.sampleSize)
+            assertNotNull(edge)
+            assertEquals(ceilDiv(alignedEdgeTile.width(), layer.sampleSize), edge!!.width)
+            assertEquals(ceilDiv(alignedEdgeTile.height(), layer.sampleSize), edge.height)
+            edge.recycle()
+
             val crossing = Rect(1800, 1800, 2400, 2250)
             assertEquals(4, active.addressableTileCount(crossing, layer.sampleSize))
             val decoded = active.decodeRegion(crossing, layer.sampleSize)
@@ -369,6 +445,53 @@ class IndexedJpegStoreInstrumentedTest {
 
         assertTrue(store.delete(source.absolutePath))
         source.delete()
+    }
+
+    @Test
+    fun openedDecodersSurviveAtomicReplacementAndDeletion() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-live-handle-fixture.jpg")
+        createOverviewFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+        store.buildForViewport(source.absolutePath, 120, 160)
+        val sourceDecoder = requireNotNull(store.openDecoder(source.absolutePath))
+        val overviewDecoder = requireNotNull(store.openOverviewDecoder(source.absolutePath))
+        val overviewSample = overviewDecoder.availableSampleSizes.last()
+
+        try {
+            store.buildForViewport(source.absolutePath, 250, 350)
+            assertDecodedSize(
+                sourceDecoder.decodeRegion(Rect(0, 0, 512, 384), 1),
+                512,
+                384,
+            )
+            assertDecodedSize(
+                overviewDecoder.decodeRegion(
+                    Rect(0, 0, 512, 384),
+                    overviewSample,
+                ),
+                ceilDiv(512, overviewSample),
+                ceilDiv(384, overviewSample),
+            )
+
+            assertTrue(store.delete(source.absolutePath))
+            assertDecodedSize(
+                sourceDecoder.decodeRegion(Rect(512, 384, 1024, 768), 1),
+                512,
+                384,
+            )
+            assertDecodedSize(
+                overviewDecoder.decodeRegion(Rect(512, 384, 1024, 768), overviewSample),
+                ceilDiv(512, overviewSample),
+                ceilDiv(384, overviewSample),
+            )
+        } finally {
+            overviewDecoder.close()
+            sourceDecoder.close()
+            store.delete(source.absolutePath)
+            source.delete()
+        }
     }
 
     @Test
@@ -470,6 +593,29 @@ class IndexedJpegStoreInstrumentedTest {
             decodeSample,
         )
         overview.recycle()
+
+        listOf(90, 180, 270).forEach { rotationDegrees ->
+            val rotated = store.decodeScreenOverview(
+                sourcePath = source.absolutePath,
+                rotationDegrees = rotationDegrees,
+                requestedWidth = viewportWidth,
+                requestedHeight = viewportHeight,
+            )
+            assertNotNull("No covering overview for rotation=$rotationDegrees", rotated)
+            rotated!!
+            assertTrue(
+                overviewCoversFit(
+                    overviewWidth = rotated.width,
+                    overviewHeight = rotated.height,
+                    sourceWidth = info.sourceWidth,
+                    sourceHeight = info.sourceHeight,
+                    rotationDegrees = rotationDegrees,
+                    requestedWidth = viewportWidth,
+                    requestedHeight = viewportHeight,
+                ),
+            )
+            rotated.recycle()
+        }
 
         store.openOverviewDecoder(source.absolutePath).use { decoder ->
             assertNotNull(decoder)
@@ -591,6 +737,89 @@ class IndexedJpegStoreInstrumentedTest {
         )
         writeLittleEndianInt(single, single.size - Int.SIZE_BYTES, 0x31444e45)
         index.writeBytes(single)
+    }
+
+    private fun convertCurrentPyramidToVersion6SingleLayer(
+        index: File,
+        current: ByteArray,
+    ) {
+        val headerBytes = 64
+        val pyramidBytes = readLittleEndianInt(current, 60)
+        assertEquals(7, readLittleEndianInt(current, 8))
+        assertTrue(pyramidBytes > 0)
+        val overviewMarkerOffset = current.size - Int.SIZE_BYTES - pyramidBytes - Int.SIZE_BYTES
+        assertEquals(0x3152564f, readLittleEndianInt(current, overviewMarkerOffset))
+        val payloadOffset = overviewMarkerOffset + Int.SIZE_BYTES
+        assertEquals(0x32525950, readLittleEndianInt(current, payloadOffset))
+        val count = readLittleEndianInt(current, payloadOffset + Int.SIZE_BYTES)
+        assertTrue(count > 0)
+        val layerRecordBytes = 28
+        val tileRecordBytes = 20
+        val selectedDirectory =
+            payloadOffset + 2 * Int.SIZE_BYTES + (count - 1) * layerRecordBytes
+        val sampleSize = readLittleEndianInt(current, selectedDirectory)
+        val width = readLittleEndianInt(current, selectedDirectory + 4)
+        val height = readLittleEndianInt(current, selectedDirectory + 8)
+        val encodedBytes = readLittleEndianInt(current, selectedDirectory + 12)
+        val tilesAcross = readLittleEndianInt(current, selectedDirectory + 20)
+        val tilesDown = readLittleEndianInt(current, selectedDirectory + 24)
+        assertEquals(1, tilesAcross * tilesDown)
+
+        var totalTileRecords = 0
+        repeat(count) { position ->
+            val directory = payloadOffset + 2 * Int.SIZE_BYTES + position * layerRecordBytes
+            totalTileRecords +=
+                readLittleEndianInt(current, directory + 20) *
+                    readLittleEndianInt(current, directory + 24)
+        }
+        var encodedOffset =
+            payloadOffset + 2 * Int.SIZE_BYTES + count * layerRecordBytes +
+                totalTileRecords * tileRecordBytes
+        repeat(count - 1) { position ->
+            encodedOffset += readLittleEndianInt(
+                current,
+                payloadOffset + 2 * Int.SIZE_BYTES + position * layerRecordBytes + 12,
+            )
+        }
+
+        val checkpointBytes = overviewMarkerOffset - headerBytes
+        val version6PayloadBytes = 2 * Int.SIZE_BYTES + 4 * Int.SIZE_BYTES + encodedBytes
+        val version6 = ByteArray(
+            headerBytes + checkpointBytes + Int.SIZE_BYTES +
+                version6PayloadBytes + Int.SIZE_BYTES,
+        )
+        current.copyInto(version6, endIndex = headerBytes)
+        writeLittleEndianInt(version6, 8, 6)
+        writeLittleEndianInt(version6, 48, width)
+        writeLittleEndianInt(version6, 52, height)
+        writeLittleEndianInt(version6, 56, sampleSize)
+        writeLittleEndianInt(version6, 60, version6PayloadBytes)
+        current.copyInto(
+            destination = version6,
+            destinationOffset = headerBytes,
+            startIndex = headerBytes,
+            endIndex = overviewMarkerOffset,
+        )
+        var cursor = headerBytes + checkpointBytes
+        writeLittleEndianInt(version6, cursor, 0x3152564f)
+        cursor += Int.SIZE_BYTES
+        writeLittleEndianInt(version6, cursor, 0x31525950)
+        cursor += Int.SIZE_BYTES
+        writeLittleEndianInt(version6, cursor, 1)
+        cursor += Int.SIZE_BYTES
+        writeLittleEndianInt(version6, cursor, sampleSize)
+        writeLittleEndianInt(version6, cursor + 4, width)
+        writeLittleEndianInt(version6, cursor + 8, height)
+        writeLittleEndianInt(version6, cursor + 12, encodedBytes)
+        cursor += 4 * Int.SIZE_BYTES
+        current.copyInto(
+            destination = version6,
+            destinationOffset = cursor,
+            startIndex = encodedOffset,
+            endIndex = encodedOffset + encodedBytes,
+        )
+        writeLittleEndianInt(version6, version6.size - Int.SIZE_BYTES, 0x31444e45)
+        index.writeBytes(version6)
     }
 
     private fun downgradeCurrentIndexToVersion2(index: File) {
