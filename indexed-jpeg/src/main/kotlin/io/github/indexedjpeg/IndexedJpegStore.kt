@@ -987,6 +987,31 @@ class IndexedJpegOverviewRegionDecoder private constructor(
     ): Bitmap? {
         val loader = tileLoader ?: return null
         if (layer.tileSize <= 0 || overviewRect.isEmpty) return null
+        val firstTileX = overviewRect.left / layer.tileSize
+        val lastTileX = (overviewRect.right - 1) / layer.tileSize
+        val firstTileY = overviewRect.top / layer.tileSize
+        val lastTileY = (overviewRect.bottom - 1) / layer.tileSize
+        if (firstTileX == lastTileX && firstTileY == lastTileY) {
+            val tileLeft = firstTileX * layer.tileSize
+            val tileTop = firstTileY * layer.tileSize
+            val tileWidth = min(layer.tileSize, layer.width - tileLeft)
+            val tileHeight = min(layer.tileSize, layer.height - tileTop)
+            if (
+                overviewRect.left == tileLeft && overviewRect.top == tileTop &&
+                overviewRect.right == tileLeft + tileWidth &&
+                overviewRect.bottom == tileTop + tileHeight
+            ) {
+                return decodeStoredTile(
+                    loader = loader,
+                    layer = layer,
+                    tileX = firstTileX,
+                    tileY = firstTileY,
+                    expectedWidth = tileWidth,
+                    expectedHeight = tileHeight,
+                )
+            }
+        }
+
         val destination = runCatching {
             Bitmap.createBitmap(
                 overviewRect.width(),
@@ -995,35 +1020,21 @@ class IndexedJpegOverviewRegionDecoder private constructor(
             )
         }.getOrNull() ?: return null
         val canvas = Canvas(destination)
-        val firstTileX = overviewRect.left / layer.tileSize
-        val lastTileX = (overviewRect.right - 1) / layer.tileSize
-        val firstTileY = overviewRect.top / layer.tileSize
-        val lastTileY = (overviewRect.bottom - 1) / layer.tileSize
         for (tileY in firstTileY..lastTileY) {
             for (tileX in firstTileX..lastTileX) {
-                val encoded = loader(layer.sampleSize, tileX, tileY)
-                if (encoded == null) {
-                    destination.recycle()
-                    return null
-                }
-                val tileBitmap = BitmapFactory.decodeByteArray(
-                    encoded,
-                    0,
-                    encoded.size,
-                    BitmapFactory.Options().apply {
-                        inPreferredConfig = Bitmap.Config.ARGB_8888
-                        inScaled = false
-                    },
-                )
                 val tileLeft = tileX * layer.tileSize
                 val tileTop = tileY * layer.tileSize
                 val expectedTileWidth = min(layer.tileSize, layer.width - tileLeft)
                 val expectedTileHeight = min(layer.tileSize, layer.height - tileTop)
-                if (
-                    tileBitmap == null || tileBitmap.width != expectedTileWidth ||
-                    tileBitmap.height != expectedTileHeight
-                ) {
-                    tileBitmap?.recycle()
+                val tileBitmap = decodeStoredTile(
+                    loader = loader,
+                    layer = layer,
+                    tileX = tileX,
+                    tileY = tileY,
+                    expectedWidth = expectedTileWidth,
+                    expectedHeight = expectedTileHeight,
+                )
+                if (tileBitmap == null) {
                     destination.recycle()
                     return null
                 }
@@ -1050,6 +1061,29 @@ class IndexedJpegOverviewRegionDecoder private constructor(
             }
         }
         return destination
+    }
+
+    private fun decodeStoredTile(
+        loader: (Int, Int, Int) -> ByteArray?,
+        layer: IndexedJpegPyramidLayer,
+        tileX: Int,
+        tileY: Int,
+        expectedWidth: Int,
+        expectedHeight: Int,
+    ): Bitmap? {
+        val encoded = loader(layer.sampleSize, tileX, tileY) ?: return null
+        val bitmap = BitmapFactory.decodeByteArray(
+            encoded,
+            0,
+            encoded.size,
+            BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inScaled = false
+            },
+        ) ?: return null
+        if (bitmap.width == expectedWidth && bitmap.height == expectedHeight) return bitmap
+        bitmap.recycle()
+        return null
     }
 
     private fun decoderFor(layer: IndexedJpegPyramidLayer): BitmapRegionDecoder? {
