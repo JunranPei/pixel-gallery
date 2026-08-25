@@ -52,8 +52,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val ANIMATION_DURATION = 200L
         private const val FLING_DURATION = 300L
         private const val INSTANT_ANIMATION_DURATION = 10L
-        // Keep one ARGB tile below ~5.5MB. Two adjacent misses can then share the
-        // 12MB source-decode wave without making one texture upload exceed a frame.
+        // Keep one ordinary ARGB tile below ~5.5MB. Decoders backed by an independently
+        // addressable pyramid can override this with their stored block size so SSIV aligns
+        // to the source layout without changing the grid for unrelated formats.
         private const val TARGET_DECODED_TILE_SIZE = 1200
         private const val ARGB_8888_BYTES_PER_PIXEL = 4L
         // A source miss is decoded into one temporary sampled fragment and then split
@@ -1360,7 +1361,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     scheduledCount += 1
                 }
             } else {
-                val decoderCapabilities = batchDecoder.capabilities()
+                val decoderCapabilities = batchDecoder.capabilities(sampleSize)
                 val cacheProbeDetails = if (diagnosticsListener != null) {
                     ArrayList<String>(prioritizedTiles.size)
                 } else {
@@ -1646,7 +1647,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             }
 
             val sampleSize = calculateRequiredTileSampleSize()
-            val decoderCapabilities = cacheDecoder.capabilities()
+            val decoderCapabilities = cacheDecoder.capabilities(sampleSize)
             if (!decoderCapabilities.persistDecodedTiles) {
                 diagnosticsListener?.invoke(
                     "tile=CACHE_SKIP generation=$generation reason=PERSISTENT_REGION_SOURCE",
@@ -2063,9 +2064,14 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             // Telephoto-derived formula made every foreground tile as large as the whole
             // fit layer. On tall or wide sources that silently produced 20MB tiles even
             // though TARGET_DECODED_TILE_SIZE claimed a 1024-class grid.
-            val decodedTileWidth = min(TARGET_DECODED_TILE_SIZE, maxTileDimensions.x)
+            val sourceAlignedTileSize = (decoder as? BatchedImageRegionDecoder)
+                ?.capabilities(sampleSize)
+                ?.preferredDecodedTileSize
+                ?.takeIf { it > 0 }
+            val decodedTileSize = sourceAlignedTileSize ?: TARGET_DECODED_TILE_SIZE
+            val decodedTileWidth = min(decodedTileSize, maxTileDimensions.x)
                 .coerceAtLeast(1)
-            val decodedTileHeight = min(TARGET_DECODED_TILE_SIZE, maxTileDimensions.y)
+            val decodedTileHeight = min(decodedTileSize, maxTileDimensions.y)
                 .coerceAtLeast(1)
             val sourceTileWidthLimit = min(
                 sWidth(),
@@ -2077,10 +2083,18 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             ).coerceAtLeast(1)
             val xTiles = ceilDiv(sWidth(), sourceTileWidthLimit).coerceAtLeast(1)
             val yTiles = ceilDiv(sHeight(), sourceTileHeightLimit).coerceAtLeast(1)
-            // Balance the remainder across the axis. Stretching only the last tile can
-            // otherwise make it almost twice the advertised upload bound.
-            val sTileWidth = ceilDiv(sWidth(), xTiles)
-            val sTileHeight = ceilDiv(sHeight(), yTiles)
+            // A persistent source grid must keep exact interior boundaries. Ordinary
+            // sequential sources retain the balanced remainder that minimizes edge tiles.
+            val sTileWidth = if (sourceAlignedTileSize != null) {
+                sourceTileWidthLimit
+            } else {
+                ceilDiv(sWidth(), xTiles)
+            }
+            val sTileHeight = if (sourceAlignedTileSize != null) {
+                sourceTileHeightLimit
+            } else {
+                ceilDiv(sHeight(), yTiles)
+            }
 
             val tileGrid = ArrayList<Tile>(xTiles * yTiles)
             for (x in 0 until xTiles) {
@@ -2091,8 +2105,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     tile.sRect = Rect(
                         x * sTileWidth,
                         y * sTileHeight,
-                        if (x == xTiles - 1) sWidth() else (x + 1) * sTileWidth,
-                        if (y == yTiles - 1) sHeight() else (y + 1) * sTileHeight
+                        min(sWidth(), (x + 1) * sTileWidth),
+                        min(sHeight(), (y + 1) * sTileHeight)
                     )
 
                     tile.vRect = Rect(0, 0, 0, 0)

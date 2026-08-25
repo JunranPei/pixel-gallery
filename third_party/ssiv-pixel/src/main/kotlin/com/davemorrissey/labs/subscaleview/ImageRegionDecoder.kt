@@ -26,11 +26,12 @@ interface ImageRegionDecoder {
 data class RegionDecoderCapabilities(
     val batchSourceMisses: Boolean = true,
     val persistDecodedTiles: Boolean = true,
+    val preferredDecodedTileSize: Int? = null,
 )
 
 /** Optional extension for amortizing adjacent source-cache misses. */
 interface BatchedImageRegionDecoder : ImageRegionDecoder {
-    fun capabilities(): RegionDecoderCapabilities = RegionDecoderCapabilities()
+    fun capabilities(sampleSize: Int): RegionDecoderCapabilities = RegionDecoderCapabilities()
 
     fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean
 

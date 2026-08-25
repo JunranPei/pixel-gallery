@@ -238,10 +238,15 @@ class FastRegionDecoder(
             val options = BitmapFactory.Options()
             options.inSampleSize = newSampleSize
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
-            val cacheFiles = tileCacheFiles(rect, newSampleSize)
+            val useDecodedTileCache = capabilities(newSampleSize).persistDecodedTiles
+            val cacheFiles = if (useDecodedTileCache) {
+                tileCacheFiles(rect, newSampleSize)
+            } else {
+                null
+            }
             val metricsEnabled = ViewerLoadMetrics.isEnabled
             val cacheReadStartedAt = if (metricsEnabled) SystemClock.elapsedRealtimeNanos() else 0L
-            decodeCachedTile(cacheFiles)?.let { (cacheFile, cachedBitmap) ->
+            cacheFiles?.let(::decodeCachedTile)?.let { (cacheFile, cachedBitmap) ->
                 if (metricsEnabled) {
                     ViewerLoadMetrics.cacheRead(
                         imageKey = metricsKey,
@@ -265,7 +270,7 @@ class FastRegionDecoder(
                 )
                 return attached
             }
-            if (metricsEnabled) {
+            if (metricsEnabled && useDecodedTileCache) {
                 ViewerLoadMetrics.cacheRead(
                     imageKey = metricsKey,
                     sessionId = metricsSessionId,
@@ -304,28 +309,38 @@ class FastRegionDecoder(
         }
     }
 
-    override fun capabilities(): RegionDecoderCapabilities {
-        val persistentPyramid = activeIndexedBackend?.persistentTilePyramid == true
+    override fun capabilities(sampleSize: Int): RegionDecoderCapabilities {
+        val addressableJpegTileSize = addressableJpegPyramidTileSize(sampleSize)
+        val persistentPyramid =
+            activeIndexedBackend?.persistentTilePyramid == true ||
+                addressableJpegTileSize != null
         return RegionDecoderCapabilities(
             batchSourceMisses = !persistentPyramid,
             persistDecodedTiles = !persistentPyramid,
+            preferredDecodedTileSize = addressableJpegTileSize,
         )
     }
 
     override fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean {
         if (!initialized) return false
-        return tileCacheFiles(sRect, effectiveSampleSize(sRect, sampleSize)).argb8888.isFile
+        val effectiveSample = effectiveSampleSize(sRect, sampleSize)
+        if (!capabilities(effectiveSample).persistDecodedTiles) return false
+        return tileCacheFiles(sRect, effectiveSample).argb8888.isFile
     }
 
     override fun decodeRegions(sRects: List<Rect>, sampleSize: Int): List<Bitmap> {
         require(sRects.isNotEmpty()) { "At least one source region is required" }
         if (sRects.size == 1) return listOf(decodeRegion(sRects.first(), sampleSize))
-        if (!capabilities().batchSourceMisses) {
+        val routedSamples = sRects.map { effectiveSampleSize(it, sampleSize) }
+        if (
+            routedSamples.distinct().size == 1 &&
+            !capabilities(routedSamples.first()).batchSourceMisses
+        ) {
             return sRects.map { decodeRegion(it, sampleSize) }
         }
 
         synchronized(decoderLock) {
-            val actualSamples = sRects.map { effectiveSampleSize(it, sampleSize) }
+            val actualSamples = routedSamples
             if (actualSamples.distinct().size != 1) {
                 return sRects.map { decodeRegion(it, sampleSize) }
             }
@@ -423,8 +438,8 @@ class FastRegionDecoder(
     override fun cacheRegion(sRect: Rect, sampleSize: Int, bitmap: Bitmap): Boolean {
         synchronized(cacheWriteLock) {
             if (!initialized || bitmap.isRecycled) return false
-            if (!capabilities().persistDecodedTiles) return true
             val actualSample = effectiveSampleSize(sRect, sampleSize)
+            if (!capabilities(actualSample).persistDecodedTiles) return true
             val cacheFiles = tileCacheFiles(sRect, actualSample)
             if (cacheFiles.argb8888.isFile) return true
             return saveCachedTile(cacheFiles, bitmap)
@@ -583,6 +598,8 @@ class FastRegionDecoder(
                             ViewerLoadMetrics.event(
                                 "INDEXED_JPEG_OVERVIEW_REGION_DECODE",
                                 "sample=$sampleSize layerSample=${overview.layerSampleSize(sampleSize)} " +
+                                    "storage=${if (overview.isAddressableTiled) "ADDRESSABLE" else "WHOLE_LAYER"} " +
+                                    "blocks=${overview.addressableTileCount(rect, sampleSize) ?: 0} " +
                                     "bitmap=${bitmap.width}x${bitmap.height} duration=" +
                                     "${(SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000L}ms",
                                 imageKey = imageVersion,
@@ -826,6 +843,7 @@ class FastRegionDecoder(
         ViewerLoadMetrics.event(
             "INDEX_OPEN",
             "format=JPEG_PYRAMID result=${if (indexedOverviewDecoder != null) "HIT" else "MISS"} " +
+                "storage=${if (indexedOverviewDecoder?.isAddressableTiled == true) "ADDRESSABLE" else "WHOLE_LAYER"} " +
                 "layers=${indexedOverviewDecoder?.availableSampleSizes?.joinToString() ?: "none"}",
             imageKey = imageVersion,
         )
@@ -837,6 +855,19 @@ class FastRegionDecoder(
             )
         }
         return indexedOverviewDecoder
+    }
+
+    private fun addressableJpegPyramidTileSize(sampleSize: Int): Int? {
+        if (sampleSize < 2 || activeIndexedBackend != IndexedBackend.JPEG) return null
+        return synchronized(decoderLock) {
+            refreshIndexedOverviewDecoder()?.let { overview ->
+                if (overview.isAddressableTiled) {
+                    overview.addressableTileSize(sampleSize)
+                } else {
+                    null
+                }
+            }
+        }
     }
 
     private fun refreshIndexedPngDecoder(): IndexedPngRegionDecoder? {
