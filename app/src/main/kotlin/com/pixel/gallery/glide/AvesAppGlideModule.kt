@@ -105,6 +105,11 @@ class AvesAppGlideModule : AppGlideModule() {
             Bitmap::class.java,
             IndexedPngScreenPreviewLoader.Factory(context),
         )
+        registry.append(
+            IndexedJpegScreenPreview::class.java,
+            Bitmap::class.java,
+            IndexedJpegScreenPreviewLoader.Factory(context),
+        )
     }
 
     override fun isManifestParsingEnabled(): Boolean = false

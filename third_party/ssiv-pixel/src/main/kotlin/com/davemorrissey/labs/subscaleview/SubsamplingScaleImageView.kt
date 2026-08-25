@@ -52,7 +52,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val ANIMATION_DURATION = 200L
         private const val FLING_DURATION = 300L
         private const val INSTANT_ANIMATION_DURATION = 10L
-        private const val TARGET_DECODED_TILE_SIZE = 1024
+        // Keep one ARGB tile below ~5.5MB. Two adjacent misses can then share the
+        // 12MB source-decode wave without making one texture upload exceed a frame.
+        private const val TARGET_DECODED_TILE_SIZE = 1200
         private const val ARGB_8888_BYTES_PER_PIXEL = 4L
         // A source miss is decoded into one temporary sampled fragment and then split
         // into the visible tiles it covers. Two 1024-class ARGB tiles keep one decode wave
@@ -2057,22 +2059,28 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         var sampleSize = fullImageSampleSize
 
         while (true) {
-            // Keep decoded tiles close to Telephoto's stable 1024-class grid at every
-            // sampling level. The experimental viewport-sized grid produced 7-10MB
-            // bitmaps and made every stable refresh allocate and upload tens of MB in a
-            // short burst. Smaller, level-stable tiles preserve the same source detail
-            // while bounding each decode/upload independently of the device viewport.
-            val levelRatio = sampleSize.toFloat() / fullImageSampleSize.coerceAtLeast(1)
-            val sTileWidth = max(
-                TARGET_DECODED_TILE_SIZE,
-                (sWidth() * levelRatio).toInt(),
-            )
-            val sTileHeight = max(
-                TARGET_DECODED_TILE_SIZE,
-                (sHeight() * levelRatio).toInt(),
-            )
-            val xTiles = (sWidth() / sTileWidth).coerceAtLeast(1)
-            val yTiles = (sHeight() / sTileHeight).coerceAtLeast(1)
+            // Bound the decoded bitmap, not its source-space rectangle. The previous
+            // Telephoto-derived formula made every foreground tile as large as the whole
+            // fit layer. On tall or wide sources that silently produced 20MB tiles even
+            // though TARGET_DECODED_TILE_SIZE claimed a 1024-class grid.
+            val decodedTileWidth = min(TARGET_DECODED_TILE_SIZE, maxTileDimensions.x)
+                .coerceAtLeast(1)
+            val decodedTileHeight = min(TARGET_DECODED_TILE_SIZE, maxTileDimensions.y)
+                .coerceAtLeast(1)
+            val sourceTileWidthLimit = min(
+                sWidth(),
+                (decodedTileWidth.toLong() * sampleSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            ).coerceAtLeast(1)
+            val sourceTileHeightLimit = min(
+                sHeight(),
+                (decodedTileHeight.toLong() * sampleSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            ).coerceAtLeast(1)
+            val xTiles = ceilDiv(sWidth(), sourceTileWidthLimit).coerceAtLeast(1)
+            val yTiles = ceilDiv(sHeight(), sourceTileHeightLimit).coerceAtLeast(1)
+            // Balance the remainder across the axis. Stretching only the last tile can
+            // otherwise make it almost twice the advertised upload bound.
+            val sTileWidth = ceilDiv(sWidth(), xTiles)
+            val sTileHeight = ceilDiv(sHeight(), yTiles)
 
             val tileGrid = ArrayList<Tile>(xTiles * yTiles)
             for (x in 0 until xTiles) {
