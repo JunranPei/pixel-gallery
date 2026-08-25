@@ -32,7 +32,10 @@ class IndexedJpegStoreInstrumentedTest {
         assertEquals(384, info.sourceHeight)
         assertTrue(info.indexBytes > 0L)
         assertEquals(0, info.pyramidLayerCount)
-        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        val initialStatus = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(7, initialStatus.formatVersion)
+        assertEquals(IndexedJpegPyramidType.SEEK_ONLY, initialStatus.pyramidType)
+        assertEquals(false, initialStatus.canUpgradeToAddressablePyramid)
 
         store.openDecoder(source.absolutePath).use { decoder ->
             assertNotNull(decoder)
@@ -94,6 +97,9 @@ class IndexedJpegStoreInstrumentedTest {
         val info = store.build(source.absolutePath)
         assertTrue(info.scanCount > 1)
         assertEquals(0L, info.overviewBytes)
+        val progressiveStatus = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(7, progressiveStatus.formatVersion)
+        assertEquals(IndexedJpegPyramidType.SEEK_ONLY, progressiveStatus.pyramidType)
         store.openDecoder(source.absolutePath).use { decoder ->
             assertNotNull(decoder)
             val region = Rect(64, 48, 448, 336)
@@ -149,21 +155,34 @@ class IndexedJpegStoreInstrumentedTest {
 
         writeLittleEndianInt(currentVersion, 8, 7)
         convertCurrentPyramidToSingleLayer(index, currentVersion, version = 4)
-        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        val version4Status = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(4, version4Status.formatVersion)
+        assertEquals(IndexedJpegPyramidType.FIT_PREVIEW, version4Status.pyramidType)
+        assertTrue(version4Status.canUpgradeToAddressablePyramid)
         val legacyOverview = store.decodeScreenOverview(source.absolutePath, 0, 120, 160)
         assertNotNull(legacyOverview)
         legacyOverview!!.recycle()
         assertEquals(null, store.openOverviewDecoder(source.absolutePath))
 
         convertCurrentPyramidToSingleLayer(index, currentVersion, version = 5)
-        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        val version5Status = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(5, version5Status.formatVersion)
+        assertEquals(IndexedJpegPyramidType.WHOLE_JPEG_LAYERS, version5Status.pyramidType)
+        assertEquals(1, version5Status.pyramidLayerCount)
         store.openOverviewDecoder(source.absolutePath).use { decoder ->
             assertNotNull(decoder)
         }
         index.writeBytes(currentVersion)
         downgradeCurrentIndexToVersion2(index)
 
-        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        val version2Status = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(2, version2Status.formatVersion)
+        assertEquals(IndexedJpegPyramidType.SEEK_ONLY, version2Status.pyramidType)
+        assertTrue(version2Status.canUpgradeToAddressablePyramid)
+        val version2Bytes = index.readBytes()
+        index.writeBytes(version2Bytes.copyOf(version2Bytes.size - 1))
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Invalid)
+        index.writeBytes(version2Bytes)
         assertEquals(
             null,
             store.decodeScreenOverview(
@@ -289,6 +308,10 @@ class IndexedJpegStoreInstrumentedTest {
 
         val index = persistedIndexFile(context, source)
         val validIndex = index.readBytes()
+        val ready = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(7, ready.formatVersion)
+        assertEquals(IndexedJpegPyramidType.ADDRESSABLE_TILES, ready.pyramidType)
+        assertEquals(info.pyramidLayerCount, ready.pyramidLayerCount)
         val payloadBytes = readLittleEndianInt(validIndex, 60)
         val overviewMarkerOffset =
             validIndex.size - Int.SIZE_BYTES - payloadBytes - Int.SIZE_BYTES
@@ -299,6 +322,10 @@ class IndexedJpegStoreInstrumentedTest {
             0x32525951,
         )
         index.writeBytes(corruptIndex)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Invalid)
+        index.writeBytes(validIndex)
+        assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
+        index.writeBytes(validIndex.copyOf(validIndex.size - 1))
         assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Invalid)
         index.writeBytes(validIndex)
         assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)

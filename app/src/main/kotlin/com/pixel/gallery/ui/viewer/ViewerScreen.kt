@@ -61,6 +61,7 @@ import com.pixel.gallery.ui.viewer.formats.ViewerPreviewKind
 import com.pixel.gallery.ui.viewer.formats.ViewerRenderPlan
 import com.pixel.gallery.ui.viewer.formats.ViewerRegionDecoderKind
 import com.pixel.gallery.ui.viewer.decoders.UltraHdrTileSupport
+import io.github.indexedjpeg.IndexedJpegPyramidType
 import io.github.indexedjpeg.IndexedJpegStatus
 import io.github.indexedjpeg.IndexedJpegStore
 import io.github.indexedpng.IndexedPngStatus
@@ -157,7 +158,13 @@ private data class IndexedImageTarget(
     val detectedFromContent: Boolean = false,
 )
 
-private enum class IndexedImageAction { BUILD, DELETE }
+private enum class IndexedImageAction { BUILD, REBUILD, DELETE }
+
+private data class IndexedImageAvailability(
+    val ready: Boolean,
+    val upgradeAvailable: Boolean = false,
+    val jpegPyramidType: IndexedJpegPyramidType? = null,
+)
 
 private fun MediaEntry.viewerCacheKey(): String = "$contentId:$dateModifiedMillis"
 
@@ -532,6 +539,10 @@ internal fun ViewerScreen(
         }
     }
     var imageIndexReady by remember { mutableStateOf<Boolean?>(null) }
+    var imageIndexUpgradeAvailable by remember { mutableStateOf(false) }
+    var jpegIndexPyramidType by remember {
+        mutableStateOf<IndexedJpegPyramidType?>(null)
+    }
     var imageIndexAction by remember { mutableStateOf<IndexedImageAction?>(null) }
     var imageIndexBusy by remember { mutableStateOf(false) }
     var pendingIndexBuildAfterResolution by remember(currentMediaCacheKey) { mutableStateOf(false) }
@@ -539,21 +550,46 @@ internal fun ViewerScreen(
     LaunchedEffect(currentIndexTarget) {
         if (!pendingIndexBuildAfterResolution) imageIndexAction = null
         imageIndexBusy = false
-        val isReady = currentIndexTarget?.let { target ->
+        val availability = currentIndexTarget?.let { target ->
             withContext(Dispatchers.IO) {
                 when (target.format) {
-                    IndexedImageFormat.JPEG -> jpegIndexStore.status(target.path) is IndexedJpegStatus.Ready
-                    IndexedImageFormat.PNG -> pngIndexStore.status(target.path) is IndexedPngStatus.Ready
-                    IndexedImageFormat.TIFF -> tiffIndexStore.status(target.path) is IndexedTiffStatus.Ready
-                    IndexedImageFormat.WEBP -> webpIndexStore.status(target.path) is IndexedWebpStatus.Ready
-                    IndexedImageFormat.RAW -> rawIndexStore.status(target.path) is IndexedRawStatus.Ready
-                    IndexedImageFormat.HEIF -> heifIndexStore.status(target.path) is IndexedHeifStatus.Ready
-                    IndexedImageFormat.BMP -> bmpIndexStore.status(target.path) is IndexedBmpStatus.Ready
-                    IndexedImageFormat.JXL -> jxlIndexStore.status(target.path) is IndexedJxlStatus.Ready
+                    IndexedImageFormat.JPEG -> {
+                        val status = jpegIndexStore.status(target.path)
+                        val ready = status as? IndexedJpegStatus.Ready
+                        IndexedImageAvailability(
+                            ready = ready != null,
+                            upgradeAvailable = ready?.canUpgradeToAddressablePyramid == true,
+                            jpegPyramidType = ready?.pyramidType,
+                        )
+                    }
+                    IndexedImageFormat.PNG -> IndexedImageAvailability(
+                        pngIndexStore.status(target.path) is IndexedPngStatus.Ready,
+                    )
+                    IndexedImageFormat.TIFF -> IndexedImageAvailability(
+                        tiffIndexStore.status(target.path) is IndexedTiffStatus.Ready,
+                    )
+                    IndexedImageFormat.WEBP -> IndexedImageAvailability(
+                        webpIndexStore.status(target.path) is IndexedWebpStatus.Ready,
+                    )
+                    IndexedImageFormat.RAW -> IndexedImageAvailability(
+                        rawIndexStore.status(target.path) is IndexedRawStatus.Ready,
+                    )
+                    IndexedImageFormat.HEIF -> IndexedImageAvailability(
+                        heifIndexStore.status(target.path) is IndexedHeifStatus.Ready,
+                    )
+                    IndexedImageFormat.BMP -> IndexedImageAvailability(
+                        bmpIndexStore.status(target.path) is IndexedBmpStatus.Ready,
+                    )
+                    IndexedImageFormat.JXL -> IndexedImageAvailability(
+                        jxlIndexStore.status(target.path) is IndexedJxlStatus.Ready,
+                    )
                 }
             }
         }
+        val isReady = availability?.ready
         imageIndexReady = isReady
+        imageIndexUpgradeAvailable = availability?.upgradeAvailable == true
+        jpegIndexPyramidType = availability?.jpegPyramidType
         if (pendingIndexBuildAfterResolution) {
             imageIndexAction = if (isReady == true) {
                 IndexedImageAction.DELETE
@@ -1401,12 +1437,34 @@ internal fun ViewerScreen(
                                 val indexReady = imageIndexReady == true
                                 val indexChecking = imageIndexReady == null
                                 val formatName = indexTarget.format.displayName
+                                if (
+                                    indexTarget.format == IndexedImageFormat.JPEG &&
+                                    imageIndexUpgradeAvailable &&
+                                    !imageIndexBusy &&
+                                    !indexChecking
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Upgrade JPEG index") },
+                                        enabled = true,
+                                        onClick = {
+                                            showMenu = false
+                                            imageIndexAction = IndexedImageAction.REBUILD
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.Storage, contentDescription = null)
+                                        },
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             when {
                                                 imageIndexBusy -> "Building $formatName index…"
                                                 indexChecking -> "Checking $formatName index…"
+                                                indexReady &&
+                                                    indexTarget.format == IndexedImageFormat.JPEG &&
+                                                    jpegIndexPyramidType == IndexedJpegPyramidType.SEEK_ONLY ->
+                                                    "Delete JPEG seek index"
                                                 indexReady -> "Delete $formatName index"
                                                 else -> "Build $formatName index"
                                             }
@@ -1612,7 +1670,8 @@ internal fun ViewerScreen(
         imageIndexAction?.let { action ->
             val target = currentIndexTarget ?: return@let
             val formatName = target.format.displayName
-            val isBuild = action == IndexedImageAction.BUILD
+            val isBuild = action != IndexedImageAction.DELETE
+            val isUpgrade = action == IndexedImageAction.REBUILD
             val detectedFormatMessage = if (target.detectedFromContent) {
                 "This file is named .${File(target.path).extension}, but its actual content is $formatName. " +
                     "It will be indexed as $formatName.\n\n"
@@ -1622,16 +1681,31 @@ internal fun ViewerScreen(
             AlertDialog(
                 onDismissRequest = { if (!imageIndexBusy) imageIndexAction = null },
                 title = {
-                    Text(if (isBuild) "Build $formatName index?" else "Delete $formatName index?")
+                    Text(
+                        when {
+                            isUpgrade -> "Upgrade $formatName index?"
+                            isBuild -> "Build $formatName index?"
+                            else -> "Delete $formatName index?"
+                        }
+                    )
                 },
                 text = {
                     Text(
                         if (isBuild) {
                             detectedFormatMessage + when (target.format) {
                                 IndexedImageFormat.JPEG ->
-                                    "This reads the complete JPEG once and may briefly use significant power. " +
-                                        "The saved seek index and compact fit-screen layer apply only to this " +
-                                        "image; both are produced by the same scan."
+                                    if (isUpgrade) {
+                                        "This replaces the legacy JPEG index with the current format. " +
+                                            "It keeps source seek checkpoints and, for supported baseline sRGB " +
+                                            "images, stores independently decodable low-resolution tiles. " +
+                                            "Building can read the source more than once and may temporarily use " +
+                                            "significant power. The old index remains usable if publishing fails."
+                                    } else {
+                                        "This saves source seek checkpoints and, for supported baseline sRGB " +
+                                            "images, independently decodable low-resolution tiles. Building can " +
+                                            "read the JPEG more than once and may temporarily use significant power. " +
+                                            "The original image is not changed."
+                                    }
                                 IndexedImageFormat.PNG ->
                                     "This decodes the complete PNG once and builds a lossless multi-resolution " +
                                         "tile index. It may temporarily use significant power and storage."
@@ -1729,33 +1803,75 @@ internal fun ViewerScreen(
                                                 }
                                             }
                                         }
-                                        "$formatName index ${if (isBuild) "built" else "deleted"}"
+                                        if (
+                                            operationTarget.format == IndexedImageFormat.JPEG &&
+                                            isBuild
+                                        ) {
+                                            when (
+                                                val status = jpegIndexStore.status(operationTarget.path)
+                                            ) {
+                                                is IndexedJpegStatus.Ready -> if (
+                                                    status.hasAddressablePyramid
+                                                ) {
+                                                    "JPEG index ${if (isUpgrade) "upgraded" else "built"} " +
+                                                        "with ${status.pyramidLayerCount} addressable layers"
+                                                } else {
+                                                    "JPEG seek index ${if (isUpgrade) "upgraded" else "built"}; " +
+                                                        "this image did not produce addressable overview tiles"
+                                                }
+                                                else -> error("The completed JPEG index could not be validated")
+                                            }
+                                        } else {
+                                            "$formatName index ${if (isBuild) "built" else "deleted"}"
+                                        }
                                     }
                                 }
                                 if (currentIndexTarget == operationTarget) {
                                     imageIndexBusy = false
-                                    val indexReadyAfterOperation = withContext(Dispatchers.IO) {
+                                    val availabilityAfterOperation = withContext(Dispatchers.IO) {
                                         when (operationTarget.format) {
-                                            IndexedImageFormat.JPEG ->
-                                                jpegIndexStore.status(operationTarget.path) is IndexedJpegStatus.Ready
-                                            IndexedImageFormat.PNG ->
-                                                pngIndexStore.status(operationTarget.path) is IndexedPngStatus.Ready
-                                            IndexedImageFormat.TIFF ->
-                                                tiffIndexStore.status(operationTarget.path) is IndexedTiffStatus.Ready
-                                            IndexedImageFormat.WEBP ->
-                                                webpIndexStore.status(operationTarget.path) is IndexedWebpStatus.Ready
-                                            IndexedImageFormat.RAW ->
-                                                rawIndexStore.status(operationTarget.path) is IndexedRawStatus.Ready
-                                            IndexedImageFormat.HEIF ->
-                                                heifIndexStore.status(operationTarget.path) is IndexedHeifStatus.Ready
-                                            IndexedImageFormat.BMP ->
-                                                bmpIndexStore.status(operationTarget.path) is IndexedBmpStatus.Ready
-                                            IndexedImageFormat.JXL ->
-                                                jxlIndexStore.status(operationTarget.path) is IndexedJxlStatus.Ready
+                                            IndexedImageFormat.JPEG -> {
+                                                val status = jpegIndexStore.status(operationTarget.path)
+                                                val ready = status as? IndexedJpegStatus.Ready
+                                                IndexedImageAvailability(
+                                                    ready = ready != null,
+                                                    upgradeAvailable =
+                                                        ready?.canUpgradeToAddressablePyramid == true,
+                                                    jpegPyramidType = ready?.pyramidType,
+                                                )
+                                            }
+                                            IndexedImageFormat.PNG -> IndexedImageAvailability(
+                                                pngIndexStore.status(operationTarget.path) is IndexedPngStatus.Ready,
+                                            )
+                                            IndexedImageFormat.TIFF -> IndexedImageAvailability(
+                                                tiffIndexStore.status(operationTarget.path) is IndexedTiffStatus.Ready,
+                                            )
+                                            IndexedImageFormat.WEBP -> IndexedImageAvailability(
+                                                webpIndexStore.status(operationTarget.path) is IndexedWebpStatus.Ready,
+                                            )
+                                            IndexedImageFormat.RAW -> IndexedImageAvailability(
+                                                rawIndexStore.status(operationTarget.path) is IndexedRawStatus.Ready,
+                                            )
+                                            IndexedImageFormat.HEIF -> IndexedImageAvailability(
+                                                heifIndexStore.status(operationTarget.path) is IndexedHeifStatus.Ready,
+                                            )
+                                            IndexedImageFormat.BMP -> IndexedImageAvailability(
+                                                bmpIndexStore.status(operationTarget.path) is IndexedBmpStatus.Ready,
+                                            )
+                                            IndexedImageFormat.JXL -> IndexedImageAvailability(
+                                                jxlIndexStore.status(operationTarget.path) is IndexedJxlStatus.Ready,
+                                            )
                                         }
                                     }
-                                    imageIndexReady = indexReadyAfterOperation
-                                    if (isBuild && result.isSuccess && indexReadyAfterOperation) {
+                                    imageIndexReady = availabilityAfterOperation.ready
+                                    imageIndexUpgradeAvailable =
+                                        availabilityAfterOperation.upgradeAvailable
+                                    jpegIndexPyramidType =
+                                        availabilityAfterOperation.jpegPyramidType
+                                    if (
+                                        isBuild && result.isSuccess &&
+                                        availabilityAfterOperation.ready
+                                    ) {
                                         IndexedImageFormatMemory.put(
                                             context.applicationContext,
                                             currentMediaCacheKey,
@@ -1771,7 +1887,13 @@ internal fun ViewerScreen(
                             }
                         },
                     ) {
-                        Text(if (isBuild) "Build index" else "Delete index")
+                        Text(
+                            when {
+                                isUpgrade -> "Upgrade index"
+                                isBuild -> "Build index"
+                                else -> "Delete index"
+                            }
+                        )
                     }
                 },
                 dismissButton = {
