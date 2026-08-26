@@ -3,6 +3,7 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <atomic>
 #include <csetjmp>
 #include <cmath>
 #include <climits>
@@ -16,6 +17,8 @@
 #include <utility>
 #include <vector>
 #include <unistd.h>
+
+#include "indexed_jpeg_simd.h"
 
 extern "C" {
 #include "jpeglib.h"
@@ -1670,12 +1673,40 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
     if (mapping == MAP_FAILED) return JNI_FALSE;
     auto* encoded = static_cast<unsigned char*>(mapping) + delta;
 
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) == ANDROID_BITMAP_RESULT_SUCCESS) {
+        const bool simdComplete = indexed_jpeg_simd_decode_rgba(
+            encoded,
+            tile->bytes,
+            tile->width,
+            tile->height,
+            static_cast<uint8_t*>(pixels),
+            bitmapInfo.stride) != 0;
+        AndroidBitmap_unlockPixels(env, bitmap);
+        pixels = nullptr;
+        if (simdComplete) {
+            static std::atomic_flag logged = ATOMIC_FLAG_INIT;
+            if (!logged.test_and_set(std::memory_order_relaxed)) {
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    "IndexedJpeg",
+                    "pyramid decoder=libjpeg-turbo-3.2.0 simd=%d",
+                    indexed_jpeg_simd_compiled_with_simd());
+            }
+            munmap(mapping, mapBytes);
+            return JNI_TRUE;
+        }
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            "IndexedJpeg",
+            "SIMD pyramid decode failed; using indexed codec fallback");
+    }
+
     jpeg_decompress_struct info{};
     JpegError error{};
     info.err = jpeg_std_error(&error.base);
     error.base.error_exit = errorExit;
     bool created = false;
-    void* pixels = nullptr;
     if (setjmp(error.jump)) {
         if (pixels != nullptr) AndroidBitmap_unlockPixels(env, bitmap);
         if (created) jpeg_destroy_decompress(&info);
