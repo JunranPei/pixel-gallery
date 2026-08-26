@@ -31,8 +31,10 @@ fun SettingsScreen(
 ) {
     val materialYou by viewModel.materialYou.collectAsState()
     val startupAtAlbums by viewModel.startupAtAlbums.collectAsState()
+    val pageColor = MaterialTheme.colorScheme.surface
 
     Scaffold(
+        containerColor = pageColor,
         topBar = {
             TopAppBar(
                 title = { 
@@ -45,7 +47,11 @@ fun SettingsScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = pageColor,
+                    scrolledContainerColor = pageColor
+                )
             )
         }
     ) { innerPadding ->
@@ -89,7 +95,6 @@ fun SettingsScreen(
                     onClick = onNavigateToExcludedFolders
                 )
             }
-            item { HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
             item {
                 SettingsClickItem(
                     title = "About",
