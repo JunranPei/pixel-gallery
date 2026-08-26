@@ -560,6 +560,10 @@ internal object ViewerLoadMetrics {
     }
 
     private fun session(imageKey: String, expectedId: Long, event: String): Session? {
+        // Some decoder diagnostics intentionally use a source-path key rather than the
+        // viewer-session key. They have no aggregate session, so session id 0 is expected
+        // and must not emit one misleading STALE_TASK line per decoded tile.
+        if (expectedId == 0L) return null
         val current = sessions[imageKey]
         if (current != null && current.id == expectedId) return current
         emit(

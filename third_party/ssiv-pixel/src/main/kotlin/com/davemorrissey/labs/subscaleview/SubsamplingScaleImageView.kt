@@ -1453,7 +1453,17 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     "cacheProfile=${cacheStats.profile}",
             )
         }
-        if (load) scheduleStableTileCachePersistence()
+        // Do not enqueue a delayed persistence callback when this decoder has already
+        // declared that decoded tiles must not be persisted. Cold benchmarks used to
+        // schedule one callback per refresh only for every callback to wake up and skip.
+        if (
+            load &&
+            (decoder as? BatchedImageRegionDecoder)
+                ?.capabilities(sampleSize)
+                ?.persistDecodedTiles == true
+        ) {
+            scheduleStableTileCachePersistence()
+        }
     }
 
     /**
