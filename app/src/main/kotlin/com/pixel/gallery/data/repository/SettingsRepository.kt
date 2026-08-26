@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import com.pixel.gallery.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +35,10 @@ class SettingsRepository @Inject constructor(
         Context.MODE_PRIVATE,
     )
     private val mutableLargeImageColdTestMode = MutableStateFlow(
-        viewerTestPreferences.getBoolean("large_image_cold_test_mode", false),
+        viewerTestPreferences.getBoolean(
+            "large_image_cold_test_mode",
+            BuildConfig.LARGE_IMAGE_COLD_TEST_DEFAULT,
+        ),
     )
     private val STARTUP_AT_ALBUMS = booleanPreferencesKey("flutter.albums")
     private val MATERIAL_YOU = booleanPreferencesKey("flutter.material_you")
