@@ -571,6 +571,7 @@ fun MainScaffold(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
+            containerColor = colorScheme.surface,
             contentWindowInsets = WindowInsets(0), // Manual padding for full control
             modifier = Modifier
                 .nestedScroll(scrollBehavior)
@@ -980,6 +981,7 @@ fun MainScaffold(
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = colorScheme.surface,
+                        scrolledContainerColor = colorScheme.surface,
                         titleContentColor = colorScheme.onSurface
                     ),
                     windowInsets = WindowInsets.statusBars,
