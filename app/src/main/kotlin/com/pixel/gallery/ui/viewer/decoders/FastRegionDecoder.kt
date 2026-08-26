@@ -36,6 +36,12 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
+
+private val ssivTileCacheLock = ReentrantReadWriteLock(true)
+private val ssivTileCacheGeneration = AtomicLong(0L)
 
 private object SsivTileCacheBudget {
     private const val PREFS = "ssiv_tile_cache_budget"
@@ -101,8 +107,13 @@ private object SsivTileCacheBudget {
     }
 }
 
-fun resetSsivTileCacheBudget(context: Context) {
-    SsivTileCacheBudget.reset(context.applicationContext)
+fun clearSsivTileCache(context: Context): Boolean = ssivTileCacheLock.write {
+    val appContext = context.applicationContext
+    ssivTileCacheGeneration.incrementAndGet()
+    val directory = File(appContext.cacheDir, "ssiv_tile_cache")
+    val cleared = !directory.exists() || directory.deleteRecursively()
+    SsivTileCacheBudget.reset(appContext)
+    cleared
 }
 
 class FastRegionDecoder(
@@ -111,6 +122,7 @@ class FastRegionDecoder(
     private val indexedSourcePath: String? = null,
     private val knownSourceWidth: Int = 0,
     private val knownSourceHeight: Int = 0,
+    private val coldTestMode: Boolean = false,
 ) : BatchedImageRegionDecoder {
     companion object {
         const val RAW_TILE_MAGIC = 0x50475854
@@ -146,6 +158,7 @@ class FastRegionDecoder(
     private var sourceWidth = 0
     private var sourceHeight = 0
     private lateinit var tileCacheDir: File
+    private var tileCacheGeneration = 0L
     private lateinit var appContext: Context
     private lateinit var sourceUri: Uri
     private var localSourcePath: String? = null
@@ -171,6 +184,7 @@ class FastRegionDecoder(
     @Volatile private var activeIndexedBackend: IndexedBackend? = null
     @Volatile private var resolvedCapabilityRevision = Long.MIN_VALUE
     @Volatile private var initialized = false
+    private var coldDropSequence = 0L
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
 
@@ -200,6 +214,7 @@ class FastRegionDecoder(
         screenWidth = displayMetrics.widthPixels
         screenHeight = displayMetrics.heightPixels
         tileCacheDir = File(context.cacheDir, "ssiv_tile_cache")
+        tileCacheGeneration = ssivTileCacheGeneration.get()
 
         sourceWidth = knownSourceWidth
         sourceHeight = knownSourceHeight
@@ -327,7 +342,7 @@ class FastRegionDecoder(
                     addressableJpegTileSize != null
             RegionDecoderCapabilities(
                 batchSourceMisses = !persistentPyramid,
-                persistDecodedTiles = !persistentPyramid,
+                persistDecodedTiles = !coldTestMode && !persistentPyramid,
                 preferredDecodedTileSize = persistentTileSize,
             )
         }
@@ -578,6 +593,7 @@ class FastRegionDecoder(
         options: BitmapFactory.Options,
         fallbackReason: String,
     ): Pair<Bitmap, String> {
+        prepareColdSourceDecode()
         ViewerLoadMetrics.event(
             "REGION_SOURCE_ROUTE",
             "rect=${rect.left},${rect.top}-${rect.right},${rect.bottom} sample=$sampleSize " +
@@ -1089,9 +1105,10 @@ class FastRegionDecoder(
         return cacheFile to decoded
     }
 
-    private fun saveCachedTile(cacheFiles: TileCacheFiles, bitmap: Bitmap): Boolean {
+    private fun saveCachedTile(cacheFiles: TileCacheFiles, bitmap: Bitmap): Boolean = ssivTileCacheLock.read {
+        if (tileCacheGeneration != ssivTileCacheGeneration.get()) return@read true
         val cacheFile = cacheFiles.argb8888
-        if (cacheFile.isFile) return false
+        if (cacheFile.isFile) return@read false
         val token = ViewerLoadMetrics.workStarted(
             "TILE_CACHE_WRITE",
             metricsKey,
@@ -1120,7 +1137,7 @@ class FastRegionDecoder(
             }
             if (cacheFile.isFile) {
                 tempFile.delete()
-                return false
+                return@read false
             }
             if (!tempFile.renameTo(cacheFile)) {
                 tempFile.copyTo(cacheFile, overwrite = false)
@@ -1144,5 +1161,86 @@ class FastRegionDecoder(
             ViewerLoadMetrics.workFailed(token, error.javaClass.simpleName)
             false
         }
+    }
+
+    private data class ColdDropSummary(
+        val adviceAccepted: Boolean,
+        val residencyVerified: Boolean,
+        val totalPages: Long,
+        val residentBefore: Long,
+        val residentAfter: Long,
+    )
+
+    /**
+     * Test-only zero-reuse path. Close every live decoder first so no mmap or descriptor
+     * owned by this viewer can pin the source/index, then reclaim clean file pages before
+     * every source decode. Residency is sampled on the first and every sixteenth request;
+     * doing a whole-file mincore scan for every 1024px tile would itself contaminate the
+     * power measurement we are trying to isolate.
+     */
+    private fun prepareColdSourceDecode() {
+        if (!coldTestMode) return
+        coldDropSequence += 1L
+        closeDecodersForColdRead()
+        val sourcePath = indexedSourcePath
+        val backend = activeIndexedBackend
+        val verifyResidency = coldDropSequence == 1L || coldDropSequence % 16L == 0L
+        val result = try {
+            when (backend) {
+                IndexedBackend.JPEG -> sourcePath?.let { path ->
+                    indexedStore?.requestColdRead(path, verifyResidency)?.let { report ->
+                        ColdDropSummary(
+                            adviceAccepted = report.adviceAccepted,
+                            residencyVerified = report.residencyVerified,
+                            totalPages = report.totalPages,
+                            residentBefore = report.residentBefore,
+                            residentAfter = report.residentAfter,
+                        )
+                    }
+                }
+                IndexedBackend.PNG -> sourcePath?.let { path ->
+                    indexedPngStore?.requestColdRead(path, verifyResidency)?.let { report ->
+                        ColdDropSummary(
+                            adviceAccepted = report.adviceAccepted,
+                            residencyVerified = report.residencyVerified,
+                            totalPages = report.totalPages,
+                            residentBefore = report.residentBefore,
+                            residentAfter = report.residentAfter,
+                        )
+                    }
+                }
+                else -> null
+            }
+        } catch (_: Throwable) {
+            null
+        }
+        ViewerLoadMetrics.event(
+            "COLD_TEST_EVICT",
+            "sequence=$coldDropSequence backend=${backend?.name ?: "NONE"} " +
+                "source=${sourcePath?.let(::File)?.name ?: "none"} " +
+                "dropAdviceAccepted=${result?.adviceAccepted == true} " +
+                "residencyVerified=${result?.residencyVerified == true} " +
+                "residentPages=${result?.residentBefore ?: -1}->${result?.residentAfter ?: -1}" +
+                "/${result?.totalPages ?: -1} decodedTileDiskCache=false " +
+                "decoderReuse=false",
+            imageKey = imageVersion,
+        )
+    }
+
+    private fun closeDecodersForColdRead() {
+        decoder?.recycle()
+        decoder = null
+        decoderInputStream?.close()
+        decoderInputStream = null
+        indexedDecoder?.close()
+        indexedDecoder = null
+        indexedOverviewDecoder?.close()
+        indexedOverviewDecoder = null
+        indexedPngDecoder?.close()
+        indexedPngDecoder = null
+        indexedWebpDecoder?.close()
+        indexedWebpDecoder = null
+        indexedHeifDecoder?.close()
+        indexedHeifDecoder = null
     }
 }

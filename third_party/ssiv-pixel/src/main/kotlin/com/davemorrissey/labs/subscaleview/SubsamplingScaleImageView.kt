@@ -131,6 +131,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var stableTileRefreshGeneration = 0L
     private var stableTileCacheGeneration = 0L
     private var activeTileMemoryCache = true
+    private var tileMemoryCacheEnabled = true
     private var minimumTileDpi = -1
     private var maxTileWidth = TILE_SIZE_AUTO
     private var maxTileHeight = TILE_SIZE_AUTO
@@ -1722,6 +1723,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     )
 
     private fun tileMemoryCacheBudget(currentSampleSize: Int): TileMemoryCacheBudget {
+        if (!tileMemoryCacheEnabled) {
+            return TileMemoryCacheBudget(
+                entries = 0,
+                bytes = 0L,
+                profile = "DISABLED",
+            )
+        }
         if (!activeTileMemoryCache) {
             return TileMemoryCacheBudget(
                 entries = INACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES,
@@ -1767,7 +1775,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val offscreenTiles = loadedTiles.filter { tile ->
             val intersectsViewport = tileVisible(tile)
             val protected = tile.loading || tile.cacheWriting ||
-                tile.sampleSize == fullImageSampleSize ||
+                (tileMemoryCacheEnabled && tile.sampleSize == fullImageSampleSize) ||
                 (tile.sampleSize == currentSampleSize && intersectsViewport) ||
                 (!currentViewportComplete && intersectsViewport)
             !protected
@@ -2663,6 +2671,27 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 "sample=$sampleSize retained=${stats?.entries ?: 0}/${budget?.entries ?: 0} " +
                 "bytes=${stats?.bytes ?: 0L}/${budget?.bytes ?: 0L} " +
                 "evicted=${stats?.evictedCount ?: 0}",
+        )
+    }
+
+    /**
+     * Test-only policy: visible tiles remain the renderer's working set, but a bitmap is
+     * released as soon as it leaves the viewport. Returning to that area must decode it
+     * again, so no in-viewer off-screen LRU can make a later pass look artificially warm.
+     */
+    fun setTileMemoryCacheEnabled(enabled: Boolean) {
+        if (tileMemoryCacheEnabled == enabled) return
+        tileMemoryCacheEnabled = enabled
+        val sampleSize = if (tileMap != null && sWidth > 0 && sHeight > 0) {
+            calculateRequiredTileSampleSize()
+        } else {
+            0
+        }
+        val stats = if (sampleSize > 0) trimTileMemoryCache(sampleSize) else null
+        diagnosticsListener?.invoke(
+            "tile=CACHE_POLICY memory=${if (enabled) "ENABLED" else "DISABLED"} " +
+                "sample=$sampleSize retainedOffscreen=${stats?.entries ?: 0} " +
+                "bytes=${stats?.bytes ?: 0L} evicted=${stats?.evictedCount ?: 0}",
         )
     }
 

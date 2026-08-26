@@ -17,6 +17,7 @@ val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoole
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
 val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
+        viewerTestVariant == "testtrace" ||
         viewerTestVariant == "compressed" ||
         viewerTestVariant == "zoomtrace" ||
         viewerTestVariant == "jpegindextrace" ||
@@ -47,6 +48,9 @@ android {
     defaultConfig {
         applicationId = when (viewerTestVariant) {
             "test" -> "com.pixel.gallery.multitask.test"
+            // Same package/data as the quiet test build so a diagnostic update keeps
+            // the user's indexes and cache state intact.
+            "testtrace" -> "com.pixel.gallery.multitask.test"
             "simplemerge" -> "com.pixel.gallery.simplegallerymerge"
             "trace" -> "com.pixel.gallery.codextrace"
             "clean" -> "com.pixel.gallery.codexclean"
@@ -62,6 +66,7 @@ android {
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "test" -> "Gallery Test"
+            "testtrace" -> "Gallery Test Trace"
             "simplemerge" -> "Gallery Test"
             "trace" -> "Pixel Trace"
             "clean" -> "Pixel Clean"

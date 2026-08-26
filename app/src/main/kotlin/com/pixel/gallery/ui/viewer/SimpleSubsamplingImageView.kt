@@ -326,7 +326,18 @@ private suspend fun resolveGlideDataCacheFile(
     dateModifiedMillis: Long,
     fallbackPath: String,
     imageKey: String,
+    bypassCache: Boolean = false,
 ): String {
+    if (bypassCache) {
+        File(fallbackPath).takeIf { it.isFile && it.canRead() }?.let { source ->
+            ViewerLoadMetrics.event(
+                "REGION_SOURCE_CACHE_BYPASS",
+                "file=${source.name} bytes=${source.length()}",
+                imageKey = imageKey,
+            )
+            return source.absolutePath
+        }
+    }
     val requestManager = Glide.with(context.applicationContext)
     val request = requestManager
         .downloadOnly()
@@ -475,6 +486,7 @@ internal fun SimpleSubsamplingImageView(
     regionDecoderKind: ViewerRegionDecoderKind = ViewerRegionDecoderKind.PLATFORM,
     decoderSourceKey: String = "",
     indexCapabilityRevision: Long = 0L,
+    coldTestMode: Boolean = false,
     transformStateStore: ViewerTransformStateStore,
     onContentReadyChanged: (Boolean) -> Unit = {},
     onUltraHdrAvailabilityChanged: (Boolean) -> Unit = {},
@@ -675,6 +687,7 @@ internal fun SimpleSubsamplingImageView(
                                 dateModifiedMillis = dateModifiedMillis,
                                 fallbackPath = imagePath,
                                 imageKey = transformStateKey,
+                                bypassCache = coldTestMode,
                             )
                         }
                     } else {
@@ -911,7 +924,10 @@ internal fun SimpleSubsamplingImageView(
                     // pay region-source preparation even if the user never zoomed. The
                     // original DATA cache is now populated only by the on-demand deep-zoom
                     // handoff in resolveGlideDataCacheFile().
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .diskCacheStrategy(
+                        if (coldTestMode) DiskCacheStrategy.NONE else DiskCacheStrategy.RESOURCE,
+                    )
+                    .skipMemoryCache(coldTestMode)
                     .downsample(DownsampleStrategy.FIT_CENTER)
                     .priority(if (isActivePage) Priority.IMMEDIATE else Priority.NORMAL)
                     .let { opts ->
@@ -1087,7 +1103,11 @@ internal fun SimpleSubsamplingImageView(
                                 .load(indexedModel)
                                 .apply(
                                     requestOptions.clone()
-                                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE),
+                                        .diskCacheStrategy(
+                                            if (coldTestMode) DiskCacheStrategy.NONE
+                                            else DiskCacheStrategy.RESOURCE,
+                                        )
+                                        .skipMemoryCache(coldTestMode),
                                 )
                                 .listener(
                                     previewListener(
@@ -1102,7 +1122,11 @@ internal fun SimpleSubsamplingImageView(
                             val thumbnailOptions = RequestOptions()
                                 .withViewerTaskCompression()
                                 .format(DecodeFormat.PREFER_RGB_565)
-                                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                .diskCacheStrategy(
+                                    if (coldTestMode) DiskCacheStrategy.NONE
+                                    else DiskCacheStrategy.RESOURCE,
+                                )
+                                .skipMemoryCache(coldTestMode)
                                 .downsample(DownsampleStrategy.FIT_CENTER)
                                 .priority(Priority.IMMEDIATE)
                                 .override(512)
@@ -1174,32 +1198,41 @@ internal fun SimpleSubsamplingImageView(
                         "intermediate=$useIntermediatePreview model=${requestModel.javaClass.simpleName}",
                     imageKey = transformStateKey,
                 )
-                val sourceCacheProbe = requestManager
-                    .load(requestModel)
-                    .apply(
-                        requestOptions.clone()
-                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                            .onlyRetrieveFromCache(true),
+                if (coldTestMode) {
+                    ViewerLoadMetrics.snapshotEvent(
+                        "PREVIEW_CACHE_BYPASS",
+                        "request=${metricsToken.id} memory=false disk=false",
+                        imageKey = transformStateKey,
                     )
-                    .listener(previewListener(phase = "FULL_CACHE_PROBE", onCacheMiss = startSourceLoad))
-                val cacheProbe = indexedFitPreviewModel?.let { indexedModel ->
-                    requestManager
-                        .asDrawable()
-                        .load(indexedModel)
+                    startSourceLoad()
+                } else {
+                    val sourceCacheProbe = requestManager
+                        .load(requestModel)
                         .apply(
                             requestOptions.clone()
                                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                 .onlyRetrieveFromCache(true),
                         )
-                        .listener(
-                            previewListener(
-                                phase = "INDEXED_FIT_CACHE_PROBE",
-                                deferFailureToFallback = true,
-                            ),
-                        )
-                        .error(sourceCacheProbe)
-                } ?: sourceCacheProbe
-                cacheProbe.into(imageView)
+                        .listener(previewListener(phase = "FULL_CACHE_PROBE", onCacheMiss = startSourceLoad))
+                    val cacheProbe = indexedFitPreviewModel?.let { indexedModel ->
+                        requestManager
+                            .asDrawable()
+                            .load(indexedModel)
+                            .apply(
+                                requestOptions.clone()
+                                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                    .onlyRetrieveFromCache(true),
+                            )
+                            .listener(
+                                previewListener(
+                                    phase = "INDEXED_FIT_CACHE_PROBE",
+                                    deferFailureToFallback = true,
+                                ),
+                            )
+                            .error(sourceCacheProbe)
+                    } ?: sourceCacheProbe
+                    cacheProbe.into(imageView)
+                }
             } else {
                 // The request is deliberately retained across settle/active-page changes.
                 // Do not reveal the 200 px cover when no new preview was started.
@@ -1397,6 +1430,7 @@ internal fun SimpleSubsamplingImageView(
                 taskExecutor = tileDecodeExecutor
                 cacheTaskExecutor = tileCacheWriteExecutor
                 setActiveTileMemoryCache(isActivePage)
+                setTileMemoryCacheEnabled(!coldTestMode)
                 deferTileLoadsAtOrBelowFit = !indexedOnlyRenderer
                 rotationEnabled = true
                 doubleTapReturnsToFit = true
@@ -1419,6 +1453,7 @@ internal fun SimpleSubsamplingImageView(
                             },
                             knownSourceWidth = sourceWidth,
                             knownSourceHeight = sourceHeight,
+                            coldTestMode = coldTestMode,
                         )
                         ViewerRegionDecoderKind.TIFF -> TiffRegionDecoder()
                         ViewerRegionDecoderKind.SVG -> SvgRegionDecoder()
@@ -1627,6 +1662,7 @@ internal fun SimpleSubsamplingImageView(
                     previewOwnsTransform = previewOwnsTransform,
                 )
                 view.setActiveTileMemoryCache(isActivePage)
+                view.setTileMemoryCacheEnabled(!coldTestMode)
             }
             val imageView = imageViewRef
             if (imageView != null) {

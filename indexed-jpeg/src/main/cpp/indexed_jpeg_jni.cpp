@@ -11,9 +11,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <memory>
 #include <string>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <utility>
 #include <vector>
 #include <unistd.h>
@@ -25,6 +27,13 @@ extern "C" {
 }
 
 namespace {
+
+#ifndef MADV_COLD
+#define MADV_COLD 20
+#endif
+#ifndef MADV_PAGEOUT
+#define MADV_PAGEOUT 21
+#endif
 
 constexpr uint8_t kMagic[8] = {'I', 'J', 'X', 'M', 'C', 'U', '0', '1'};
 // Version 2 stores the complete entropy position and an ABI-independent bit
@@ -122,11 +131,16 @@ struct PyramidLayer {
 
 struct PyramidHandle {
     FILE* file = nullptr;
+    void* mapping = nullptr;
+    size_t mappingBytes = 0;
+    void* simdDecoder = nullptr;
     uint32_t sourceWidth = 0;
     uint32_t sourceHeight = 0;
     std::vector<PyramidLayer> layers;
 
     ~PyramidHandle() {
+        indexed_jpeg_simd_decoder_destroy(simdDecoder);
+        if (mapping != nullptr) munmap(mapping, mappingBytes);
         if (file != nullptr) fclose(file);
     }
 };
@@ -168,6 +182,84 @@ private:
     jstring value_;
     const char* chars_ = nullptr;
 };
+
+struct FileCacheDropStats {
+    bool adviceAccepted = false;
+    bool residencyVerified = false;
+    int64_t totalPages = 0;
+    int64_t residentBefore = -1;
+    int64_t residentAfter = -1;
+};
+
+int64_t residentPageCount(int descriptor, size_t bytes, bool reclaimMapping) {
+    if (descriptor < 0 || bytes == 0) return 0;
+    const long pageSizeValue = sysconf(_SC_PAGESIZE);
+    if (pageSizeValue <= 0) return -1;
+    const size_t pageSize = static_cast<size_t>(pageSizeValue);
+    const size_t pageCount = bytes / pageSize + (bytes % pageSize == 0 ? 0u : 1u);
+    if (pageCount == 0 || pageCount > static_cast<size_t>(INT64_MAX)) return -1;
+    void* mapping = mmap(nullptr, bytes, PROT_READ, MAP_PRIVATE, descriptor, 0);
+    if (mapping == MAP_FAILED) return -1;
+    std::vector<unsigned char> residency(pageCount);
+    const int result = mincore(mapping, bytes, residency.data());
+    int64_t resident = -1;
+    if (result == 0) {
+        resident = 0;
+        for (unsigned char state : residency) {
+            if ((state & 1u) != 0u) ++resident;
+        }
+    }
+    if (reclaimMapping) {
+        // PAGEOUT/COLD are best-effort on Android kernels. DONTNEED removes this
+        // process's PTEs before the file-level fadvise below attempts page-cache reclaim.
+        madvise(mapping, bytes, MADV_COLD);
+        madvise(mapping, bytes, MADV_PAGEOUT);
+        madvise(mapping, bytes, MADV_DONTNEED);
+    }
+    munmap(mapping, bytes);
+    return resident;
+}
+
+FileCacheDropStats dropFileCacheWithStats(const char* path, bool verifyResidency) {
+    FileCacheDropStats stats;
+    const int descriptor = open(path, O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) return stats;
+    struct stat fileInfo {};
+    const bool validSize = fstat(descriptor, &fileInfo) == 0 && fileInfo.st_size >= 0 &&
+        static_cast<uint64_t>(fileInfo.st_size) <= static_cast<uint64_t>(SIZE_MAX);
+    const size_t bytes = validSize ? static_cast<size_t>(fileInfo.st_size) : 0u;
+    const long pageSizeValue = sysconf(_SC_PAGESIZE);
+    if (validSize && pageSizeValue > 0) {
+        const uint64_t pageSize = static_cast<uint64_t>(pageSizeValue);
+        stats.totalPages = static_cast<int64_t>(
+            static_cast<uint64_t>(bytes) / pageSize +
+            (static_cast<uint64_t>(bytes) % pageSize == 0 ? 0u : 1u));
+    }
+    if (verifyResidency && validSize) {
+        stats.residentBefore = residentPageCount(descriptor, bytes, true);
+    }
+    stats.adviceAccepted = posix_fadvise(
+        descriptor, 0, 0, POSIX_FADV_DONTNEED) == 0;
+    if (verifyResidency && validSize) {
+        stats.residentAfter = residentPageCount(descriptor, bytes, false);
+        stats.residencyVerified = stats.residentBefore >= 0 && stats.residentAfter >= 0;
+    }
+    close(descriptor);
+    return stats;
+}
+
+jlongArray fileCacheDropStatsArray(JNIEnv* env, const FileCacheDropStats& stats) {
+    const jlong values[] = {
+        stats.adviceAccepted ? 1L : 0L,
+        stats.residencyVerified ? 1L : 0L,
+        static_cast<jlong>(stats.totalPages),
+        static_cast<jlong>(stats.residentBefore),
+        static_cast<jlong>(stats.residentAfter),
+    };
+    jlongArray result = env->NewLongArray(5);
+    if (result != nullptr) env->SetLongArrayRegion(result, 0, 5, values);
+    return result;
+}
 
 void throwIOException(JNIEnv* env, const std::string& message) {
     jclass type = env->FindClass("java/io/IOException");
@@ -1627,6 +1719,27 @@ Java_io_github_indexedjpeg_IndexedJpegNative_openPyramidTiles(
     handle->file = file.release();
     handle->sourceWidth = header.width;
     handle->sourceHeight = header.height;
+    const int descriptor = fileno(handle->file);
+    struct stat fileInfo {};
+    if (descriptor >= 0 && fstat(descriptor, &fileInfo) == 0 &&
+        fileInfo.st_size > 0 &&
+        static_cast<uint64_t>(fileInfo.st_size) <=
+            static_cast<uint64_t>(SIZE_MAX)) {
+        handle->mappingBytes = static_cast<size_t>(fileInfo.st_size);
+        void* mapping = mmap(
+            nullptr,
+            handle->mappingBytes,
+            PROT_READ,
+            MAP_PRIVATE,
+            descriptor,
+            0);
+        if (mapping != MAP_FAILED) {
+            handle->mapping = mapping;
+        } else {
+            handle->mappingBytes = 0;
+        }
+    }
+    handle->simdDecoder = indexed_jpeg_simd_decoder_create();
     return reinterpret_cast<jlong>(handle.release());
 }
 
@@ -1651,31 +1764,41 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
         return JNI_FALSE;
     }
 
-    const int descriptor = fileno(handle->file);
-    const long pageSizeValue = sysconf(_SC_PAGESIZE);
-    if (descriptor < 0 || pageSizeValue <= 0) return JNI_FALSE;
-    const uint64_t pageSize = static_cast<uint64_t>(pageSizeValue);
-    const uint64_t mapOffset = (tile->dataOffset / pageSize) * pageSize;
-    const uint64_t delta = tile->dataOffset - mapOffset;
-    const uint64_t mapBytes64 = delta + tile->bytes;
-    if (mapOffset > static_cast<uint64_t>(INT64_MAX) || mapBytes64 == 0 ||
-        mapBytes64 > static_cast<uint64_t>(SIZE_MAX)) {
-        return JNI_FALSE;
+    void* transientMapping = nullptr;
+    size_t transientMappingBytes = 0;
+    auto* encoded = static_cast<unsigned char*>(nullptr);
+    if (handle->mapping != nullptr &&
+        tile->dataOffset <= handle->mappingBytes &&
+        tile->bytes <= handle->mappingBytes - tile->dataOffset) {
+        encoded = static_cast<unsigned char*>(handle->mapping) + tile->dataOffset;
+    } else {
+        const int descriptor = fileno(handle->file);
+        const long pageSizeValue = sysconf(_SC_PAGESIZE);
+        if (descriptor < 0 || pageSizeValue <= 0) return JNI_FALSE;
+        const uint64_t pageSize = static_cast<uint64_t>(pageSizeValue);
+        const uint64_t mapOffset = (tile->dataOffset / pageSize) * pageSize;
+        const uint64_t delta = tile->dataOffset - mapOffset;
+        const uint64_t mapBytes64 = delta + tile->bytes;
+        if (mapOffset > static_cast<uint64_t>(INT64_MAX) || mapBytes64 == 0 ||
+            mapBytes64 > static_cast<uint64_t>(SIZE_MAX)) {
+            return JNI_FALSE;
+        }
+        transientMappingBytes = static_cast<size_t>(mapBytes64);
+        transientMapping = mmap(
+            nullptr,
+            transientMappingBytes,
+            PROT_READ,
+            MAP_PRIVATE,
+            descriptor,
+            static_cast<off_t>(mapOffset));
+        if (transientMapping == MAP_FAILED) return JNI_FALSE;
+        encoded = static_cast<unsigned char*>(transientMapping) + delta;
     }
-    const size_t mapBytes = static_cast<size_t>(mapBytes64);
-    void* mapping = mmap(
-        nullptr,
-        mapBytes,
-        PROT_READ,
-        MAP_PRIVATE,
-        descriptor,
-        static_cast<off_t>(mapOffset));
-    if (mapping == MAP_FAILED) return JNI_FALSE;
-    auto* encoded = static_cast<unsigned char*>(mapping) + delta;
 
     void* pixels = nullptr;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) == ANDROID_BITMAP_RESULT_SUCCESS) {
-        const bool simdComplete = indexed_jpeg_simd_decode_rgba(
+        const bool simdComplete = indexed_jpeg_simd_decoder_decode_rgba(
+            handle->simdDecoder,
             encoded,
             tile->bytes,
             tile->width,
@@ -1693,7 +1816,9 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
                     "pyramid decoder=libjpeg-turbo-3.2.0 simd=%d",
                     indexed_jpeg_simd_compiled_with_simd());
             }
-            munmap(mapping, mapBytes);
+            if (transientMapping != nullptr) {
+                munmap(transientMapping, transientMappingBytes);
+            }
             return JNI_TRUE;
         }
         __android_log_print(
@@ -1710,7 +1835,9 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
     if (setjmp(error.jump)) {
         if (pixels != nullptr) AndroidBitmap_unlockPixels(env, bitmap);
         if (created) jpeg_destroy_decompress(&info);
-        munmap(mapping, mapBytes);
+        if (transientMapping != nullptr) {
+            munmap(transientMapping, transientMappingBytes);
+        }
         __android_log_print(
             ANDROID_LOG_ERROR,
             "IndexedJpeg",
@@ -1725,7 +1852,9 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
     if (jpeg_read_header(&info, TRUE) != JPEG_HEADER_OK || info.arith_code ||
         info.image_width != tile->width || info.image_height != tile->height) {
         jpeg_destroy_decompress(&info);
-        munmap(mapping, mapBytes);
+        if (transientMapping != nullptr) {
+            munmap(transientMapping, transientMappingBytes);
+        }
         return JNI_FALSE;
     }
     info.out_color_space = JCS_EXT_RGBA;
@@ -1733,7 +1862,9 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
         info.output_width != bitmapInfo.width || info.output_height != bitmapInfo.height ||
         AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
         jpeg_destroy_decompress(&info);
-        munmap(mapping, mapBytes);
+        if (transientMapping != nullptr) {
+            munmap(transientMapping, transientMappingBytes);
+        }
         return JNI_FALSE;
     }
 
@@ -1748,7 +1879,9 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
     AndroidBitmap_unlockPixels(env, bitmap);
     pixels = nullptr;
     jpeg_destroy_decompress(&info);
-    munmap(mapping, mapBytes);
+    if (transientMapping != nullptr) {
+        munmap(transientMapping, transientMappingBytes);
+    }
     return complete ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -1935,4 +2068,15 @@ Java_io_github_indexedjpeg_IndexedJpegNative_close(
     if (handle == nullptr) return;
     freeIndex(&handle->index);
     delete handle;
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_io_github_indexedjpeg_IndexedJpegNative_dropFileCache(
+    JNIEnv* env, jobject, jstring pathValue, jboolean verifyResidency
+) {
+    UtfChars path(env, pathValue);
+    if (path.get() == nullptr) return nullptr;
+    return fileCacheDropStatsArray(
+        env,
+        dropFileCacheWithStats(path.get(), verifyResidency == JNI_TRUE));
 }
