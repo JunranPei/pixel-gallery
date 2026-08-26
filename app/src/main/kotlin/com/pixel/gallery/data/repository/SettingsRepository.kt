@@ -6,6 +6,9 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,6 +29,13 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
 class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    private val viewerTestPreferences = context.getSharedPreferences(
+        "viewer_test_settings",
+        Context.MODE_PRIVATE,
+    )
+    private val mutableLargeImageColdTestMode = MutableStateFlow(
+        viewerTestPreferences.getBoolean("large_image_cold_test_mode", false),
+    )
     private val STARTUP_AT_ALBUMS = booleanPreferencesKey("flutter.albums")
     private val MATERIAL_YOU = booleanPreferencesKey("flutter.material_you")
     private val EXCLUDED_FOLDERS = stringSetPreferencesKey("excluded_folders")
@@ -270,5 +280,12 @@ class SettingsRepository @Inject constructor(
         context.dataStore.edit { preferences ->
             preferences[LARGE_IMAGE_HARDWARE_BITMAP] = value
         }
+    }
+
+    val largeImageColdTestMode: StateFlow<Boolean> = mutableLargeImageColdTestMode.asStateFlow()
+
+    suspend fun setLargeImageColdTestMode(value: Boolean) {
+        viewerTestPreferences.edit().putBoolean("large_image_cold_test_mode", value).apply()
+        mutableLargeImageColdTestMode.value = value
     }
 }

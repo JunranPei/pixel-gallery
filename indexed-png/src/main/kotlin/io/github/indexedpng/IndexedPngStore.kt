@@ -26,6 +26,14 @@ data class IndexedPngInfo(
     val tileCount: Int,
 )
 
+data class IndexedPngColdReadResult(
+    val adviceAccepted: Boolean,
+    val residencyVerified: Boolean,
+    val totalPages: Long,
+    val residentBefore: Long,
+    val residentAfter: Long,
+)
+
 /**
  * Persistent, opt-in lossless PNG tile-pyramid storage.
  *
@@ -171,6 +179,25 @@ class IndexedPngStore(context: Context) {
             .joinToString("") { "%02x".format(it) }
     }
 
+    /** Test-only cache policy hook. The index itself is preserved; only clean file pages are reclaimed. */
+    fun requestColdRead(sourcePath: String, verifyResidency: Boolean): IndexedPngColdReadResult? {
+        val source = compatibleSource(sourcePath) ?: return null
+        val index = indexFile(source)
+        if (!index.isFile) return null
+        val sourceResult = IndexedPngNative.dropFileCache(source.absolutePath, verifyResidency)
+            ?.takeIf { it.size >= 5 } ?: return null
+        val indexResult = IndexedPngNative.dropFileCache(index.absolutePath, verifyResidency)
+            ?.takeIf { it.size >= 5 } ?: return null
+        val residencyVerified = sourceResult[1] == 1L && indexResult[1] == 1L
+        return IndexedPngColdReadResult(
+            adviceAccepted = sourceResult[0] == 1L && indexResult[0] == 1L,
+            residencyVerified = residencyVerified,
+            totalPages = sourceResult[2] + indexResult[2],
+            residentBefore = if (residencyVerified) sourceResult[3] + indexResult[3] else -1L,
+            residentAfter = if (residencyVerified) sourceResult[4] + indexResult[4] else -1L,
+        )
+    }
+
     private fun markChanged(source: File) {
         generations.computeIfAbsent(sourceKey(source)) { AtomicLong(0L) }.incrementAndGet()
     }
@@ -284,4 +311,6 @@ private object IndexedPngNative {
     ): Boolean
 
     external fun close(handle: Long)
+
+    external fun dropFileCache(path: String, verifyResidency: Boolean): LongArray?
 }

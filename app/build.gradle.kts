@@ -15,6 +15,7 @@ val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoole
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
 val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
+        viewerTestVariant == "testtrace" ||
         viewerTestVariant == "compressed" ||
         viewerTestVariant == "zoomtrace" ||
         viewerTestVariant == "jpegindextrace" ||
@@ -45,6 +46,7 @@ android {
     defaultConfig {
         applicationId = when (viewerTestVariant) {
             "test" -> "com.pixel.gallery.shortcuts.test"
+            "testtrace" -> "com.pixel.gallery.shortcuts.test"
             "simplemerge" -> "com.pixel.gallery.shortcuts.simplegallerymerge"
             "trace" -> "com.pixel.gallery.shortcuts.codextrace"
             "clean" -> "com.pixel.gallery.shortcuts.codexclean"
@@ -59,6 +61,7 @@ android {
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "simplemerge" -> "Gallery Test"
             "test" -> "Gallery Shortcuts Test"
+            "testtrace" -> "Gallery Shortcuts Test Trace"
             "trace" -> "Pixel Shortcuts Trace"
             "clean" -> "Pixel Shortcuts Clean"
             "compressed" -> "Pixel Shortcuts Compressed"
