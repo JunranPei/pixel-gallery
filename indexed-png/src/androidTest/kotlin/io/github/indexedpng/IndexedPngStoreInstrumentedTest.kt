@@ -11,10 +11,111 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.DataOutputStream
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import java.security.MessageDigest
+import java.util.zip.CRC32
+import java.util.zip.Deflater
 
 @RunWith(AndroidJUnit4::class)
 class IndexedPngStoreInstrumentedTest {
+    @Test
+    fun corruptedTilePayloadFailsClosed() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-png-corrupt-fixture.png")
+        createRgbFixture(source, width = 37, height = 29)
+        val store = IndexedPngStore(context)
+        store.delete(source.absolutePath)
+        store.build(source.absolutePath)
+
+        val key = MessageDigest.getInstance("SHA-256")
+            .digest(source.canonicalPath.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val index = File(context.noBackupFilesDir, "indexed-png/$key.ipx")
+        RandomAccessFile(index, "rw").use { file ->
+            file.seek(64)
+            val payloadOffset = java.lang.Long.reverseBytes(file.readLong())
+            file.seek(payloadOffset)
+            file.writeByte(file.readUnsignedByte() xor 0x40)
+        }
+
+        store.openDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            assertEquals(null, decoder!!.decodeRegion(Rect(0, 0, 20, 20), 1))
+        }
+        assertTrue(store.delete(source.absolutePath))
+    }
+
+    @Test
+    fun opaqueRgbPngBuildsAndDecodesWithoutInventingTransparency() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-png-rgb-fixture.png")
+        createRgbFixture(source, width = 37, height = 29)
+        val store = IndexedPngStore(context)
+        store.delete(source.absolutePath)
+        val unrelated = File(context.cacheDir, "indexed-png-unrelated.png")
+        val unrelatedGeneration = store.currentGenerationFor(unrelated.absolutePath)
+        val sourceGeneration = store.currentGenerationFor(source.absolutePath)
+
+        val info = store.build(source.absolutePath)
+        assertTrue(store.currentGenerationFor(source.absolutePath) > sourceGeneration)
+        assertEquals(unrelatedGeneration, store.currentGenerationFor(unrelated.absolutePath))
+        assertEquals(37, info.sourceWidth)
+        assertEquals(29, info.sourceHeight)
+        store.openDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            val region = Rect(3, 5, 34, 27)
+            val bitmap = decoder!!.decodeRegion(region, 1)
+            assertNotNull(bitmap)
+            bitmap!!
+            for (point in listOf(0 to 0, 15 to 10, 30 to 21)) {
+                val sourceX = region.left + point.first
+                val sourceY = region.top + point.second
+                assertEquals(
+                    Color.rgb(
+                        (sourceX * 7 + sourceY * 3) and 0xff,
+                        (sourceX * 5 + sourceY * 11) and 0xff,
+                        (sourceX * 13 + sourceY) and 0xff,
+                    ),
+                    bitmap.getPixel(point.first, point.second),
+                )
+            }
+            bitmap.recycle()
+            assertDecodedSize(decoder.decodeRegion(region, 2), 16, 11)
+            assertDecodedSize(decoder.decodeRegion(region, 4), 8, 6)
+        }
+        assertTrue(store.delete(source.absolutePath))
+    }
+
+    @Test
+    fun truecolorTransparencyStaysTransparentAndPremultiplied() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-png-trns-fixture.png")
+        val transparentX = 7
+        val transparentY = 5
+        val transparentColor = intArrayOf(
+            (transparentX * 7 + transparentY * 3) and 0xff,
+            (transparentX * 5 + transparentY * 11) and 0xff,
+            (transparentX * 13 + transparentY) and 0xff,
+        )
+        createRgbFixture(source, width = 23, height = 17, transparentColor = transparentColor)
+        val store = IndexedPngStore(context)
+        store.delete(source.absolutePath)
+        store.build(source.absolutePath)
+
+        store.openDecoder(source.absolutePath).use { decoder ->
+            assertNotNull(decoder)
+            val bitmap = decoder!!.decodeRegion(Rect(0, 0, 23, 17), 1)
+            assertNotNull(bitmap)
+            bitmap!!
+            assertEquals(Color.TRANSPARENT, bitmap.getPixel(transparentX, transparentY))
+            assertEquals(255, Color.alpha(bitmap.getPixel(0, 0)))
+            bitmap.recycle()
+        }
+        assertTrue(store.delete(source.absolutePath))
+    }
+
     @Test
     fun buildPersistDecodeAcrossTilesAndSamplesThenDelete() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
@@ -141,5 +242,70 @@ class IndexedPngStoreInstrumentedTest {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
         }
         bitmap.recycle()
+    }
+
+    private fun createRgbFixture(
+        destination: File,
+        width: Int,
+        height: Int,
+        transparentColor: IntArray? = null,
+    ) {
+        val scanlines = ByteArray((width * 3 + 1) * height)
+        for (y in 0 until height) {
+            val row = y * (width * 3 + 1)
+            scanlines[row] = 0
+            for (x in 0 until width) {
+                val pixel = row + 1 + x * 3
+                scanlines[pixel] = (x * 7 + y * 3).toByte()
+                scanlines[pixel + 1] = (x * 5 + y * 11).toByte()
+                scanlines[pixel + 2] = (x * 13 + y).toByte()
+            }
+        }
+        val compressor = Deflater(6)
+        compressor.setInput(scanlines)
+        compressor.finish()
+        val compressed = ByteArray(scanlines.size + 128)
+        val compressedBytes = compressor.deflate(compressed)
+        compressor.end()
+
+        DataOutputStream(FileOutputStream(destination)).use { output ->
+            output.write(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+            val header = java.io.ByteArrayOutputStream().also { bytes ->
+                DataOutputStream(bytes).use { data ->
+                    data.writeInt(width)
+                    data.writeInt(height)
+                    data.writeByte(8)
+                    data.writeByte(2)
+                    data.writeByte(0)
+                    data.writeByte(0)
+                    data.writeByte(0)
+                }
+            }.toByteArray()
+            writePngChunk(output, "IHDR", header)
+            transparentColor?.let { color ->
+                val transparency = java.io.ByteArrayOutputStream().also { bytes ->
+                    DataOutputStream(bytes).use { data ->
+                        data.writeShort(color[0])
+                        data.writeShort(color[1])
+                        data.writeShort(color[2])
+                    }
+                }.toByteArray()
+                writePngChunk(output, "tRNS", transparency)
+            }
+            writePngChunk(output, "IDAT", compressed.copyOf(compressedBytes))
+            writePngChunk(output, "IEND", byteArrayOf())
+        }
+    }
+
+    private fun writePngChunk(output: DataOutputStream, type: String, data: ByteArray) {
+        val typeBytes = type.toByteArray(Charsets.US_ASCII)
+        output.writeInt(data.size)
+        output.write(typeBytes)
+        output.write(data)
+        val crc = CRC32().apply {
+            update(typeBytes)
+            update(data)
+        }
+        output.writeInt(crc.value.toInt())
     }
 }

@@ -7,6 +7,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -87,7 +88,7 @@ class IndexedPngStore(context: Context) {
                 if (!temporary.renameTo(destination)) {
                     throw IOException("Unable to publish the completed PNG index")
                 }
-                generation.incrementAndGet()
+                markChanged(source)
                 return IndexedPngInfo(
                     indexBytes = destination.length(),
                     sourceWidth = nativeInfo[0],
@@ -108,8 +109,10 @@ class IndexedPngStore(context: Context) {
         if (!buildInProgress.compareAndSet(false, true)) return false
         return try {
             val source = File(sourcePath)
-            val deleted = indexFile(source).let { !it.exists() || it.delete() }
-            if (deleted) generation.incrementAndGet()
+            val index = indexFile(source)
+            val existed = index.exists()
+            val deleted = !existed || index.delete()
+            if (deleted && existed) markChanged(source)
             deleted
         } finally {
             buildInProgress.set(false)
@@ -128,7 +131,8 @@ class IndexedPngStore(context: Context) {
             if (destinationIndex.exists() && !destinationIndex.delete()) return false
             if (!sourceIndex.renameTo(destinationIndex)) return false
             if (status(destinationPath) is IndexedPngStatus.Ready) {
-                generation.incrementAndGet()
+                markChanged(File(sourcePath))
+                markChanged(destinationSource)
                 true
             } else {
                 if (!destinationIndex.renameTo(sourceIndex)) destinationIndex.delete()
@@ -151,8 +155,8 @@ class IndexedPngStore(context: Context) {
         return handle.takeIf { it != 0L }?.let(::IndexedPngRegionDecoder)
     }
 
-    val currentGeneration: Long
-        get() = generation.get()
+    fun currentGenerationFor(sourcePath: String): Long =
+        generations[sourceKey(File(sourcePath))]?.get() ?: 0L
 
     private fun indexFile(source: File): File = File(directory, sourceKey(source) + INDEX_SUFFIX)
 
@@ -165,6 +169,10 @@ class IndexedPngStore(context: Context) {
         return MessageDigest.getInstance("SHA-256")
             .digest(stablePath.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
+    }
+
+    private fun markChanged(source: File) {
+        generations.computeIfAbsent(sourceKey(source)) { AtomicLong(0L) }.incrementAndGet()
     }
 
     private fun compatibleSource(path: String): File? = readableSource(path)?.takeIf { source ->
@@ -188,16 +196,18 @@ class IndexedPngStore(context: Context) {
         }
     }
 
-    private companion object {
-        const val DIRECTORY_NAME = "indexed-png"
-        const val INDEX_SUFFIX = ".ipx"
-        const val RAW_TEMP_SUFFIX = ".rows"
-        val PNG_SIGNATURE = byteArrayOf(
+    companion object {
+        const val TILE_SIZE = 512
+        const val PREFERRED_DECODED_TILE_SIZE = TILE_SIZE * 2
+        private const val DIRECTORY_NAME = "indexed-png"
+        private const val INDEX_SUFFIX = ".ipx"
+        private const val RAW_TEMP_SUFFIX = ".rows"
+        private val PNG_SIGNATURE = byteArrayOf(
             0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
         )
-        val mutationLock = Any()
-        val buildInProgress = AtomicBoolean(false)
-        val generation = AtomicLong(0L)
+        private val mutationLock = Any()
+        private val buildInProgress = AtomicBoolean(false)
+        private val generations = ConcurrentHashMap<String, AtomicLong>()
     }
 }
 

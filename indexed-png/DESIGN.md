@@ -13,10 +13,13 @@ that sequential representation into independently compressed 512-pixel tiles.
    semantics can be represented by the RGBA8 index. Untagged PNGs, explicit `sRGB`, canonical
    full-range sRGB `cICP`, and canonical `gAMA` + `cHRM` are accepted; animation, ICC, wide-gamut,
    limited-range, and mastering-display metadata fail closed to the platform decoder.
-2. libspng validates the PNG and decodes it once to premultiplied RGBA8.
+2. libspng validates the PNG and decodes it once. Opaque sources stay RGB8; sources with an
+   alpha channel or `tRNS` are stored as premultiplied RGBA8.
 3. Non-interlaced images are consumed a bounded band at a time. Adam7 images use
    a temporary row store because passes revisit rows non-sequentially.
-4. Level 1 tiles are independently compressed with zlib.
+4. Each tile applies a cheap, reversible per-row filter before independent zlib compression.
+   The filter set is intentionally limited to None/Sub/Up so cache misses remain inexpensive to
+   reconstruct on mobile CPUs.
 5. Lower-resolution levels are generated losslessly from the preceding level,
    keeping peak memory bounded to a handful of tiles.
 6. A fixed-width little-endian directory is written only after every payload is
@@ -25,8 +28,14 @@ that sequential representation into independently compressed 512-pixel tiles.
 ## Decode lifecycle
 
 The decoder selects the closest stored level that is no coarser than the requested
-sample size, inflates only overlapping tiles, and writes the requested output
-bitmap. File reads use positional I/O and the native handle serializes access.
+sample size, inflates and reverses filtering only for overlapping tiles, and writes the requested
+output bitmap. RGB tiles expand directly into Android's RGBA bitmap without an intermediate
+full-image allocation. File reads use positional I/O and the native handle serializes access.
+
+SSIV keeps its compact 1024-pixel decoded tiles, but is told that exact size so it does not balance
+the final column across the grid. Since 1024 is an integer multiple of the persistent 512-pixel
+blocks, neighbouring requests no longer re-inflate a shared block merely because their boundaries
+were shifted.
 
 ## Persistent format
 

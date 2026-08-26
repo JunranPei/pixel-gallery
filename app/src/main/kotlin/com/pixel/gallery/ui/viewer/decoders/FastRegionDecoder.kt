@@ -317,13 +317,18 @@ class FastRegionDecoder(
         return synchronized(decoderLock) {
             refreshBackendForCapabilityRevision()
             val addressableJpegTileSize = addressableJpegPyramidTileSize(sampleSize)
+            val persistentTileSize = when {
+                addressableJpegTileSize != null -> addressableJpegTileSize
+                activeIndexedBackend == IndexedBackend.PNG -> IndexedPngStore.PREFERRED_DECODED_TILE_SIZE
+                else -> null
+            }
             val persistentPyramid =
                 activeIndexedBackend?.persistentTilePyramid == true ||
                     addressableJpegTileSize != null
             RegionDecoderCapabilities(
                 batchSourceMisses = !persistentPyramid,
                 persistDecodedTiles = !persistentPyramid,
-                preferredDecodedTileSize = addressableJpegTileSize,
+                preferredDecodedTileSize = persistentTileSize,
             )
         }
     }
@@ -801,7 +806,11 @@ class FastRegionDecoder(
         } else {
             0L
         }
-        revision = revision * 31L + (indexedPngStore?.currentGeneration ?: 0L)
+        revision = revision * 31L + if (sourcePath != null) {
+            indexedPngStore?.currentGenerationFor(sourcePath) ?: 0L
+        } else {
+            0L
+        }
         revision = revision * 31L + (indexedWebpStore?.currentGeneration ?: 0L)
         revision = revision * 31L + (indexedHeifStore?.currentGeneration ?: 0L)
         return revision
@@ -906,7 +915,7 @@ class FastRegionDecoder(
     private fun refreshIndexedPngDecoder(): IndexedPngRegionDecoder? {
         val store = indexedPngStore ?: return null
         val sourcePath = indexedSourcePath ?: return null
-        val generation = store.currentGeneration
+        val generation = store.currentGenerationFor(sourcePath)
         if (indexedPngGeneration != generation) {
             ViewerLoadMetrics.event(
                 "INDEX_GENERATION_CHANGE",
