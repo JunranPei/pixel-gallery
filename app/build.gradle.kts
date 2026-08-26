@@ -75,6 +75,11 @@ android {
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
         buildConfigField(
             "boolean",
+            "LARGE_IMAGE_COLD_TEST_DEFAULT",
+            (viewerTestVariant == "ssivlite").toString(),
+        )
+        buildConfigField(
+            "boolean",
             "INDEXED_IMAGE_DIAGNOSTICS_ENABLED",
             indexedImageDiagnosticsEnabled.toString(),
         )
