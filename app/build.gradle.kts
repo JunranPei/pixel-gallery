@@ -144,9 +144,9 @@ android {
 
     packaging {
         jniLibs {
-            // Native libraries are stored uncompressed in the APK (since Android 6.0). 
-            // Setting this to true forces compression, reducing APK size.
-            useLegacyPackaging = true
+            // Keep native libraries uncompressed so AGP can align them for
+            // direct loading on devices with 16 KB memory pages.
+            useLegacyPackaging = false
         }
     }
 
