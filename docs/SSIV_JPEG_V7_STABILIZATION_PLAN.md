@@ -37,6 +37,8 @@
 - 不增加浅放大整图，也不声称 48 MiB 可以同时保护当前和上一个 sample=2 视口。一个视口本身即可占用约 32–48 MiB；缓存不能降低首次未命中的成本。
 - v7 可寻址块改为从 index 中 mmap 压缩区间，并在 JNI 内直接解码到最终 ARGB Bitmap；生产路径不再创建压缩块 `std::vector`、Java `ByteArray` 或调用 `BitmapFactory.decodeByteArray`。index 格式、1024 网格、48 MiB 预算、sample 选择和显示时序均不改变，已有 v7 文件无需重建。
 - 该改动已在 Android 16 模拟器和三星 SM-S9380 上分别通过 9 项 `indexed-jpeg` 仪器测试，完整 Debug APK 构建通过。
+- 进一步确认定制 seek 解码器仍基于 libjpeg-turbo 1.3.0 且显式使用 `jsimd_none.c`。保持该定制库专用于 `sample=1`，另以隔离共享库接入 libjpeg-turbo 3.2.0：只有 v7 独立标准 JPEG 块走现代 SIMD，失败时回退原解码器。现代库的 `jpeg_*` 符号全部隐藏，现有 index 格式和文件均不变化。
+- arm64 构建已确认包含 NEON Huffman、IDCT、色彩转换及上采样对象；包装库仅导出两个私有桥接接口。Android 16 模拟器的 9 项仪器测试全部通过，运行日志确认 `simd=1`；四架构 Debug AAR、完整 Debug APK 和 16 KB APK/ELF 对齐检查通过。
 
 ## 不可突破的边界
 
