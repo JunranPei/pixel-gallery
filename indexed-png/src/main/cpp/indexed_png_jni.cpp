@@ -26,11 +26,14 @@
 namespace {
 
 constexpr std::array<uint8_t, 8> kMagic = {'I', 'P', 'N', 'G', 'I', 'D', 'X', 0};
-constexpr uint32_t kVersion = 1;
-constexpr uint32_t kHeaderBytes = 80;
+constexpr uint32_t kVersion = 2;
+constexpr uint32_t kHeaderBytes = 88;
 constexpr uint32_t kEntryBytes = 48;
 constexpr uint32_t kTileSize = 512;
 constexpr uint64_t kMaxEntries = 10'000'000;
+constexpr uint32_t kFilteredZlibEncoding = 1;
+constexpr uint32_t kRgbChannels = 3;
+constexpr uint32_t kRgbaChannels = 4;
 
 struct Header {
     uint64_t sourceBytes = 0;
@@ -43,6 +46,8 @@ struct Header {
     uint64_t directoryOffset = 0;
     uint64_t payloadOffset = 0;
     uint64_t totalBytes = 0;
+    uint32_t channels = 0;
+    uint32_t encoding = 0;
 };
 
 struct Entry {
@@ -213,7 +218,7 @@ std::vector<Level> makeLevels(uint32_t width, uint32_t height) {
     return levels;
 }
 
-std::vector<Entry> makeEntries(const std::vector<Level>& levels) {
+std::vector<Entry> makeEntries(const std::vector<Level>& levels, uint32_t channels) {
     const Level& last = levels.back();
     const size_t total = last.firstEntry + static_cast<size_t>(last.columns) * last.rows;
     std::vector<Entry> entries(total);
@@ -226,7 +231,7 @@ std::vector<Entry> makeEntries(const std::vector<Level>& levels) {
                 entry.y = tileY * kTileSize;
                 entry.width = std::min(kTileSize, level.width - entry.x);
                 entry.height = std::min(kTileSize, level.height - entry.y);
-                const uint64_t raw = static_cast<uint64_t>(entry.width) * entry.height * 4;
+                const uint64_t raw = static_cast<uint64_t>(entry.width) * entry.height * channels;
                 entry.rawBytes = static_cast<uint32_t>(raw);
             }
         }
@@ -244,18 +249,110 @@ void premultiplyRow(uint8_t* row, uint32_t width) {
     }
 }
 
-void writeTile(FILE* output, Entry& entry, const std::vector<uint8_t>& raw) {
+uint64_t filterCost(const uint8_t* row, const uint8_t* previous, size_t bytes, uint32_t channels, uint8_t filter) {
+    uint64_t cost = 0;
+    for (size_t index = 0; index < bytes; ++index) {
+        const uint8_t left = index >= channels ? row[index - channels] : 0;
+        const uint8_t up = previous == nullptr ? 0 : previous[index];
+        const uint8_t predictor = filter == SPNG_FILTER_SUB ? left :
+            (filter == SPNG_FILTER_UP ? up : 0);
+        const uint8_t residual = static_cast<uint8_t>(row[index] - predictor);
+        const int signedResidual = residual < 128 ? residual : residual - 256;
+        cost += static_cast<uint64_t>(signedResidual < 0 ? -signedResidual : signedResidual);
+    }
+    return cost;
+}
+
+std::vector<uint8_t> filterTile(
+    const std::vector<uint8_t>& raw,
+    uint32_t width,
+    uint32_t height,
+    uint32_t channels
+) {
+    const size_t rowBytes = static_cast<size_t>(width) * channels;
+    std::vector<uint8_t> filtered((rowBytes + 1) * height);
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint8_t* row = raw.data() + static_cast<size_t>(y) * rowBytes;
+        const uint8_t* previous = y == 0 ? nullptr : row - rowBytes;
+        const uint64_t noneCost = filterCost(row, previous, rowBytes, channels, SPNG_FILTER_NONE);
+        const uint64_t subCost = filterCost(row, previous, rowBytes, channels, SPNG_FILTER_SUB);
+        const uint64_t upCost = filterCost(row, previous, rowBytes, channels, SPNG_FILTER_UP);
+        uint8_t filter = SPNG_FILTER_NONE;
+        if (subCost < noneCost) filter = SPNG_FILTER_SUB;
+        if (upCost < (filter == SPNG_FILTER_SUB ? subCost : noneCost)) filter = SPNG_FILTER_UP;
+
+        uint8_t* destination = filtered.data() + static_cast<size_t>(y) * (rowBytes + 1);
+        destination[0] = filter;
+        ++destination;
+        for (size_t index = 0; index < rowBytes; ++index) {
+            const uint8_t left = index >= channels ? row[index - channels] : 0;
+            const uint8_t up = previous == nullptr ? 0 : previous[index];
+            const uint8_t predictor = filter == SPNG_FILTER_SUB ? left :
+                (filter == SPNG_FILTER_UP ? up : 0);
+            destination[index] = static_cast<uint8_t>(row[index] - predictor);
+        }
+    }
+    return filtered;
+}
+
+std::vector<uint8_t> unfilterTile(
+    const std::vector<uint8_t>& filtered,
+    uint32_t width,
+    uint32_t height,
+    uint32_t channels
+) {
+    const size_t rowBytes = static_cast<size_t>(width) * channels;
+    if (filtered.size() != (rowBytes + 1) * height) {
+        throw std::runtime_error("PNG index filtered tile size mismatch");
+    }
+    std::vector<uint8_t> raw(rowBytes * height);
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint8_t* source = filtered.data() + static_cast<size_t>(y) * (rowBytes + 1);
+        const uint8_t filter = *source++;
+        if (filter != SPNG_FILTER_NONE && filter != SPNG_FILTER_SUB && filter != SPNG_FILTER_UP) {
+            throw std::runtime_error("PNG index tile uses an unsupported filter");
+        }
+        uint8_t* row = raw.data() + static_cast<size_t>(y) * rowBytes;
+        const uint8_t* previous = y == 0 ? nullptr : row - rowBytes;
+        for (size_t index = 0; index < rowBytes; ++index) {
+            const uint8_t left = index >= channels ? row[index - channels] : 0;
+            const uint8_t up = previous == nullptr ? 0 : previous[index];
+            const uint8_t predictor = filter == SPNG_FILTER_SUB ? left :
+                (filter == SPNG_FILTER_UP ? up : 0);
+            row[index] = static_cast<uint8_t>(source[index] + predictor);
+        }
+    }
+    return raw;
+}
+
+std::vector<uint8_t> compressFiltered(const std::vector<uint8_t>& filtered) {
+    z_stream stream{};
+    if (deflateInit2(&stream, 3, Z_DEFLATED, 15, 8, Z_FILTERED) != Z_OK) {
+        throw std::runtime_error("Unable to initialize PNG index tile compressor");
+    }
+    std::vector<uint8_t> compressed(compressBound(static_cast<uLong>(filtered.size())));
+    stream.next_in = const_cast<Bytef*>(filtered.data());
+    stream.avail_in = static_cast<uInt>(filtered.size());
+    stream.next_out = compressed.data();
+    stream.avail_out = static_cast<uInt>(compressed.size());
+    const int result = deflate(&stream, Z_FINISH);
+    const size_t compressedBytes = stream.total_out;
+    deflateEnd(&stream);
+    if (result != Z_STREAM_END) throw std::runtime_error("Unable to compress PNG index tile");
+    compressed.resize(compressedBytes);
+    return compressed;
+}
+
+void writeTile(
+    FILE* output,
+    Entry& entry,
+    const std::vector<uint8_t>& raw,
+    uint32_t channels
+) {
     if (raw.size() != entry.rawBytes) throw std::runtime_error("PNG tile size mismatch");
-    uLongf compressedSize = compressBound(static_cast<uLong>(raw.size()));
-    std::vector<uint8_t> compressed(compressedSize);
-    const int result = compress2(
-        compressed.data(),
-        &compressedSize,
-        raw.data(),
-        static_cast<uLong>(raw.size()),
-        Z_BEST_SPEED
-    );
-    if (result != Z_OK) throw std::runtime_error("Unable to compress PNG index tile");
+    const std::vector<uint8_t> filtered = filterTile(raw, entry.width, entry.height, channels);
+    const std::vector<uint8_t> compressed = compressFiltered(filtered);
+    const size_t compressedSize = compressed.size();
     const off_t offset = ftello(output);
     if (offset < 0 || static_cast<uint64_t>(offset) > std::numeric_limits<uint64_t>::max() - compressedSize) {
         throw std::runtime_error("PNG index offset overflow");
@@ -274,37 +371,40 @@ void writeBand(
     std::vector<Entry>& entries,
     const uint8_t* band,
     uint32_t bandTop,
-    uint32_t bandHeight
+    uint32_t bandHeight,
+    uint32_t channels
 ) {
-    const size_t sourceStride = static_cast<size_t>(level.width) * 4;
+    const size_t sourceStride = static_cast<size_t>(level.width) * channels;
     const uint32_t tileY = bandTop / kTileSize;
     for (uint32_t tileX = 0; tileX < level.columns; ++tileX) {
         Entry& entry = entries[level.firstEntry + static_cast<size_t>(tileY) * level.columns + tileX];
         if (entry.height != bandHeight) throw std::runtime_error("PNG band height mismatch");
         std::vector<uint8_t> tile(entry.rawBytes);
-        const size_t tileStride = static_cast<size_t>(entry.width) * 4;
+        const size_t tileStride = static_cast<size_t>(entry.width) * channels;
         for (uint32_t row = 0; row < bandHeight; ++row) {
             memcpy(
                 tile.data() + static_cast<size_t>(row) * tileStride,
-                band + static_cast<size_t>(row) * sourceStride + static_cast<size_t>(entry.x) * 4,
+                band + static_cast<size_t>(row) * sourceStride + static_cast<size_t>(entry.x) * channels,
                 tileStride
             );
         }
-        writeTile(output, entry, tile);
+        writeTile(output, entry, tile, channels);
     }
 }
 
-std::vector<uint8_t> loadTileRaw(int fd, const Entry& entry) {
+std::vector<uint8_t> loadTileRaw(int fd, const Entry& entry, uint32_t channels) {
     std::vector<uint8_t> compressed(entry.compressedBytes);
     if (!preadAll(fd, compressed.data(), compressed.size(), entry.offset)) {
         throw std::runtime_error("Unable to read PNG index tile");
     }
-    std::vector<uint8_t> raw(entry.rawBytes);
-    uLongf rawSize = raw.size();
-    const int result = uncompress(raw.data(), &rawSize, compressed.data(), compressed.size());
-    if (result != Z_OK || rawSize != raw.size()) {
+    const size_t filteredBytes = entry.rawBytes + entry.height;
+    std::vector<uint8_t> filtered(filteredBytes);
+    uLongf decodedBytes = filtered.size();
+    const int result = uncompress(filtered.data(), &decodedBytes, compressed.data(), compressed.size());
+    if (result != Z_OK || decodedBytes != filtered.size()) {
         throw std::runtime_error("Unable to inflate PNG index tile");
     }
+    std::vector<uint8_t> raw = unfilterTile(filtered, entry.width, entry.height, channels);
     const uint32_t actualCrc = crc32(0, raw.data(), static_cast<uInt>(raw.size()));
     if (actualCrc != entry.crc) throw std::runtime_error("PNG index tile checksum mismatch");
     return raw;
@@ -316,7 +416,8 @@ const uint8_t* pixelAt(
     int fd,
     std::unordered_map<size_t, std::vector<uint8_t>>& cache,
     uint32_t x,
-    uint32_t y
+    uint32_t y,
+    uint32_t channels
 ) {
     if (x >= level.width || y >= level.height) return nullptr;
     const uint32_t tileX = x / kTileSize;
@@ -324,15 +425,20 @@ const uint8_t* pixelAt(
     const size_t index = level.firstEntry + static_cast<size_t>(tileY) * level.columns + tileX;
     auto found = cache.find(index);
     if (found == cache.end()) {
-        found = cache.emplace(index, loadTileRaw(fd, entries[index])).first;
+        found = cache.emplace(index, loadTileRaw(fd, entries[index], channels)).first;
     }
     const Entry& entry = entries[index];
     const uint32_t localX = x - entry.x;
     const uint32_t localY = y - entry.y;
-    return found->second.data() + (static_cast<size_t>(localY) * entry.width + localX) * 4;
+    return found->second.data() + (static_cast<size_t>(localY) * entry.width + localX) * channels;
 }
 
-void generateLowerLevels(FILE* output, const std::vector<Level>& levels, std::vector<Entry>& entries) {
+void generateLowerLevels(
+    FILE* output,
+    const std::vector<Level>& levels,
+    std::vector<Entry>& entries,
+    uint32_t channels
+) {
     const int fd = fileno(output);
     for (size_t levelIndex = 1; levelIndex < levels.size(); ++levelIndex) {
         if (fflush(output) != 0) throw std::runtime_error("Unable to flush PNG index level");
@@ -360,22 +466,23 @@ void generateLowerLevels(FILE* output, const std::vector<Level>& levels, std::ve
                                     fd,
                                     cache,
                                     sourceX + dx,
-                                    sourceY + dy
+                                    sourceY + dy,
+                                    channels
                                 );
                                 if (pixel == nullptr) continue;
-                                for (size_t channel = 0; channel < 4; ++channel) sums[channel] += pixel[channel];
+                                for (size_t channel = 0; channel < channels; ++channel) sums[channel] += pixel[channel];
                                 ++count;
                             }
                         }
                         if (count == 0) throw std::runtime_error("PNG pyramid source pixel is missing");
                         uint8_t* destinationPixel = outputTile.data() +
-                            (static_cast<size_t>(y) * outputEntry.width + x) * 4;
-                        for (size_t channel = 0; channel < 4; ++channel) {
+                            (static_cast<size_t>(y) * outputEntry.width + x) * channels;
+                        for (size_t channel = 0; channel < channels; ++channel) {
                             destinationPixel[channel] = static_cast<uint8_t>((sums[channel] + count / 2) / count);
                         }
                     }
                 }
-                writeTile(output, outputEntry, outputTile);
+                writeTile(output, outputEntry, outputTile, channels);
             }
         }
     }
@@ -400,6 +507,8 @@ void writeHeaderAndDirectory(
     putU64(bytes, 56, header.directoryOffset);
     putU64(bytes, 64, header.payloadOffset);
     putU64(bytes, 72, header.totalBytes);
+    putU32(bytes, 80, header.channels);
+    putU32(bytes, 84, header.encoding);
 
     for (size_t i = 0; i < entries.size(); ++i) {
         const Entry& entry = entries[i];
@@ -428,7 +537,8 @@ void decodeBaseLevel(
     FILE* output,
     const Level& level,
     std::vector<Entry>& entries,
-    spng_ihdr* decodedHeader
+    spng_ihdr* decodedHeader,
+    uint32_t channels
 ) {
     std::unique_ptr<FILE, decltype(&fclose)> source(fopen(sourcePath.c_str(), "rb"), fclose);
     if (!source) throw std::runtime_error("Unable to open the PNG source");
@@ -442,12 +552,12 @@ void decodeBaseLevel(
         context.get(),
         nullptr,
         0,
-        SPNG_FMT_RGBA8,
+        channels == kRgbChannels ? SPNG_FMT_RGB8 : SPNG_FMT_RGBA8,
         SPNG_DECODE_TRNS | SPNG_DECODE_PROGRESSIVE
     );
     if (result != 0) throw std::runtime_error(spng_strerror(result));
 
-    const uint64_t rowBytes64 = static_cast<uint64_t>(level.width) * 4;
+    const uint64_t rowBytes64 = static_cast<uint64_t>(level.width) * channels;
     if (rowBytes64 > std::numeric_limits<size_t>::max()) {
         throw std::runtime_error("PNG row is too large for this ABI");
     }
@@ -472,10 +582,10 @@ void decodeBaseLevel(
             uint8_t* row = band.data() + static_cast<size_t>(bandRows) * rowBytes;
             result = spng_decode_row(context.get(), row, rowBytes);
             if (result != 0 && result != SPNG_EOI) throw std::runtime_error(spng_strerror(result));
-            premultiplyRow(row, level.width);
+            if (channels == kRgbaChannels) premultiplyRow(row, level.width);
             ++bandRows;
             if (bandRows == kTileSize || expectedRow + 1 == level.height) {
-                writeBand(output, level, entries, band.data(), bandTop, bandRows);
+                writeBand(output, level, entries, band.data(), bandTop, bandRows, channels);
                 bandTop += bandRows;
                 bandRows = 0;
             }
@@ -525,9 +635,11 @@ void decodeBaseLevel(
             throw std::runtime_error("Unable to read completed interlaced PNG rows");
         }
         for (uint32_t rowIndex = 0; rowIndex < bandRows; ++rowIndex) {
-            premultiplyRow(band.data() + static_cast<size_t>(rowIndex) * rowBytes, level.width);
+            if (channels == kRgbaChannels) {
+                premultiplyRow(band.data() + static_cast<size_t>(rowIndex) * rowBytes, level.width);
+            }
         }
-        writeBand(output, level, entries, band.data(), bandTop, bandRows);
+        writeBand(output, level, entries, band.data(), bandTop, bandRows, channels);
     }
 }
 
@@ -543,6 +655,8 @@ Header parseHeader(const uint8_t* bytes) {
     header.directoryOffset = getU64(bytes, 56);
     header.payloadOffset = getU64(bytes, 64);
     header.totalBytes = getU64(bytes, 72);
+    header.channels = getU32(bytes, 80);
+    header.encoding = getU32(bytes, 84);
     return header;
 }
 
@@ -567,6 +681,8 @@ bool readIndex(
     if (header.sourceBytes != expectedSourceBytes ||
         header.sourceModifiedMillis != expectedSourceModifiedMillis ||
         header.tileSize != kTileSize || header.levelCount == 0 ||
+        (header.channels != kRgbChannels && header.channels != kRgbaChannels) ||
+        header.encoding != kFilteredZlibEncoding ||
         header.entryCount == 0 || header.entryCount > kMaxEntries ||
         header.directoryOffset != kHeaderBytes ||
         header.entryCount > (std::numeric_limits<uint64_t>::max() - kHeaderBytes) / kEntryBytes ||
@@ -611,7 +727,7 @@ bool readIndex(
     }
     if (nextPayloadOffset != header.totalBytes) return false;
 
-    const std::vector<Entry> expectedMetadata = makeEntries(levels);
+    const std::vector<Entry> expectedMetadata = makeEntries(levels, header.channels);
     for (size_t i = 0; i < entries.size(); ++i) {
         const Entry& actual = entries[i];
         const Entry& expected = expectedMetadata[i];
@@ -642,9 +758,18 @@ std::array<jint, 4> buildIndex(
     spng_ihdr imageHeader{};
     result = spng_get_ihdr(probeContext.get(), &imageHeader);
     if (result != 0) throw std::runtime_error(spng_strerror(result));
+    spng_trns transparency{};
+    const int transparencyResult = spng_get_trns(probeContext.get(), &transparency);
+    if (transparencyResult != 0 && transparencyResult != SPNG_ECHUNKAVAIL) {
+        throw std::runtime_error(spng_strerror(transparencyResult));
+    }
+    const bool hasTransparency = imageHeader.color_type == SPNG_COLOR_TYPE_GRAYSCALE_ALPHA ||
+        imageHeader.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA ||
+        transparencyResult == 0;
+    const uint32_t channels = hasTransparency ? kRgbaChannels : kRgbChannels;
 
     std::vector<Level> levels = makeLevels(imageHeader.width, imageHeader.height);
-    std::vector<Entry> entries = makeEntries(levels);
+    std::vector<Entry> entries = makeEntries(levels, channels);
     Header header;
     header.sourceBytes = sourceBytes;
     header.sourceModifiedMillis = sourceModifiedMillis;
@@ -652,6 +777,8 @@ std::array<jint, 4> buildIndex(
     header.height = imageHeader.height;
     header.tileSize = kTileSize;
     header.levelCount = static_cast<uint32_t>(levels.size());
+    header.channels = channels;
+    header.encoding = kFilteredZlibEncoding;
     header.entryCount = entries.size();
     header.directoryOffset = kHeaderBytes;
     header.payloadOffset = kHeaderBytes + static_cast<uint64_t>(entries.size()) * kEntryBytes;
@@ -671,12 +798,13 @@ std::array<jint, 4> buildIndex(
             output.get(),
             levels.front(),
             entries,
-            &decodedHeader
+            &decodedHeader,
+            channels
         );
         if (decodedHeader.width != imageHeader.width || decodedHeader.height != imageHeader.height) {
             throw std::runtime_error("PNG dimensions changed during index creation");
         }
-        generateLowerLevels(output.get(), levels, entries);
+        generateLowerLevels(output.get(), levels, entries, channels);
         const off_t end = ftello(output.get());
         if (end < 0) throw std::runtime_error("Unable to determine PNG index size");
         header.totalBytes = static_cast<uint64_t>(end);
@@ -833,16 +961,23 @@ Java_io_github_indexedpng_IndexedPngNative_decode(
                     const uint32_t sourceX = static_cast<uint32_t>(left) + x * sampleSize;
                     const uint32_t levelX = sourceX / selected->sample;
                     const uint8_t* sourcePixel = pixelAt(
-                        *selected, decoder->entries, decoder->fd, cache, levelX, levelY
+                        *selected, decoder->entries, decoder->fd, cache, levelX, levelY,
+                        decoder->header.channels
                     );
                     if (sourcePixel == nullptr) throw std::runtime_error("PNG index pixel is missing");
                     uint32_t run = std::min(expectedWidth - x, kTileSize - levelX % kTileSize);
                     run = std::min(run, selected->width - levelX);
-                    memcpy(
-                        outputRow + static_cast<size_t>(x) * 4,
-                        sourcePixel,
-                        static_cast<size_t>(run) * 4
-                    );
+                    uint8_t* destination = outputRow + static_cast<size_t>(x) * 4;
+                    if (decoder->header.channels == kRgbaChannels) {
+                        memcpy(destination, sourcePixel, static_cast<size_t>(run) * 4);
+                    } else {
+                        for (uint32_t pixel = 0; pixel < run; ++pixel) {
+                            destination[pixel * 4] = sourcePixel[pixel * 3];
+                            destination[pixel * 4 + 1] = sourcePixel[pixel * 3 + 1];
+                            destination[pixel * 4 + 2] = sourcePixel[pixel * 3 + 2];
+                            destination[pixel * 4 + 3] = 255;
+                        }
+                    }
                     x += run;
                 }
             } else {
@@ -850,10 +985,15 @@ Java_io_github_indexedpng_IndexedPngNative_decode(
                     const uint32_t sourceX = static_cast<uint32_t>(left) + x * sampleSize;
                     const uint32_t levelX = sourceX / selected->sample;
                     const uint8_t* sourcePixel = pixelAt(
-                        *selected, decoder->entries, decoder->fd, cache, levelX, levelY
+                        *selected, decoder->entries, decoder->fd, cache, levelX, levelY,
+                        decoder->header.channels
                     );
                     if (sourcePixel == nullptr) throw std::runtime_error("PNG index pixel is missing");
-                    memcpy(outputRow + static_cast<size_t>(x) * 4, sourcePixel, 4);
+                    uint8_t* destination = outputRow + static_cast<size_t>(x) * 4;
+                    destination[0] = sourcePixel[0];
+                    destination[1] = sourcePixel[1];
+                    destination[2] = sourcePixel[2];
+                    destination[3] = decoder->header.channels == kRgbaChannels ? sourcePixel[3] : 255;
                 }
             }
         }
