@@ -1720,18 +1720,8 @@ internal fun ViewerScreen(
                         if (isBuild) {
                             detectedFormatMessage + when (target.format) {
                                 IndexedImageFormat.JPEG ->
-                                    if (isUpgrade) {
-                                        "This replaces the legacy JPEG index with the current format. " +
-                                            "It keeps source seek checkpoints and, for supported baseline sRGB " +
-                                            "images, stores independently decodable low-resolution tiles. " +
-                                            "Building can read the source more than once and may temporarily use " +
-                                            "significant power. The old index remains usable if publishing fails."
-                                    } else {
-                                        "This saves source seek checkpoints and, for supported baseline sRGB " +
-                                            "images, independently decodable low-resolution tiles. Building can " +
-                                            "read the JPEG more than once and may temporarily use significant power. " +
-                                            "The original image is not changed."
-                                    }
+                                    "This reads the complete JPEG once and builds an index. It may temporarily " +
+                                        "use significant power and storage. The original image is not changed."
                                 IndexedImageFormat.PNG ->
                                     "This decodes the complete PNG once and builds a lossless multi-resolution " +
                                         "tile index. It may temporarily use significant power and storage."
@@ -1833,23 +1823,12 @@ internal fun ViewerScreen(
                                             operationTarget.format == IndexedImageFormat.JPEG &&
                                             isBuild
                                         ) {
-                                            when (
-                                                val status = jpegIndexStore.status(operationTarget.path)
-                                            ) {
-                                                is IndexedJpegStatus.Ready -> if (
-                                                    status.hasAddressablePyramid
-                                                ) {
-                                                    "JPEG index ${if (isUpgrade) "upgraded" else "built"} " +
-                                                        "with ${status.pyramidLayerCount} addressable layers"
-                                                } else {
-                                                    "JPEG seek index ${if (isUpgrade) "upgraded" else "built"}; " +
-                                                        "this image did not produce addressable overview tiles"
-                                                }
+                                            when (jpegIndexStore.status(operationTarget.path)) {
+                                                is IndexedJpegStatus.Ready -> Unit
                                                 else -> error("The completed JPEG index could not be validated")
                                             }
-                                        } else {
-                                            "$formatName index ${if (isBuild) "built" else "deleted"}"
                                         }
+                                        "$formatName index ${if (isUpgrade) "upgraded" else if (isBuild) "built" else "deleted"}"
                                     }
                                 }
                                 if (result.isSuccess) {

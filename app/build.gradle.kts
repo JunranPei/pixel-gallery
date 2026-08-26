@@ -81,7 +81,7 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 2046
+        versionCode = 2047
         versionName = "4.3.3.2-auto-multitask"
     }
 
@@ -157,9 +157,9 @@ android {
 
     packaging {
         jniLibs {
-            // Native libraries are stored uncompressed in the APK (since Android 6.0). 
-            // Setting this to true forces compression, reducing APK size.
-            useLegacyPackaging = true
+            // Keep native libraries uncompressed so AGP can align them for
+            // direct loading on devices with 16 KB memory pages.
+            useLegacyPackaging = false
         }
     }
 
