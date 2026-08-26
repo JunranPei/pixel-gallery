@@ -12,6 +12,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <sys/mman.h>
 #include <utility>
 #include <vector>
 #include <unistd.h>
@@ -126,6 +127,29 @@ struct PyramidHandle {
         if (file != nullptr) fclose(file);
     }
 };
+
+const PyramidTile* findPyramidTile(
+    PyramidHandle* handle,
+    int sampleSize,
+    int tileX,
+    int tileY
+) {
+    if (handle == nullptr || sampleSize <= 0 || tileX < 0 || tileY < 0) return nullptr;
+    const PyramidLayer* selected = nullptr;
+    for (const auto& layer : handle->layers) {
+        if (layer.sampleSize == static_cast<uint32_t>(sampleSize)) {
+            selected = &layer;
+            break;
+        }
+    }
+    if (selected == nullptr || static_cast<uint32_t>(tileX) >= selected->tilesAcross ||
+        static_cast<uint32_t>(tileY) >= selected->tilesDown) {
+        return nullptr;
+    }
+    const size_t position = static_cast<size_t>(tileY) * selected->tilesAcross +
+                            static_cast<size_t>(tileX);
+    return position < selected->tiles.size() ? &selected->tiles[position] : nullptr;
+}
 
 class UtfChars {
 public:
@@ -1603,51 +1627,98 @@ Java_io_github_indexedjpeg_IndexedJpegNative_openPyramidTiles(
     return reinterpret_cast<jlong>(handle.release());
 }
 
-extern "C" JNIEXPORT jbyteArray JNICALL
-Java_io_github_indexedjpeg_IndexedJpegNative_readPyramidTile(
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
     JNIEnv* env,
     jobject,
     jlong handleValue,
     jint sampleSize,
     jint tileX,
-    jint tileY
+    jint tileY,
+    jobject bitmap
 ) {
     auto* handle = reinterpret_cast<PyramidHandle*>(handleValue);
-    if (handle == nullptr || sampleSize <= 0 || tileX < 0 || tileY < 0) {
-        return nullptr;
+    const PyramidTile* tile = findPyramidTile(handle, sampleSize, tileX, tileY);
+    if (tile == nullptr || bitmap == nullptr || handle->file == nullptr) return JNI_FALSE;
+
+    AndroidBitmapInfo bitmapInfo{};
+    if (AndroidBitmap_getInfo(env, bitmap, &bitmapInfo) != ANDROID_BITMAP_RESULT_SUCCESS ||
+        bitmapInfo.format != ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+        bitmapInfo.width != tile->width || bitmapInfo.height != tile->height) {
+        return JNI_FALSE;
     }
-    const PyramidLayer* selected = nullptr;
-    for (const auto& layer : handle->layers) {
-        if (layer.sampleSize == static_cast<uint32_t>(sampleSize)) {
-            selected = &layer;
-            break;
-        }
+
+    const int descriptor = fileno(handle->file);
+    const long pageSizeValue = sysconf(_SC_PAGESIZE);
+    if (descriptor < 0 || pageSizeValue <= 0) return JNI_FALSE;
+    const uint64_t pageSize = static_cast<uint64_t>(pageSizeValue);
+    const uint64_t mapOffset = (tile->dataOffset / pageSize) * pageSize;
+    const uint64_t delta = tile->dataOffset - mapOffset;
+    const uint64_t mapBytes64 = delta + tile->bytes;
+    if (mapOffset > static_cast<uint64_t>(INT64_MAX) || mapBytes64 == 0 ||
+        mapBytes64 > static_cast<uint64_t>(SIZE_MAX)) {
+        return JNI_FALSE;
     }
-    if (selected == nullptr || static_cast<uint32_t>(tileX) >= selected->tilesAcross ||
-        static_cast<uint32_t>(tileY) >= selected->tilesDown) {
-        return nullptr;
+    const size_t mapBytes = static_cast<size_t>(mapBytes64);
+    void* mapping = mmap(
+        nullptr,
+        mapBytes,
+        PROT_READ,
+        MAP_PRIVATE,
+        descriptor,
+        static_cast<off_t>(mapOffset));
+    if (mapping == MAP_FAILED) return JNI_FALSE;
+    auto* encoded = static_cast<unsigned char*>(mapping) + delta;
+
+    jpeg_decompress_struct info{};
+    JpegError error{};
+    info.err = jpeg_std_error(&error.base);
+    error.base.error_exit = errorExit;
+    bool created = false;
+    void* pixels = nullptr;
+    if (setjmp(error.jump)) {
+        if (pixels != nullptr) AndroidBitmap_unlockPixels(env, bitmap);
+        if (created) jpeg_destroy_decompress(&info);
+        munmap(mapping, mapBytes);
+        __android_log_print(
+            ANDROID_LOG_ERROR,
+            "IndexedJpeg",
+            "pyramid tile decode error: %s",
+            error.message);
+        return JNI_FALSE;
     }
-    const size_t position = static_cast<size_t>(tileY) * selected->tilesAcross +
-                            static_cast<size_t>(tileX);
-    if (position >= selected->tiles.size()) return nullptr;
-    const PyramidTile& tile = selected->tiles[position];
-    if (tile.dataOffset > static_cast<uint64_t>(LONG_MAX) ||
-        tile.bytes > static_cast<uint32_t>(INT_MAX)) {
-        return nullptr;
+
+    jpeg_create_decompress(&info);
+    created = true;
+    jpeg_mem_src(&info, encoded, tile->bytes);
+    if (jpeg_read_header(&info, TRUE) != JPEG_HEADER_OK || info.arith_code ||
+        info.image_width != tile->width || info.image_height != tile->height) {
+        jpeg_destroy_decompress(&info);
+        munmap(mapping, mapBytes);
+        return JNI_FALSE;
     }
-    if (handle->file == nullptr || fseek(
-            handle->file, static_cast<long>(tile.dataOffset), SEEK_SET) != 0) {
-        return nullptr;
+    info.out_color_space = JCS_EXT_RGBA;
+    if (!jpeg_start_decompress(&info) || info.output_components != 4 ||
+        info.output_width != bitmapInfo.width || info.output_height != bitmapInfo.height ||
+        AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
+        jpeg_destroy_decompress(&info);
+        munmap(mapping, mapBytes);
+        return JNI_FALSE;
     }
-    std::vector<uint8_t> encoded(tile.bytes);
-    if (!readBytes(handle->file, encoded.data(), encoded.size())) return nullptr;
-    jbyteArray result = env->NewByteArray(static_cast<jsize>(encoded.size()));
-    if (result != nullptr) {
-        env->SetByteArrayRegion(
-            result, 0, static_cast<jsize>(encoded.size()),
-            reinterpret_cast<const jbyte*>(encoded.data()));
+
+    while (info.output_scanline < info.output_height) {
+        auto* destination = static_cast<uint8_t*>(pixels) +
+                            static_cast<size_t>(info.output_scanline) * bitmapInfo.stride;
+        JSAMPROW row = destination;
+        if (jpeg_read_scanlines(&info, &row, 1) != 1) break;
     }
-    return result;
+    const bool complete = info.output_scanline == info.output_height;
+    if (complete) jpeg_finish_decompress(&info);
+    AndroidBitmap_unlockPixels(env, bitmap);
+    pixels = nullptr;
+    jpeg_destroy_decompress(&info);
+    munmap(mapping, mapBytes);
+    return complete ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
