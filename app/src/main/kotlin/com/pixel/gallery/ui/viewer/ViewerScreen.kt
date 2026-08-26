@@ -43,6 +43,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.ui.components.DeleteConfirmDialog
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -349,6 +350,8 @@ internal fun ViewerScreen(
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val configuredColdTestMode by viewModel.largeImageColdTestMode.collectAsState()
+    val coldTestMode = BuildConfig.VIEWER_METRICS_ENABLED && configuredColdTestMode
     val initialIndex = remember(initialId, photos) {
         val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
         photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0).also { index ->
@@ -1257,6 +1260,7 @@ internal fun ViewerScreen(
                                         intermediatePreviewModel = swipeThumbnailModel,
                                         regionDecoderKind = indexedRegionKind,
                                         transformStateStore = transformStateStore,
+                                        coldTestMode = coldTestMode,
                                         onContentReadyChanged = { fullPreviewReady = it },
                                         modifier = Modifier.fillMaxSize(),
                                         onClick = onImageClick,
@@ -1346,6 +1350,7 @@ internal fun ViewerScreen(
                                         "motionPending=$metadataPending",
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
                                     indexCapabilityRevision = mediaIndexCapabilityRevision,
+                                    coldTestMode = coldTestMode,
                                     transformStateStore = transformStateStore,
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onUltraHdrAvailabilityChanged = { available ->

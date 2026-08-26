@@ -290,6 +290,9 @@ class PhotosViewModel @Inject constructor(
     val glidePersistentGridCacheSize: StateFlow<Int> = settingsRepository.glidePersistentGridCacheSize
         .stateIn(viewModelScope, SharingStarted.Eagerly, 250)
 
+    val largeImageColdTestMode: StateFlow<Boolean> = settingsRepository.largeImageColdTestMode
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val excludedFolders: StateFlow<Set<String>> = settingsRepository.excludedFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -548,12 +551,19 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun clearAllCaches(context: android.content.Context, onComplete: () -> Unit) {
+    fun setLargeImageColdTestMode(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setLargeImageColdTestMode(value)
+        }
+    }
+
+    fun clearAllCaches(context: android.content.Context, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var success = true
             try {
                 com.bumptech.glide.Glide.get(context).clearDiskCache()
             } catch (e: Exception) {
-                // ignore
+                success = false
             }
             try {
                 val dirs = listOf(
@@ -566,25 +576,27 @@ class PhotosViewModel @Inject constructor(
                     "persistent_thumbnails",
                     "persistent_thumbnails_v2",
                     "persistent_thumbnails_v3",
-                    "ssiv_tile_cache"
+                    "telephoto_tiles"
                 )
                 for (dirName in dirs) {
                     val dir = java.io.File(context.cacheDir, dirName)
-                    if (dir.exists()) {
-                        dir.deleteRecursively()
+                    if (dir.exists() && !dir.deleteRecursively()) {
+                        success = false
                     }
                 }
-                com.pixel.gallery.ui.viewer.decoders.resetSsivTileCacheBudget(context)
+                if (!com.pixel.gallery.ui.viewer.decoders.clearSsivTileCache(context)) {
+                    success = false
+                }
             } catch (e: Exception) {
-                // ignore
+                success = false
             }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 try {
                     com.bumptech.glide.Glide.get(context).clearMemory()
                 } catch (e: Exception) {
-                    // ignore
+                    success = false
                 }
-                onComplete()
+                onComplete(success)
             }
         }
     }

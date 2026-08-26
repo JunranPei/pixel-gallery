@@ -76,6 +76,14 @@ data class IndexedJpegPyramidLayer(
     val tileSize: Int = 0,
 )
 
+data class IndexedJpegColdReadResult(
+    val adviceAccepted: Boolean,
+    val residencyVerified: Boolean,
+    val totalPages: Long,
+    val residentBefore: Long,
+    val residentAfter: Long,
+)
+
 private data class IndexedJpegPyramidMetadata(
     val formatVersion: Int,
     val sourceWidth: Int,
@@ -365,6 +373,25 @@ class IndexedJpegStore(context: Context) {
             sourceWidth = metadata[1],
             sourceHeight = metadata[2],
             overviewSampleSize = metadata[5],
+        )
+    }
+
+    /** Test-only cache policy hook. The index itself is preserved; only clean file pages are reclaimed. */
+    fun requestColdRead(sourcePath: String, verifyResidency: Boolean): IndexedJpegColdReadResult? {
+        val source = supportedSource(sourcePath) ?: return null
+        val index = indexFile(source)
+        if (!index.isFile) return null
+        val sourceResult = IndexedJpegNative.dropFileCache(source.absolutePath, verifyResidency)
+            ?.takeIf { it.size >= 5 } ?: return null
+        val indexResult = IndexedJpegNative.dropFileCache(index.absolutePath, verifyResidency)
+            ?.takeIf { it.size >= 5 } ?: return null
+        val residencyVerified = sourceResult[1] == 1L && indexResult[1] == 1L
+        return IndexedJpegColdReadResult(
+            adviceAccepted = sourceResult[0] == 1L && indexResult[0] == 1L,
+            residencyVerified = residencyVerified,
+            totalPages = sourceResult[2] + indexResult[2],
+            residentBefore = if (residencyVerified) sourceResult[3] + indexResult[3] else -1L,
+            residentAfter = if (residencyVerified) sourceResult[4] + indexResult[4] else -1L,
         )
     }
 
@@ -1247,4 +1274,6 @@ private object IndexedJpegNative {
     ): Boolean
 
     external fun close(handle: Long)
+
+    external fun dropFileCache(path: String, verifyResidency: Boolean): LongArray?
 }

@@ -15,6 +15,7 @@ val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoole
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
 val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
+        viewerTestVariant == "testtrace" ||
         viewerTestVariant == "compressed" ||
         viewerTestVariant == "zoomtrace" ||
         viewerTestVariant == "jpegindextrace" ||
@@ -45,6 +46,7 @@ android {
     defaultConfig {
         applicationId = when (viewerTestVariant) {
             "test" -> "com.pixel.gallery.main.test"
+            "testtrace" -> "com.pixel.gallery.main.test"
             "simplemerge" -> "com.pixel.gallery.main.simplegallerymerge"
             "trace" -> "com.pixel.gallery.main.codextrace"
             "clean" -> "com.pixel.gallery.main.codexclean"
@@ -59,6 +61,7 @@ android {
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
             "simplemerge" -> "Gallery Test"
             "test" -> "Gallery Main Test"
+            "testtrace" -> "Gallery Main Test Trace"
             "trace" -> "Pixel Main Trace"
             "clean" -> "Pixel Main Clean"
             "compressed" -> "Pixel Main Compressed"

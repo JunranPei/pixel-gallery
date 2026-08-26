@@ -5,14 +5,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.pixel.gallery.BuildConfig
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.launch
@@ -30,6 +31,7 @@ fun PerformanceSettingsScreen(
     val glideThreadCount by viewModel.glideThreadCount.collectAsState()
     val glideCacheSize by viewModel.glideCacheSize.collectAsState()
     val glidePersistentGridCacheSize by viewModel.glidePersistentGridCacheSize.collectAsState()
+    val largeImageColdTestMode by viewModel.largeImageColdTestMode.collectAsState()
 
     var showClearCacheConfirm by remember { mutableStateOf(false) }
  
@@ -37,14 +39,16 @@ fun PerformanceSettingsScreen(
         AlertDialog(
             onDismissRequest = { showClearCacheConfirm = false },
             title = { Text("Clear Cache") },
-            text = { Text("Are you sure you want to clear all thumbnail cache directories and free up disk space? Thumbnails will need to be re-decoded next time.") },
+            text = { Text("Clear thumbnail and large-image disk caches? They will be rebuilt as needed.") },
             confirmButton = {
                 Button(
                     onClick = {
                         showClearCacheConfirm = false
-                        viewModel.clearAllCaches(context) {
+                        viewModel.clearAllCaches(context) { success ->
                             scope.launch {
-                                snackbarHostState.showSnackbar("Cache cleared successfully")
+                                snackbarHostState.showSnackbar(
+                                    if (success) "Cache cleared" else "Some cache files could not be cleared"
+                                )
                             }
                         }
                     }
@@ -60,7 +64,10 @@ fun PerformanceSettingsScreen(
         )
     }
 
+    val pageColor = MaterialTheme.colorScheme.surface
+
     Scaffold(
+        containerColor = pageColor,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -74,7 +81,11 @@ fun PerformanceSettingsScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = pageColor,
+                    scrolledContainerColor = pageColor
+                )
             )
         }
     ) { innerPadding ->
@@ -117,15 +128,23 @@ fun PerformanceSettingsScreen(
                 )
             }
             item {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            }
-            item {
                 SettingsClickItem(
                     title = "Clear Cache",
-                    description = "Clear all thumbnail cache directories and free up disk space.",
+                    description = "Clear thumbnail and large-image disk caches.",
                     icon = Icons.Outlined.DeleteSweep,
                     onClick = { showClearCacheConfirm = true }
                 )
+            }
+            if (BuildConfig.VIEWER_METRICS_ENABLED) {
+                item {
+                    SettingsToggleItem(
+                        title = "Large-image Cold Test",
+                        description = "Disable preview and tile caches; reclaim JPEG/PNG file pages before decoding.",
+                        icon = Icons.Outlined.Science,
+                        checked = largeImageColdTestMode,
+                        onCheckedChange = viewModel::setLargeImageColdTestMode,
+                    )
+                }
             }
         }
     }

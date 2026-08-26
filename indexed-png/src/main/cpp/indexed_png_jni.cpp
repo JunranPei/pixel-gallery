@@ -21,9 +21,17 @@
 #include <vector>
 
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 namespace {
+
+#ifndef MADV_COLD
+#define MADV_COLD 20
+#endif
+#ifndef MADV_PAGEOUT
+#define MADV_PAGEOUT 21
+#endif
 
 constexpr std::array<uint8_t, 8> kMagic = {'I', 'P', 'N', 'G', 'I', 'D', 'X', 0};
 constexpr uint32_t kVersion = 2;
@@ -101,6 +109,82 @@ private:
     jstring value_;
     const char* chars_ = nullptr;
 };
+
+struct FileCacheDropStats {
+    bool adviceAccepted = false;
+    bool residencyVerified = false;
+    int64_t totalPages = 0;
+    int64_t residentBefore = -1;
+    int64_t residentAfter = -1;
+};
+
+int64_t residentPageCount(int descriptor, size_t bytes, bool reclaimMapping) {
+    if (descriptor < 0 || bytes == 0) return 0;
+    const long pageSizeValue = sysconf(_SC_PAGESIZE);
+    if (pageSizeValue <= 0) return -1;
+    const size_t pageSize = static_cast<size_t>(pageSizeValue);
+    const size_t pageCount = bytes / pageSize + (bytes % pageSize == 0 ? 0u : 1u);
+    if (pageCount == 0 || pageCount > static_cast<size_t>(INT64_MAX)) return -1;
+    void* mapping = mmap(nullptr, bytes, PROT_READ, MAP_PRIVATE, descriptor, 0);
+    if (mapping == MAP_FAILED) return -1;
+    std::vector<unsigned char> residency(pageCount);
+    const int result = mincore(mapping, bytes, residency.data());
+    int64_t resident = -1;
+    if (result == 0) {
+        resident = 0;
+        for (unsigned char state : residency) {
+            if ((state & 1u) != 0u) ++resident;
+        }
+    }
+    if (reclaimMapping) {
+        madvise(mapping, bytes, MADV_COLD);
+        madvise(mapping, bytes, MADV_PAGEOUT);
+        madvise(mapping, bytes, MADV_DONTNEED);
+    }
+    munmap(mapping, bytes);
+    return resident;
+}
+
+FileCacheDropStats dropFileCacheWithStats(const char* path, bool verifyResidency) {
+    FileCacheDropStats stats;
+    const int descriptor = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) return stats;
+    struct stat fileInfo {};
+    const bool validSize = fstat(descriptor, &fileInfo) == 0 && fileInfo.st_size >= 0 &&
+        static_cast<uint64_t>(fileInfo.st_size) <= static_cast<uint64_t>(SIZE_MAX);
+    const size_t bytes = validSize ? static_cast<size_t>(fileInfo.st_size) : 0u;
+    const long pageSizeValue = sysconf(_SC_PAGESIZE);
+    if (validSize && pageSizeValue > 0) {
+        const uint64_t pageSize = static_cast<uint64_t>(pageSizeValue);
+        stats.totalPages = static_cast<int64_t>(
+            static_cast<uint64_t>(bytes) / pageSize +
+            (static_cast<uint64_t>(bytes) % pageSize == 0 ? 0u : 1u));
+    }
+    if (verifyResidency && validSize) {
+        stats.residentBefore = residentPageCount(descriptor, bytes, true);
+    }
+    stats.adviceAccepted = posix_fadvise(
+        descriptor, 0, 0, POSIX_FADV_DONTNEED) == 0;
+    if (verifyResidency && validSize) {
+        stats.residentAfter = residentPageCount(descriptor, bytes, false);
+        stats.residencyVerified = stats.residentBefore >= 0 && stats.residentAfter >= 0;
+    }
+    ::close(descriptor);
+    return stats;
+}
+
+jlongArray fileCacheDropStatsArray(JNIEnv* env, const FileCacheDropStats& stats) {
+    const jlong values[] = {
+        stats.adviceAccepted ? 1L : 0L,
+        stats.residencyVerified ? 1L : 0L,
+        static_cast<jlong>(stats.totalPages),
+        static_cast<jlong>(stats.residentBefore),
+        static_cast<jlong>(stats.residentAfter),
+    };
+    jlongArray result = env->NewLongArray(5);
+    if (result != nullptr) env->SetLongArrayRegion(result, 0, 5, values);
+    return result;
+}
 
 void throwIOException(JNIEnv* env, const std::string& message) {
     jclass type = env->FindClass("java/io/IOException");
@@ -1008,4 +1092,15 @@ Java_io_github_indexedpng_IndexedPngNative_decode(
 extern "C" JNIEXPORT void JNICALL
 Java_io_github_indexedpng_IndexedPngNative_close(JNIEnv*, jobject, jlong handle) {
     delete reinterpret_cast<Decoder*>(handle);
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_io_github_indexedpng_IndexedPngNative_dropFileCache(
+    JNIEnv* env, jobject, jstring pathValue, jboolean verifyResidency
+) {
+    JString path(env, pathValue);
+    if (!path.valid()) return nullptr;
+    return fileCacheDropStatsArray(
+        env,
+        dropFileCacheWithStats(path.c_str(), verifyResidency == JNI_TRUE));
 }
