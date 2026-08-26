@@ -1180,11 +1180,15 @@ class FastRegionDecoder(
      */
     private fun prepareColdSourceDecode() {
         if (!coldTestMode) return
+        val totalStartedAt = SystemClock.elapsedRealtimeNanos()
         coldDropSequence += 1L
+        val closeStartedAt = SystemClock.elapsedRealtimeNanos()
         closeDecodersForColdRead()
+        val closeDurationNanos = SystemClock.elapsedRealtimeNanos() - closeStartedAt
         val sourcePath = indexedSourcePath
         val backend = activeIndexedBackend
         val verifyResidency = coldDropSequence == 1L || coldDropSequence % 16L == 0L
+        val adviceStartedAt = SystemClock.elapsedRealtimeNanos()
         val result = try {
             when (backend) {
                 IndexedBackend.JPEG -> sourcePath?.let { path ->
@@ -1214,6 +1218,8 @@ class FastRegionDecoder(
         } catch (_: Throwable) {
             null
         }
+        val adviceDurationNanos = SystemClock.elapsedRealtimeNanos() - adviceStartedAt
+        val totalDurationNanos = SystemClock.elapsedRealtimeNanos() - totalStartedAt
         ViewerLoadMetrics.event(
             "COLD_TEST_EVICT",
             "sequence=$coldDropSequence backend=${backend?.name ?: "NONE"} " +
@@ -1222,7 +1228,8 @@ class FastRegionDecoder(
                 "residencyVerified=${result?.residencyVerified == true} " +
                 "residentPages=${result?.residentBefore ?: -1}->${result?.residentAfter ?: -1}" +
                 "/${result?.totalPages ?: -1} decodedTileDiskCache=false " +
-                "decoderReuse=false",
+                "decoderReuse=false closeUs=${closeDurationNanos / 1_000L} " +
+                "adviceUs=${adviceDurationNanos / 1_000L} totalUs=${totalDurationNanos / 1_000L}",
             imageKey = imageVersion,
         )
     }
