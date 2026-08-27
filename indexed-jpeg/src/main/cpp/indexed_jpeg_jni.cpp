@@ -2265,6 +2265,220 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decode(
     return JNI_TRUE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_github_indexedjpeg_IndexedJpegNative_decodeBatch(
+    JNIEnv* env,
+    jobject,
+    jlong handleValue,
+    jintArray leftsValue,
+    jintArray topsValue,
+    jintArray rightsValue,
+    jintArray bottomsValue,
+    jint sampleSize,
+    jobjectArray bitmapsValue
+) {
+    auto* handle = reinterpret_cast<IndexHandle*>(handleValue);
+    if (handle == nullptr || leftsValue == nullptr || topsValue == nullptr ||
+        rightsValue == nullptr || bottomsValue == nullptr || bitmapsValue == nullptr ||
+        !isPowerOfTwo(sampleSize)) {
+        logDecodeFailure("batch-arguments");
+        return JNI_FALSE;
+    }
+
+    const jsize count = env->GetArrayLength(leftsValue);
+    if (count <= 0 || count > 16 || env->GetArrayLength(topsValue) != count ||
+        env->GetArrayLength(rightsValue) != count ||
+        env->GetArrayLength(bottomsValue) != count ||
+        env->GetArrayLength(bitmapsValue) != count) {
+        logDecodeFailure("batch-array-size");
+        return JNI_FALSE;
+    }
+
+    std::vector<jint> lefts(static_cast<size_t>(count));
+    std::vector<jint> tops(static_cast<size_t>(count));
+    std::vector<jint> rights(static_cast<size_t>(count));
+    std::vector<jint> bottoms(static_cast<size_t>(count));
+    env->GetIntArrayRegion(leftsValue, 0, count, lefts.data());
+    env->GetIntArrayRegion(topsValue, 0, count, tops.data());
+    env->GetIntArrayRegion(rightsValue, 0, count, rights.data());
+    env->GetIntArrayRegion(bottomsValue, 0, count, bottoms.data());
+    if (env->ExceptionCheck()) return JNI_FALSE;
+
+    std::vector<jobject> bitmaps(static_cast<size_t>(count), nullptr);
+    std::vector<AndroidBitmapInfo> bitmapInfos(static_cast<size_t>(count));
+    int unionLeft = static_cast<int>(handle->width);
+    int unionTop = static_cast<int>(handle->height);
+    int unionRight = 0;
+    int unionBottom = 0;
+    for (jsize index = 0; index < count; ++index) {
+        if (lefts[index] < 0 || tops[index] < 0 || rights[index] <= lefts[index] ||
+            bottoms[index] <= tops[index] ||
+            static_cast<uint32_t>(rights[index]) > handle->width ||
+            static_cast<uint32_t>(bottoms[index]) > handle->height) {
+            logDecodeFailure("batch-region");
+            for (jobject bitmap : bitmaps) {
+                if (bitmap != nullptr) env->DeleteLocalRef(bitmap);
+            }
+            return JNI_FALSE;
+        }
+        jobject bitmap = env->GetObjectArrayElement(bitmapsValue, index);
+        bitmaps[index] = bitmap;
+        auto& bitmapInfo = bitmapInfos[index];
+        const uint32_t expectedWidth = static_cast<uint32_t>(
+            (rights[index] - lefts[index] + sampleSize - 1) / sampleSize);
+        const uint32_t expectedHeight = static_cast<uint32_t>(
+            (bottoms[index] - tops[index] + sampleSize - 1) / sampleSize);
+        if (bitmap == nullptr ||
+            AndroidBitmap_getInfo(env, bitmap, &bitmapInfo) != ANDROID_BITMAP_RESULT_SUCCESS ||
+            bitmapInfo.format != ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+            bitmapInfo.width != expectedWidth || bitmapInfo.height != expectedHeight) {
+            logDecodeFailure("batch-bitmap-info");
+            for (jobject opened : bitmaps) {
+                if (opened != nullptr) env->DeleteLocalRef(opened);
+            }
+            return JNI_FALSE;
+        }
+        unionLeft = std::min(unionLeft, static_cast<int>(lefts[index]));
+        unionTop = std::min(unionTop, static_cast<int>(tops[index]));
+        unionRight = std::max(unionRight, static_cast<int>(rights[index]));
+        unionBottom = std::max(unionBottom, static_cast<int>(bottoms[index]));
+    }
+
+    std::unique_ptr<FILE, decltype(&fclose)> input(fopen(handle->sourcePath.c_str(), "rb"), fclose);
+    if (!input) {
+        for (jobject bitmap : bitmaps) env->DeleteLocalRef(bitmap);
+        logDecodeFailure("batch-source-open");
+        return JNI_FALSE;
+    }
+
+    jpeg_decompress_struct info{};
+    JpegError error{};
+    info.err = jpeg_std_error(&error.base);
+    error.base.error_exit = errorExit;
+    bool created = false;
+    std::vector<void*> pixels(static_cast<size_t>(count), nullptr);
+
+    if (setjmp(error.jump)) {
+        for (jsize index = 0; index < count; ++index) {
+            if (pixels[index] != nullptr) AndroidBitmap_unlockPixels(env, bitmaps[index]);
+            env->DeleteLocalRef(bitmaps[index]);
+        }
+        if (created) jpeg_destroy_decompress(&info);
+        __android_log_print(
+            ANDROID_LOG_ERROR, "IndexedJpeg", "batch jpeg error: %s", error.message);
+        return JNI_FALSE;
+    }
+
+    jpeg_create_decompress(&info);
+    created = true;
+    jpeg_stdio_src(&info, input.get());
+    if (jpeg_read_header(&info, TRUE) != JPEG_HEADER_OK ||
+        info.image_width != handle->width || info.image_height != handle->height ||
+        info.arith_code) {
+        jpeg_destroy_decompress(&info);
+        for (jobject bitmap : bitmaps) env->DeleteLocalRef(bitmap);
+        logDecodeFailure("batch-source-header");
+        return JNI_FALSE;
+    }
+
+    const int nativeSample = std::min<int>(sampleSize, 8);
+    const int postSample = sampleSize / nativeSample;
+    info.scale_num = 1;
+    info.scale_denom = nativeSample;
+    info.out_color_space = JCS_EXT_RGBA;
+    info.do_fancy_upsampling = FALSE;
+    info.do_block_smoothing = FALSE;
+    if (!jpeg_start_tile_decompress(&info)) {
+        jpeg_destroy_decompress(&info);
+        for (jobject bitmap : bitmaps) env->DeleteLocalRef(bitmap);
+        logDecodeFailure("batch-tile-start");
+        return JNI_FALSE;
+    }
+
+    int alignedLeft = unionLeft;
+    int alignedTop = unionTop;
+    int alignedWidth = unionRight - unionLeft;
+    int alignedHeight = unionBottom - unionTop;
+    jpeg_init_read_tile_scanline(
+        &info, &handle->index, &alignedLeft, &alignedTop, &alignedWidth, &alignedHeight);
+    if (alignedWidth <= 0 || alignedHeight <= 0 || info.output_components != 4) {
+        jpeg_destroy_decompress(&info);
+        for (jobject bitmap : bitmaps) env->DeleteLocalRef(bitmap);
+        logDecodeFailure("batch-tile-dimensions");
+        return JNI_FALSE;
+    }
+
+    std::vector<int> firstXs(static_cast<size_t>(count));
+    std::vector<int> firstYs(static_cast<size_t>(count));
+    for (jsize index = 0; index < count; ++index) {
+        firstXs[index] = (lefts[index] - alignedLeft) / nativeSample;
+        firstYs[index] = (tops[index] - alignedTop) / nativeSample;
+        if (firstXs[index] < 0 || firstYs[index] < 0) {
+            jpeg_destroy_decompress(&info);
+            for (jobject bitmap : bitmaps) env->DeleteLocalRef(bitmap);
+            logDecodeFailure("batch-crop-origin");
+            return JNI_FALSE;
+        }
+        if (AndroidBitmap_lockPixels(env, bitmaps[index], &pixels[index]) !=
+            ANDROID_BITMAP_RESULT_SUCCESS) {
+            for (jsize locked = 0; locked < index; ++locked) {
+                AndroidBitmap_unlockPixels(env, bitmaps[locked]);
+                pixels[locked] = nullptr;
+            }
+            jpeg_destroy_decompress(&info);
+            for (jobject bitmap : bitmaps) env->DeleteLocalRef(bitmap);
+            logDecodeFailure("batch-bitmap-lock");
+            return JNI_FALSE;
+        }
+    }
+
+    std::vector<uint32_t> destinationRows(static_cast<size_t>(count), 0u);
+    std::vector<JSAMPLE> row(static_cast<size_t>(alignedWidth) * 4u);
+    JSAMPROW rowPointer = row.data();
+    for (int sourceY = 0; sourceY < alignedHeight; ++sourceY) {
+        if (jpeg_read_tile_scanline(&info, &handle->index, &rowPointer) != 1) break;
+        for (jsize index = 0; index < count; ++index) {
+            const int relativeY = sourceY - firstYs[index];
+            if (relativeY < 0 || relativeY % postSample != 0 ||
+                destinationRows[index] >= bitmapInfos[index].height) {
+                continue;
+            }
+            auto* destination = reinterpret_cast<uint8_t*>(pixels[index]) +
+                                static_cast<size_t>(destinationRows[index]) *
+                                    bitmapInfos[index].stride;
+            if (postSample == 1 &&
+                firstXs[index] + static_cast<int>(bitmapInfos[index].width) <= alignedWidth) {
+                std::memcpy(
+                    destination,
+                    row.data() + static_cast<size_t>(firstXs[index]) * 4u,
+                    static_cast<size_t>(bitmapInfos[index].width) * 4u);
+            } else {
+                for (uint32_t x = 0; x < bitmapInfos[index].width; ++x) {
+                    const int sourceX = std::min(
+                        firstXs[index] + static_cast<int>(x) * postSample,
+                        alignedWidth - 1);
+                    std::memcpy(
+                        destination + static_cast<size_t>(x) * 4u,
+                        row.data() + static_cast<size_t>(sourceX) * 4u,
+                        4u);
+                }
+            }
+            ++destinationRows[index];
+        }
+    }
+
+    bool complete = true;
+    for (jsize index = 0; index < count; ++index) {
+        AndroidBitmap_unlockPixels(env, bitmaps[index]);
+        pixels[index] = nullptr;
+        complete = complete && destinationRows[index] == bitmapInfos[index].height;
+        env->DeleteLocalRef(bitmaps[index]);
+    }
+    jpeg_destroy_decompress(&info);
+    if (!complete) logDecodeFailure("batch-short-output");
+    return complete ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_io_github_indexedjpeg_IndexedJpegNative_close(
     JNIEnv*, jobject, jlong handleValue

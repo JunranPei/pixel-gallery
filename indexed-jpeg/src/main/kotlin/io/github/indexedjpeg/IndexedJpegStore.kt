@@ -1221,6 +1221,40 @@ class IndexedJpegRegionDecoder internal constructor(
         }
     }
 
+    /**
+     * Decode adjacent regions from one indexed JPEG scan while keeping one Bitmap per region.
+     * This avoids allocating a large union Bitmap and copying it back into SSIV tiles.
+     */
+    fun decodeRegions(rects: List<Rect>, sampleSize: Int): List<Bitmap>? {
+        val handle = nativeHandle
+        if (handle == 0L || rects.isEmpty() || sampleSize <= 0 || rects.any { it.isEmpty }) {
+            return null
+        }
+        if (rects.size == 1) return decodeRegion(rects.single(), sampleSize)?.let(::listOf)
+
+        val bitmaps = rects.map { rect ->
+            Bitmap.createBitmap(
+                ceilDiv(rect.width(), sampleSize),
+                ceilDiv(rect.height(), sampleSize),
+                Bitmap.Config.ARGB_8888,
+            )
+        }.toTypedArray()
+        val decoded = runCatching {
+            IndexedJpegNative.decodeBatch(
+                handle = handle,
+                lefts = rects.map(Rect::left).toIntArray(),
+                tops = rects.map(Rect::top).toIntArray(),
+                rights = rects.map(Rect::right).toIntArray(),
+                bottoms = rects.map(Rect::bottom).toIntArray(),
+                sampleSize = sampleSize,
+                bitmaps = bitmaps,
+            )
+        }.getOrDefault(false)
+        if (decoded) return bitmaps.toList()
+        bitmaps.forEach { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+        return null
+    }
+
     override fun close() {
         val handle = nativeHandle
         nativeHandle = 0L
@@ -1313,6 +1347,16 @@ private object IndexedJpegNative {
         bottom: Int,
         sampleSize: Int,
         bitmap: Bitmap,
+    ): Boolean
+
+    external fun decodeBatch(
+        handle: Long,
+        lefts: IntArray,
+        tops: IntArray,
+        rights: IntArray,
+        bottoms: IntArray,
+        sampleSize: Int,
+        bitmaps: Array<Bitmap>,
     ): Boolean
 
     external fun close(handle: Long)

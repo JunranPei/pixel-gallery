@@ -28,6 +28,11 @@ data class RegionDecoderCapabilities(
     val persistDecodedTiles: Boolean = true,
     val preferredDecodedTileSize: Int? = null,
     /**
+     * The decoder can fill several independent tile Bitmaps from one source scan without
+     * allocating and splitting a union Bitmap.
+     */
+    val directSourceMissOutputs: Boolean = false,
+    /**
      * Submit the independently decoded source misses as one task so test-only cold-cache
      * preparation runs once for the whole visible wave, not once for every tile.
      */
