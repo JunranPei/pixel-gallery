@@ -355,6 +355,8 @@ class FastRegionDecoder(
                 batchSourceMisses = !persistentPyramid,
                 persistDecodedTiles = !coldTestMode && !persistentPyramid,
                 preferredDecodedTileSize = persistentTileSize,
+                directSourceMissOutputs =
+                    activeIndexedBackend == IndexedBackend.JPEG && sampleSize == 1,
                 // A cold benchmark represents one cold image access per stable viewport,
                 // regardless of whether that viewport is served by addressable pyramid
                 // tiles or batched source regions. Without a wave id the source path was
@@ -418,6 +420,55 @@ class FastRegionDecoder(
                     "count=${sRects.size} rect=${union.left},${union.top}-${union.right},${union.bottom} " +
                         "sample=$sampleSize actualSample=$actualSample",
                 )
+                if (
+                    actualSample == 1 &&
+                    activeIndexedBackend == IndexedBackend.JPEG &&
+                    sRects.size > 1
+                ) {
+                    val decodeStartedAt = SystemClock.elapsedRealtimeNanos()
+                    val directBitmaps = refreshIndexedDecoder()?.decodeRegions(sRects, actualSample)
+                    if (directBitmaps != null) {
+                        val decodeDurationMs =
+                            (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
+                        if (ViewerLoadMetrics.isEnabled) {
+                            ViewerLoadMetrics.event(
+                                "INDEXED_JPEG_REGION_DIRECT_BATCH_DECODE",
+                                "count=${sRects.size} rect=${union.left},${union.top}-" +
+                                    "${union.right},${union.bottom} sample=$sampleSize " +
+                                    "pixels=${directBitmaps.sumOf { bitmap -> bitmap.width.toLong() * bitmap.height }} " +
+                                    "duration=${decodeDurationMs}ms",
+                                imageKey = imageVersion,
+                            )
+                            ViewerLoadMetrics.regionDecoded(
+                                imageKey = metricsKey,
+                                sessionId = metricsSessionId,
+                                rect = "${union.left},${union.top}-${union.right},${union.bottom}",
+                                requestedSample = sampleSize,
+                                actualSample = actualSample,
+                                outputPixels = directBitmaps.sumOf { bitmap ->
+                                    bitmap.width.toLong() * bitmap.height
+                                },
+                                durationMs = decodeDurationMs,
+                            )
+                        }
+                        val attached = directBitmaps.mapIndexed { index, bitmap ->
+                            UltraHdrTileSupport.attach(
+                                imageKey = imageVersion,
+                                baseTile = bitmap,
+                                sourceRect = sRects[index],
+                                sourceWidth = sourceWidth,
+                                sourceHeight = sourceHeight,
+                            )
+                        }
+                        ViewerLoadMetrics.workReady(
+                            batchToken,
+                            source = "INDEXED_JPEG_REGION_DIRECT_BATCH_DECODE",
+                            detail = "count=${attached.size} actualSample=$actualSample " +
+                                "decodeMs=$decodeDurationMs",
+                        )
+                        return attached
+                    }
+                }
                 val options = BitmapFactory.Options().apply {
                     inSampleSize = actualSample
                     inPreferredConfig = Bitmap.Config.ARGB_8888

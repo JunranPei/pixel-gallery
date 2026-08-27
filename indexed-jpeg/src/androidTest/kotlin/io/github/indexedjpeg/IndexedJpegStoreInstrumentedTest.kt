@@ -97,6 +97,38 @@ class IndexedJpegStoreInstrumentedTest {
                 region = Rect(320, 48, 500, 336),
                 sampleSize = 1,
             )
+
+            val batchRegions = listOf(
+                Rect(0, 0, 256, 192),
+                Rect(256, 0, 512, 192),
+                Rect(0, 192, 256, 384),
+                Rect(256, 192, 512, 384),
+            )
+            val batch = decoder.decodeRegions(batchRegions, sampleSize = 1)
+            assertNotNull(batch)
+            assertEquals(batchRegions.size, batch!!.size)
+            batchRegions.zip(batch).forEach { (region, actual) ->
+                val expected = decoder.decodeRegion(region, sampleSize = 1)
+                assertNotNull(expected)
+                assertBitmapsEqual(expected!!, actual)
+                expected.recycle()
+                actual.recycle()
+            }
+
+            val unevenBatchRegions = listOf(
+                Rect(0, 48, 180, 336),
+                Rect(180, 48, 320, 336),
+                Rect(320, 48, 500, 336),
+            )
+            val unevenBatch = decoder.decodeRegions(unevenBatchRegions, sampleSize = 1)
+            assertNotNull(unevenBatch)
+            unevenBatchRegions.zip(unevenBatch!!).forEach { (region, actual) ->
+                val expected = decoder.decodeRegion(region, sampleSize = 1)
+                assertNotNull(expected)
+                assertBitmapsEqual(expected!!, actual)
+                expected.recycle()
+                actual.recycle()
+            }
         }
 
         val relocated = File(context.cacheDir, "indexed-jpeg-fixture-relocated.jpg")
@@ -998,6 +1030,32 @@ class IndexedJpegStoreInstrumentedTest {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 91, output))
         }
         bitmap.recycle()
+    }
+
+    private fun assertBitmapsEqual(expected: Bitmap, actual: Bitmap) {
+        assertEquals(expected.width, actual.width)
+        assertEquals(expected.height, actual.height)
+        val expectedPixels = IntArray(expected.width * expected.height)
+        val actualPixels = IntArray(actual.width * actual.height)
+        expected.getPixels(
+            expectedPixels,
+            0,
+            expected.width,
+            0,
+            0,
+            expected.width,
+            expected.height,
+        )
+        actual.getPixels(
+            actualPixels,
+            0,
+            actual.width,
+            0,
+            0,
+            actual.width,
+            actual.height,
+        )
+        assertTrue("Direct batch output differs from single-region decode", expectedPixels.contentEquals(actualPixels))
     }
 
     private fun createOverviewFixture(destination: File) {

@@ -134,6 +134,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         // in the power trace.
         private const val MAX_SOURCE_MISS_FRAGMENT_BYTES = 12L * 1024L * 1024L
         private const val MAX_SOURCE_MISS_TILES_PER_FRAGMENT = 2
+        private const val MAX_DIRECT_SOURCE_MISS_FRAGMENT_BYTES = 24L * 1024L * 1024L
+        private const val MAX_DIRECT_SOURCE_MISS_TILES_PER_FRAGMENT = 4
         private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 40L
         private const val TILE_CACHE_ADMISSION_DELAY_MS = 1200L
         private const val MAX_PENDING_TILE_CACHE_WRITES = 4
@@ -1492,7 +1494,10 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 // every visible tile independently repeats much of that work. A dense 2D
                 // fragment amortizes the scan across up to four tiles. The next wave starts
                 // only after this one finishes, avoiding a long queue of obsolete misses.
-                val fragment = buildSourceMissFragment(sourceMissTiles)
+                val fragment = buildSourceMissFragment(
+                    candidates = sourceMissTiles,
+                    directOutputs = decoderCapabilities.directSourceMissOutputs,
+                )
                 if (fragment.isNotEmpty()) {
                     diagnosticsListener?.invoke(
                         "tile=SOURCE_FRAGMENT sample=$sampleSize count=${fragment.size} " +
@@ -1639,21 +1644,44 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
     }
 
-    private fun buildSourceMissFragment(candidates: List<Tile>): List<Tile> {
+    private fun buildSourceMissFragment(
+        candidates: List<Tile>,
+        directOutputs: Boolean,
+    ): List<Tile> {
         val first = candidates.firstOrNull() ?: return emptyList()
         val fragment = mutableListOf(first)
         val remaining = candidates.drop(1).toMutableList()
-        while (fragment.size < MAX_SOURCE_MISS_TILES_PER_FRAGMENT) {
+        val maximumTiles = if (directOutputs) {
+            MAX_DIRECT_SOURCE_MISS_TILES_PER_FRAGMENT
+        } else {
+            MAX_SOURCE_MISS_TILES_PER_FRAGMENT
+        }
+        val maximumBytes = if (directOutputs) {
+            MAX_DIRECT_SOURCE_MISS_FRAGMENT_BYTES
+        } else {
+            MAX_SOURCE_MISS_FRAGMENT_BYTES
+        }
+        while (fragment.size < maximumTiles) {
             val nextIndex = remaining.indices
-                .filter { canExtendSourceMissFragment(fragment, remaining[it]) }
+                .filter { canExtendSourceMissFragment(fragment, remaining[it], maximumBytes) }
                 .minByOrNull { index -> sourceMissFragmentBytes(fragment + remaining[index]) }
                 ?: break
             fragment += remaining.removeAt(nextIndex)
         }
+        // Three tiles forming an L require decoding the missing fourth tile's pixels. Two
+        // direct batches are cheaper in that case. Full rows, columns and 2x2 groups remain
+        // dense and can share one JPEG scan without invisible-area overhead.
+        if (directOutputs && fragment.size > 2 && !sourceMissFragmentIsDense(fragment)) {
+            return fragment.take(MAX_SOURCE_MISS_TILES_PER_FRAGMENT)
+        }
         return fragment
     }
 
-    private fun canExtendSourceMissFragment(fragment: List<Tile>, candidate: Tile): Boolean {
+    private fun canExtendSourceMissFragment(
+        fragment: List<Tile>,
+        candidate: Tile,
+        maximumBytes: Long,
+    ): Boolean {
         val first = fragment.firstOrNull() ?: return false
         if (candidate.sampleSize != first.sampleSize) return false
         val candidateRect = candidate.fileSRect ?: return false
@@ -1670,7 +1698,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (!touchesExisting) return false
 
         val extended = fragment + candidate
-        if (sourceMissFragmentBytes(extended) > MAX_SOURCE_MISS_FRAGMENT_BYTES) return false
+        if (sourceMissFragmentBytes(extended) > maximumBytes) return false
 
         // Permit an L-shape while assembling a 2x2 fragment, but reject sparse unions
         // that would decode mostly invisible pixels.
@@ -1681,6 +1709,15 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
         val unionArea = union.width().toLong() * union.height().toLong()
         return coveredArea * 3L >= unionArea * 2L
+    }
+
+    private fun sourceMissFragmentIsDense(tiles: List<Tile>): Boolean {
+        val union = sourceMissFragmentBounds(tiles) ?: return false
+        val coveredArea = tiles.sumOf { tile ->
+            val rect = tile.fileSRect ?: return false
+            rect.width().toLong() * rect.height().toLong()
+        }
+        return coveredArea == union.width().toLong() * union.height().toLong()
     }
 
     private fun sourceMissFragmentBytes(tiles: List<Tile>): Long {
