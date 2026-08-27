@@ -36,4 +36,14 @@ extern "C" INDEXED_JPEG_SIMD_EXPORT int indexed_jpeg_simd_decoder_decode_rgba(
     size_t destinationStride
 );
 
+extern "C" INDEXED_JPEG_SIMD_EXPORT int indexed_jpeg_simd_decoder_decode_rgb565(
+    void* decoder,
+    const uint8_t* encoded,
+    size_t encodedBytes,
+    uint32_t expectedWidth,
+    uint32_t expectedHeight,
+    uint8_t* destination,
+    size_t destinationStride
+);
+
 extern "C" INDEXED_JPEG_SIMD_EXPORT int indexed_jpeg_simd_compiled_with_simd();
