@@ -23,6 +23,76 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.math.*
 
+private const val INTERMEDIATE_SAMPLE_MAX_RECONSTRUCTION_UPSCALE = 1.05f
+
+private fun isPowerOfTwoSample(sampleSize: Int): Boolean =
+    sampleSize > 0 && (sampleSize and (sampleSize - 1)) == 0
+
+internal fun maximumScaleForStoredSample(sampleSize: Int): Float {
+    if (sampleSize <= 0) return 0f
+    val reconstructionUpscale = if (isPowerOfTwoSample(sampleSize)) {
+        1f
+    } else {
+        INTERMEDIATE_SAMPLE_MAX_RECONSTRUCTION_UPSCALE
+    }
+    return reconstructionUpscale / sampleSize.toFloat()
+}
+
+internal fun selectStoredSampleSize(
+    availableSamples: Iterable<Int>,
+    inverseScale: Float,
+    maximumSample: Int = Int.MAX_VALUE,
+): Int = availableSamples
+    .asSequence()
+    .filter { sampleSize ->
+        sampleSize in 1..maximumSample &&
+            // Power-of-two levels keep their historic exact boundary. Optional
+            // intermediate levels may reconstruct by at most 5%, matching the
+            // pyramid's existing fit-layer quality allowance. This lets a useful
+            // sample=3 level own real gesture landing points such as 1/2.97 without
+            // changing the established 1/2/4/8 behaviour.
+            sampleSize.toFloat() <= inverseScale *
+                if (isPowerOfTwoSample(sampleSize)) {
+                    1f
+                } else {
+                    INTERMEDIATE_SAMPLE_MAX_RECONSTRUCTION_UPSCALE
+                }
+    }
+    .maxOrNull()
+    ?: 1
+
+internal fun selectRequiredStoredSampleSize(
+    availableSamples: Iterable<Int>,
+    effectiveScale: Float,
+    currentSampleSize: Int,
+    maximumSample: Int,
+): Int {
+    val samples = availableSamples
+        .asSequence()
+        .filter { it in 1..maximumSample }
+        .distinct()
+        .toList()
+    val safeScale = effectiveScale.coerceAtLeast(0.000001f)
+    val target = selectStoredSampleSize(samples, 1f / safeScale, maximumSample)
+    val current = currentSampleSize.takeIf { it in samples } ?: target
+    return when {
+        target == current -> current
+        target < current -> {
+            val clearerBoundary = maximumScaleForStoredSample(current)
+            val clearerLimit = if (isPowerOfTwoSample(current)) {
+                clearerBoundary * (1f + SubsamplingScaleImageView.SAMPLE_SIZE_HYSTERESIS)
+            } else {
+                // The intermediate level's reconstruction allowance is already its
+                // quality limit. Never extend it with the ordinary hysteresis.
+                clearerBoundary
+            }
+            if (safeScale > clearerLimit) target else current
+        }
+        // [target] has already passed its exact or tolerated quality boundary.
+        else -> target
+    }.coerceIn(1, maximumSample)
+}
+
 // rotation inspired by https://github.com/IndoorAtlas/subsampling-scale-image-view/tree/feature_rotation
 open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context, attr: AttributeSet? = null) : ImageView(context, attr) {
     data class ViewState(
@@ -67,7 +137,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         private const val SOURCE_MISS_NEXT_WAVE_DELAY_MS = 40L
         private const val TILE_CACHE_ADMISSION_DELAY_MS = 1200L
         private const val MAX_PENDING_TILE_CACHE_WRITES = 4
-        private const val SAMPLE_SIZE_HYSTERESIS = 0.12f
+        internal const val SAMPLE_SIZE_HYSTERESIS = 0.12f
         private const val ACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES = 12
         private const val ACTIVE_OFFSCREEN_TILE_CACHE_MIN_BYTES = 48L * 1024L * 1024L
         private const val ACTIVE_OFFSCREEN_TILE_CACHE_MAX_BYTES = 48L * 1024L * 1024L
@@ -127,6 +197,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private var tileMapCapabilityRevision = Long.MIN_VALUE
     private var hostCapabilityRevision = Long.MIN_VALUE
     private var tileAccessSequence = 0L
+    private var sourceMissWaveSequence = 0L
     private var lastRequiredSampleSize = 0
     private var stableTileRefreshGeneration = 0L
     private var stableTileCacheGeneration = 0L
@@ -325,6 +396,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         maxTouchCount = 0
         fullImageSampleSize = 0
         lastRequiredSampleSize = 0
+        sourceMissWaveSequence = 0L
         stableTileRefreshGeneration += 1
         stableTileCacheGeneration += 1
         lastDiagnosticsDrawLogNanos = 0L
@@ -535,6 +607,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val beforeScale = if (shouldTraceTouch) scale else 0f
         val beforeTranslate = if (shouldTraceTouch) PointF(vTranslate!!.x, vTranslate!!.y) else null
         val beforeCenter = if (shouldTraceTouch) getCenter() else null
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            tileMap?.values?.flatten()?.forEach { tile -> tile.sourceMissWaveId = 0L }
+        }
         val handled = onTouchEventInternal(event) || super.onTouchEvent(event)
         // Commit the transform only after SSIV has processed UP/CANCEL. Dispatching this
         // callback before onTouchEventInternal() caused callers to persist the previous
@@ -1015,10 +1090,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     }
                     .minWithOrNull(
                         compareBy<Int> {
-                            kotlin.math.abs(
-                                Integer.numberOfTrailingZeros(it) -
-                                    Integer.numberOfTrailingZeros(sampleSize),
-                            )
+                            kotlin.math.abs(kotlin.math.ln(it.toDouble() / sampleSize.toDouble()))
                         }.thenBy { candidate ->
                             if (candidate > sampleSize) 0 else 1
                         },
@@ -1313,12 +1385,14 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
 
         tileMap!!.values.forEach {
             for (tile in it) {
+                if (tile.sampleSize != sampleSize) tile.sourceMissWaveId = 0L
                 if (tile.sampleSize == sampleSize) {
                     if (tileVisible(tile)) {
                         tile.visible = true
                         markTileAccess(tile)
                     } else {
                         tile.visible = false
+                        tile.sourceMissWaveId = 0L
                     }
                 } else if (tile.sampleSize == fullImageSampleSize) {
                     tile.visible = true
@@ -1386,6 +1460,19 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                         )
                     }
                 }
+                val sourceMissWaveId = if (
+                    decoderCapabilities.coordinateSourceMissWave && sourceMissTiles.isNotEmpty()
+                ) {
+                    sourceMissTiles.asSequence()
+                        .map { it.sourceMissWaveId }
+                        .firstOrNull { it > 0L }
+                        ?: (++sourceMissWaveSequence)
+                } else {
+                    0L
+                }
+                if (sourceMissWaveId > 0L) {
+                    sourceMissTiles.forEach { tile -> tile.sourceMissWaveId = sourceMissWaveId }
+                }
                 if (cacheProbeDetails?.isNotEmpty() == true) {
                     diagnosticsListener?.invoke(
                         "tile=CACHE_PROBE count=${cacheProbeDetails.size} " +
@@ -1410,11 +1497,22 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     diagnosticsListener?.invoke(
                         "tile=SOURCE_FRAGMENT sample=$sampleSize count=${fragment.size} " +
                             "bytes=${sourceMissFragmentBytes(fragment)} " +
-                            "deferred=${sourceMissTiles.size - fragment.size}",
+                            "deferred=${sourceMissTiles.size - fragment.size} " +
+                            "wave=${sourceMissWaveId.takeIf { it > 0L } ?: "none"}",
                     )
                 }
-                if (fragment.size > 1 && decoderCapabilities.batchSourceMisses) {
-                    execute(TileBatchLoadTask(this, batchDecoder, fragment))
+                if (
+                    (fragment.size > 1 && decoderCapabilities.batchSourceMisses) ||
+                    (fragment.isNotEmpty() && decoderCapabilities.coordinateSourceMissWave)
+                ) {
+                    execute(
+                        TileBatchLoadTask(
+                            this,
+                            batchDecoder,
+                            fragment,
+                            sourceMissWaveId.takeIf { it > 0L },
+                        ),
+                    )
                     scheduledCount += fragment.size
                 } else {
                     for (tile in fragment) {
@@ -1525,6 +1623,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         val previous = tile.bitmap
         discardTileRenderNode(tile)
         tile.bitmap = null
+        tile.sourceMissWaveId = 0L
         if (recycleBitmap && previous?.isRecycled == false) {
             previous.recycle()
         }
@@ -1884,13 +1983,24 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         fitToBounds()
     }
 
+    private fun availableDecoderSampleSizes(): List<Int>? =
+        (decoder as? BatchedImageRegionDecoder)
+            ?.availableSampleSizes()
+            ?.asSequence()
+            ?.filter { it > 0 }
+            ?.distinct()
+            ?.sorted()
+            ?.toList()
+            ?.takeIf { it.firstOrNull() == 1 }
+
     private fun calculateInSampleSize(scale: Float): Int {
-        // Match the stable Telephoto grid exactly: choose the largest power of two
-        // whose decoded image is still at least as large as the viewport. The old SSIV
-        // branch also multiplied this value by eight after 95 app launches, which made
-        // the same image initialise at sample=64 instead of stable-0713's sample=8.
+        // Choose the coarsest stored level that is still pixel-complete at this scale.
+        // Decoders without an explicit layer directory retain Telephoto's 1/2/4/8 grid.
         val safeScale = scale.coerceAtLeast(0.000001f)
         val inverseScale = 1f / safeScale
+        availableDecoderSampleSizes()?.let { availableSamples ->
+            return selectStoredSampleSize(availableSamples, inverseScale)
+        }
         var sampleSize = 1
         while (sampleSize <= Int.MAX_VALUE / 2 && sampleSize * 2 <= inverseScale) {
             sampleSize *= 2
@@ -1899,7 +2009,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     }
 
     /**
-     * Select a tile level using Telephoto's power-of-two boundaries. Keep hysteresis only
+     * Select a tile level using the decoder's real boundaries. Keep hysteresis only
      * while moving to a clearer level: the coarser level remains pixel-complete until the
      * scale has crossed the boundary, so a small zoom-in buffer prevents level thrashing.
      * While zooming out, retaining the finer level below that boundary cannot add visible
@@ -1909,28 +2019,27 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (fullImageSampleSize <= 0) return 1
         val effectiveScale = scale.coerceAtLeast(0.000001f)
 
-        var target = 1
         val inverseScale = 1f / effectiveScale
-        while (target <= Int.MAX_VALUE / 2 && target * 2 <= inverseScale) {
-            target *= 2
-        }
-        target = min(fullImageSampleSize, target)
+        val target = tileMap?.keys?.let { availableSamples ->
+            selectStoredSampleSize(availableSamples, inverseScale, fullImageSampleSize)
+        } ?: 1
 
         val current = lastRequiredSampleSize
             .takeIf { it in 1..fullImageSampleSize && tileMap?.containsKey(it) == true }
             ?: target
-        val selected = when {
-            target == current -> current
-            target < current -> {
-                val clearerBoundary = 1f / current.toFloat()
-                if (effectiveScale > clearerBoundary * (1f + SAMPLE_SIZE_HYSTERESIS)) target else current
-            }
-            else -> {
-                val blurrierBoundary = 1f / target.toFloat()
-                if (effectiveScale <= blurrierBoundary) target else current
-            }
-        }.coerceIn(1, fullImageSampleSize)
+        val selected = selectRequiredStoredSampleSize(
+            availableSamples = tileMap?.keys.orEmpty(),
+            effectiveScale = effectiveScale,
+            currentSampleSize = current,
+            maximumSample = fullImageSampleSize,
+        )
 
+        if (selected != current) {
+            diagnosticsListener?.invoke(
+                "tile=SAMPLE_CHANGE from=$current to=$selected target=$target " +
+                    "scale=$effectiveScale inverse=$inverseScale",
+            )
+        }
         lastRequiredSampleSize = selected
         return selected
     }
@@ -2089,9 +2198,24 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     private fun initialiseTileMap(maxTileDimensions: Point) {
         debug("initialiseTileMap maxTileDimensions=${maxTileDimensions.x}x${maxTileDimensions.y}")
         tileMap = LinkedHashMap()
-        var sampleSize = fullImageSampleSize
+        val explicitSamples = availableDecoderSampleSizes()
+            ?.filter { it <= fullImageSampleSize }
+            ?.toMutableSet()
+            ?.apply {
+                add(1)
+                add(fullImageSampleSize)
+            }
+            ?.sortedDescending()
+        val samples = explicitSamples ?: buildList {
+            var sampleSize = fullImageSampleSize
+            while (true) {
+                add(sampleSize)
+                if (sampleSize == 1) break
+                sampleSize /= 2
+            }
+        }
 
-        while (true) {
+        for (sampleSize in samples) {
             // Bound the decoded bitmap, not its source-space rectangle. The previous
             // Telephoto-derived formula made every foreground tile as large as the whole
             // fit layer. On tall or wide sources that silently produced 20MB tiles even
@@ -2155,11 +2279,6 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     "${(sTileHeight + sampleSize - 1) / sampleSize} " +
                     "base=$fullImageSampleSize viewport=${width}x$height source=${sWidth()}x${sHeight()}",
             )
-            if (sampleSize == 1) {
-                break
-            } else {
-                sampleSize /= 2
-            }
         }
         tileMapCapabilityRevision = (decoder as? BatchedImageRegionDecoder)
             ?.capabilityRevision()
@@ -2194,6 +2313,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         tileMap = null
         tileAccessSequence = 0L
         isImageLoaded = false
+        fullImageSampleSize = calculateInSampleSize(getFullScale())
+        lastRequiredSampleSize = calculateInSampleSize(scale)
         initialiseTileMap(maxTileDimensions)
         diagnosticsListener?.invoke(
             "tile=CAPABILITY_REBUILD from=$previousRevision to=$tileMapCapabilityRevision " +
@@ -2259,6 +2380,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         view: SubsamplingScaleImageView,
         decoder: BatchedImageRegionDecoder,
         tiles: List<Tile>,
+        private val sourceMissWaveId: Long?,
     ) : AsyncTask<Void, Void, TileBatchResult>() {
         private val viewRef = WeakReference(view)
         private val decoderRef = WeakReference(decoder)
@@ -2292,10 +2414,14 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 try {
                     if (!decoder.isReady()) return null
                     tiles.forEach { view.fileSRect(it.sRect, it.fileSRect) }
-                    val bitmaps = if (tiles.size == 1) {
+                    val bitmaps = if (tiles.size == 1 && sourceMissWaveId == null) {
                         listOf(decoder.decodeRegion(tiles.first().fileSRect!!, tiles.first().sampleSize))
                     } else {
-                        decoder.decodeRegions(tiles.map { Rect(it.fileSRect!!) }, tiles.first().sampleSize)
+                        decoder.decodeRegions(
+                            tiles.map { Rect(it.fileSRect!!) },
+                            tiles.first().sampleSize,
+                            sourceMissWaveId,
+                        )
                     }
                     require(bitmaps.size == tiles.size) {
                         "Batch decoder returned ${bitmaps.size} bitmaps for ${tiles.size} regions"
@@ -3097,6 +3223,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         var failedAttempts = 0
         var diskCacheReady = false
         var cacheWriteScheduled = false
+        var sourceMissWaveId = 0L
         @Volatile var cacheWriting = false
     }
 
