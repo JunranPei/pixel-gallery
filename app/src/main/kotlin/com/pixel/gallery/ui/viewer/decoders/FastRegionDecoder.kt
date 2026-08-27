@@ -185,6 +185,8 @@ class FastRegionDecoder(
     @Volatile private var resolvedCapabilityRevision = Long.MIN_VALUE
     @Volatile private var initialized = false
     private var coldDropSequence = 0L
+    private var coldDecodeWaveDepth = 0
+    private var preparedColdSourceMissWaveId = Long.MIN_VALUE
     private var metricsKey: String = ""
     private var metricsSessionId: Long = 0L
 
@@ -328,6 +330,15 @@ class FastRegionDecoder(
 
     override fun capabilityRevision(): Long = indexStoresRevision()
 
+    override fun availableSampleSizes(): List<Int>? = synchronized(decoderLock) {
+        refreshBackendForCapabilityRevision()
+        if (activeIndexedBackend != IndexedBackend.JPEG) return@synchronized null
+        refreshIndexedOverviewDecoder()
+            ?.takeIf { it.isAddressableTiled }
+            ?.availableSampleSizes
+            ?.let { samples -> (sequenceOf(1) + samples.asSequence()).distinct().sorted().toList() }
+    }
+
     override fun capabilities(sampleSize: Int): RegionDecoderCapabilities {
         return synchronized(decoderLock) {
             refreshBackendForCapabilityRevision()
@@ -344,6 +355,11 @@ class FastRegionDecoder(
                 batchSourceMisses = !persistentPyramid,
                 persistDecodedTiles = !coldTestMode && !persistentPyramid,
                 preferredDecodedTileSize = persistentTileSize,
+                // A cold benchmark represents one cold image access per stable viewport,
+                // regardless of whether that viewport is served by addressable pyramid
+                // tiles or batched source regions. Without a wave id the source path was
+                // evicted again for every two-tile fragment at sample=1.
+                coordinateSourceMissWave = coldTestMode,
             )
         }
     }
@@ -355,110 +371,129 @@ class FastRegionDecoder(
         return tileCacheFiles(sRect, effectiveSample).argb8888.isFile
     }
 
-    override fun decodeRegions(sRects: List<Rect>, sampleSize: Int): List<Bitmap> {
+    override fun decodeRegions(
+        sRects: List<Rect>,
+        sampleSize: Int,
+        sourceMissWaveId: Long?,
+    ): List<Bitmap> {
         require(sRects.isNotEmpty()) { "At least one source region is required" }
-        if (sRects.size == 1) return listOf(decodeRegion(sRects.first(), sampleSize))
+        if (sRects.size == 1 && sourceMissWaveId == null) {
+            return listOf(decodeRegion(sRects.first(), sampleSize))
+        }
         val routedSamples = sRects.map { effectiveSampleSize(it, sampleSize) }
         if (
             routedSamples.distinct().size == 1 &&
             !capabilities(routedSamples.first()).batchSourceMisses
         ) {
-            return sRects.map { decodeRegion(it, sampleSize) }
+            return decodeIndependentRegionsAsWave(sRects, sampleSize, sourceMissWaveId)
         }
 
         synchronized(decoderLock) {
-            val actualSamples = routedSamples
-            if (actualSamples.distinct().size != 1) {
-                return sRects.map { decodeRegion(it, sampleSize) }
+            val coordinatedColdWave = coldTestMode && sourceMissWaveId != null
+            if (
+                coordinatedColdWave &&
+                sourceMissWaveId != preparedColdSourceMissWaveId
+            ) {
+                prepareColdSourceDecode()
+                preparedColdSourceMissWaveId = sourceMissWaveId
             }
-            val actualSample = actualSamples.first()
-            // A cache file may have appeared after SSIV built this batch. Preserve the
-            // ordinary hit path instead of making that region wait on a source decode.
-            if (sRects.any { tileCacheFiles(it, actualSample).argb8888.isFile }) {
-                return sRects.map { decodeRegion(it, sampleSize) }
-            }
-
-            val union = Rect(sRects.first())
-            sRects.drop(1).forEach(union::union)
-            val batchToken = ViewerLoadMetrics.workStarted(
-                "REGION_TILE_BATCH_REQUEST",
-                imageVersion,
-                "count=${sRects.size} rect=${union.left},${union.top}-${union.right},${union.bottom} " +
-                    "sample=$sampleSize actualSample=$actualSample",
-            )
-            val options = BitmapFactory.Options().apply {
-                inSampleSize = actualSample
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-            val decodeStartedAt = SystemClock.elapsedRealtimeNanos()
-            val (unionBitmap, source) = decodeSourceRegion(
-                union,
-                actualSample,
-                options,
-                "tile-batch-cache-miss",
-            )
-            val decodeDurationMs =
-                (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
-            if (ViewerLoadMetrics.isEnabled) {
-                ViewerLoadMetrics.regionDecoded(
-                    imageKey = metricsKey,
-                    sessionId = metricsSessionId,
-                    rect = "${union.left},${union.top}-${union.right},${union.bottom}",
-                    requestedSample = sampleSize,
-                    actualSample = actualSample,
-                    outputPixels = unionBitmap.width.toLong() * unionBitmap.height.toLong(),
-                    durationMs = decodeDurationMs,
-                )
-            }
-
-            val splitBitmaps = ArrayList<Bitmap>(sRects.size)
+            if (coordinatedColdWave) coldDecodeWaveDepth += 1
             try {
-                for (rect in sRects) {
-                    val left = ((rect.left - union.left) / actualSample)
-                        .coerceIn(0, unionBitmap.width - 1)
-                    val top = ((rect.top - union.top) / actualSample)
-                        .coerceIn(0, unionBitmap.height - 1)
-                    val right = ceilDiv(rect.right - union.left, actualSample)
-                        .coerceIn(left + 1, unionBitmap.width)
-                    val bottom = ceilDiv(rect.bottom - union.top, actualSample)
-                        .coerceIn(top + 1, unionBitmap.height)
-                    splitBitmaps += Bitmap.createBitmap(
-                        unionBitmap,
-                        left,
-                        top,
-                        right - left,
-                        bottom - top,
+                val actualSamples = routedSamples
+                if (actualSamples.distinct().size != 1) {
+                    return sRects.map { decodeRegion(it, sampleSize) }
+                }
+                val actualSample = actualSamples.first()
+                // A cache file may have appeared after SSIV built this batch. Preserve the
+                // ordinary hit path instead of making that region wait on a source decode.
+                if (sRects.any { tileCacheFiles(it, actualSample).argb8888.isFile }) {
+                    return sRects.map { decodeRegion(it, sampleSize) }
+                }
+
+                val union = Rect(sRects.first())
+                sRects.drop(1).forEach(union::union)
+                val batchToken = ViewerLoadMetrics.workStarted(
+                    "REGION_TILE_BATCH_REQUEST",
+                    imageVersion,
+                    "count=${sRects.size} rect=${union.left},${union.top}-${union.right},${union.bottom} " +
+                        "sample=$sampleSize actualSample=$actualSample",
+                )
+                val options = BitmapFactory.Options().apply {
+                    inSampleSize = actualSample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                val decodeStartedAt = SystemClock.elapsedRealtimeNanos()
+                val (unionBitmap, source) = decodeSourceRegion(
+                    union,
+                    actualSample,
+                    options,
+                    "tile-batch-cache-miss",
+                )
+                val decodeDurationMs =
+                    (SystemClock.elapsedRealtimeNanos() - decodeStartedAt) / 1_000_000L
+                if (ViewerLoadMetrics.isEnabled) {
+                    ViewerLoadMetrics.regionDecoded(
+                        imageKey = metricsKey,
+                        sessionId = metricsSessionId,
+                        rect = "${union.left},${union.top}-${union.right},${union.bottom}",
+                        requestedSample = sampleSize,
+                        actualSample = actualSample,
+                        outputPixels = unionBitmap.width.toLong() * unionBitmap.height.toLong(),
+                        durationMs = decodeDurationMs,
                     )
                 }
-            } catch (error: Throwable) {
-                splitBitmaps.forEach { if (!it.isRecycled) it.recycle() }
-                ViewerLoadMetrics.workFailed(batchToken, error.javaClass.simpleName)
-                throw error
-            } finally {
-                if (!unionBitmap.isRecycled) unionBitmap.recycle()
-            }
 
-            val attached = splitBitmaps.mapIndexed { index, bitmap ->
-                val rect = sRects[index]
-                UltraHdrTileSupport.attach(
-                    imageKey = imageVersion,
-                    baseTile = bitmap,
-                    sourceRect = rect,
-                    sourceWidth = sourceWidth,
-                    sourceHeight = sourceHeight,
+                val splitBitmaps = ArrayList<Bitmap>(sRects.size)
+                try {
+                    for (rect in sRects) {
+                        val left = ((rect.left - union.left) / actualSample)
+                            .coerceIn(0, unionBitmap.width - 1)
+                        val top = ((rect.top - union.top) / actualSample)
+                            .coerceIn(0, unionBitmap.height - 1)
+                        val right = ceilDiv(rect.right - union.left, actualSample)
+                            .coerceIn(left + 1, unionBitmap.width)
+                        val bottom = ceilDiv(rect.bottom - union.top, actualSample)
+                            .coerceIn(top + 1, unionBitmap.height)
+                        splitBitmaps += Bitmap.createBitmap(
+                            unionBitmap,
+                            left,
+                            top,
+                            right - left,
+                            bottom - top,
+                        )
+                    }
+                } catch (error: Throwable) {
+                    splitBitmaps.forEach { if (!it.isRecycled) it.recycle() }
+                    ViewerLoadMetrics.workFailed(batchToken, error.javaClass.simpleName)
+                    throw error
+                } finally {
+                    if (!unionBitmap.isRecycled) unionBitmap.recycle()
+                }
+
+                val attached = splitBitmaps.mapIndexed { index, bitmap ->
+                    val rect = sRects[index]
+                    UltraHdrTileSupport.attach(
+                        imageKey = imageVersion,
+                        baseTile = bitmap,
+                        sourceRect = rect,
+                        sourceWidth = sourceWidth,
+                        sourceHeight = sourceHeight,
+                    )
+                }
+                ViewerLoadMetrics.workReady(
+                    batchToken,
+                    source = when (source) {
+                        "INDEXED_JPEG_REGION_DECODE" -> "INDEXED_JPEG_REGION_BATCH_DECODE"
+                        "INDEXED_PNG_REGION_DECODE" -> "INDEXED_PNG_REGION_BATCH_DECODE"
+                        "INDEXED_WEBP_REGION_DECODE" -> "INDEXED_WEBP_REGION_BATCH_DECODE"
+                        else -> "SOURCE_REGION_BATCH_DECODE"
+                    },
+                    detail = "count=${attached.size} actualSample=$actualSample decodeMs=$decodeDurationMs",
                 )
+                return attached
+            } finally {
+                if (coordinatedColdWave) coldDecodeWaveDepth -= 1
             }
-            ViewerLoadMetrics.workReady(
-                batchToken,
-                source = when (source) {
-                    "INDEXED_JPEG_REGION_DECODE" -> "INDEXED_JPEG_REGION_BATCH_DECODE"
-                    "INDEXED_PNG_REGION_DECODE" -> "INDEXED_PNG_REGION_BATCH_DECODE"
-                    "INDEXED_WEBP_REGION_DECODE" -> "INDEXED_WEBP_REGION_BATCH_DECODE"
-                    else -> "SOURCE_REGION_BATCH_DECODE"
-                },
-                detail = "count=${attached.size} actualSample=$actualSample decodeMs=$decodeDurationMs",
-            )
-            return attached
         }
     }
 
@@ -805,6 +840,31 @@ class FastRegionDecoder(
         val bitmap = openDecoder(fallbackReason).decodeRegion(rect, options)
             ?: throw RuntimeException("Region decoder returned null bitmap")
         return bitmap to "SOURCE_REGION_DECODE"
+    }
+
+    /**
+     * Addressable pyramid tiles remain independent decodes, but a cold benchmark must model
+     * one cold image access followed by all tiles needed for that viewport. Evicting the whole
+     * source and index before every tile measures the eviction harness and grows more expensive
+     * whenever the index gains a useful level.
+     */
+    private fun decodeIndependentRegionsAsWave(
+        sRects: List<Rect>,
+        sampleSize: Int,
+        sourceMissWaveId: Long?,
+    ): List<Bitmap> = synchronized(decoderLock) {
+        val needsColdPreparation = sourceMissWaveId == null ||
+            sourceMissWaveId != preparedColdSourceMissWaveId
+        if (needsColdPreparation) {
+            prepareColdSourceDecode()
+            preparedColdSourceMissWaveId = sourceMissWaveId ?: Long.MIN_VALUE
+        }
+        coldDecodeWaveDepth += 1
+        try {
+            sRects.map { decodeRegion(it, sampleSize) }
+        } finally {
+            coldDecodeWaveDepth -= 1
+        }
     }
 
     private fun resolveIndexedBackend(): IndexedBackend? {
@@ -1174,12 +1234,13 @@ class FastRegionDecoder(
     /**
      * Test-only zero-reuse path. Close every live decoder first so no mmap or descriptor
      * owned by this viewer can pin the source/index, then reclaim clean file pages before
-     * every source decode. Residency is sampled on the first and every sixteenth request;
-     * doing a whole-file mincore scan for every 1024px tile would itself contaminate the
-     * power measurement we are trying to isolate.
+     * one visible source-miss wave. Tiles in that wave reuse the newly opened decoder but
+     * never reuse decoded Bitmaps or the decoded-tile disk cache. Residency is sampled on
+     * the first and every sixteenth wave; a whole-file mincore scan for every 1024px tile
+     * would itself contaminate the power measurement we are trying to isolate.
      */
     private fun prepareColdSourceDecode() {
-        if (!coldTestMode) return
+        if (!coldTestMode || coldDecodeWaveDepth > 0) return
         val totalStartedAt = SystemClock.elapsedRealtimeNanos()
         coldDropSequence += 1L
         val closeStartedAt = SystemClock.elapsedRealtimeNanos()
@@ -1228,7 +1289,7 @@ class FastRegionDecoder(
                 "residencyVerified=${result?.residencyVerified == true} " +
                 "residentPages=${result?.residentBefore ?: -1}->${result?.residentAfter ?: -1}" +
                 "/${result?.totalPages ?: -1} decodedTileDiskCache=false " +
-                "decoderReuse=false closeUs=${closeDurationNanos / 1_000L} " +
+                "decoderReuse=within-wave closeUs=${closeDurationNanos / 1_000L} " +
                 "adviceUs=${adviceDurationNanos / 1_000L} totalUs=${totalDurationNanos / 1_000L}",
             imageKey = imageVersion,
         )

@@ -47,13 +47,16 @@ constexpr uint8_t kMagic[8] = {'I', 'J', 'X', 'M', 'C', 'U', '0', '1'};
 // Version 7 stores the generated levels as independently decodable JPEG tiles
 // in one indexed container. A viewer can therefore read only the two-
 // dimensional blocks intersecting its viewport instead of region-decoding a
-// complete overview JPEG stream from its beginning.
+// complete overview JPEG stream from its beginning. Version 8 keeps the same
+// addressable layout but permits a strictly increasing, per-image layer plan
+// rather than requiring 2/4/8/... levels.
 constexpr uint32_t kLegacyTileFormatVersion = 2;
 constexpr uint32_t kBrokenOverviewFormatVersion = 3;
 constexpr uint32_t kFitOverviewFormatVersion = 4;
 constexpr uint32_t kSingleLayerFormatVersion = 5;
 constexpr uint32_t kWholeLayerPyramidFormatVersion = 6;
-constexpr uint32_t kFormatVersion = 7;
+constexpr uint32_t kAddressablePyramidFormatVersion = 7;
+constexpr uint32_t kFormatVersion = 8;
 constexpr uint32_t kOverviewMarker = 0x3152564F;  // OVR1
 constexpr uint32_t kPyramidMarker = 0x31525950;  // PYR1
 constexpr uint32_t kIndexedPyramidMarker = 0x32525950;  // PYR2
@@ -369,6 +372,10 @@ uint32_t ceilDiv(uint32_t value, uint32_t divisor) {
     return value / divisor + (value % divisor == 0u ? 0u : 1u);
 }
 
+bool isTiledPyramidVersion(uint32_t version) {
+    return version == kAddressablePyramidFormatVersion || version == kFormatVersion;
+}
+
 uint32_t maximumPyramidSample(
     uint32_t sourceWidth,
     uint32_t sourceHeight,
@@ -571,6 +578,38 @@ std::vector<uint8_t> encodeScaledJpegFromSource(
     return result;
 }
 
+void areaResampleRgbRow(
+    const unsigned char* input,
+    uint32_t inputWidth,
+    unsigned char* output,
+    uint32_t outputWidth
+) {
+    if (input == nullptr || output == nullptr || inputWidth == 0 || outputWidth == 0) return;
+    if (inputWidth == outputWidth) {
+        std::memcpy(output, input, static_cast<size_t>(inputWidth) * 3u);
+        return;
+    }
+    for (uint32_t outputX = 0; outputX < outputWidth; ++outputX) {
+        const uint64_t start = static_cast<uint64_t>(outputX) * inputWidth;
+        const uint64_t end = static_cast<uint64_t>(outputX + 1u) * inputWidth;
+        const uint32_t firstInput = static_cast<uint32_t>(start / outputWidth);
+        const uint32_t lastInput = static_cast<uint32_t>((end - 1u) / outputWidth);
+        for (uint32_t channel = 0; channel < 3u; ++channel) {
+            uint64_t sum = 0;
+            for (uint32_t inputX = firstInput; inputX <= lastInput; ++inputX) {
+                const uint64_t inputStart = static_cast<uint64_t>(inputX) * outputWidth;
+                const uint64_t inputEnd = static_cast<uint64_t>(inputX + 1u) * outputWidth;
+                const uint64_t overlap =
+                    std::min(end, inputEnd) - std::max(start, inputStart);
+                sum += static_cast<uint64_t>(input[static_cast<size_t>(inputX) * 3u + channel]) *
+                    overlap;
+            }
+            output[static_cast<size_t>(outputX) * 3u + channel] =
+                static_cast<unsigned char>((sum + inputWidth / 2u) / inputWidth);
+        }
+    }
+}
+
 bool encodeScaledTilesFromSource(
     const char* sourcePath,
     uint32_t sampleSize,
@@ -578,8 +617,11 @@ bool encodeScaledTilesFromSource(
     uint32_t expectedHeight,
     PyramidLayer* layer
 ) {
-    if (sourcePath == nullptr || layer == nullptr || sampleSize < 2u ||
-        (sampleSize & (sampleSize - 1u)) != 0u ||
+    const bool powerOfTwoSample =
+        sampleSize >= 2u && (sampleSize & (sampleSize - 1u)) == 0u;
+    const bool adaptiveIntermediateSample = sampleSize == 3u;
+    if (sourcePath == nullptr || layer == nullptr ||
+        (!powerOfTwoSample && !adaptiveIntermediateSample) ||
         expectedWidth == 0 || expectedHeight == 0) {
         return false;
     }
@@ -601,7 +643,9 @@ bool encodeScaledTilesFromSource(
     bool decoderCreated = false;
     unsigned char* decodedRow = nullptr;
     unsigned char* outputRow = nullptr;
+    unsigned char* filteredRow = nullptr;
     uint64_t* accumulatedRow = nullptr;
+    int64_t loadedResampleSourceRow = -1;
     auto* encoders = static_cast<jpeg_compress_struct*>(
         calloc(tilesAcross, sizeof(jpeg_compress_struct)));
     auto* encoded = static_cast<unsigned char**>(
@@ -625,6 +669,7 @@ bool encodeScaledTilesFromSource(
         free(encoderCreated);
         free(decodedRow);
         if (outputRow != decodedRow) free(outputRow);
+        free(filteredRow);
         free(accumulatedRow);
         if (decoderCreated) jpeg_destroy_decompress(&decoder);
         fclose(input);
@@ -644,8 +689,13 @@ bool encodeScaledTilesFromSource(
         cleanup();
         return false;
     }
-    const uint32_t nativeSample = std::min<uint32_t>(sampleSize, 8u);
-    const uint32_t postSample = sampleSize / nativeSample;
+    // libjpeg-turbo's 1/2 and 1/4 IDCT paths are SIMD accelerated. Build the 1/3
+    // intermediate from a 1/2 decode followed by a streaming area reduction; this
+    // remains bounded to a handful of scanlines and never allocates a whole layer.
+    const uint32_t nativeSample = adaptiveIntermediateSample
+        ? 2u
+        : std::min<uint32_t>(sampleSize, 8u);
+    const uint32_t postSample = adaptiveIntermediateSample ? 0u : sampleSize / nativeSample;
     decoder.scale_num = 1;
     decoder.scale_denom = static_cast<unsigned int>(nativeSample);
     decoder.out_color_space = JCS_EXT_RGB;
@@ -670,7 +720,10 @@ bool encodeScaledTilesFromSource(
     outputRow = postSample == 1u
         ? decodedRow
         : static_cast<unsigned char*>(malloc(outputRowBytes));
-    if (postSample > 1u) {
+    if (adaptiveIntermediateSample) {
+        filteredRow = static_cast<unsigned char*>(malloc(outputRowBytes));
+    }
+    if (postSample > 1u || adaptiveIntermediateSample) {
         const size_t accumulatedItems = static_cast<size_t>(expectedWidth) * 3u;
         if (accumulatedItems / 3u != expectedWidth ||
             accumulatedItems > SIZE_MAX / sizeof(uint64_t)) {
@@ -681,7 +734,8 @@ bool encodeScaledTilesFromSource(
             calloc(accumulatedItems, sizeof(uint64_t)));
     }
     if (decodedRow == nullptr || outputRow == nullptr ||
-        (postSample > 1u && accumulatedRow == nullptr)) {
+        ((postSample > 1u || adaptiveIntermediateSample) && accumulatedRow == nullptr) ||
+        (adaptiveIntermediateSample && filteredRow == nullptr)) {
         cleanup();
         return false;
     }
@@ -725,7 +779,53 @@ bool encodeScaledTilesFromSource(
             }
         }
 
-        if (postSample == 1u) {
+        if (adaptiveIntermediateSample) {
+            const uint64_t verticalStart =
+                static_cast<uint64_t>(outputY) * decoder.output_height;
+            const uint64_t verticalEnd =
+                static_cast<uint64_t>(outputY + 1u) * decoder.output_height;
+            const uint32_t firstSourceY =
+                static_cast<uint32_t>(verticalStart / expectedHeight);
+            const uint32_t lastSourceY =
+                static_cast<uint32_t>((verticalEnd - 1u) / expectedHeight);
+            std::memset(
+                accumulatedRow,
+                0,
+                static_cast<size_t>(expectedWidth) * 3u * sizeof(uint64_t));
+            for (uint32_t sourceY = firstSourceY; sourceY <= lastSourceY; ++sourceY) {
+                while (loadedResampleSourceRow < static_cast<int64_t>(sourceY)) {
+                    JSAMPROW row = decodedRow;
+                    if (jpeg_read_scanlines(&decoder, &row, 1) != 1) {
+                        cleanup();
+                        return false;
+                    }
+                    ++loadedResampleSourceRow;
+                    areaResampleRgbRow(
+                        decodedRow,
+                        decoder.output_width,
+                        filteredRow,
+                        expectedWidth);
+                }
+                const uint64_t sourceStart =
+                    static_cast<uint64_t>(sourceY) * expectedHeight;
+                const uint64_t sourceEnd =
+                    static_cast<uint64_t>(sourceY + 1u) * expectedHeight;
+                const uint64_t overlap =
+                    std::min(verticalEnd, sourceEnd) -
+                    std::max(verticalStart, sourceStart);
+                const size_t items = static_cast<size_t>(expectedWidth) * 3u;
+                for (size_t item = 0; item < items; ++item) {
+                    accumulatedRow[item] +=
+                        static_cast<uint64_t>(filteredRow[item]) * overlap;
+                }
+            }
+            const size_t items = static_cast<size_t>(expectedWidth) * 3u;
+            for (size_t item = 0; item < items; ++item) {
+                outputRow[item] = static_cast<unsigned char>(
+                    (accumulatedRow[item] + decoder.output_height / 2u) /
+                    decoder.output_height);
+            }
+        } else if (postSample == 1u) {
             JSAMPROW row = decodedRow;
             if (jpeg_read_scanlines(&decoder, &row, 1) != 1) {
                 cleanup();
@@ -837,9 +937,11 @@ bool encodeScaledTilesFromSource(
     input = nullptr;
     free(decodedRow);
     if (outputRow != decodedRow) free(outputRow);
+    free(filteredRow);
     free(accumulatedRow);
     decodedRow = nullptr;
     outputRow = nullptr;
+    filteredRow = nullptr;
     accumulatedRow = nullptr;
     free(encoders);
     free(encoded);
@@ -852,28 +954,34 @@ std::vector<PyramidLayer> encodePyramidFromSource(
     const char* sourcePath,
     uint32_t sourceWidth,
     uint32_t sourceHeight,
-    int viewportWidth,
-    int viewportHeight
+    const std::vector<uint32_t>& plannedSamples,
+    const std::vector<uint32_t>& layerByteBudgets
 ) {
     std::vector<PyramidLayer> layers;
-    const uint32_t maximumSample = maximumPyramidSample(
-        sourceWidth, sourceHeight, viewportWidth, viewportHeight);
+    if (plannedSamples.size() != layerByteBudgets.size() ||
+        plannedSamples.size() > kMaxPyramidLayers) {
+        return layers;
+    }
     uint64_t totalBytes = 0;
-    for (uint32_t sample = 2u; sample != 0u && sample <= maximumSample;
-         sample *= 2u) {
+    for (size_t i = 0; i < plannedSamples.size(); ++i) {
+        const uint32_t sample = plannedSamples[i];
         PyramidLayer layer;
         const uint32_t layerWidth = ceilDiv(sourceWidth, sample);
         const uint32_t layerHeight = ceilDiv(sourceHeight, sample);
         if (!encodeScaledTilesFromSource(
                 sourcePath, sample, layerWidth, layerHeight, &layer)) {
+            if (layerByteBudgets[i] > 0u) continue;
             return {};
         }
-        totalBytes += layer.bytes;
-        if (totalBytes > kMaxPyramidBytes || layers.size() >= kMaxPyramidLayers) {
+        const bool optionalLayer = layerByteBudgets[i] > 0u;
+        if (optionalLayer && layer.bytes > layerByteBudgets[i]) continue;
+        const uint64_t nextTotalBytes = totalBytes + layer.bytes;
+        if (nextTotalBytes > kMaxPyramidBytes || layers.size() >= kMaxPyramidLayers) {
+            if (optionalLayer) continue;
             return {};
         }
+        totalBytes = nextTotalBytes;
         layers.push_back(std::move(layer));
-        if (sample > maximumSample / 2u) break;
     }
     return layers;
 }
@@ -994,6 +1102,7 @@ bool readHeader(FILE* file, Header* header) {
          version != kFitOverviewFormatVersion &&
          version != kSingleLayerFormatVersion &&
          version != kWholeLayerPyramidFormatVersion &&
+         version != kAddressablePyramidFormatVersion &&
          version != kFormatVersion) ||
         !readU64(file, &sourceBytes) || !readU64(file, &sourceModified) ||
         !readU32(file, &header->width) || !readU32(file, &header->height) ||
@@ -1012,10 +1121,10 @@ bool readHeader(FILE* file, Header* header) {
         return false;
     }
     const uint32_t maximumOverviewBytes =
-        (version == kWholeLayerPyramidFormatVersion || version == kFormatVersion)
+        (version == kWholeLayerPyramidFormatVersion || isTiledPyramidVersion(version))
         ? kMaxPyramidBytes : kMaxOverviewBytes;
     const bool pyramidDimensionsValid =
-        (version != kWholeLayerPyramidFormatVersion && version != kFormatVersion) ||
+        (version != kWholeLayerPyramidFormatVersion && !isTiledPyramidVersion(version)) ||
         (header->overviewSampleSize == 2u &&
          header->overviewWidth == ceilDiv(header->width, 2u) &&
          header->overviewHeight == ceilDiv(header->height, 2u));
@@ -1026,7 +1135,7 @@ bool readHeader(FILE* file, Header* header) {
           header->overviewWidth > 0 && header->overviewHeight > 0 &&
           header->overviewSampleSize >= 2 &&
           (header->overviewSampleSize & (header->overviewSampleSize - 1u)) == 0 &&
-          (version == kWholeLayerPyramidFormatVersion || version == kFormatVersion ||
+          (version == kWholeLayerPyramidFormatVersion || isTiledPyramidVersion(version) ||
            static_cast<uint64_t>(header->overviewWidth) * header->overviewHeight <=
                kMaxOverviewPixels) &&
           pyramidDimensionsValid;
@@ -1167,7 +1276,7 @@ bool readOverview(
     std::unique_ptr<FILE, decltype(&fclose)> file(fopen(path, "rb"), fclose);
     if (!file || !readHeader(file.get(), header) ||
         header->formatVersion == kWholeLayerPyramidFormatVersion ||
-        header->formatVersion == kFormatVersion ||
+        isTiledPyramidVersion(header->formatVersion) ||
         header->sourceBytes != expectedBytes ||
         header->sourceModifiedMillis != expectedModified ||
         header->overviewBytes == 0 ||
@@ -1191,7 +1300,7 @@ bool readPyramidDirectory(
     std::vector<PyramidLayer>* layers,
     long* dataOffset
 ) {
-    const bool tiled = header->formatVersion == kFormatVersion;
+    const bool tiled = isTiledPyramidVersion(header->formatVersion);
     if ((!tiled && header->formatVersion != kWholeLayerPyramidFormatVersion) ||
         header->overviewBytes == 0 ||
         !seekOverviewPayload(file, header)) {
@@ -1208,15 +1317,25 @@ bool readPyramidDirectory(
     const uint32_t layerRecordBytes = tiled ? 28u : 16u;
     uint64_t payloadBytes = 8u + static_cast<uint64_t>(count) * layerRecordBytes;
     uint32_t expectedSample = 2u;
+    uint32_t previousSample = 0u;
     for (uint32_t i = 0; i < count; ++i) {
         PyramidLayer layer;
         if (!readU32(file, &layer.sampleSize) ||
             !readU32(file, &layer.width) ||
             !readU32(file, &layer.height) ||
             !readU32(file, &layer.bytes) ||
-            layer.sampleSize != expectedSample || layer.bytes == 0 ||
+            layer.sampleSize == 0u ||
+            layer.bytes == 0 ||
             layer.width != ceilDiv(header->width, layer.sampleSize) ||
             layer.height != ceilDiv(header->height, layer.sampleSize)) {
+            layers->clear();
+            return false;
+        }
+        const bool sampleOrderValid = header->formatVersion == kFormatVersion
+            ? layer.sampleSize >= 2u && layer.sampleSize > previousSample &&
+                (i != 0u || layer.sampleSize == 2u)
+            : layer.sampleSize == expectedSample;
+        if (!sampleOrderValid) {
             layers->clear();
             return false;
         }
@@ -1236,6 +1355,7 @@ bool readPyramidDirectory(
             payloadBytes += layer.bytes;
         }
         layers->push_back(std::move(layer));
+        previousSample = layers->back().sampleSize;
         if (expectedSample > UINT32_MAX / 2u && i + 1u < count) {
             layers->clear();
             return false;
@@ -1331,7 +1451,7 @@ bool validateIndexStructure(
     }
 
     if ((header->formatVersion == kWholeLayerPyramidFormatVersion ||
-         header->formatVersion == kFormatVersion) &&
+         isTiledPyramidVersion(header->formatVersion)) &&
         header->overviewBytes > 0) {
         std::vector<PyramidLayer> layers;
         long dataOffset = 0;
@@ -1371,7 +1491,7 @@ bool readPyramid(
     long dataOffset = 0;
     if (!readPyramidDirectory(file.get(), header, layers, &dataOffset)) return false;
     if (encoded == nullptr) return true;
-    if (header->formatVersion == kFormatVersion) return false;
+    if (isTiledPyramidVersion(header->formatVersion)) return false;
     uint64_t skip = 0;
     const PyramidLayer* selected = nullptr;
     for (const auto& layer : *layers) {
@@ -1397,6 +1517,53 @@ bool isPowerOfTwo(int value) {
     return value > 0 && (value & (value - 1)) == 0;
 }
 
+bool readPyramidPlan(
+    JNIEnv* env,
+    jintArray sampleValues,
+    jintArray budgetValues,
+    std::vector<uint32_t>* samples,
+    std::vector<uint32_t>* budgets
+) {
+    if (sampleValues == nullptr || budgetValues == nullptr ||
+        samples == nullptr || budgets == nullptr) {
+        return false;
+    }
+    const jsize count = env->GetArrayLength(sampleValues);
+    if (count != env->GetArrayLength(budgetValues) ||
+        count < 0 || static_cast<uint32_t>(count) > kMaxPyramidLayers) {
+        return false;
+    }
+    std::vector<jint> rawSamples(static_cast<size_t>(count));
+    std::vector<jint> rawBudgets(static_cast<size_t>(count));
+    if (count > 0) {
+        env->GetIntArrayRegion(sampleValues, 0, count, rawSamples.data());
+        env->GetIntArrayRegion(budgetValues, 0, count, rawBudgets.data());
+        if (env->ExceptionCheck()) return false;
+    }
+    samples->clear();
+    budgets->clear();
+    samples->reserve(static_cast<size_t>(count));
+    budgets->reserve(static_cast<size_t>(count));
+    uint32_t previous = 0u;
+    for (jsize i = 0; i < count; ++i) {
+        const jint rawSample = rawSamples[static_cast<size_t>(i)];
+        const jint rawBudget = rawBudgets[static_cast<size_t>(i)];
+        const bool supportedSample = rawSample == 3 || isPowerOfTwo(rawSample);
+        if (rawSample < 2 || rawSample > (1 << 20) || rawBudget < 0 ||
+            !supportedSample || static_cast<uint32_t>(rawSample) <= previous ||
+            (i == 0 && rawSample != 2) ||
+            (rawBudget > 0 && rawSample != 3)) {
+            samples->clear();
+            budgets->clear();
+            return false;
+        }
+        previous = static_cast<uint32_t>(rawSample);
+        samples->push_back(previous);
+        budgets->push_back(static_cast<uint32_t>(rawBudget));
+    }
+    return true;
+}
+
 void logDecodeFailure(const char* stage) {
     __android_log_print(ANDROID_LOG_ERROR, "IndexedJpeg", "decode failed at %s", stage);
 }
@@ -1411,12 +1578,23 @@ Java_io_github_indexedjpeg_IndexedJpegNative_buildIndex(
     jstring destinationPathValue,
     jlong sourceBytes,
     jlong sourceModifiedMillis,
-    jint viewportWidth,
-    jint viewportHeight
+    jintArray pyramidSampleValues,
+    jintArray pyramidLayerByteBudgetValues
 ) {
     UtfChars sourcePath(env, sourcePathValue);
     UtfChars destinationPath(env, destinationPathValue);
     if (sourcePath.get() == nullptr || destinationPath.get() == nullptr) return nullptr;
+    std::vector<uint32_t> plannedSamples;
+    std::vector<uint32_t> layerByteBudgets;
+    if (!readPyramidPlan(
+            env,
+            pyramidSampleValues,
+            pyramidLayerByteBudgetValues,
+            &plannedSamples,
+            &layerByteBudgets)) {
+        throwIOException(env, "The JPEG pyramid plan is invalid");
+        return nullptr;
+    }
 
     std::unique_ptr<FILE, decltype(&fclose)> input(fopen(sourcePath.get(), "rb"), fclose);
     if (!input) {
@@ -1476,7 +1654,7 @@ Java_io_github_indexedjpeg_IndexedJpegNative_buildIndex(
         ? std::vector<PyramidLayer>{}
         : encodePyramidFromSource(
             sourcePath.get(), width, height,
-            static_cast<int>(viewportWidth), static_cast<int>(viewportHeight));
+            plannedSamples, layerByteBudgets);
     const uint32_t pyramidBytes = pyramidPayloadBytes(layers);
     const bool written = writeIndex(
         destinationPath.get(), index, width, height,
@@ -1601,7 +1779,7 @@ Java_io_github_indexedjpeg_IndexedJpegNative_readOverviewMetadata(
     Header header{};
     if (!file || !readHeader(file.get(), &header) ||
         header.formatVersion == kWholeLayerPyramidFormatVersion ||
-        header.formatVersion == kFormatVersion ||
+        isTiledPyramidVersion(header.formatVersion) ||
         header.sourceBytes != static_cast<int64_t>(sourceBytes) ||
         header.sourceModifiedMillis != static_cast<int64_t>(sourceModifiedMillis) ||
         header.overviewBytes == 0) {
@@ -1709,7 +1887,7 @@ Java_io_github_indexedjpeg_IndexedJpegNative_openPyramidTiles(
     auto handle = std::make_unique<PyramidHandle>();
     long dataOffset = 0;
     if (!file || !readHeader(file.get(), &header) ||
-        header.formatVersion != kFormatVersion ||
+        !isTiledPyramidVersion(header.formatVersion) ||
         header.sourceBytes != static_cast<int64_t>(sourceBytes) ||
         header.sourceModifiedMillis != static_cast<int64_t>(sourceModifiedMillis) ||
         !readPyramidDirectory(

@@ -66,7 +66,7 @@ class IndexedJpegStoreInstrumentedTest {
         assertTrue(info.indexBytes > 0L)
         assertEquals(0, info.pyramidLayerCount)
         val initialStatus = store.status(source.absolutePath) as IndexedJpegStatus.Ready
-        assertEquals(7, initialStatus.formatVersion)
+        assertEquals(INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION, initialStatus.formatVersion)
         assertEquals(IndexedJpegPyramidType.SEEK_ONLY, initialStatus.pyramidType)
         assertEquals(false, initialStatus.canUpgradeToAddressablePyramid)
 
@@ -131,7 +131,7 @@ class IndexedJpegStoreInstrumentedTest {
         assertTrue(info.scanCount > 1)
         assertEquals(0L, info.overviewBytes)
         val progressiveStatus = store.status(source.absolutePath) as IndexedJpegStatus.Ready
-        assertEquals(7, progressiveStatus.formatVersion)
+        assertEquals(INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION, progressiveStatus.formatVersion)
         assertEquals(IndexedJpegPyramidType.SEEK_ONLY, progressiveStatus.pyramidType)
         store.openDecoder(source.absolutePath).use { decoder ->
             assertNotNull(decoder)
@@ -424,7 +424,7 @@ class IndexedJpegStoreInstrumentedTest {
         val index = persistedIndexFile(context, source)
         val validIndex = index.readBytes()
         val ready = store.status(source.absolutePath) as IndexedJpegStatus.Ready
-        assertEquals(7, ready.formatVersion)
+        assertEquals(INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION, ready.formatVersion)
         assertEquals(IndexedJpegPyramidType.ADDRESSABLE_TILES, ready.pyramidType)
         assertEquals(info.pyramidLayerCount, ready.pyramidLayerCount)
         val payloadBytes = readLittleEndianInt(validIndex, 60)
@@ -445,6 +445,48 @@ class IndexedJpegStoreInstrumentedTest {
         index.writeBytes(validIndex)
         assertTrue(store.status(source.absolutePath) is IndexedJpegStatus.Ready)
 
+        assertTrue(store.delete(source.absolutePath))
+        source.delete()
+    }
+
+    @Test
+    fun adaptivePyramidPersistsAndDecodesSampleThree() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val source = File(context.cacheDir, "indexed-jpeg-adaptive-sample-three-fixture.jpg")
+        createAdaptiveOverviewFixture(source)
+        val store = IndexedJpegStore(context)
+        store.delete(source.absolutePath)
+
+        val info = store.buildForViewportWithPlan(
+            sourcePath = source.absolutePath,
+            viewportWidth = 1000,
+            viewportHeight = 1200,
+            sampleSizes = listOf(2, 3, 4),
+        )
+        assertEquals(INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION, info.formatVersion)
+        assertEquals(listOf(2, 3, 4), store.pyramidLayers(source.absolutePath).map { it.sampleSize })
+
+        store.openOverviewDecoder(source.absolutePath).use { decoder ->
+            val active = requireNotNull(decoder)
+            assertEquals(listOf(2, 3, 4), active.availableSampleSizes)
+            val region = Rect(2_800, 101, 3_500, 1_001)
+            assertEquals(2, active.addressableTileCount(region, 3))
+            val decoded = active.decodeRegion(region, 3)
+            assertNotNull(decoded)
+            assertEquals(Bitmap.Config.RGB_565, decoded!!.config)
+            assertEquals(ceilDiv(region.width(), 3), decoded.width)
+            assertEquals(ceilDiv(region.height(), 3), decoded.height)
+            val topLeft = decoded.getPixel(0, 0)
+            val bottomRight = decoded.getPixel(decoded.width - 1, decoded.height - 1)
+            assertTrue(Color.red(bottomRight) > Color.red(topLeft) + 20)
+            assertTrue(Color.green(bottomRight) > Color.green(topLeft) + 100)
+            assertTrue(Color.blue(bottomRight) > Color.blue(topLeft) + 30)
+            decoded.recycle()
+        }
+
+        val ready = store.status(source.absolutePath) as IndexedJpegStatus.Ready
+        assertEquals(INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION, ready.formatVersion)
+        assertEquals(IndexedJpegPyramidType.ADDRESSABLE_TILES, ready.pyramidType)
         assertTrue(store.delete(source.absolutePath))
         source.delete()
     }
@@ -677,7 +719,8 @@ class IndexedJpegStoreInstrumentedTest {
     ) {
         val headerBytes = 64
         val pyramidBytes = readLittleEndianInt(current, 60)
-        assertEquals(7, readLittleEndianInt(current, 8))
+        // This compatibility fixture deliberately relabels the v8 tiled payload as v7 above.
+        assertEquals(INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION, readLittleEndianInt(current, 8))
         assertTrue(pyramidBytes > 0)
         val overviewMarkerOffset = current.size - Int.SIZE_BYTES - pyramidBytes - Int.SIZE_BYTES
         assertEquals(0x3152564f, readLittleEndianInt(current, overviewMarkerOffset))
@@ -747,7 +790,7 @@ class IndexedJpegStoreInstrumentedTest {
     ) {
         val headerBytes = 64
         val pyramidBytes = readLittleEndianInt(current, 60)
-        assertEquals(7, readLittleEndianInt(current, 8))
+        assertEquals(INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION, readLittleEndianInt(current, 8))
         assertTrue(pyramidBytes > 0)
         val overviewMarkerOffset = current.size - Int.SIZE_BYTES - pyramidBytes - Int.SIZE_BYTES
         assertEquals(0x3152564f, readLittleEndianInt(current, overviewMarkerOffset))
@@ -830,7 +873,10 @@ class IndexedJpegStoreInstrumentedTest {
         val currentHeaderBytes = 64
         val version2HeaderBytes = 48
         val overviewBytes = readLittleEndianInt(current, 60)
-        assertEquals(7, readLittleEndianInt(current, versionOffset))
+        assertEquals(
+            INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION,
+            readLittleEndianInt(current, versionOffset),
+        )
         assertTrue(overviewBytes > 0)
 
         val overviewMarkerOffset = current.size - Int.SIZE_BYTES - overviewBytes - Int.SIZE_BYTES
@@ -978,6 +1024,27 @@ class IndexedJpegStoreInstrumentedTest {
     private fun createLargeOverviewFixture(destination: File) {
         val width = 2560
         val height = 2304
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val row = IntArray(width)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                row[x] = Color.rgb(
+                    24 + x * 200 / (width - 1),
+                    20 + y * 210 / (height - 1),
+                    32 + (x + y) * 180 / (width + height - 2),
+                )
+            }
+            bitmap.setPixels(row, 0, width, 0, y, width, 1)
+        }
+        FileOutputStream(destination).use { output ->
+            assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output))
+        }
+        bitmap.recycle()
+    }
+
+    private fun createAdaptiveOverviewFixture(destination: File) {
+        val width = 4097
+        val height = 1025
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val row = IntArray(width)
         for (y in 0 until height) {

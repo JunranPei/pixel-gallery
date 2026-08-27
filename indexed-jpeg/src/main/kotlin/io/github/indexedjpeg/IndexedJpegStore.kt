@@ -24,6 +24,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 const val INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION = 7
+const val INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION = 8
 
 enum class IndexedJpegPyramidType {
     SEEK_ONLY,
@@ -44,7 +45,7 @@ sealed interface IndexedJpegStatus {
             get() = pyramidType == IndexedJpegPyramidType.ADDRESSABLE_TILES
 
         val canUpgradeToAddressablePyramid: Boolean
-            get() = formatVersion < INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION
+            get() = formatVersion < INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION
     }
     data class Unsupported(val reason: String) : IndexedJpegStatus
     data class Invalid(val reason: String) : IndexedJpegStatus
@@ -60,7 +61,7 @@ data class IndexedJpegInfo(
     val overviewHeight: Int = 0,
     val overviewSampleSize: Int = 0,
     val pyramidLayerCount: Int = 0,
-    val formatVersion: Int = INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION,
+    val formatVersion: Int = INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION,
     val pyramidType: IndexedJpegPyramidType = if (pyramidLayerCount > 0) {
         IndexedJpegPyramidType.ADDRESSABLE_TILES
     } else {
@@ -178,9 +179,29 @@ class IndexedJpegStore(context: Context) {
         IndexedJpegOverviewSize(viewportWidth, viewportHeight),
     )
 
+    /** Instrumentation-only hook for validating a new directory layout and decoder tier. */
+    internal fun buildForViewportWithPlan(
+        sourcePath: String,
+        viewportWidth: Int,
+        viewportHeight: Int,
+        sampleSizes: List<Int>,
+    ): IndexedJpegInfo = buildWithViewport(
+        sourcePath = sourcePath,
+        viewport = IndexedJpegOverviewSize(viewportWidth, viewportHeight),
+        planOverride = IndexedJpegPyramidPlanner.Plan(
+            sampleSizes.map { sampleSize ->
+                IndexedJpegPyramidPlanner.Layer(
+                    sampleSize = sampleSize,
+                    maximumBytes = if (sampleSize == 3) Int.MAX_VALUE else 0,
+                )
+            },
+        ),
+    )
+
     private fun buildWithViewport(
         sourcePath: String,
         viewport: IndexedJpegOverviewSize,
+        planOverride: IndexedJpegPyramidPlanner.Plan? = null,
     ): IndexedJpegInfo = synchronized(mutationLock) {
         val source = supportedSource(sourcePath)
             ?: throw IOException("A readable local JPEG file is required")
@@ -200,14 +221,26 @@ class IndexedJpegStore(context: Context) {
             try {
                 // The DC layer is reconstructed as sRGB. Preserve wide-gamut JPEGs by keeping
                 // their index seek-only and letting Android's color-managed decoder draw fit view.
-                val canEmbedOverview = sourceHasSrgbOutput(source)
+                val sourceProbe = probeSource(source)
+                val canEmbedOverview = sourceProbe?.hasSrgbOutput == true
+                val pyramidPlan = planOverride ?: if (canEmbedOverview) {
+                    IndexedJpegPyramidPlanner.plan(
+                        sourceWidth = sourceProbe.width,
+                        sourceHeight = sourceProbe.height,
+                        sourceBytes = source.length(),
+                        viewportWidth = viewport.width,
+                        viewportHeight = viewport.height,
+                    )
+                } else {
+                    IndexedJpegPyramidPlanner.Plan(emptyList())
+                }
                 val nativeInfo = IndexedJpegNative.buildIndex(
                     source.absolutePath,
                     temporary.absolutePath,
                     source.length(),
                     source.lastModified(),
-                    if (canEmbedOverview) viewport.width else 0,
-                    if (canEmbedOverview) viewport.height else 0,
+                    pyramidPlan.layers.map { it.sampleSize }.toIntArray(),
+                    pyramidPlan.layers.map { it.maximumBytes }.toIntArray(),
                 )
                 if (nativeInfo.size < 7 || nativeInfo[0] <= 0 || nativeInfo[1] <= 0) {
                     throw IOException("The native index builder returned invalid metadata")
@@ -738,15 +771,23 @@ class IndexedJpegStore(context: Context) {
             .joinToString("") { "%02x".format(it) }
     }
 
-    private fun sourceHasSrgbOutput(source: File): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
-        return runCatching {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(source.absolutePath, bounds)
-            bounds.outWidth > 0 && bounds.outHeight > 0 &&
-                bounds.outColorSpace?.isSrgb != false
-        }.getOrDefault(false)
-    }
+    private data class SourceProbe(
+        val width: Int,
+        val height: Int,
+        val hasSrgbOutput: Boolean,
+    )
+
+    private fun probeSource(source: File): SourceProbe? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(source.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        SourceProbe(
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            hasSrgbOutput = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                bounds.outColorSpace?.isSrgb != false,
+        )
+    }.getOrNull()
 
     private fun supportedSource(path: String): File? {
         val source = File(path)
@@ -771,7 +812,8 @@ class IndexedJpegStore(context: Context) {
         const val SINGLE_LAYER_OVERVIEW_FORMAT_VERSION = 5
         const val MULTI_LAYER_PYRAMID_FORMAT_VERSION = 6
         const val ADDRESSABLE_PYRAMID_FORMAT_VERSION = INDEXED_JPEG_ADDRESSABLE_FORMAT_VERSION
-        const val CACHE_SIGNATURE_VERSION = "jpeg-index-v7-addressable"
+        const val ADAPTIVE_PYRAMID_FORMAT_VERSION = INDEXED_JPEG_ADAPTIVE_FORMAT_VERSION
+        const val CACHE_SIGNATURE_VERSION = "jpeg-index-v8-adaptive"
         const val TEMPORARY_CLEANUP_INTERVAL_MILLIS = 6L * 60L * 60L * 1000L
         const val TEMPORARY_STALE_AGE_MILLIS = 24L * 60L * 60L * 1000L
         val mutationLock = Any()
@@ -1199,8 +1241,8 @@ private object IndexedJpegNative {
         destinationPath: String,
         sourceBytes: Long,
         sourceModifiedMillis: Long,
-        viewportWidth: Int,
-        viewportHeight: Int,
+        pyramidSampleSizes: IntArray,
+        pyramidLayerByteBudgets: IntArray,
     ): IntArray
 
     external fun validateIndex(
