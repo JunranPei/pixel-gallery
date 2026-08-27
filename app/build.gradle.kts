@@ -91,8 +91,8 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 2047
-        versionName = "4.3.3.2-auto-multitask"
+        versionCode = 2048
+        versionName = "4.3.3.3-auto-multitask"
     }
 
     signingConfigs {
