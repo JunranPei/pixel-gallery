@@ -2551,7 +2551,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (!isZooming && !isPanning && anim == null) {
             trimTileMemoryCache(currentSampleSize)
         }
-        scheduleStableTileCachePersistence()
+        if (
+            (decoder as? BatchedImageRegionDecoder)
+                ?.capabilities(currentSampleSize)
+                ?.persistDecodedTiles == true
+        ) {
+            scheduleStableTileCachePersistence()
+        }
         val currentTiles = tileMap?.get(currentSampleSize).orEmpty().filter(::tileVisible)
         val hasLoadingTile = currentTiles.any { it.loading }
         val hasMissingTile = currentTiles.any { tile ->

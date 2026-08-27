@@ -1044,7 +1044,7 @@ class IndexedJpegOverviewRegionDecoder private constructor(
             Bitmap.createBitmap(
                 overviewRect.width(),
                 overviewRect.height(),
-                Bitmap.Config.ARGB_8888,
+                Bitmap.Config.RGB_565,
             )
         }.getOrNull() ?: return null
         val canvas = Canvas(destination)
@@ -1100,7 +1100,7 @@ class IndexedJpegOverviewRegionDecoder private constructor(
         expectedHeight: Int,
     ): Bitmap? {
         val bitmap = runCatching {
-            Bitmap.createBitmap(expectedWidth, expectedHeight, Bitmap.Config.ARGB_8888)
+            Bitmap.createBitmap(expectedWidth, expectedHeight, Bitmap.Config.RGB_565)
         }.getOrNull() ?: return null
         if (decoder(layer.sampleSize, tileX, tileY, bitmap)) return bitmap
         bitmap.recycle()

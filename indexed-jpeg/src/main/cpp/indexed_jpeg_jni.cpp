@@ -1759,7 +1759,8 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
 
     AndroidBitmapInfo bitmapInfo{};
     if (AndroidBitmap_getInfo(env, bitmap, &bitmapInfo) != ANDROID_BITMAP_RESULT_SUCCESS ||
-        bitmapInfo.format != ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+        (bitmapInfo.format != ANDROID_BITMAP_FORMAT_RGBA_8888 &&
+         bitmapInfo.format != ANDROID_BITMAP_FORMAT_RGB_565) ||
         bitmapInfo.width != tile->width || bitmapInfo.height != tile->height) {
         return JNI_FALSE;
     }
@@ -1797,14 +1798,24 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
 
     void* pixels = nullptr;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) == ANDROID_BITMAP_RESULT_SUCCESS) {
-        const bool simdComplete = indexed_jpeg_simd_decoder_decode_rgba(
-            handle->simdDecoder,
-            encoded,
-            tile->bytes,
-            tile->width,
-            tile->height,
-            static_cast<uint8_t*>(pixels),
-            bitmapInfo.stride) != 0;
+        const bool rgb565 = bitmapInfo.format == ANDROID_BITMAP_FORMAT_RGB_565;
+        const bool simdComplete = (rgb565
+            ? indexed_jpeg_simd_decoder_decode_rgb565(
+                handle->simdDecoder,
+                encoded,
+                tile->bytes,
+                tile->width,
+                tile->height,
+                static_cast<uint8_t*>(pixels),
+                bitmapInfo.stride)
+            : indexed_jpeg_simd_decoder_decode_rgba(
+                handle->simdDecoder,
+                encoded,
+                tile->bytes,
+                tile->width,
+                tile->height,
+                static_cast<uint8_t*>(pixels),
+                bitmapInfo.stride)) != 0;
         AndroidBitmap_unlockPixels(env, bitmap);
         pixels = nullptr;
         if (simdComplete) {
@@ -1813,8 +1824,9 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
                 __android_log_print(
                     ANDROID_LOG_INFO,
                     "IndexedJpeg",
-                    "pyramid decoder=libjpeg-turbo-3.2.0 simd=%d",
-                    indexed_jpeg_simd_compiled_with_simd());
+                    "pyramid decoder=libjpeg-turbo-3.2.0 simd=%d output=%s",
+                    indexed_jpeg_simd_compiled_with_simd(),
+                    rgb565 ? "RGB565" : "RGBA8888");
             }
             if (transientMapping != nullptr) {
                 munmap(transientMapping, transientMappingBytes);
@@ -1857,8 +1869,23 @@ Java_io_github_indexedjpeg_IndexedJpegNative_decodePyramidTile(
         }
         return JNI_FALSE;
     }
+    const bool rgb565 = bitmapInfo.format == ANDROID_BITMAP_FORMAT_RGB_565;
+#ifdef ANDROID_RGB
+    info.out_color_space = rgb565 ? JCS_RGB_565 : JCS_EXT_RGBA;
+#else
+    // The legacy indexed codec does not normally provide the RGB565 extension.
+    // Valid v7 tiles use the modern SIMD decoder above; keep RGBA as the only
+    // safe fallback rather than writing four-byte pixels into a two-byte bitmap.
+    if (rgb565) {
+        jpeg_destroy_decompress(&info);
+        if (transientMapping != nullptr) {
+            munmap(transientMapping, transientMappingBytes);
+        }
+        return JNI_FALSE;
+    }
     info.out_color_space = JCS_EXT_RGBA;
-    if (!jpeg_start_decompress(&info) || info.output_components != 4 ||
+#endif
+    if (!jpeg_start_decompress(&info) ||
         info.output_width != bitmapInfo.width || info.output_height != bitmapInfo.height ||
         AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
         jpeg_destroy_decompress(&info);

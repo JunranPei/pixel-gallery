@@ -51,21 +51,23 @@ extern "C" void indexed_jpeg_simd_decoder_destroy(void* decoderValue) {
     delete decoder;
 }
 
-extern "C" int indexed_jpeg_simd_decoder_decode_rgba(
+int decodeTile(
     void* decoderValue,
     const uint8_t* encoded,
     size_t encodedBytes,
     uint32_t expectedWidth,
     uint32_t expectedHeight,
     uint8_t* destination,
-    size_t destinationStride
+    size_t destinationStride,
+    J_COLOR_SPACE outputColorSpace,
+    size_t outputBytesPerPixel
 ) {
     auto* decoder = static_cast<Decoder*>(decoderValue);
     if (encoded == nullptr || encodedBytes == 0 || destination == nullptr ||
         decoder == nullptr || !decoder->created ||
         expectedWidth == 0 || expectedHeight == 0 ||
         encodedBytes > std::numeric_limits<unsigned long>::max() ||
-        destinationStride < static_cast<size_t>(expectedWidth) * 4u) {
+        destinationStride < static_cast<size_t>(expectedWidth) * outputBytesPerPixel) {
         return 0;
     }
 
@@ -85,15 +87,15 @@ extern "C" int indexed_jpeg_simd_decoder_decode_rgba(
         return 0;
     }
 
-    info.out_color_space = JCS_EXT_RGBA;
+    info.out_color_space = outputColorSpace;
     // These tiles are already low-frequency, quality-90 overview data. The
     // fast integer IDCT and merged chroma upsampling materially reduce the
-    // work per decoded pixel while preserving the same dimensions and RGBA8
-    // output contract. sample=1 continues to use the accurate seek decoder.
+    // work per decoded pixel while preserving the requested Android bitmap
+    // dimensions and pixel format. sample=1 continues to use the accurate seek decoder.
     info.dct_method = JDCT_IFAST;
     info.do_fancy_upsampling = FALSE;
     info.do_block_smoothing = FALSE;
-    if (!jpeg_start_decompress(&info) || info.output_components != 4 ||
+    if (!jpeg_start_decompress(&info) ||
         info.output_width != expectedWidth || info.output_height != expectedHeight) {
         jpeg_abort_decompress(&info);
         return 0;
@@ -110,6 +112,48 @@ extern "C" int indexed_jpeg_simd_decoder_decode_rgba(
         return 0;
     }
     return 1;
+}
+
+extern "C" int indexed_jpeg_simd_decoder_decode_rgba(
+    void* decoderValue,
+    const uint8_t* encoded,
+    size_t encodedBytes,
+    uint32_t expectedWidth,
+    uint32_t expectedHeight,
+    uint8_t* destination,
+    size_t destinationStride
+) {
+    return decodeTile(
+        decoderValue,
+        encoded,
+        encodedBytes,
+        expectedWidth,
+        expectedHeight,
+        destination,
+        destinationStride,
+        JCS_EXT_RGBA,
+        4u);
+}
+
+extern "C" int indexed_jpeg_simd_decoder_decode_rgb565(
+    void* decoderValue,
+    const uint8_t* encoded,
+    size_t encodedBytes,
+    uint32_t expectedWidth,
+    uint32_t expectedHeight,
+    uint8_t* destination,
+    size_t destinationStride
+) {
+    return decodeTile(
+        decoderValue,
+        encoded,
+        encodedBytes,
+        expectedWidth,
+        expectedHeight,
+        destination,
+        destinationStride,
+        JCS_RGB565,
+        2u);
 }
 
 extern "C" int indexed_jpeg_simd_decode_rgba(
