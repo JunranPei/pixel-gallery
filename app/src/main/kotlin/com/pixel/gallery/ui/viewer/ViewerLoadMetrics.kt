@@ -35,8 +35,6 @@ internal object ViewerLoadMetrics {
     private const val powerTimelinePeriodMs = 100L
     private const val powerTimelineRetentionMs = 120_000L
     private const val entryTimelineBeforeMs = 5_000L
-    private const val entryTimelineAfterMs = 5_000L
-    private const val activeRuntimeSamplingWindowMs = 60_000L
     private const val idlePowerTimelinePeriodMs = 1_000L
     const val isEnabled: Boolean = BuildConfig.VIEWER_METRICS_ENABLED
 
@@ -357,17 +355,18 @@ internal object ViewerLoadMetrics {
                         "items=${remaining.joinToString(limit = 20) { "${it.id}:${it.type}:${it.imageKey}" }}"
                 )
             }
-            activeEntry.compareAndSet(entry, null)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 Trace.endAsyncSection("ViewerEntry:${entry.contentId}", entry.id.toInt())
             }
+            val endedAtNanos = SystemClock.elapsedRealtimeNanos()
             emit(
                 entryId,
                 "ENTRY_END entry=$entryId total=${elapsedMs(entry.requestedAtNanos)}ms " +
                     "contentId=${entry.contentId} source=${entry.source} reason=$reason ${snapshotDetail()}"
             )
+            queueEntryForPersistence(context.applicationContext, entry, endedAtNanos)
+            activeEntry.compareAndSet(entry, null)
             entries.remove(entryId, entry)
-            queueEntryForPersistence(context.applicationContext, entry)
         }
     }
 
@@ -670,8 +669,7 @@ internal object ViewerLoadMetrics {
     private fun sampleContinuousPower() {
         val sampledAtNanos = SystemClock.elapsedRealtimeNanos()
         val active = activeEntry.get()
-        val activeAgeMs = active?.let { elapsedMs(it.requestedAtNanos) } ?: Long.MAX_VALUE
-        val requiredPeriodMs = if (activeAgeMs <= activeRuntimeSamplingWindowMs) {
+        val requiredPeriodMs = if (active != null) {
             powerTimelinePeriodMs
         } else {
             idlePowerTimelinePeriodMs
@@ -697,15 +695,17 @@ internal object ViewerLoadMetrics {
         latestContinuousPower.set(sample)
         synchronized(powerTimelineLock) {
             powerTimeline.addLast(sample)
-            val cutoffNanos = sampledAtNanos - TimeUnit.MILLISECONDS.toNanos(powerTimelineRetentionMs)
+            val cutoffNanos = active?.requestedAtNanos
+                ?.minus(TimeUnit.MILLISECONDS.toNanos(entryTimelineBeforeMs))
+                ?: sampledAtNanos - TimeUnit.MILLISECONDS.toNanos(powerTimelineRetentionMs)
             while (powerTimeline.firstOrNull()?.sampledAtNanos?.let { it < cutoffNanos } == true) {
                 powerTimeline.removeFirst()
             }
         }
-        if (active != null && activeAgeMs <= activeRuntimeSamplingWindowMs) {
+        if (active != null) {
             val previous = lastRuntimeSampleNanos.get()
             if (
-                sampledAtNanos - previous >= 250_000_000L &&
+                sampledAtNanos - previous >= TimeUnit.MILLISECONDS.toNanos(powerTimelinePeriodMs) &&
                 lastRuntimeSampleNanos.compareAndSet(previous, sampledAtNanos)
             ) {
                 emit(
@@ -756,8 +756,9 @@ internal object ViewerLoadMetrics {
         )
         synchronized(batteryBroadcastTimelineLock) {
             batteryBroadcastTimeline.addLast(sample)
-            val cutoffNanos = sampledAtNanos -
-                TimeUnit.MILLISECONDS.toNanos(powerTimelineRetentionMs)
+            val cutoffNanos = activeEntry.get()?.requestedAtNanos
+                ?.minus(TimeUnit.MILLISECONDS.toNanos(entryTimelineBeforeMs))
+                ?: sampledAtNanos - TimeUnit.MILLISECONDS.toNanos(powerTimelineRetentionMs)
             while (
                 batteryBroadcastTimeline.firstOrNull()
                     ?.sampledAtNanos
@@ -817,15 +818,16 @@ internal object ViewerLoadMetrics {
         }
     }
 
-    private fun queueEntryForPersistence(context: Context, entry: Entry) {
+    private fun queueEntryForPersistence(context: Context, entry: Entry, endedAtNanos: Long) {
         val lines = entry.snapshotLines()
         if (lines.isEmpty()) return
-        val timeline = snapshotPowerTimeline(entry.requestedAtNanos)
-        val batteryBroadcasts = snapshotBatteryBroadcastTimeline(entry.requestedAtNanos)
+        val timeline = snapshotPowerTimeline(entry.requestedAtNanos, endedAtNanos)
+        val batteryBroadcasts = snapshotBatteryBroadcastTimeline(entry.requestedAtNanos, endedAtNanos)
         val persistedEntry = PersistedEntry(
             id = entry.id,
             contentId = entry.contentId,
             requestedAtNanos = entry.requestedAtNanos,
+            endedAtNanos = endedAtNanos,
             lines = lines,
             powerTimeline = timeline,
             batteryBroadcasts = batteryBroadcasts,
@@ -897,21 +899,23 @@ internal object ViewerLoadMetrics {
         }
     }
 
-    private fun snapshotPowerTimeline(requestedAtNanos: Long): List<ContinuousPowerSample> {
+    private fun snapshotPowerTimeline(
+        requestedAtNanos: Long,
+        endedAtNanos: Long,
+    ): List<ContinuousPowerSample> {
         val startNanos = requestedAtNanos - TimeUnit.MILLISECONDS.toNanos(entryTimelineBeforeMs)
-        val endNanos = requestedAtNanos + TimeUnit.MILLISECONDS.toNanos(entryTimelineAfterMs)
         return synchronized(powerTimelineLock) {
-            powerTimeline.filter { it.sampledAtNanos in startNanos..endNanos }
+            powerTimeline.filter { it.sampledAtNanos in startNanos..endedAtNanos }
         }
     }
 
     private fun snapshotBatteryBroadcastTimeline(
         requestedAtNanos: Long,
+        endedAtNanos: Long,
     ): List<BatteryBroadcastSample> {
         val startNanos = requestedAtNanos - TimeUnit.MILLISECONDS.toNanos(entryTimelineBeforeMs)
-        val endNanos = requestedAtNanos + TimeUnit.MILLISECONDS.toNanos(entryTimelineAfterMs)
         return synchronized(batteryBroadcastTimelineLock) {
-            batteryBroadcastTimeline.filter { it.sampledAtNanos in startNanos..endNanos }
+            batteryBroadcastTimeline.filter { it.sampledAtNanos in startNanos..endedAtNanos }
         }
     }
 
@@ -925,7 +929,7 @@ internal object ViewerLoadMetrics {
         append(" beforeMs=")
         append(entryTimelineBeforeMs)
         append(" afterMs=")
-        append(entryTimelineAfterMs)
+        append(TimeUnit.NANOSECONDS.toMillis(entry.endedAtNanos - entry.requestedAtNanos))
         append('\n')
         entry.powerTimeline.forEach { sample ->
             val relativeMs = TimeUnit.NANOSECONDS.toMillis(
@@ -962,7 +966,7 @@ internal object ViewerLoadMetrics {
         append(" beforeMs=")
         append(entryTimelineBeforeMs)
         append(" afterMs=")
-        append(entryTimelineAfterMs)
+        append(TimeUnit.NANOSECONDS.toMillis(entry.endedAtNanos - entry.requestedAtNanos))
         append('\n')
         entry.batteryBroadcasts.forEach { sample ->
             val relativeMs = TimeUnit.NANOSECONDS.toMillis(
@@ -1129,6 +1133,7 @@ internal object ViewerLoadMetrics {
         val id: Long,
         val contentId: Long,
         val requestedAtNanos: Long,
+        val endedAtNanos: Long,
         val lines: List<String>,
         val powerTimeline: List<ContinuousPowerSample>,
         val batteryBroadcasts: List<BatteryBroadcastSample>,
@@ -1142,7 +1147,6 @@ internal object ViewerLoadMetrics {
         private val lines = ArrayDeque<String>()
 
         fun record(line: String) = synchronized(lines) {
-            if (lines.size >= 32_768) lines.removeFirst()
             lines.addLast(line)
         }
 
