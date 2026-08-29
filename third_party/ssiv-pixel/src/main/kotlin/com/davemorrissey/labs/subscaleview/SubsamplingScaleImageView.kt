@@ -2013,14 +2013,31 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 TARGET_DECODED_TILE_SIZE,
                 (sHeight() * levelRatio).toInt(),
             )
-            // Match Telephoto/0713: the source-space grid is determined only by image
-            // size, base sample and the 1024px minimum. Its decoded tile dimensions are
-            // naturally near the fit-screen bitmap size. SSIV's old half-decoder cap
-            // split 0713's ~1600/3200px source tiles into many 1024/2048px tiles.
-            val sTileWidth = stableSourceTileWidth
-            val sTileHeight = stableSourceTileHeight
-            val xTiles = (sWidth() / sTileWidth).coerceAtLeast(1)
-            val yTiles = (sHeight() / sTileHeight).coerceAtLeast(1)
+            // Preserve Telephoto's stable source grid unless the caller requests a
+            // smaller decoded tile. The previous implementation ignored setMaxTileSize(),
+            // allowing ~10MB textures even when the app selected a lower GPU upload cap.
+            val maxSourceTileWidth = (maxTileDimensions.x.toLong() * sampleSize)
+                .coerceAtLeast(1L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            val maxSourceTileHeight = (maxTileDimensions.y.toLong() * sampleSize)
+                .coerceAtLeast(1L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            val widthCapped = stableSourceTileWidth > maxSourceTileWidth
+            val heightCapped = stableSourceTileHeight > maxSourceTileHeight
+            val sTileWidth = min(stableSourceTileWidth, maxSourceTileWidth)
+            val sTileHeight = min(stableSourceTileHeight, maxSourceTileHeight)
+            val xTiles = if (widthCapped) {
+                ((sWidth().toLong() + sTileWidth - 1L) / sTileWidth).toInt().coerceAtLeast(1)
+            } else {
+                (sWidth() / sTileWidth).coerceAtLeast(1)
+            }
+            val yTiles = if (heightCapped) {
+                ((sHeight().toLong() + sTileHeight - 1L) / sTileHeight).toInt().coerceAtLeast(1)
+            } else {
+                (sHeight() / sTileHeight).coerceAtLeast(1)
+            }
 
             val tileGrid = ArrayList<Tile>(xTiles * yTiles)
             for (x in 0 until xTiles) {
@@ -2047,6 +2064,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     "grid=${xTiles}x$yTiles count=${tileGrid.size} " +
                     "decodedTarget=${(sTileWidth + sampleSize - 1) / sampleSize}x" +
                     "${(sTileHeight + sampleSize - 1) / sampleSize} " +
+                    "decodedCap=${maxTileDimensions.x}x${maxTileDimensions.y} " +
                     "base=$fullImageSampleSize viewport=${width}x$height source=${sWidth()}x${sHeight()}",
             )
             if (sampleSize == 1) {

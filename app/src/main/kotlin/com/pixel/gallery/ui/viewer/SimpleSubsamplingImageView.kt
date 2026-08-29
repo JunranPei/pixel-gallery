@@ -1259,7 +1259,9 @@ internal fun SimpleSubsamplingImageView(
                     else -> 160
                 }
                 setMinimumTileDpi(minTileDpi)
-                setMaxTileSize(if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) 4096 else 2048)
+                // Bound every ARGB tile to 4MB before it enters the hardware display list.
+                // This is a renderer-independent invariant, not a device-specific branch.
+                setMaxTileSize(1024)
                 taskExecutor = tileDecodeExecutor
                 cacheTaskExecutor = tileCacheWriteExecutor
                 setActiveTileMemoryCache(isActivePage)

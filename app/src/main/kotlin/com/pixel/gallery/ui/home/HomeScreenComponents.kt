@@ -52,7 +52,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.Velocity
-import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DecodeFormat
 
 
@@ -98,8 +97,6 @@ fun PhotosScreen(
         }
     }
 
-    val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
-    val context = LocalContext.current
     val scrollbarPositionLabels = remember(items) {
         var currentDateLabel: String? = null
         List(items.size) { index ->
@@ -114,40 +111,6 @@ fun PhotosScreen(
     }
     val scrollbarPositionLabelProvider = remember(scrollbarPositionLabels) {
         { index: Int -> scrollbarPositionLabels.getOrNull(index) }
-    }
-
-    LaunchedEffect(firstVisibleIndex, items, isFastScrolling, isScrollbarDragging) {
-        if (!isFastScrolling && !isScrollbarDragging) {
-            val info = state.layoutInfo
-            val visibleCount = info.visibleItemsInfo.size
-            if (visibleCount > 0 && items.isNotEmpty()) {
-                val preloadStartIndex = firstVisibleIndex + visibleCount
-                val preloadEndIndex = (preloadStartIndex + 18).coerceAtMost(items.size - 1)
-                for (i in preloadStartIndex..preloadEndIndex) {
-                    val item = items[i]
-                    if (item is GridItem.Photo) {
-                        val media = item.entry
-                        val model = AvesAppGlideModule.getModel(
-                            context = context,
-                            uri = Uri.parse(media.uri),
-                            mimeType = media.sourceMimeType,
-                            pageId = null,
-                            sizeBytes = media.sizeBytes,
-                            isThumbnail = true,
-                            rotationDegrees = media.sourceRotationDegrees,
-                            dateModifiedMillis = media.dateModifiedMillis
-                        )
-                        Glide.with(context)
-                            .load(model)
-                            .signature(ObjectKey(media.dateModifiedMillis))
-                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                            .format(DecodeFormat.PREFER_RGB_565)
-                            .override(200)
-                            .preload()
-                    }
-                }
-            }
-        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -516,42 +479,6 @@ fun AlbumsScreen(
     emptyMessage: String? = null,
 ) {
     var isScrollbarDragging by remember { mutableStateOf(false) }
-    val firstVisibleIndex by remember { derivedStateOf { gridState.firstVisibleItemIndex } }
-    val context = LocalContext.current
-
-    LaunchedEffect(firstVisibleIndex, albums, isScrollbarDragging) {
-        if (!isScrollbarDragging) {
-            val info = gridState.layoutInfo
-            val visibleCount = info.visibleItemsInfo.size
-            if (visibleCount > 0 && albums.isNotEmpty()) {
-                val preloadStartIndex = firstVisibleIndex + visibleCount
-                val preloadEndIndex = (preloadStartIndex + 18).coerceAtMost(albums.size - 1)
-                for (i in preloadStartIndex..preloadEndIndex) {
-                    val album = albums[i]
-                    val mimeType = MimeTypeMap.getFileExtensionFromUrl(album.coverUri).lowercase().let { ext ->
-                        MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "image/jpeg"
-                    }
-                    val model = AvesAppGlideModule.getModel(
-                        context = context,
-                        uri = Uri.parse(album.coverUri),
-                        mimeType = mimeType,
-                        pageId = null,
-                        sizeBytes = null,
-                        isThumbnail = true,
-                        rotationDegrees = 0,
-                        dateModifiedMillis = album.lastModified
-                    )
-                    Glide.with(context)
-                        .load(model)
-                        .signature(ObjectKey(album.lastModified))
-                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                        .format(DecodeFormat.PREFER_RGB_565)
-                        .override(200)
-                        .preload()
-                }
-            }
-        }
-    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
