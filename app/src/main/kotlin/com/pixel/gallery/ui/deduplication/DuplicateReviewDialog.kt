@@ -75,6 +75,8 @@ fun DuplicateReviewDialog(
     val selectedEntries = groups.flatMap { it.entries }
         .filter { it.contentId in state.selectedIds }
     val selectedBytes = selectedEntries.sumOf { it.sizeBytes }
+    val copyIds = groups.flatMap { group -> group.entries.drop(1).map(MediaEntry::contentId) }
+    val allCopiesSelected = copyIds.isNotEmpty() && copyIds.all { it in state.selectedIds }
     val canDismiss = state.phase != DuplicatePhase.AWAITING_PERMISSION &&
         state.phase != DuplicatePhase.VERIFYING
 
@@ -129,17 +131,19 @@ fun DuplicateReviewDialog(
                                 )
                                 TextButton(
                                     onClick = {
-                                        groups.flatMap { it.entries.drop(1) }
-                                            .filterNot { it.contentId in state.selectedIds }
-                                            .forEach { onToggle(it.contentId) }
+                                        toggleCopySelection(copyIds, state.selectedIds, onToggle)
                                     },
-                                ) { Text(stringResource(R.string.duplicate_select_copies)) }
-                                TextButton(
-                                    onClick = {
-                                        selectedEntries.forEach { onToggle(it.contentId) }
-                                    },
-                                    enabled = selectedEntries.isNotEmpty(),
-                                ) { Text(stringResource(R.string.duplicate_clear_selection)) }
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            if (allCopiesSelected) {
+                                                R.string.duplicate_clear_selection
+                                            } else {
+                                                R.string.duplicate_select_copies
+                                            },
+                                        ),
+                                    )
+                                }
                             }
                             if (!state.canTrash) {
                                 Text(
@@ -313,6 +317,17 @@ fun DuplicateReviewDialog(
     }
 }
 
+private fun toggleCopySelection(
+    copyIds: List<Long>,
+    selectedIds: Set<Long>,
+    onToggle: (Long) -> Unit,
+) {
+    val selectAll = copyIds.any { it !in selectedIds }
+    copyIds
+        .filter { if (selectAll) it !in selectedIds else it in selectedIds }
+        .forEach(onToggle)
+}
+
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun DuplicateGroupCard(
@@ -322,7 +337,8 @@ private fun DuplicateGroupCard(
     onToggle: (Long) -> Unit,
 ) {
     val entries = group.entries
-    val selected = entries.count { it.contentId in selectedIds }
+    val copyIds = entries.drop(1).map(MediaEntry::contentId)
+    val allCopiesSelected = copyIds.isNotEmpty() && copyIds.all { it in selectedIds }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         shape = RoundedCornerShape(24.dp),
@@ -341,15 +357,18 @@ private fun DuplicateGroupCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    TextButton(onClick = {
-                        entries.drop(1).filterNot { it.contentId in selectedIds }
-                            .forEach { onToggle(it.contentId) }
-                    }) { Text(stringResource(R.string.duplicate_select_copies)) }
-                    TextButton(
-                        onClick = { entries.filter { it.contentId in selectedIds }.forEach { onToggle(it.contentId) } },
-                        enabled = selected > 0,
-                    ) { Text(stringResource(R.string.duplicate_clear_selection)) }
+                TextButton(onClick = {
+                    toggleCopySelection(copyIds, selectedIds, onToggle)
+                }) {
+                    Text(
+                        stringResource(
+                            if (allCopiesSelected) {
+                                R.string.duplicate_clear_selection
+                            } else {
+                                R.string.duplicate_select_copies
+                            },
+                        ),
+                    )
                 }
             }
             entries.forEachIndexed { position, entry ->
