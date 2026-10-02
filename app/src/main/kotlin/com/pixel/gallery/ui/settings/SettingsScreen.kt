@@ -89,7 +89,7 @@ fun SettingsScreen(
                     onClick = onNavigateToExcludedFolders
                 )
             }
-            item { HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
             item {
                 SettingsClickItem(
                     title = "About",

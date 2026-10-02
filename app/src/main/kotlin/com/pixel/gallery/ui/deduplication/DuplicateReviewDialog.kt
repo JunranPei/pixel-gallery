@@ -24,7 +24,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -101,12 +100,12 @@ fun DuplicateReviewDialog(
                 )
             },
             bottomBar = {
-                Surface(tonalElevation = 3.dp) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()) {
+                if (state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()) {
+                    Surface(tonalElevation = 3.dp) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.Center,
@@ -145,17 +144,6 @@ fun DuplicateReviewDialog(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Text(stringResource(R.string.duplicate_move_to_bin))
-                            }
-                        } else if (canDismiss) {
-                            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    stringResource(
-                                        if (state.phase == DuplicatePhase.SCANNING ||
-                                            state.phase == DuplicatePhase.VALIDATING ||
-                                            state.phase == DuplicatePhase.IDLE
-                                        ) R.string.duplicate_cancel else R.string.duplicate_done,
-                                    ),
-                                )
                             }
                         }
                     }
@@ -365,7 +353,7 @@ private fun DuplicateGroupCard(
                     disabled = !entrySelected && unselected == 1,
                     onToggle = { onToggle(entry.contentId) },
                 )
-                if (position < entries.lastIndex) HorizontalDivider(modifier = Modifier.padding(start = 92.dp, end = 18.dp))
+                if (position < entries.lastIndex) Spacer(Modifier.height(8.dp))
             }
         }
     }
