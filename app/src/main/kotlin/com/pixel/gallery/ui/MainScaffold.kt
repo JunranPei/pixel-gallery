@@ -74,6 +74,13 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.outlined.FileCopy
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.model.DeduplicationScope
+import com.pixel.gallery.ui.deduplication.DuplicateReviewDialog
+import com.pixel.gallery.ui.deduplication.DuplicateViewModel
 
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
@@ -241,6 +248,39 @@ fun MainScaffold(
     photosViewModel: PhotosViewModel = hiltViewModel()
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val duplicateViewModel: DuplicateViewModel = hiltViewModel()
+    val duplicateState by duplicateViewModel.state.collectAsState()
+    val duplicateTrashRequest by duplicateViewModel.trashRequest.collectAsState()
+    val duplicateOriginalAccessRequest by duplicateViewModel.originalAccessRequest.collectAsState()
+    val duplicateOriginalAccessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        duplicateViewModel.onOriginalAccessResult(granted, context.getString(R.string.duplicate_original_access_required))
+    }
+    LaunchedEffect(duplicateOriginalAccessRequest) {
+        if (duplicateOriginalAccessRequest) {
+            duplicateViewModel.originalRequestLaunched()
+            duplicateOriginalAccessLauncher.launch(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
+        }
+    }
+    val duplicateTrashLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        duplicateViewModel.onTrashResult(result.resultCode == android.app.Activity.RESULT_OK)
+    }
+    LaunchedEffect(duplicateState.removedCount) {
+        if (duplicateState.removedCount > 0) photosViewModel.refresh()
+    }
+    LaunchedEffect(duplicateTrashRequest) {
+        duplicateTrashRequest?.let { request ->
+            duplicateViewModel.requestLaunched()
+            try {
+                duplicateTrashLauncher.launch(request)
+            } catch (error: Exception) {
+                duplicateViewModel.requestFailed(error)
+            }
+        }
+    }
     val allPhotos by photosViewModel.photos.collectAsState()
     val groupedPhotos by photosViewModel.groupedPhotos.collectAsState()
     val favourites by photosViewModel.favourites.collectAsState()
@@ -762,6 +802,19 @@ fun MainScaffold(
                                                 ) {
                                                     if (homePagerState.currentPage == 0) {
                                                         DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.duplicate_find_all)) },
+                                                            enabled = allPhotos.size > 1,
+                                                            onClick = {
+                                                                showMenu = false
+                                                                duplicateViewModel.start(
+                                                                    allPhotos,
+                                                                    DeduplicationScope.ALL_FILES,
+                                                                    context.getString(R.string.duplicate_scope_all),
+                                                                )
+                                                            },
+                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
+                                                        )
+                                                        DropdownMenuItem(
                                                             text = { Text("Sort Photos") },
                                                             onClick = {
                                                                 showMenu = false
@@ -775,6 +828,19 @@ fun MainScaffold(
                                                             },
                                                         )
                                                     } else {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.duplicate_find_each_album)) },
+                                                            enabled = allPhotos.size > 1,
+                                                            onClick = {
+                                                                showMenu = false
+                                                                duplicateViewModel.start(
+                                                                    allPhotos,
+                                                                    DeduplicationScope.WITHIN_ALBUMS,
+                                                                    context.getString(R.string.duplicate_scope_each_album),
+                                                                )
+                                                            },
+                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
+                                                        )
                                                         DropdownMenuItem(
                                                             text = { Text("Sort Albums") },
                                                             onClick = {
@@ -1167,6 +1233,13 @@ fun MainScaffold(
                         onAlbumPhotosChanged = { photos ->
                             albumPhotoLists[albumName] = photos
                         },
+                        onDeduplicate = { photos ->
+                            duplicateViewModel.start(
+                                photos,
+                                DeduplicationScope.WITHIN_ALBUMS,
+                                context.getString(R.string.duplicate_scope_album, albumName),
+                            )
+                        },
                         gridState = albumState
                     )
                 }
@@ -1429,6 +1502,13 @@ fun MainScaffold(
             }
         }
     }
+
+    DuplicateReviewDialog(
+        state = duplicateState,
+        onDismiss = duplicateViewModel::dismiss,
+        onToggle = duplicateViewModel::toggle,
+        onConfirm = duplicateViewModel::confirm,
+    )
 
     // Custom sort dialog overlays
         val photoCriteria = remember {

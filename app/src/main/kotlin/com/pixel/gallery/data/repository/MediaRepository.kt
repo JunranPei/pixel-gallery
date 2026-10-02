@@ -107,7 +107,7 @@ class MediaRepository @Inject constructor(
     private val bmpIndexStore by lazy { IndexedBmpStore(context) }
     private val jxlIndexStore by lazy { IndexedJxlStore(context) }
 
-    private suspend fun <T> withMediaMutation(block: suspend () -> T): T =
+    internal suspend fun <T> withMediaMutation(block: suspend () -> T): T =
         mediaMutationMutex.withLock {
             mediaMutationInProgress = true
             try {

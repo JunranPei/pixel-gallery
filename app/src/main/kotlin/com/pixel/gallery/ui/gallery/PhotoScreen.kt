@@ -6,6 +6,9 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.FileCopy
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.R
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +44,7 @@ fun PhotoScreen(
     onSelectionChange: (Set<Long>) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
     onAlbumPhotosChanged: (List<MediaEntry>) -> Unit = {},
+    onDeduplicate: (List<MediaEntry>) -> Unit = {},
     gridState: LazyGridState = rememberLazyGridState(),
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
@@ -145,6 +149,15 @@ fun PhotoScreen(
                                     }
                                 },
                                 leadingIcon = { Icon(Icons.Outlined.FolderOff, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.duplicate_find_album)) },
+                                enabled = albumPhotos.size > 1,
+                                onClick = {
+                                    showMenu = false
+                                    onDeduplicate(albumPhotos)
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) }
                             )
                         }
                     }

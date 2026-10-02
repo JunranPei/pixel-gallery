@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="duplicate_find_all">查找重复文件</string>
+    <string name="duplicate_find_album">在此相册内去重</string>
+    <string name="duplicate_find_each_album">各相册内分别去重</string>
+    <string name="duplicate_scope_all">所有文件</string>
+    <string name="duplicate_scope_album">相册：%1$s</string>
+    <string name="duplicate_scope_each_album">各相册内分别检查</string>
+    <string name="duplicate_review_title">重复文件</string>
+    <string name="duplicate_close">关闭</string>
+    <string name="duplicate_cancel">取消</string>
+    <string name="duplicate_done">完成</string>
+    <string name="duplicate_selection_summary">已选 %1$d 个副本 · %2$s</string>
+    <string name="duplicate_select_all">全选副本</string>
+    <string name="duplicate_deselect_all">取消全选</string>
+    <string name="duplicate_select_copies">选择副本</string>
+    <string name="duplicate_clear_selection">清除</string>
+    <string name="duplicate_trash_unavailable">移入回收站需要 Android 11 或更高版本。您仍可查看重复文件。</string>
+    <string name="duplicate_move_to_bin">将所选副本移入回收站</string>
+    <string name="duplicate_scan_progress">已检查 %1$d / %2$d 个文件</string>
+    <string name="duplicate_scanning">正在检查文件内容…</string>
+    <string name="duplicate_validating">正在重新核对所选副本及保留的原文件…</string>
+    <string name="duplicate_awaiting_permission">正在等待系统授权修改所选文件…</string>
+    <string name="duplicate_verifying">正在重新核对文件并将副本移入回收站…</string>
+    <string name="duplicate_original_access_required">请允许访问照片的原始元数据，以便比较完整文件。未改动任何文件。</string>
+    <string name="duplicate_scan_explanation">仅将内容完全相同的文件归为一组，每组保留一个原文件。请检查所选副本后再确认；扫描不会改动文件。</string>
+    <string name="duplicate_scan_summary">已检查 %1$d 个文件 · 找到 %2$d 组重复文件</string>
+    <string name="duplicate_scan_skipped">跳过了 %1$d 个无法安全检查的文件。</string>
+    <string name="duplicate_none_found">已检查的文件中未发现内容完全相同的副本。</string>
+    <string name="duplicate_group_title">第 %1$d 组 · %2$d 个相同文件</string>
+    <string name="duplicate_retained">保留</string>
+    <string name="duplicate_copy">重复副本</string>
+    <string name="duplicate_recommended">建议保留</string>
+    <string name="duplicate_keep_status">保留</string>
+    <string name="duplicate_move_status">移入回收站</string>
+    <string name="duplicate_unknown_folder">未知文件夹</string>
+    <string name="duplicate_group_size">总大小：%1$s</string>
+    <string name="duplicate_failed">未能完成去重</string>
+    <string name="duplicate_cleanup_cancelled">已取消清理</string>
+    <string name="duplicate_cleanup_complete">清理结束</string>
+    <string name="duplicate_removed_summary">已移入回收站：%1$d 个文件</string>
+    <string name="duplicate_cleanup_skipped">未改动或未能确认的文件：%1$d 个。文件可能已变化、无法访问，或未获准移入回收站。</string>
+    <string name="duplicate_restore_hint">可在回收站中恢复这些文件。</string>
+    <string name="duplicate_confirm_title">将所选副本移入回收站？</string>
+    <string name="duplicate_confirm_message">所选副本：%1$d 个\n检查范围：%2$s\n\n每组标为“保留”的原文件将保留。清理前会重新核对文件，无法安全移除的副本会跳过。</string>
+</resources>

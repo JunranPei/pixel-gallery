@@ -62,6 +62,7 @@ Thank you to the original author and every contributor who made Pixel Gallery po
 - **📷 EXIF Details** - View detailed camera metadata (Model, Aperture, ISO, Shutter Speed).
 - **⚡ Native Performance** - Built from the ground up for Android for maximum speed and efficiency.
 - **🔒 Privacy First** - Your photos stay on your device. No cloud uploads, no tracking.
+- **Duplicate cleanup** - Find identical files from the Photos menu across all visible files, from an album menu within that album, or from the Albums menu within each album separately. Review the retained originals and select copies before moving them to the recycle bin (Android 11+). Original file contents are compared locally, including metadata; files are rechecked after storage authorization. Hidden, excluded, locked and trashed media are outside the scan. Files that cannot be verified are left unchanged.
 
 ## 📱 Screenshots
 
