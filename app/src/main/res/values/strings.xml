@@ -101,6 +101,7 @@
     <string name="duplicate_verifying">Rechecking files and moving copies to Recycle Bin…</string>
     <string name="duplicate_original_access_required">Allow access to original photo metadata to compare complete files. No files were changed.</string>
     <string name="duplicate_scan_explanation">Only files with identical contents are grouped. One original in each group is retained. Review the selected copies before confirming; scanning does not change your files.</string>
+    <string name="duplicate_scan_short">Exact contents only · nothing changes until you confirm.</string>
     <string name="duplicate_scan_summary">Files checked: %1$d · Duplicate groups: %2$d</string>
     <string name="duplicate_scan_skipped">Skipped %1$d files that could not be safely checked.</string>
     <string name="duplicate_none_found">No identical duplicates found in the checked files.</string>

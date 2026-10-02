@@ -203,7 +203,7 @@ fun DuplicateReviewDialog(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 Text(state.title, style = MaterialTheme.typography.titleMedium)
-                                Text(stringResource(R.string.duplicate_scan_explanation))
+                                Text(stringResource(R.string.duplicate_scan_short), style = MaterialTheme.typography.bodyMedium)
                                 Text(stringResource(R.string.duplicate_scan_summary, state.result?.scannedCount ?: 0, groups.size), style = MaterialTheme.typography.bodyMedium)
                                 val skipped = state.result?.skippedCount ?: 0
                                 if (skipped > 0) {
@@ -320,9 +320,9 @@ private fun DuplicateGroupCard(
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 1.dp,
     ) {
-        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+        Column(modifier = Modifier.padding(vertical = 8.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -376,11 +376,11 @@ private fun DuplicateMediaRow(
         onValueChange = { onToggle() },
     )
     Row(
-        modifier = rowModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = rowModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            modifier = Modifier.size(64.dp).clip(MaterialTheme.shapes.small)
+            modifier = Modifier.size(56.dp).clip(MaterialTheme.shapes.small)
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         ) {
             GlideImage(
@@ -399,23 +399,25 @@ private fun DuplicateMediaRow(
                 fontWeight = if (recommended && !selected) FontWeight.Bold else FontWeight.Normal,
             )
             Text(File(entry.path).name.ifBlank { entry.uri }, style = MaterialTheme.typography.bodyMedium)
+            val folder = File(entry.path).parentFile?.name
+                ?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.duplicate_unknown_folder)
+            val timestamp = entry.bestTimestamp.takeIf { it > 0L }
+                ?: entry.sourceDateTakenMillis
+                ?: (entry.dateAddedSecs * 1000L).takeIf { it > 0L }
+            val date = timestamp?.let {
+                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+            }
             Text(
-                File(entry.path).parent ?: stringResource(R.string.duplicate_unknown_folder),
+                listOfNotNull(
+                    folder,
+                    Formatter.formatShortFileSize(context, entry.sizeBytes),
+                    date,
+                ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(entry.path.ifBlank { entry.uri }, style = MaterialTheme.typography.bodySmall)
-            Text(Formatter.formatShortFileSize(context, entry.sizeBytes), style = MaterialTheme.typography.bodySmall)
-            val timestamp = entry.bestTimestamp.takeIf { it > 0L }
-                ?: entry.sourceDateTakenMillis
-                ?: (entry.dateAddedSecs * 1000L).takeIf { it > 0L }
-            timestamp?.let {
-                Text(
-                    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
         }
         Column(horizontalAlignment = Alignment.End) {
             Checkbox(checked = selected, enabled = !disabled, onCheckedChange = null)

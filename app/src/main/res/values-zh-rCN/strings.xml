@@ -24,6 +24,7 @@
     <string name="duplicate_verifying">正在重新核对文件并将副本移入回收站…</string>
     <string name="duplicate_original_access_required">请允许访问照片的原始元数据，以便比较完整文件。未改动任何文件。</string>
     <string name="duplicate_scan_explanation">仅将内容完全相同的文件归为一组，每组保留一个原文件。请检查所选副本后再确认；扫描不会改动文件。</string>
+    <string name="duplicate_scan_short">仅匹配内容完全相同的文件 · 确认前不会改动文件。</string>
     <string name="duplicate_scan_summary">已检查 %1$d 个文件 · 找到 %2$d 组重复文件</string>
     <string name="duplicate_scan_skipped">跳过了 %1$d 个无法安全检查的文件。</string>
     <string name="duplicate_none_found">已检查的文件中未发现内容完全相同的副本。</string>

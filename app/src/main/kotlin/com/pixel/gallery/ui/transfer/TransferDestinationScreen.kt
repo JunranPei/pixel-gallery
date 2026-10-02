@@ -31,7 +31,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -254,14 +253,6 @@ fun TransferDestinationScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                actions = {
-                    IconButton(
-                        onClick = { showCreateFolderDialog = true },
-                        enabled = !transferState.isRunning
-                    ) {
-                        Icon(Icons.Default.CreateNewFolder, contentDescription = "Create folder")
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -327,7 +318,7 @@ fun TransferDestinationScreen(
                     modifier = Modifier.weight(1f),
                     enabled = !transferState.isRunning
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null)
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("New folder", maxLines = 1)
                 }

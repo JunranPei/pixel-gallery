@@ -802,19 +802,6 @@ fun MainScaffold(
                                                 ) {
                                                     if (homePagerState.currentPage == 0) {
                                                         DropdownMenuItem(
-                                                            text = { Text(stringResource(R.string.duplicate_find_all)) },
-                                                            enabled = allPhotos.size > 1,
-                                                            onClick = {
-                                                                showMenu = false
-                                                                duplicateViewModel.start(
-                                                                    allPhotos,
-                                                                    DeduplicationScope.ALL_FILES,
-                                                                    context.getString(R.string.duplicate_scope_all),
-                                                                )
-                                                            },
-                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
-                                                        )
-                                                        DropdownMenuItem(
                                                             text = { Text("Sort Photos") },
                                                             onClick = {
                                                                 showMenu = false
@@ -828,19 +815,6 @@ fun MainScaffold(
                                                             },
                                                         )
                                                     } else {
-                                                        DropdownMenuItem(
-                                                            text = { Text(stringResource(R.string.duplicate_find_each_album)) },
-                                                            enabled = allPhotos.size > 1,
-                                                            onClick = {
-                                                                showMenu = false
-                                                                duplicateViewModel.start(
-                                                                    allPhotos,
-                                                                    DeduplicationScope.WITHIN_ALBUMS,
-                                                                    context.getString(R.string.duplicate_scope_each_album),
-                                                                )
-                                                            },
-                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
-                                                        )
                                                         DropdownMenuItem(
                                                             text = { Text("Sort Albums") },
                                                             onClick = {
@@ -883,6 +857,35 @@ fun MainScaffold(
                                                             )
                                                         },
                                                     )
+                                                    if (homePagerState.currentPage == 0) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.duplicate_find_all)) },
+                                                            enabled = allPhotos.size > 1,
+                                                            onClick = {
+                                                                showMenu = false
+                                                                duplicateViewModel.start(
+                                                                    allPhotos,
+                                                                    DeduplicationScope.ALL_FILES,
+                                                                    context.getString(R.string.duplicate_scope_all),
+                                                                )
+                                                            },
+                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
+                                                        )
+                                                    } else {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.duplicate_find_each_album)) },
+                                                            enabled = allPhotos.size > 1,
+                                                            onClick = {
+                                                                showMenu = false
+                                                                duplicateViewModel.start(
+                                                                    allPhotos,
+                                                                    DeduplicationScope.WITHIN_ALBUMS,
+                                                                    context.getString(R.string.duplicate_scope_each_album),
+                                                                )
+                                                            },
+                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
+                                                        )
+                                                    }
                                                     DropdownMenuItem(
                                                         text = { Text("Settings") },
                                                         onClick = {

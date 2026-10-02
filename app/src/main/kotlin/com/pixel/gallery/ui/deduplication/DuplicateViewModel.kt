@@ -127,10 +127,14 @@ class DuplicateViewModel @Inject constructor(private val repository: DuplicateRe
                     _state.update { it.copy(skippedCount = it.skippedCount + batchIds.size - pendingEntries.size) }
                     if (pendingEntries.isEmpty()) continue
                     if (!repository.needsWriteAccess) {
-                        val removed = repository.trashAfterPermission(
+                        val removedIds = repository.trashAfterPermissionDetailed(
                             requireNotNull(cleanupResult), pendingEntries.map { it.contentId }.toSet(),
                         ) { progress -> _state.update { it.copy(progress = progress) } }
-                        _state.update { it.copy(removedCount = it.removedCount + removed, skippedCount = it.skippedCount + pendingEntries.size - removed) }
+                        _state.update { it.copy(
+                            removedCount = it.removedCount + removedIds.size,
+                            skippedCount = it.skippedCount + pendingEntries.size - removedIds.size,
+                        ) }
+                        updateReviewAfterRemoval(removedIds)
                         pendingEntries = emptyList()
                         continue
                     }
@@ -159,20 +163,25 @@ class DuplicateViewModel @Inject constructor(private val repository: DuplicateRe
         if (_state.value.phase != DuplicatePhase.AWAITING_PERMISSION) return
         _trashRequest.value = null
         if (!granted) {
+            // The system prompt was dismissed; nothing was removed. Return to the same review
+            // list so the user can adjust the selection and try another batch.
             pendingEntries = emptyList()
-            finish(cancelled = true)
+            remainingIds = emptyList()
+            cleanupResult = null
+            _state.update { it.copy(phase = DuplicatePhase.REVIEW, progress = null, cancelled = false) }
             return
         }
         _state.update { it.copy(phase = DuplicatePhase.VERIFYING) }
         job = viewModelScope.launch {
             try {
-                val removed = repository.trashAfterPermission(
+                val removedIds = repository.trashAfterPermissionDetailed(
                     requireNotNull(cleanupResult), pendingEntries.map { it.contentId }.toSet(),
                 ) { progress -> _state.update { it.copy(progress = progress) } }
                 _state.update { it.copy(
-                    removedCount = it.removedCount + removed,
-                    skippedCount = it.skippedCount + pendingEntries.size - removed,
+                    removedCount = it.removedCount + removedIds.size,
+                    skippedCount = it.skippedCount + pendingEntries.size - removedIds.size,
                 ) }
+                updateReviewAfterRemoval(removedIds)
                 pendingEntries = emptyList()
                 prepareNextBatch()
             } catch (cancelled: CancellationException) {
@@ -202,7 +211,35 @@ class DuplicateViewModel @Inject constructor(private val repository: DuplicateRe
 
     private fun finish(cancelled: Boolean = false) {
         remainingIds = emptyList()
-        _state.update { it.copy(phase = DuplicatePhase.COMPLETE, progress = null, cancelled = cancelled) }
+        cleanupResult = null
+        _state.update { current ->
+            // A cleanup request may contain only one batch of a larger review. Keep the same
+            // dialog open so groups that still have two live files can be reviewed again.
+            if (!cancelled && current.result?.groups?.isNotEmpty() == true) {
+                current.copy(
+                    phase = DuplicatePhase.REVIEW,
+                    progress = null,
+                    selectedIds = emptySet(),
+                    cancelled = false,
+                )
+            } else {
+                current.copy(phase = DuplicatePhase.COMPLETE, progress = null, cancelled = cancelled)
+            }
+        }
+    }
+
+    /** Remove only entries confirmed by the platform and keep the review list alive when groups remain. */
+    private fun updateReviewAfterRemoval(removedIds: Set<Long>) {
+        if (removedIds.isEmpty()) return
+        _state.update { current ->
+            val result = current.result ?: return@update current
+            val groups = result.groups.mapNotNull { group ->
+                val remaining = group.entries.filterNot { it.contentId in removedIds }
+                if (remaining.size < 2) null
+                else DuplicateGroup(remaining.first(), remaining.drop(1), group.fingerprint)
+            }
+            current.copy(result = result.copy(groups = groups), selectedIds = emptySet())
+        }
     }
 
     private fun fail(error: Exception) {

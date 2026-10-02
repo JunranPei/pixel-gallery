@@ -67,10 +67,21 @@ class DuplicateRepository @Inject constructor(
         result: DuplicateScanResult,
         selectedIds: Set<Long>,
         onProgress: (DuplicateScanProgress) -> Unit,
-    ): Int = mediaRepository.withMediaMutation {
+    ): Int = trashAfterPermissionDetailed(result, selectedIds, onProgress).size
+
+    /**
+     * Performs the final revalidation and moves only entries that still match the snapshot to the
+     * recycle bin. Returning the actual IDs is important for the review screen: a failed conditional
+     * update must remain visible so the user can inspect it and choose another cleanup batch.
+     */
+    suspend fun trashAfterPermissionDetailed(
+        result: DuplicateScanResult,
+        selectedIds: Set<Long>,
+        onProgress: (DuplicateScanProgress) -> Unit,
+    ): Set<Long> = mediaRepository.withMediaMutation {
         withContext(Dispatchers.IO) {
             check(canTrash)
-            var removed = 0
+            val removedIds = linkedSetOf<Long>()
             // Serialize with gallery moves/restores and validate each group immediately before
             // mutation. No deletion is delegated to a system prompt with a stale fingerprint.
             for (group in result.groups) {
@@ -94,10 +105,10 @@ class DuplicateRepository @Inject constructor(
                         resolver.update(Uri.parse(entry.uri), values, selection, selectionArgs) == 1 &&
                             query(entry, arrayOf(MediaStore.MediaColumns.IS_TRASHED)) { it.getInt(0) == 1 }
                     }.getOrDefault(false)
-                    if (trashed) removed++
+                    if (trashed) removedIds += entry.contentId
                 }
             }
-            removed
+            removedIds
         }
     }
 
