@@ -101,15 +101,32 @@ fun DuplicateReviewDialog(
             },
             bottomBar = {
                 if (state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()) {
-                    Surface(tonalElevation = 3.dp) {
+                    Surface(
+                        // Keep this area opaque and aligned with the page background so it
+                        // reads as part of the screen instead of a floating color block.
+                        color = MaterialTheme.colorScheme.background,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                    ) {
                         Column(
-                            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                Text(
+                                    stringResource(
+                                        R.string.duplicate_selection_summary,
+                                        selectedEntries.size,
+                                        Formatter.formatShortFileSize(context, selectedBytes),
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
                                 TextButton(
                                     onClick = {
                                         groups.flatMap { it.entries.drop(1) }
@@ -124,14 +141,6 @@ fun DuplicateReviewDialog(
                                     enabled = selectedEntries.isNotEmpty(),
                                 ) { Text(stringResource(R.string.duplicate_clear_selection)) }
                             }
-                            Text(
-                                stringResource(
-                                    R.string.duplicate_selection_summary,
-                                    selectedEntries.size,
-                                    Formatter.formatShortFileSize(context, selectedBytes),
-                                ),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
                             if (!state.canTrash) {
                                 Text(
                                     stringResource(R.string.duplicate_trash_unavailable),

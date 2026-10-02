@@ -622,15 +622,16 @@ private fun TransferBottomBar(
     onMove: () -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 3.dp,
-        shadowElevation = 8.dp
+        // Use a solid page-colored surface; no translucent overlay or oversized panel.
+        color = MaterialTheme.colorScheme.background,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text(
                 text = if (isRunning) progressLabel.orEmpty() else destination?.displayName ?: "Select a destination",
@@ -645,7 +646,7 @@ private fun TransferBottomBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
             if (isRunning) {
                 LinearProgressIndicator(
                     progress = { (progress ?: 0f).coerceIn(0f, 1f) },
