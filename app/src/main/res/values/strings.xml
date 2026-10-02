@@ -88,8 +88,6 @@
     <string name="duplicate_cancel">Cancel</string>
     <string name="duplicate_done">Done</string>
     <string name="duplicate_selection_summary">Selected: %1$d copies · %2$s</string>
-    <string name="duplicate_select_all">Select all copies</string>
-    <string name="duplicate_deselect_all">Deselect all</string>
     <string name="duplicate_select_copies">Select all copies</string>
     <string name="duplicate_clear_selection">Deselect all copies</string>
     <string name="duplicate_trash_unavailable">Moving duplicates to the recycle bin requires Android 11 or later. You can still review the results.</string>

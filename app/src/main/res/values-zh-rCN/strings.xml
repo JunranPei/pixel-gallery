@@ -11,8 +11,6 @@
     <string name="duplicate_cancel">取消</string>
     <string name="duplicate_done">完成</string>
     <string name="duplicate_selection_summary">已选 %1$d 个副本 · %2$s</string>
-    <string name="duplicate_select_all">全选副本</string>
-    <string name="duplicate_deselect_all">取消全选</string>
     <string name="duplicate_select_copies">选择全部副本</string>
     <string name="duplicate_clear_selection">取消全选副本</string>
     <string name="duplicate_trash_unavailable">移入回收站需要 Android 11 或更高版本。您仍可查看重复文件。</string>
