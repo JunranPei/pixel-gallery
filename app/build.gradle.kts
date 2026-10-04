@@ -116,7 +116,8 @@ android {
             } else {
                 include("arm64-v8a")
             }
-            isUniversalApk = officialRelease
+            // Ship one APK per ABI; do not generate a universal APK.
+            isUniversalApk = false
         }
     }
 
