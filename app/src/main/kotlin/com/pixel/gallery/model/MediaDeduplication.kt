@@ -61,21 +61,24 @@ class MediaDeduplication(private val openInputStream: (MediaEntry) -> InputStrea
                 if (!valid) skipped += DuplicateSkippedFile(entry, DuplicateSkipReason.INVALID_SIZE)
             }
         }
-        // Hash every active entry in the scan snapshot. Size is still used to
-        // avoid comparing different-sized files, but it must not hide files
-        // from the progress count or the content check.
         val candidates = eligible.groupBy { entry ->
             val partition = when (scope) {
                 DeduplicationScope.ALL_FILES -> ""
                 DeduplicationScope.WITHIN_ALBUMS -> albumPath(entry)
             }
             partition to entry.sizeBytes
-        }.values
+        }.values.filter { it.size > 1 }
         val total = unique.size
         var completed = 0
         onProgress(DuplicateScanProgress(completed, total))
         val groups = mutableListOf<DuplicateGroup>()
-        unique.filter { it.sizeBytes < 0L }.forEach {
+        val candidateIds = candidates.asSequence()
+            .flatten()
+            .map { it.contentId }
+            .toSet()
+        // Files whose size is unique have already been ruled out by the exact
+        // duplicate criterion. Count that metadata check without opening them.
+        unique.filter { it.contentId !in candidateIds }.forEach {
             onProgress(DuplicateScanProgress(++completed, total))
         }
         for (bucket in candidates) {

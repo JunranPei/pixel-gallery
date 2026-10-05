@@ -69,7 +69,7 @@ class MediaDeduplicationTest {
 
         val result = engine.scan(listOf(entry(1, size = 1), entry(2, size = 2)))
 
-        assertEquals(2, opened)
+        assertEquals(0, opened)
         assertEquals(2, result.scannedCount)
         assertTrue(result.groups.isEmpty())
     }
@@ -86,7 +86,7 @@ class MediaDeduplicationTest {
         val result = MediaDeduplication { opened++; "same".byteInputStream() }
             .scan(listOf(a, b, bridge, repeatedId, repeatedPath, a))
 
-        assertEquals(1, opened)
+        assertEquals(0, opened)
         assertTrue(result.groups.isEmpty())
     }
 
