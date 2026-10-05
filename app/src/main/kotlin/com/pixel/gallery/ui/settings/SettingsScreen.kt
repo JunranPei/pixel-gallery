@@ -2,6 +2,7 @@ package com.pixel.gallery.ui.settings
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -17,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.clickable
 import com.pixel.gallery.BuildConfig
 
@@ -49,43 +51,72 @@ fun SettingsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
+            contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             item {
-                SettingsClickItem(
-                    title = "Themes",
-                    description = "Material You and light/dark mode",
-                    icon = Icons.Outlined.Palette,
-                    onClick = onNavigateToThemeSettings
-                )
+                SettingsSurface(shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp)) {
+                    SettingsClickItem(
+                        title = "Themes",
+                        description = "Material You and light/dark mode",
+                        icon = Icons.Outlined.Palette,
+                        onClick = onNavigateToThemeSettings,
+                    )
+                }
             }
             item {
-                SettingsClickItem(
-                    title = "Display",
-                    description = "Choose startup tab and manage excluded folders",
-                    icon = Icons.Outlined.Tab,
-                    onClick = onNavigateToDisplaySettings
-                )
+                SettingsSurface {
+                    SettingsClickItem(
+                        title = "Display",
+                        description = "Choose startup tab and manage excluded folders",
+                        icon = Icons.Outlined.Tab,
+                        onClick = onNavigateToDisplaySettings,
+                    )
+                }
             }
             item {
-                SettingsClickItem(
-                    title = "Performance & Caching",
-                    description = "Manage cache limit, threads and cleanup",
-                    icon = Icons.Outlined.Speed,
-                    onClick = onNavigateToPerformanceSettings
-                )
+                SettingsSurface(shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp)) {
+                    SettingsClickItem(
+                        title = "Performance & Caching",
+                        description = "Manage cache limit, threads and cleanup",
+                        icon = Icons.Outlined.Speed,
+                        onClick = onNavigateToPerformanceSettings,
+                    )
+                }
             }
 
             item {
-                SettingsClickItem(
-                    title = "About",
-                    description = "Pixel Gallery v${BuildConfig.VERSION_NAME}",
-                    icon = Icons.Outlined.Info,
-                    onClick = onNavigateToLicenses
-                )
+                SettingsSurface(
+                    modifier = Modifier.padding(top = 24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = RoundedCornerShape(24.dp),
+                ) {
+                    SettingsClickItem(
+                        title = "About",
+                        description = "Pixel Gallery v${BuildConfig.VERSION_NAME}",
+                        icon = Icons.Outlined.Info,
+                        onClick = onNavigateToLicenses,
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+fun SettingsSurface(
+    modifier: Modifier = Modifier,
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceContainer,
+    shape: Shape = RoundedCornerShape(6.dp),
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = color,
+        shape = shape,
+        content = content,
+    )
 }
 
 @Composable

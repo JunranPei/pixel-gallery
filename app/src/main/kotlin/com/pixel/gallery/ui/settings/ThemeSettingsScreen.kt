@@ -66,12 +66,12 @@ fun ThemeSettingsScreen(
                 end = 20.dp,
                 bottom = 32.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(28.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             item {
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
@@ -104,8 +104,8 @@ fun ThemeSettingsScreen(
             }
             item {
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     SettingsToggleItem(
