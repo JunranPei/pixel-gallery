@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.clickable
 import com.pixel.gallery.BuildConfig
@@ -128,6 +129,7 @@ fun SettingsToggleItem(
     onCheckedChange: (Boolean) -> Unit
 ) {
     ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { 
             Text(
                 title,
@@ -154,6 +156,7 @@ fun SettingsClickItem(
 ) {
     ListItem(
         modifier = Modifier.clickable { onClick() },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { 
             Text(
                 title,
@@ -177,6 +180,7 @@ fun SettingsSliderItem(
 ) {
     var sliderValue by remember(value) { mutableStateOf(value) }
     ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { 
             Text(
                 title,
