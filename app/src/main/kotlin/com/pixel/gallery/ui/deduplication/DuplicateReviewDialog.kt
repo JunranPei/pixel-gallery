@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -91,9 +93,14 @@ fun DuplicateReviewDialog(
     ) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            containerColor = Color.White,
             topBar = {
                 TopAppBar(
                     title = { Text(stringResource(R.string.duplicate_review_title)) },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.White,
+                        scrolledContainerColor = Color.White,
+                    ),
                     navigationIcon = {
                         IconButton(onClick = onDismiss, enabled = canDismiss) {
                             Icon(Icons.Default.Close, stringResource(R.string.duplicate_close))
@@ -106,7 +113,7 @@ fun DuplicateReviewDialog(
                     Surface(
                         // Keep this area opaque and aligned with the page background so it
                         // reads as part of the screen instead of a floating color block.
-                        color = MaterialTheme.colorScheme.background,
+                        color = Color.White,
                         tonalElevation = 0.dp,
                         shadowElevation = 0.dp,
                     ) {
