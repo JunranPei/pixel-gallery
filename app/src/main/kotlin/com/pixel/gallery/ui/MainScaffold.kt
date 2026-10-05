@@ -595,6 +595,9 @@ fun MainScaffold(
     }
 
     val colorScheme = MaterialTheme.colorScheme
+    // Use one theme surface for the shell so the title bar and scrolling body
+    // stay identical in light and dark modes, including Samsung dynamic colors.
+    val appShellColor = colorScheme.surface
     val navigateBack: () -> Unit = {
         if (navigationStack.size > 1) {
             navigationStack = navigationStack.dropLast(1)
@@ -610,13 +613,11 @@ fun MainScaffold(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // Keep the app shell background identical to the opaque top bar on
-            // devices whose dynamic Material colors give `background` a tint.
-            .background(Color.White)
+            .background(appShellColor)
     ) {
         Scaffold(
             contentWindowInsets = WindowInsets(0), // Manual padding for full control
-        containerColor = Color.White,
+        containerColor = appShellColor,
             modifier = Modifier
                 .nestedScroll(scrollBehavior)
                 .then(
@@ -1053,8 +1054,8 @@ fun MainScaffold(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.White,
-                        scrolledContainerColor = Color.White,
+                        containerColor = appShellColor,
+                        scrolledContainerColor = appShellColor,
                         titleContentColor = colorScheme.onSurface
                     ),
                     windowInsets = WindowInsets.statusBars,
