@@ -17,6 +17,7 @@ import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.model.TransferProgress
 import com.pixel.gallery.model.TransferSummary
 import com.pixel.gallery.model.buildTransferDestinations
+import com.pixel.gallery.model.ThemeMode
 import javax.inject.Inject
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -278,6 +279,9 @@ class PhotosViewModel @Inject constructor(
     val materialYou: StateFlow<Boolean> = settingsRepository.materialYou
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val themeMode: StateFlow<ThemeMode> = settingsRepository.themeMode
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
+
     val glideThreadCount: StateFlow<Int> = settingsRepository.glideThreadCount
         .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
  
@@ -521,6 +525,12 @@ class PhotosViewModel @Inject constructor(
     fun setMaterialYou(value: Boolean) {
         viewModelScope.launch {
             settingsRepository.setMaterialYou(value)
+        }
+    }
+
+    fun setThemeMode(value: ThemeMode) {
+        viewModelScope.launch {
+            settingsRepository.setThemeMode(value)
         }
     }
 

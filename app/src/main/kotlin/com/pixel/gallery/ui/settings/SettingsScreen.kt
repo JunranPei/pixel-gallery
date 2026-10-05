@@ -7,31 +7,28 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Tab
-import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Tab
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.BuildConfig
-import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onNavigateToExcludedFolders: () -> Unit,
+    onNavigateToThemeSettings: () -> Unit,
+    onNavigateToDisplaySettings: () -> Unit,
     onNavigateToLicenses: () -> Unit,
     onNavigateToPerformanceSettings: () -> Unit,
-    viewModel: PhotosViewModel = hiltViewModel()
 ) {
-    val materialYou by viewModel.materialYou.collectAsState()
-    val startupAtAlbums by viewModel.startupAtAlbums.collectAsState()
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -55,21 +52,19 @@ fun SettingsScreen(
                 .padding(innerPadding)
         ) {
             item {
-                SettingsToggleItem(
-                    title = "Material You",
-                    description = "Use system dynamic colors",
+                SettingsClickItem(
+                    title = "Themes",
+                    description = "Material You and light/dark mode",
                     icon = Icons.Outlined.Palette,
-                    checked = materialYou,
-                    onCheckedChange = { viewModel.setMaterialYou(it) }
+                    onClick = onNavigateToThemeSettings
                 )
             }
             item {
-                SettingsToggleItem(
-                    title = "Start at Albums",
-                    description = "Open the albums tab by default",
+                SettingsClickItem(
+                    title = "Display",
+                    description = "Choose startup tab and manage excluded folders",
                     icon = Icons.Outlined.Tab,
-                    checked = startupAtAlbums,
-                    onCheckedChange = { viewModel.setStartupAtAlbums(it) }
+                    onClick = onNavigateToDisplaySettings
                 )
             }
             item {
@@ -81,15 +76,6 @@ fun SettingsScreen(
                 )
             }
 
-            item {
-                SettingsClickItem(
-                    title = "Excluded Folders",
-                    description = "Manage ignored media locations",
-                    icon = Icons.Outlined.FolderOff,
-                    onClick = onNavigateToExcludedFolders
-                )
-            }
-            item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
             item {
                 SettingsClickItem(
                     title = "About",

@@ -44,6 +44,8 @@ import com.pixel.gallery.ui.settings.LicensesScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.components.DeleteConfirmDialog
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
+import com.pixel.gallery.ui.settings.ThemeSettingsScreen
+import com.pixel.gallery.ui.settings.DisplaySettingsScreen
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
@@ -231,6 +233,8 @@ sealed class Screen : Parcelable {
     @Parcelize object Licenses : Screen()
     @Parcelize data class Photo(val albumName: String) : Screen()
     @Parcelize object PerformanceSettings : Screen()
+    @Parcelize object ThemeSettings : Screen()
+    @Parcelize object DisplaySettings : Screen()
     @Parcelize data class TransferDestination(
         val entryIds: LongArray,
         val origin: TransferOrigin
@@ -1161,12 +1165,20 @@ fun MainScaffold(
                 }
                 Screen.Settings -> SettingsScreen(
                     onBack = navigateBack,
-                    onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
+                    onNavigateToThemeSettings = { navigationStack = navigationStack + Screen.ThemeSettings },
+                    onNavigateToDisplaySettings = { navigationStack = navigationStack + Screen.DisplaySettings },
                     onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
                     onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings }
                 )
                 Screen.PerformanceSettings -> PerformanceSettingsScreen(
                     onBack = navigateBack
+                )
+                Screen.ThemeSettings -> ThemeSettingsScreen(
+                    onBack = navigateBack,
+                )
+                Screen.DisplaySettings -> DisplaySettingsScreen(
+                    onBack = navigateBack,
+                    onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
                 )
                 Screen.Favourites -> FavouritesScreen(
                     onBack = navigateBack,

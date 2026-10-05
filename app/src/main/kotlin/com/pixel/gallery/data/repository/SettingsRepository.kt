@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.pixel.gallery.model.ThemeMode
 
 import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.preferencesDataStore
@@ -28,6 +29,7 @@ class SettingsRepository @Inject constructor(
 ) {
     private val STARTUP_AT_ALBUMS = booleanPreferencesKey("flutter.albums")
     private val MATERIAL_YOU = booleanPreferencesKey("flutter.material_you")
+    private val THEME_MODE = stringPreferencesKey("theme_mode")
     private val EXCLUDED_FOLDERS = stringSetPreferencesKey("excluded_folders")
     private val HIDDEN_FOLDERS = stringSetPreferencesKey("hidden_folders")
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
@@ -43,6 +45,15 @@ class SettingsRepository @Inject constructor(
     val materialYou: Flow<Boolean> = context.dataStore.data
         .map { preferences -> preferences[MATERIAL_YOU] ?: true }
 
+    val themeMode: Flow<ThemeMode> = context.dataStore.data
+        .map { preferences ->
+            when (preferences[THEME_MODE]) {
+                ThemeMode.LIGHT.name -> ThemeMode.LIGHT
+                ThemeMode.DARK.name -> ThemeMode.DARK
+                else -> ThemeMode.SYSTEM
+            }
+        }
+
     suspend fun setStartupAtAlbums(value: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[STARTUP_AT_ALBUMS] = value
@@ -52,6 +63,12 @@ class SettingsRepository @Inject constructor(
     suspend fun setMaterialYou(value: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[MATERIAL_YOU] = value
+        }
+    }
+
+    suspend fun setThemeMode(value: ThemeMode) {
+        context.dataStore.edit { preferences ->
+            preferences[THEME_MODE] = value.name
         }
     }
 

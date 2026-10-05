@@ -15,7 +15,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Modifier
+import com.pixel.gallery.model.ThemeMode
 import com.pixel.gallery.ui.MainScaffold
 import com.pixel.gallery.ui.theme.PixelGalleryTheme
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -52,7 +56,15 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         
         setContent {
-            PixelGalleryTheme {
+            val materialYou by viewModel.materialYou.collectAsState(initial = true)
+            val themeMode by viewModel.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
+            val systemDarkTheme = isSystemInDarkTheme()
+            val darkTheme = when (themeMode) {
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+                ThemeMode.SYSTEM -> systemDarkTheme
+            }
+            PixelGalleryTheme(darkTheme = darkTheme, dynamicColor = materialYou) {
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
