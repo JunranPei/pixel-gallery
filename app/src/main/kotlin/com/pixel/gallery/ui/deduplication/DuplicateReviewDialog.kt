@@ -91,24 +91,30 @@ fun DuplicateReviewDialog(
             dismissOnClickOutside = false,
         ),
     ) {
-        Scaffold(
+        Surface(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color.White,
-            topBar = {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.duplicate_review_title)) },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.White,
-                        scrolledContainerColor = Color.White,
-                    ),
-                    navigationIcon = {
-                        IconButton(onClick = onDismiss, enabled = canDismiss) {
-                            Icon(Icons.Default.Close, stringResource(R.string.duplicate_close))
-                        }
-                    },
-                )
-            },
-            bottomBar = {
+            color = Color.White,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                containerColor = Color.White,
+                topBar = {
+                    TopAppBar(
+                        title = { Text(stringResource(R.string.duplicate_review_title)) },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.White,
+                            scrolledContainerColor = Color.White,
+                        ),
+                        navigationIcon = {
+                            IconButton(onClick = onDismiss, enabled = canDismiss) {
+                                Icon(Icons.Default.Close, stringResource(R.string.duplicate_close))
+                            }
+                        },
+                    )
+                },
+                bottomBar = {
                 if (state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()) {
                     Surface(
                         // Keep this area opaque and aligned with the page background so it
@@ -167,9 +173,9 @@ fun DuplicateReviewDialog(
                             }
                         }
                     }
-                }
-            },
-        ) { padding ->
+                    }
+                },
+            ) { padding ->
             when (state.phase) {
                 DuplicatePhase.IDLE,
                 DuplicatePhase.SCANNING,
@@ -177,7 +183,11 @@ fun DuplicateReviewDialog(
                 DuplicatePhase.AWAITING_PERMISSION,
                 DuplicatePhase.VERIFYING -> {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White)
+                            .padding(padding)
+                            .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
@@ -215,7 +225,10 @@ fun DuplicateReviewDialog(
 
                 DuplicatePhase.REVIEW -> {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize().padding(padding),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White)
+                            .padding(padding),
                     ) {
                         item("summary") {
                             Column(
@@ -288,6 +301,7 @@ fun DuplicateReviewDialog(
                             }
                         }
                     }
+                }
                 }
             }
         }
