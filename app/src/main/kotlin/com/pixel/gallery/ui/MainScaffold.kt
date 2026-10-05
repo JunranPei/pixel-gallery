@@ -607,9 +607,16 @@ fun MainScaffold(
         (allPhotos + trash + vault).filter { selectedIds.contains(it.contentId) }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Keep the app shell background identical to the opaque top bar on
+            // devices whose dynamic Material colors give `background` a tint.
+            .background(Color.White)
+    ) {
         Scaffold(
             contentWindowInsets = WindowInsets(0), // Manual padding for full control
+        containerColor = Color.White,
             modifier = Modifier
                 .nestedScroll(scrollBehavior)
                 .then(
@@ -1046,7 +1053,8 @@ fun MainScaffold(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = colorScheme.surface,
+                        containerColor = Color.White,
+                        scrolledContainerColor = Color.White,
                         titleContentColor = colorScheme.onSurface
                     ),
                     windowInsets = WindowInsets.statusBars,
