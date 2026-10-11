@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="labels_title">Labels</string>
+    <string name="label_edit">Edit labels</string>
+    <string name="labels_favourites">Favourites</string>
+    <string name="labels_empty">No labels yet</string>
+    <string name="labels_empty_hint">Create labels to organize photos and videos across albums.</string>
+    <string name="labels_new">New label</string>
+    <string name="labels_name">Label name</string>
+    <string name="labels_search">Search or create a label</string>
+    <string name="labels_new_from_query">Create “%1$s”</string>
+    <string name="labels_apply">Apply</string>
+    <string name="labels_cancel">Cancel</string>
+    <string name="labels_back">Back</string>
+    <string name="labels_more">More options</string>
+    <string name="labels_rename">Rename label</string>
+    <string name="labels_delete">Delete label</string>
+    <string name="labels_delete_title">Delete “%1$s”?</string>
+    <string name="labels_delete_message">This removes the label from all files. Your photos and videos will be kept.</string>
+    <string name="labels_save">Save</string>
+    <string name="labels_done">Done</string>
+    <string name="labels_count">%1$d items</string>
+    <string name="labels_selection_count">%1$d selected</string>
+    <string name="labels_mixed">Some selected files</string>
+    <string name="labels_pending">New label</string>
+    <string name="labels_invalid_name">Use 1–60 characters without line breaks.</string>
+    <string name="labels_duplicate_name">A label with this name already exists.</string>
+    <string name="labels_unavailable">A label has changed. Close this sheet and try again.</string>
+    <string name="labels_media_unavailable">Some files have moved or are no longer available. Reopen them to edit their labels.</string>
+    <string name="labels_save_failed">Could not save labels. Please try again.</string>
+    <string name="labels_dismiss_error">Dismiss</string>
+    <string name="labels_discard_changes">Discard changes</string>
+    <string name="labels_remove_from">Remove from label</string>
+    <string name="labels_empty_contents">No files with this label</string>
+    <string name="labels_empty_contents_hint">Select files and choose Edit labels to add them here.</string>
+</resources>

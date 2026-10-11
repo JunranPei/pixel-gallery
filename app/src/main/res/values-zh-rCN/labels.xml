@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="labels_title">标签</string>
+    <string name="label_edit">编辑标签</string>
+    <string name="labels_favourites">收藏</string>
+    <string name="labels_empty">还没有标签</string>
+    <string name="labels_empty_hint">创建标签，整理不同相册中的照片和视频。</string>
+    <string name="labels_new">新建标签</string>
+    <string name="labels_name">标签名称</string>
+    <string name="labels_search">搜索或新建标签</string>
+    <string name="labels_new_from_query">新建“%1$s”</string>
+    <string name="labels_apply">应用</string>
+    <string name="labels_cancel">取消</string>
+    <string name="labels_back">返回</string>
+    <string name="labels_more">更多选项</string>
+    <string name="labels_rename">重命名标签</string>
+    <string name="labels_delete">删除标签</string>
+    <string name="labels_delete_title">删除“%1$s”？</string>
+    <string name="labels_delete_message">这会移除所有文件上的此标签，照片和视频将保留。</string>
+    <string name="labels_save">保存</string>
+    <string name="labels_done">完成</string>
+    <string name="labels_count">%1$d 个文件</string>
+    <string name="labels_selection_count">已选择 %1$d 项</string>
+    <string name="labels_mixed">部分所选文件已有此标签</string>
+    <string name="labels_pending">新标签</string>
+    <string name="labels_invalid_name">请输入 1–60 个字符，不含换行。</string>
+    <string name="labels_duplicate_name">已存在同名标签。</string>
+    <string name="labels_unavailable">标签已发生变化，请关闭面板后重试。</string>
+    <string name="labels_media_unavailable">部分文件已移动或无法访问，请重新打开文件后编辑标签。</string>
+    <string name="labels_save_failed">无法保存标签，请重试。</string>
+    <string name="labels_dismiss_error">关闭</string>
+    <string name="labels_discard_changes">放弃更改</string>
+    <string name="labels_remove_from">移出此标签</string>
+    <string name="labels_empty_contents">此标签下还没有文件</string>
+    <string name="labels_empty_contents_hint">选择文件并点击“编辑标签”，即可添加到这里。</string>
+</resources>

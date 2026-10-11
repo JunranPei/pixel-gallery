@@ -43,6 +43,9 @@ interface MediaDao {
     @Query("DELETE FROM media_entries WHERE contentId IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
 
+    @Query("SELECT * FROM media_entries WHERE contentId IN (:ids)")
+    suspend fun getEntriesByIds(ids: List<Long>): List<MediaEntry>
+
     @Transaction
     suspend fun reconcileMedia(entries: List<MediaEntry>, obsoleteIds: List<Long>) {
         if (entries.isNotEmpty()) insertAll(entries)
@@ -50,10 +53,10 @@ interface MediaDao {
     }
 
     // --- Favourites ---
-    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 0 AND contentId IN (SELECT id FROM favourites)")
+    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 0 AND contentId IN (SELECT contentId FROM media_labels WHERE labelId = 1)")
     fun observeFavouritesChanges(): Flow<Int>
 
-    @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId > :afterContentId AND contentId IN (SELECT id FROM favourites) ORDER BY contentId LIMIT :limit")
+    @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId > :afterContentId AND contentId IN (SELECT contentId FROM media_labels WHERE labelId = 1) ORDER BY contentId LIMIT :limit")
     suspend fun getFavouritesPage(limit: Int, afterContentId: Long): List<MediaEntry>
 
     @Transaction
@@ -61,14 +64,29 @@ interface MediaDao {
         loadAllPages(::getFavouritesPage, MediaEntry::contentId)
             .sortedWith(compareByDescending<MediaEntry> { it.bestTimestamp }.thenByDescending { it.contentId })
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun addFavourite(favourite: FavouriteEntry)
+    suspend fun addFavourite(favourite: FavouriteEntry) = addFavouriteLabel(favourite.id)
 
-    @Query("DELETE FROM favourites WHERE id = :id")
+    @Query("INSERT OR IGNORE INTO media_labels (labelId, contentId) VALUES (1, :id)")
+    suspend fun addFavouriteLabel(id: Long)
+
+    @Query("DELETE FROM media_labels WHERE labelId = 1 AND contentId = :id")
     suspend fun removeFavourite(id: Long)
 
-    @Query("SELECT EXISTS(SELECT 1 FROM favourites WHERE id = :id)")
+    @Query("SELECT EXISTS(SELECT 1 FROM media_labels WHERE labelId = 1 AND contentId = :id)")
     fun isFavourite(id: Long): Flow<Boolean>
+
+    @Query("INSERT OR IGNORE INTO media_labels (labelId, contentId) SELECT labelId, :newId FROM media_labels WHERE contentId = :oldId")
+    suspend fun copyMediaLabels(oldId: Long, newId: Long)
+
+    @Query("DELETE FROM media_labels WHERE contentId = :id")
+    suspend fun deleteMediaLabels(id: Long)
+
+    @Transaction
+    suspend fun remapMediaLabels(oldId: Long, newId: Long) {
+        if (oldId == newId) return
+        copyMediaLabels(oldId, newId)
+        deleteMediaLabels(oldId)
+    }
 
     // --- Trash ---
     @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 1")

@@ -12,6 +12,10 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
@@ -35,6 +39,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
@@ -49,6 +55,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.pixel.gallery.data.local.entity.MediaEntry
+import com.pixel.gallery.R
 import com.pixel.gallery.glide.AvesAppGlideModule
 import com.pixel.gallery.glide.SvgImage
 import com.pixel.gallery.glide.TiffImage
@@ -328,7 +335,7 @@ private fun trackedDrawableListener(
 
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class, ExperimentalFoundationApi::class)
 internal fun ViewerScreen(
     initialId: Long,
     photos: List<MediaEntry>,
@@ -337,7 +344,11 @@ internal fun ViewerScreen(
     allowTransfer: Boolean = true,
     onRequestTransfer: (MediaEntry) -> Unit = {},
     enableUltraHdr: Boolean = false,
-    viewModel: PhotosViewModel = hiltViewModel()
+    viewModel: PhotosViewModel = hiltViewModel(),
+    onEditLabels: (Set<Long>) -> Unit = {},
+    labelsForMedia: (Long) -> List<String> = { emptyList() },
+    allowLabels: Boolean = true,
+    reservedIds: Set<Long> = emptySet()
 ) {
     val context = LocalContext.current
     val initialIndex = remember(initialId, photos) {
@@ -360,6 +371,13 @@ internal fun ViewerScreen(
     }
     
     val pagerState = rememberPagerState(initialPage = initialIndex) { photos.size }
+    LaunchedEffect(photos.size) {
+        // Restored page state can outlive an item removed from its label/album.
+        // Keep valid pages untouched and clamp before enabling media actions.
+        if (photos.isNotEmpty() && pagerState.currentPage > photos.lastIndex) {
+            pagerState.scrollToPage(photos.lastIndex)
+        }
+    }
     var showUI by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
@@ -368,7 +386,7 @@ internal fun ViewerScreen(
     var ultraHdrActive by remember { mutableStateOf(false) }
 
     val currentMedia = remember(pagerState.currentPage, photos) {
-        if (photos.isNotEmpty()) photos[pagerState.currentPage] else null
+        photos.getOrNull(pagerState.currentPage)
     }
 
     DisposableEffect(entryId) {
@@ -664,12 +682,14 @@ internal fun ViewerScreen(
     }
 
     // Auto-hide UI timer
-    LaunchedEffect(showUI, pagerState.currentPage, isPlayingMotion) {
+    LaunchedEffect(showUI, showMenu, pagerState.currentPage, isPlayingMotion) {
         ViewerLoadMetrics.event(
             "UI_AUTO_HIDE_SCHEDULE",
             "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
         )
-        if (showUI && !isPlayingMotion) {
+        // A menu is anchored to the top bar. Keep both bars present while it
+        // is open so the menu cannot disappear before the user taps an item.
+        if (showUI && !showMenu && !isPlayingMotion) {
             delay(3000)
             showUI = false
             ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
@@ -720,6 +740,15 @@ internal fun ViewerScreen(
         } ?: flowOf(false)
     }
     val isFavourite by favouriteFlow.collectAsState(initial = false)
+    val isCurrentReserved = currentMedia?.contentId?.let(reservedIds::contains) == true
+    val currentLabels = currentMedia?.contentId?.let(labelsForMedia).orEmpty()
+    val editLabelsDescription = stringResource(R.string.label_edit)
+    LaunchedEffect(isCurrentReserved) {
+        if (isCurrentReserved) {
+            showDeleteConfirm = false
+            if (!imageIndexBusy) imageIndexAction = null
+        }
+    }
     
     Box(
         modifier = Modifier
@@ -1321,7 +1350,10 @@ internal fun ViewerScreen(
                                 tint = Color.White
                             )
                         }
-                        IconButton(onClick = { showMenu = true }) {
+                        IconButton(onClick = {
+                            showUI = true
+                            showMenu = true
+                        }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
                         }
                         DropdownMenu(
@@ -1343,7 +1375,7 @@ internal fun ViewerScreen(
                                             }
                                         )
                                     },
-                                    enabled = !imageIndexBusy && !indexChecking,
+                                    enabled = !imageIndexBusy && !indexChecking && !isCurrentReserved,
                                     onClick = {
                                         showMenu = false
                                         if (indexReady) {
@@ -1400,6 +1432,7 @@ internal fun ViewerScreen(
                             if (allowTransfer) {
                                 DropdownMenuItem(
                                     text = { Text("Move or copy to…") },
+                                    enabled = !isCurrentReserved,
                                     onClick = {
                                         showMenu = false
                                         currentMedia?.let(onRequestTransfer)
@@ -1407,8 +1440,20 @@ internal fun ViewerScreen(
                                     leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = null) }
                                 )
                             }
+                            if (allowLabels) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.label_edit)) },
+                                    enabled = !isCurrentReserved,
+                                    onClick = {
+                                        showMenu = false
+                                        currentMedia?.let { onEditLabels(setOf(it.contentId)) }
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.Label, contentDescription = null) }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Move to locked folder") },
+                                enabled = !isCurrentReserved,
                                 onClick = {
                                     showMenu = false
                                     currentMedia?.let { media ->
@@ -1478,7 +1523,7 @@ internal fun ViewerScreen(
                             context.startActivity(Intent.createChooser(intent, "Share Media"))
                         }
                     }
-                    ViewerAction(Icons.Outlined.Edit, "Edit") {
+                    ViewerAction(Icons.Outlined.Edit, "Edit", enabled = !isCurrentReserved) {
                         currentMedia?.let { media ->
                             val intent = Intent(Intent.ACTION_EDIT).apply {
                                 setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
@@ -1489,27 +1534,44 @@ internal fun ViewerScreen(
                             } catch (e: Exception) { }
                         }
                     }
-                    IconButton(onClick = { 
-                        currentMedia?.let { viewModel.toggleFavourite(it.contentId, isFavourite) }
-                    }) {
+                    Box(
+                        modifier = Modifier.size(48.dp).clip(CircleShape).combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = false, radius = 24.dp),
+                            enabled = !isCurrentReserved,
+                            role = Role.Button,
+                            onLongClickLabel = if (allowLabels) editLabelsDescription else null,
+                            onLongClick = if (allowLabels) {
+                                { currentMedia?.let { onEditLabels(setOf(it.contentId)) } }
+                            } else null,
+                            onClick = {
+                                currentMedia?.let {
+                                    viewModel.toggleFavourite(it.contentId, isFavourite) { message ->
+                                        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        ),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
-                            imageVector = if (isFavourite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            tint = if (isFavourite) Color.Red else Color.White
+                            imageVector = if (isFavourite || currentLabels.isNotEmpty()) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                            contentDescription = stringResource(R.string.labels_favourites),
+                            tint = (if (isFavourite) Color.Red else Color.White).copy(alpha = if (isCurrentReserved) 0.38f else 1f)
                         )
                     }
                     ViewerAction(Icons.Outlined.Info, "Info") {
                         showInfo = true
                     }
                     if (currentMedia?.isTrashed == true) {
-                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore") {
+                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore", enabled = !isCurrentReserved) {
                             currentMedia?.let { media ->
                                 viewModel.restoreMedia(media.contentId, media.uri)
                                 onBack()
                             }
                         }
                     } else {
-                        ViewerAction(Icons.Outlined.Delete, "Delete") {
+                        ViewerAction(Icons.Outlined.Delete, "Delete", enabled = !isCurrentReserved) {
                             showDeleteConfirm = true
                         }
                     }
@@ -1521,19 +1583,26 @@ internal fun ViewerScreen(
             InfoBottomSheet(
                 media = currentMedia,
                 viewModel = viewModel,
-                onDismiss = { showInfo = false }
+                onDismiss = { showInfo = false },
+                labels = currentLabels,
+                allowLabels = allowLabels,
+                canEditLabels = !isCurrentReserved,
+                onEditLabels = {
+                    showInfo = false
+                    onEditLabels(setOf(currentMedia.contentId))
+                }
             )
         }
 
         DeleteConfirmDialog(
-            visible = showDeleteConfirm,
+            visible = showDeleteConfirm && !isCurrentReserved,
             onDismissRequest = { showDeleteConfirm = false },
             title = "Move to Recycle Bin?",
             message = "Move this item to the recycle bin?",
             confirmLabel = "Move to Bin",
             isDeletePermanently = false,
             onConfirm = {
-                currentMedia?.let { media ->
+                currentMedia?.takeUnless { isCurrentReserved }?.let { media ->
                     viewModel.moveToTrash(media.contentId, media.uri, media.path)
                     onBack()
                 }
@@ -1593,7 +1662,7 @@ internal fun ViewerScreen(
                 },
                 confirmButton = {
                     TextButton(
-                        enabled = !imageIndexBusy,
+                        enabled = !imageIndexBusy && !isCurrentReserved,
                         onClick = {
                             val operationTarget = currentIndexTarget ?: return@TextButton
                             imageIndexAction = null
@@ -1734,12 +1803,16 @@ internal fun ViewerScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun InfoBottomSheet(
     media: MediaEntry,
     viewModel: PhotosViewModel,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    labels: List<String> = emptyList(),
+    allowLabels: Boolean = false,
+    canEditLabels: Boolean = true,
+    onEditLabels: () -> Unit = {}
 ) {
     val metadata = remember(media.path) { viewModel.getMediaMetadata(media.path) }
     val coords = remember(media.path) { viewModel.getCoordinates(media.path) }
@@ -1752,6 +1825,7 @@ fun InfoBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp)
         ) {
@@ -1775,6 +1849,32 @@ fun InfoBottomSheet(
                     ?.let(::formatPhotoDateTime)
                 ?: "Unknown"
             InfoRow(Icons.Outlined.CalendarToday, "Date Taken", dateTaken)
+
+            if (allowLabels) {
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.labels_title),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    TextButton(onClick = onEditLabels, enabled = canEditLabels) {
+                        Icon(Icons.Outlined.Label, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.label_edit))
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    labels.forEach { name ->
+                        SuggestionChip(
+                            onClick = onEditLabels,
+                            enabled = canEditLabels,
+                            label = { Text(name) }
+                        )
+                    }
+                }
+            }
 
             if (metadata["Model"] != "Unknown") {
                 Spacer(Modifier.height(24.dp))
@@ -2234,9 +2334,10 @@ private fun formatPhotoDateTime(millis: Long): String =
 fun ViewerAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    IconButton(onClick = onClick) {
-        Icon(icon, contentDescription = label, tint = Color.White)
+    IconButton(onClick = onClick, enabled = enabled) {
+        Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f))
     }
 }

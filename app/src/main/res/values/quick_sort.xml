@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qs_labels_title">Labels</string>
+    <string name="qs_move_to">Move to</string>
+    <string name="qs_move_dock">Drag to the top or bottom; tap to switch edge</string>
+    <string name="qs_choose_albums">Choose albums</string>
+    <string name="qs_manage_albums">Choose sorting albums</string>
+    <string name="qs_choose_sorting_albums_hint">Choose albums. Long-press and drag a capsule to arrange its position.</string>
+    <string name="qs_options">Quick sort options</string>
+    <string name="qs_queue">Move queue</string>
+    <string name="qs_exit">Exit quick sort</string>
+    <string name="qs_dock_top">Top</string>
+    <string name="qs_dock_bottom">Bottom</string>
+    <string name="qs_search_albums">Search albums or paths</string>
+    <string name="qs_move_earlier">Move earlier</string>
+    <string name="qs_move_later">Move later</string>
+    <string name="qs_cancel">Cancel</string>
+    <string name="qs_apply">Apply</string>
+    <string name="qs_done">Done</string>
+    <string name="qs_pending">Waiting to move</string>
+</resources>

@@ -1,0 +1,22 @@
+<resources>
+    <string name="qs_start">快速分类</string>
+    <string name="qs_finish">退出快速分类</string>
+    <string name="qs_tasks">移动任务</string>
+    <string name="qs_queue_explanation">文件依次移动，退出快速分类后队列继续。取消任务会在当前文件安全完成后停止余下文件。</string>
+    <string name="qs_resume">继续队列</string>
+    <string name="qs_no_tasks">暂无移动任务</string>
+    <string name="qs_status_queued">等待中</string>
+    <string name="qs_status_permission">等待存储权限</string>
+    <string name="qs_status_running">移动中</string>
+    <string name="qs_status_complete">已结束</string>
+    <string name="qs_status_cancelled">已取消</string>
+    <string name="qs_status_paused">已暂停</string>
+    <string name="qs_task_counts">已移动 %1$d / %2$d · 失败 %3$d</string>
+    <string name="qs_cancelling">当前文件完成后停止</string>
+    <string name="qs_cancel_remaining">取消余下文件</string>
+    <string name="qs_details">查看详情</string>
+    <string name="qs_retry_failed">重试失败项</string>
+    <string name="qs_enqueued">已将 %1$d 个文件加入移动队列</string>
+    <string name="qs_pending_count">%1$d 个文件等待或移动中</string>
+    <string name="qs_reserved">此文件已在移动队列中</string>
+</resources>

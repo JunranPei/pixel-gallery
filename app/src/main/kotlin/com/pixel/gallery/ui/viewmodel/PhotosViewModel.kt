@@ -109,6 +109,17 @@ class PhotosViewModel @Inject constructor(
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val quickSortPreferences = settingsRepository.quickSortPreferences
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.pixel.gallery.model.QuickSortPreferences())
+
+    fun setQuickSortTargets(targets: List<TransferDestination>) {
+        viewModelScope.launch { settingsRepository.setQuickSortTargets(targets) }
+    }
+
+    fun setQuickSortDockTop(top: Boolean) {
+        viewModelScope.launch { settingsRepository.setQuickSortDockTop(top) }
+    }
+
     private val _transferUiState = MutableStateFlow(TransferUiState())
     val transferUiState: StateFlow<TransferUiState> = _transferUiState.asStateFlow()
     private var pendingTransfer: PendingTransfer? = null
@@ -120,7 +131,7 @@ class PhotosViewModel @Inject constructor(
         conflictPolicy: ConflictPolicy,
         onPermissionRequired: (IntentSenderRequest) -> Unit
     ) {
-        if (entries.isEmpty() || _transferUiState.value.isRunning) return
+        if (entries.isEmpty() || _transferUiState.value.isRunning || pendingTransfer != null) return
         _transferUiState.value = TransferUiState()
         val request = runCatching {
             if (mode == TransferMode.MOVE) repository.createTransferWriteRequest(entries) else null
@@ -315,11 +326,10 @@ class PhotosViewModel @Inject constructor(
         photos,
         albumSortOrder
     ) { photosList, sort ->
-        val grouped = photosList.groupBy { 
-            getParentFolderName(it.path)
-        }.map { (name, entries) ->
+        val grouped = photosList.groupBy { java.io.File(it.path).parent.orEmpty() }
+            .map { (parentPath, entries) ->
             val firstEntry = entries.first()
-            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
+            val name = java.io.File(parentPath).name.ifBlank { "Unknown" }
             val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
@@ -427,12 +437,14 @@ class PhotosViewModel @Inject constructor(
     }
 
     // --- Actions ---
-    fun toggleFavourite(id: Long, isCurrentlyFavourite: Boolean) {
+    fun toggleFavourite(id: Long, isCurrentlyFavourite: Boolean, onError: (String) -> Unit = {}) {
         viewModelScope.launch {
-            if (isCurrentlyFavourite) {
-                repository.removeFavourite(id)
-            } else {
-                repository.addFavourite(id)
+            try {
+                if (isCurrentlyFavourite) repository.removeFavourite(id) else repository.addFavourite(id)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                onError(error.message ?: "Could not update favourite")
             }
         }
     }

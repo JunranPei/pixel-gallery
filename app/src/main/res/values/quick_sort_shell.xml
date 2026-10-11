@@ -1,0 +1,22 @@
+<resources>
+    <string name="qs_start">Quick sort</string>
+    <string name="qs_finish">Exit quick sort</string>
+    <string name="qs_tasks">Move tasks</string>
+    <string name="qs_queue_explanation">Files move one at a time. Leaving quick sort keeps the queue running. Cancelling stops the remaining files after the current file is safe.</string>
+    <string name="qs_resume">Resume queue</string>
+    <string name="qs_no_tasks">No move tasks</string>
+    <string name="qs_status_queued">Waiting</string>
+    <string name="qs_status_permission">Waiting for storage permission</string>
+    <string name="qs_status_running">Moving</string>
+    <string name="qs_status_complete">Finished</string>
+    <string name="qs_status_cancelled">Cancelled</string>
+    <string name="qs_status_paused">Paused</string>
+    <string name="qs_task_counts">Moved %1$d / %2$d · Failed %3$d</string>
+    <string name="qs_cancelling">Stopping after current file</string>
+    <string name="qs_cancel_remaining">Cancel remaining</string>
+    <string name="qs_details">Details</string>
+    <string name="qs_retry_failed">Retry failed</string>
+    <string name="qs_enqueued">Added %1$d files to the move queue</string>
+    <string name="qs_pending_count">%1$d files waiting or moving</string>
+    <string name="qs_reserved">This file is in the move queue</string>
+</resources>

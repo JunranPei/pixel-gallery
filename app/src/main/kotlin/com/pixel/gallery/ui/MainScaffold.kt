@@ -79,6 +79,8 @@ import com.pixel.gallery.ui.components.SortCriterion
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.outlined.FileCopy
+import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.model.DeduplicationScope
 import com.pixel.gallery.ui.deduplication.DuplicateReviewDialog
@@ -103,6 +105,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.ui.transfer.TransferDestinationScreen
+import com.pixel.gallery.ui.viewmodel.LabelsViewModel
+import com.pixel.gallery.ui.viewmodel.QuickSortViewModel
+import com.pixel.gallery.ui.labels.*
+import com.pixel.gallery.ui.quicksort.*
+import com.pixel.gallery.model.QuickSortEnqueueResult
+import com.pixel.gallery.model.QuickSortJobStatus
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -179,6 +189,19 @@ internal fun reconcileViewerSessionPhotos(
     return if (refreshed == current) current else refreshed
 }
 
+/** A move may keep its MediaStore ID or obtain a new one. Preserve the page order in both cases. */
+internal fun remapMovedViewerPhotos(
+    current: List<MediaEntry>,
+    receipts: List<com.pixel.gallery.model.TransferReceipt>,
+): List<MediaEntry> = current.map { original ->
+    receipts.fold(original) { entry, receipt ->
+        if (entry.contentId == receipt.sourceId && entry.path == receipt.sourcePath) {
+            entry.copy(contentId = receipt.targetId, uri = receipt.targetUri, path = receipt.targetPath,
+                dateModifiedMillis = receipt.modifiedMillis, sourceDateTakenMillis = receipt.dateTakenMillis)
+        } else entry
+    }
+}
+
 internal fun MediaEntry.matchesFileSearch(query: String): Boolean {
     val normalizedQuery = query.trim()
     if (normalizedQuery.isEmpty()) return true
@@ -218,6 +241,8 @@ sealed class Screen : Parcelable {
     @Parcelize object Home : Screen()
     @Parcelize object Settings : Screen()
     @Parcelize object Favourites : Screen()
+    @Parcelize object Labels : Screen()
+    @Parcelize data class Label(val labelId: Long) : Screen()
     @Parcelize object Trash : Screen()
     @Parcelize object HiddenAlbums : Screen()
     @Parcelize object LockedFolder : Screen()
@@ -228,6 +253,7 @@ sealed class Screen : Parcelable {
         val externalUri: String? = null,
         val externalMimeType: String? = null,
         val searchQuery: String? = null,
+        val labelId: Long? = null,
     ) : Screen()
     @Parcelize object ExcludedFolders : Screen()
     @Parcelize object Licenses : Screen()
@@ -240,7 +266,7 @@ sealed class Screen : Parcelable {
         val origin: TransferOrigin
     ) : Screen()
 
-    enum class ViewerSource { All, Search, Favourites, Trash, Album, Vault, External }
+    enum class ViewerSource { All, Search, Favourites, Label, Trash, Album, Vault, External }
     enum class TransferOrigin { Grid, Viewer }
 }
 
@@ -252,6 +278,66 @@ fun MainScaffold(
     photosViewModel: PhotosViewModel = hiltViewModel()
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val labelsViewModel: LabelsViewModel = hiltViewModel()
+    val quickSortViewModel: QuickSortViewModel = hiltViewModel()
+    val labelEntries by labelsViewModel.labelEntries.collectAsState()
+    val labelSummaries by labelsViewModel.labels.collectAsState()
+    val labelMemberships by labelsViewModel.memberships.collectAsState()
+    val labelsSaving by labelsViewModel.isSaving.collectAsState()
+    val labelsError by labelsViewModel.errorMessage.collectAsState()
+    val labelSaveGeneration by labelsViewModel.editorSaveGeneration.collectAsState()
+    var observedLabelSaveGeneration by rememberSaveable { mutableLongStateOf(0L) }
+    val quickQueue by quickSortViewModel.state.collectAsState()
+    val quickReceipts = remember(quickQueue.jobs) { quickQueue.jobs.flatMap { job -> job.items.mapNotNull { it.receipt } } }
+    val quickPreferences by photosViewModel.quickSortPreferences.collectAsState()
+    val transferTargets by photosViewModel.transferDestinations.collectAsState()
+    var editingLabelIds by rememberSaveable(stateSaver = listSaver(
+        save = { ids: Set<Long> -> ids.toList() }, restore = { it.toSet() },
+    )) { mutableStateOf<Set<Long>>(emptySet()) }
+    LaunchedEffect(labelSaveGeneration) {
+        if (labelSaveGeneration > observedLabelSaveGeneration) editingLabelIds = emptySet()
+        observedLabelSaveGeneration = labelSaveGeneration
+    }
+    var quickSortEnabled by rememberSaveable { mutableStateOf(false) }
+    var showQuickTargets by remember { mutableStateOf(false) }
+    var quickTargetsPanelHeight by remember { mutableStateOf(0.dp) }
+    var showQuickQueue by remember { mutableStateOf(false) }
+    var pendingQuickJob by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingQuickToken by rememberSaveable { mutableStateOf<String?>(null) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
+    val quickPermissionRequest by quickSortViewModel.permissionRequest.collectAsState()
+    val quickPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val job = pendingQuickJob
+        val token = pendingQuickToken
+        pendingQuickJob = null
+        pendingQuickToken = null
+        if (job != null && token != null) quickSortViewModel.authorize(job, token, result.resultCode == android.app.Activity.RESULT_OK)
+    }
+    LaunchedEffect(quickQueue.needsPermission?.permissionToken, quickQueue.permissionRevision, pendingQuickToken, lifecycleState) {
+        if (lifecycleState == Lifecycle.State.RESUMED && pendingQuickToken == null) quickSortViewModel.requestNextPermission()
+    }
+    LaunchedEffect(quickPermissionRequest?.token, quickQueue.needsPermission?.permissionToken, pendingQuickToken, lifecycleState) {
+        if (lifecycleState == Lifecycle.State.RESUMED && pendingQuickToken == null) {
+            quickPermissionRequest?.let { request ->
+                if (quickQueue.needsPermission?.permissionToken != request.token) return@let
+                pendingQuickJob = request.jobId
+                pendingQuickToken = request.token
+                try { quickPermissionLauncher.launch(request.request) }
+                catch (_: Exception) {
+                    pendingQuickJob = null
+                    pendingQuickToken = null
+                    quickSortViewModel.authorize(request.jobId, request.token, false)
+                }
+            }
+        }
+    }
+    LaunchedEffect(quickQueue.loaded, lifecycleState, quickQueue.serviceActive, quickQueue.jobs.map { it.status }) {
+        if (lifecycleState == Lifecycle.State.RESUMED && quickQueue.loaded &&
+            !quickQueue.serviceActive && quickQueue.jobs.any { it.status == QuickSortJobStatus.Queued }) {
+            quickSortViewModel.resume()
+        }
+    }
     val duplicateViewModel: DuplicateViewModel = hiltViewModel()
     val duplicateState by duplicateViewModel.state.collectAsState()
     val duplicateTrashRequest by duplicateViewModel.trashRequest.collectAsState()
@@ -334,6 +420,23 @@ fun MainScaffold(
     }
 
     val currentScreen = navigationStack.last()
+    val activeLabelId = when (val labelSource = navigationStack.lastOrNull { it !is Screen.TransferDestination }) {
+        is Screen.Label -> labelSource.labelId
+        is Screen.Viewer -> labelSource.labelId
+        else -> null
+    }
+    val activeLabelPhotos = remember(activeLabelId, allPhotos, labelMemberships) {
+        val ids = labelMemberships.filter { it.labelId == activeLabelId }.mapTo(hashSetOf()) { it.contentId }
+        allPhotos.filter { it.contentId in ids }
+    }
+    val groupedLabelPhotos by produceState<List<GridItem>>(emptyList(), activeLabelPhotos, gridColumns, photoSortOrder) {
+        value = withContext(Dispatchers.Default) { photosViewModel.groupMedia(activeLabelPhotos, gridColumns, photoSortOrder) }
+    }
+    val favouriteLabelName = stringResource(R.string.labels_favourites)
+    val labelNamesByMedia = remember(labelEntries, labelMemberships, favouriteLabelName) {
+        val names = labelEntries.associate { it.id to if (it.isSystem) favouriteLabelName else it.name }
+        labelMemberships.groupBy { it.contentId }.mapValues { (_, links) -> links.mapNotNull { names[it.labelId] } }
+    }
 
     LaunchedEffect(allPhotos) {
         if (ViewerLoadMetrics.currentEntryId() != 0L) {
@@ -506,6 +609,60 @@ fun MainScaffold(
     }
 
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    LaunchedEffect(quickQueue.reservedIds) { selectedIds = selectedIds - quickQueue.reservedIds }
+    val openLabelEditor: (Set<Long>) -> Unit = { ids ->
+        labelsViewModel.clearError()
+        editingLabelIds = ids - quickQueue.reservedIds
+    }
+    val onQuickEnqueued: (QuickSortEnqueueResult) -> Unit = { result ->
+        when (result) {
+            is QuickSortEnqueueResult.Accepted -> {
+                selectedIds = selectedIds - result.acceptedIds
+                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.qs_enqueued, result.acceptedCount)) }
+            }
+            is QuickSortEnqueueResult.Rejected -> scope.launch { snackbarHostState.showSnackbar(result.reason) }
+        }
+    }
+    val toggleQuickSort: () -> Unit = {
+        quickSortEnabled = !quickSortEnabled
+        if (quickSortEnabled) {
+            photosViewModel.setQuickSortDockTop(false)
+            showQuickTargets = true
+        } else {
+            showQuickTargets = false
+            quickTargetsPanelHeight = 0.dp
+        }
+    }
+    // Keep user order, while refreshing covers from the current album inventory.
+    val quickSortTargets = remember(quickPreferences.targets, transferTargets) {
+        val currentAlbums = transferTargets.associateBy { it.stableKey }
+        quickPreferences.targets.map { currentAlbums[it.stableKey] ?: it }
+    }
+    val quickSortConfig = if (quickSortEnabled) QuickSortUiConfig(
+        targets = quickSortTargets,
+        dockTop = false,
+        onDockTopChange = {},
+        onReorderTargets = photosViewModel::setQuickSortTargets,
+        onManageTargets = { showQuickTargets = true },
+        onMove = { ids, destination ->
+            quickSortViewModel.enqueue(allPhotos.filter { it.contentId in ids }, destination, onQuickEnqueued)
+        },
+        // Do not draw the dock at the screen edge during the first frame of
+        // the chooser. It is measured immediately by the sheet; reserving a
+        // temporary off-screen inset prevents a one-frame overlap.
+        dockBottomInset = if (showQuickTargets && quickTargetsPanelHeight == 0.dp) {
+            1000.dp
+        } else {
+            quickTargetsPanelHeight
+        },
+        reservedIds = quickQueue.reservedIds,
+        onExit = {
+            selectedIds = emptySet()
+            quickSortEnabled = false
+            showQuickTargets = false
+            quickTargetsPanelHeight = 0.dp
+        },
+    ) else null
 
     // Focus only when the title itself transitions into search. Returning from
     // selection or the viewer keeps the keyboard closed until the field is tapped.
@@ -530,12 +687,12 @@ fun MainScaffold(
         selectedIds = if (selectedIds.contains(id)) {
             selectedIds - id
         } else {
-            selectedIds + id
+            selectedIds + (setOf(id) - quickQueue.reservedIds)
         }
     }
 
     val updateSelection = { ids: Set<Long> ->
-        selectedIds = ids
+        selectedIds = ids - quickQueue.reservedIds
     }
 
     var showMenu by remember { mutableStateOf(false) }
@@ -547,11 +704,16 @@ fun MainScaffold(
     // System back button handling
     BackHandler(
         enabled = navigationStack.size > 1 ||
+            quickSortEnabled ||
             selectedIds.isNotEmpty() ||
             (currentScreen == Screen.Home && isHomeSearchMode)
     ) {
         if (selectedIds.isNotEmpty()) {
             selectedIds = emptySet()
+        } else if (quickSortEnabled && currentScreen !is Screen.Viewer) {
+            quickSortEnabled = false
+            showQuickTargets = false
+            quickTargetsPanelHeight = 0.dp
         } else if (currentScreen == Screen.Home && isHomeSearchMode) {
             homeHeaderTransition = HomeHeaderTransitionState()
         } else {
@@ -570,6 +732,11 @@ fun MainScaffold(
         }
         if (currentScreen !is Screen.TransferDestination) {
             selectedIds = emptySet()
+        }
+        if (currentScreen !is Screen.Viewer && currentScreen !is Screen.Photo && currentScreen !is Screen.Label && currentScreen != Screen.Home) {
+            quickSortEnabled = false
+            showQuickTargets = false
+            quickTargetsPanelHeight = 0.dp
         }
     }
 
@@ -592,7 +759,9 @@ fun MainScaffold(
     // Window Insets
     val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val contentBottomPadding = if (currentScreen == Screen.Home) {
+    val contentBottomPadding = if (quickSortEnabled) {
+        navBarPadding
+    } else if (currentScreen == Screen.Home) {
         FloatingBarHeight + 16.dp + navBarPadding
     } else {
         navBarPadding + 16.dp
@@ -628,7 +797,7 @@ fun MainScaffold(
                     if (
                         currentScreen == Screen.Home &&
                         selectedIds.isEmpty() &&
-                        !isHomeSearchMode
+                        !isHomeSearchMode && !quickSortEnabled
                     ) {
                         Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
                     } else {
@@ -736,6 +905,11 @@ fun MainScaffold(
                                     onDismissRequest = { showSelectionMenu = false }
                                 ) {
                                     DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.label_edit)) },
+                                        onClick = { showSelectionMenu = false; openLabelEditor(selectedIds) },
+                                        leadingIcon = { Icon(Icons.Outlined.Label, null) },
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text("Move to locked folder") },
                                         onClick = {
                                             showSelectionMenu = false
@@ -813,6 +987,14 @@ fun MainScaffold(
                                                     onDismissRequest = { showMenu = false },
                                                 ) {
                                                     if (homePagerState.currentPage == 0) {
+                                                        if (!quickSortEnabled) DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.qs_start)) },
+                                                            onClick = {
+                                                                showMenu = false
+                                                                toggleQuickSort()
+                                                            },
+                                                            leadingIcon = { Icon(Icons.Outlined.DriveFileMove, null) },
+                                                        )
                                                         DropdownMenuItem(
                                                             text = { Text("Sort Photos") },
                                                             onClick = {
@@ -1094,10 +1276,11 @@ fun MainScaffold(
                     HorizontalPager(
                         state = homePagerState,
                         modifier = Modifier.fillMaxSize(),
-                        userScrollEnabled = selectedIds.isEmpty() // Disable swiping during selection
+                        userScrollEnabled = selectedIds.isEmpty() && !quickSortEnabled
                     ) { page ->
                         when (page) {
                             0 -> PhotosScreen(
+                                quickSort = quickSortConfig,
                                 items = searchedPhotoGridItems,
                                 onNavigateToViewer = { id ->
                                     val isSearchActive = normalizedPhotoSearchQuery.isNotEmpty()
@@ -1146,7 +1329,7 @@ fun MainScaffold(
                                 } else {
                                     albumSearchGridState
                                 },
-                                onNavigateToFavourites = { navigationStack = navigationStack + Screen.Favourites },
+                                onNavigateToFavourites = { navigationStack = navigationStack + Screen.Labels },
                                 onNavigateToTrash = { navigationStack = navigationStack + Screen.Trash },
                                 onNavigateToAlbum = { name -> navigationStack = navigationStack + Screen.Photo(name) },
                                 onExclude = { path -> photosViewModel.addExcludedFolder(path) },
@@ -1180,6 +1363,33 @@ fun MainScaffold(
                     onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
                 )
+                Screen.Labels -> LabelsScreen(
+                    columns = albumGridColumns,
+                    onColumnsChange = photosViewModel::setAlbumGridColumns,
+                    labels = labelSummaries,
+                    onBack = navigateBack,
+                    onLabelClick = { navigationStack = navigationStack + Screen.Label(it) },
+                    onCreateLabel = { labelsViewModel.createLabel(it) },
+                    onRenameLabel = { id, name -> labelsViewModel.renameLabel(id, name) },
+                    onDeleteLabel = { labelsViewModel.deleteLabel(it) },
+                    errorMessage = labelsError,
+                    onClearError = labelsViewModel::clearError,
+                    isSaving = labelsSaving,
+                )
+                is Screen.Label -> {
+                    val labelId = baseScreen.labelId
+                    val labelState = remember(labelId) { albumGridStates.getOrPut("label:$labelId") { LazyGridState() } }
+                    LabelPhotosScreen(
+                        label = labelEntries.find { it.id == labelId }, items = groupedLabelPhotos,
+                        selectedIds = selectedIds, columns = gridColumns, gridState = labelState,
+                        onBack = navigateBack,
+                        onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Label, labelId = labelId) },
+                        onSelectionChange = updateSelection, onToggleSelection = toggleSelection,
+                        onColumnsChange = photosViewModel::setGridColumns,
+                        quickSort = quickSortConfig, onToggleQuickSort = toggleQuickSort,
+                        onQueueClick = { showQuickQueue = true },
+                    )
+                }
                 Screen.Favourites -> FavouritesScreen(
                     onBack = navigateBack,
                     onNavigateToViewer = { id ->
@@ -1239,6 +1449,9 @@ fun MainScaffold(
                         albumGridStates.getOrPut(albumName) { LazyGridState() }
                     }
                     PhotoScreen(
+                        quickSort = quickSortConfig,
+                        onToggleQuickSort = toggleQuickSort,
+                        onQueueClick = { showQuickQueue = true },
                         albumName = albumName,
                         onBack = navigateBack,
                         onNavigateToViewer = { id ->
@@ -1332,6 +1545,7 @@ fun MainScaffold(
                     trash,
                     vault,
                     cachedAlbumPhotos,
+                    activeLabelPhotos,
                 ) {
                     val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
                     var listSource = "DIRECT"
@@ -1341,6 +1555,7 @@ fun MainScaffold(
                             it.matchesFileSearch(viewer.searchQuery.orEmpty())
                         }
                         Screen.ViewerSource.Favourites -> favourites
+                        Screen.ViewerSource.Label -> activeLabelPhotos
                         Screen.ViewerSource.Trash -> trash
                         Screen.ViewerSource.Vault -> vault
                         Screen.ViewerSource.Album -> {
@@ -1353,7 +1568,7 @@ fun MainScaffold(
                                         val parentPath = it.path.substring(0, lastSlash)
                                         val prevSlash = parentPath.lastIndexOf('/')
                                         val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
-                                        parentName == viewer.albumName
+                                        if (viewer.albumName?.contains('/') == true) parentPath == viewer.albumName else parentName == viewer.albumName
                                     }
                                 }
                             }
@@ -1390,10 +1605,10 @@ fun MainScaffold(
                 // refresh an existing item's path/metadata, but must not reorder pages
                 // underneath Pager or make the current numeric index point at another image.
                 var photosForViewer by remember(viewer) { mutableStateOf(livePhotosForViewer) }
-                LaunchedEffect(viewer, livePhotosForViewer) {
+                LaunchedEffect(viewer, livePhotosForViewer, quickReceipts) {
                     val reconciled = reconcileViewerSessionPhotos(
-                        current = photosForViewer,
-                        latest = livePhotosForViewer,
+                        current = remapMovedViewerPhotos(photosForViewer, quickReceipts),
+                        latest = remapMovedViewerPhotos(livePhotosForViewer, quickReceipts),
                     )
                     if (reconciled !== photosForViewer) {
                         photosForViewer = reconciled
@@ -1406,6 +1621,10 @@ fun MainScaffold(
 
                 if (photosForViewer.isNotEmpty()) {
                     ViewerScreen(
+                        onEditLabels = openLabelEditor,
+                        labelsForMedia = { labelNamesByMedia[it].orEmpty() },
+                        allowLabels = viewer.source !in setOf(Screen.ViewerSource.Trash, Screen.ViewerSource.Vault, Screen.ViewerSource.External),
+                        reservedIds = quickQueue.reservedIds,
                         initialId = viewer.initialId,
                         photos = photosForViewer,
                         transformStateStore = viewerTransformStateStore,
@@ -1470,7 +1689,7 @@ fun MainScaffold(
 
 
             // Only show the floating bar on the Home screen
-            if (currentScreen == Screen.Home) {
+            if (currentScreen == Screen.Home && !quickSortEnabled) {
                 HorizontalFloatingToolbar(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1525,6 +1744,33 @@ fun MainScaffold(
                 )
             }
         }
+    }
+
+    if (editingLabelIds.isNotEmpty()) {
+        LabelEditorSheet(
+            labels = labelEntries, memberships = labelMemberships, selectedIds = editingLabelIds,
+            onDismiss = { editingLabelIds = emptySet(); labelsViewModel.clearError() },
+            onApply = { edits -> labelsViewModel.applyEdits(editingLabelIds, edits) { editingLabelIds = emptySet() } },
+            isSaving = labelsSaving, errorMessage = labelsError,
+        )
+    }
+    if (showQuickTargets) {
+        QuickSortTargetsSheet(
+            availableTargets = transferTargets.filter { it.documentUri == null },
+            selectedTargets = quickPreferences.targets,
+            dockTop = quickPreferences.dockTop,
+            onDockTopChange = photosViewModel::setQuickSortDockTop,
+            onApply = { photosViewModel.setQuickSortTargets(it); showQuickTargets = false; quickTargetsPanelHeight = 0.dp },
+            onDismiss = { showQuickTargets = false; quickTargetsPanelHeight = 0.dp },
+            onPanelHeightChange = { quickTargetsPanelHeight = it },
+            onTargetsChange = photosViewModel::setQuickSortTargets,
+            onCreateAlbum = { parent, name, onResult -> photosViewModel.createTransferFolder(parent, name, onResult) },
+        )
+    }
+    if (showQuickQueue) {
+        QuickSortQueueSheet(state = quickQueue, onCancel = quickSortViewModel::cancel,
+            onRetry = { quickSortViewModel.retry(it, onQuickEnqueued) },
+            onResume = { quickSortViewModel.resume() }, onDismiss = { showQuickQueue = false })
     }
 
     DuplicateReviewDialog(

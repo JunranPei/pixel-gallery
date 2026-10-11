@@ -40,8 +40,9 @@ data class MediaStoreThumbnail(
     val sizeBytes: Long? = null,
     val allowPersistentCache: Boolean = true,
     val traceViewerLoad: Boolean = false,
+    val allowSourceFallback: Boolean = true,
 ) {
-    // These two flags control how a cache miss is handled, but they do not change
+    // These policy flags control how a cache miss is handled, but they do not change
     // the pixels produced by this model. Keeping them out of model identity lets
     // the viewer's cache-only cover reuse the exact 200 px bitmap that Grid just
     // displayed, without starting another source read or decode.
@@ -311,8 +312,8 @@ internal class MediaStoreThumbnailFetcher(
                 }
             }
 
-            // If system thumbnail loading fails, perform a fallback manual decode
-            if (bitmap == null) {
+            // Tiny decorative covers can decline expensive original/video decoding.
+            if (bitmap == null && model.allowSourceFallback) {
                 if (model.traceViewerLoad) {
                     ViewerLoadMetrics.event(
                         "MEDIASTORE_THUMB_FALLBACK_START",

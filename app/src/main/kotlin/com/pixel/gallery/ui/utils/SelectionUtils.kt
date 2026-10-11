@@ -12,8 +12,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.round
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -29,7 +27,8 @@ fun Modifier.photoGridDragSelect(
     selectedIds: Set<Long>,
     onSelectionChange: (Set<Long>) -> Unit,
     isPhoto: (Int) -> Boolean,
-    getPhotoId: (Int) -> Long
+    getPhotoId: (Int) -> Long,
+    leftContentPaddingPx: Float = 0f,
 ): Modifier {
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
@@ -41,6 +40,7 @@ fun Modifier.photoGridDragSelect(
     val currentSelectionChange by rememberUpdatedState(onSelectionChange)
     val currentIsPhoto by rememberUpdatedState(isPhoto)
     val currentGetPhotoId by rememberUpdatedState(getPhotoId)
+    val currentLeftPadding by rememberUpdatedState(leftContentPaddingPx)
 
     // State to track the active drag session - persistent across recompositions
     var dragInitialIndex by remember { mutableIntStateOf(-1) }
@@ -60,7 +60,7 @@ fun Modifier.photoGridDragSelect(
                 
                 // Update selection while scrolling, even if finger is stationary
                 if (lastPointerPosition != Offset.Unspecified && dragInitialIndex != -1) {
-                    val index = gridState.getItemIndexAt(lastPointerPosition)
+                    val index = gridState.photoGridItemIndexAt(lastPointerPosition, currentLeftPadding)
                     if (index != null && index != dragCurrentIndex) {
                         dragCurrentIndex = index
                         performUpdateSelection(
@@ -93,7 +93,7 @@ fun Modifier.photoGridDragSelect(
                 
                 val longPressJob = scope.launch {
                     delay(longPressTimeout)
-                    val index = gridState.getItemIndexAt(down.position)
+                    val index = gridState.photoGridItemIndexAt(down.position, currentLeftPadding)
                     if (index != null && currentIsPhoto(index)) {
                         val id = currentGetPhotoId(index)
                         
@@ -127,7 +127,7 @@ fun Modifier.photoGridDragSelect(
                         if (dragStarted) {
                             change.consume()
                             
-                            val index = gridState.getItemIndexAt(change.position)
+                            val index = gridState.photoGridItemIndexAt(change.position, currentLeftPadding)
                             
                             // Auto-scroll logic
                             val viewHeight = size.height
@@ -196,13 +196,6 @@ private fun performUpdateSelection(
     onSelectionChange(newSelection)
 }
 
-private fun LazyGridState.getItemIndexAt(offset: Offset): Int? {
-    return layoutInfo.visibleItemsInfo.find { item ->
-        val itemRect = IntRect(item.offset, item.size)
-        itemRect.contains(offset.round())
-    }?.index
-}
-
 /**
  * A modifier that detects pinch-to-zoom gestures to dynamically change the number of columns in a grid.
  */
@@ -210,9 +203,11 @@ fun Modifier.pinchToZoomColumns(
     currentColumns: Int,
     onColumnsChange: (Int) -> Unit,
     minColumns: Int = 2,
-    maxColumns: Int = 6
+    maxColumns: Int = 6,
+    isEnabled: () -> Boolean = { true },
 ): Modifier = composed {
     var zoomAccumulator by remember { mutableFloatStateOf(1f) }
+    val currentIsEnabled by rememberUpdatedState(isEnabled)
     
     LaunchedEffect(currentColumns) {
         zoomAccumulator = 1f
@@ -223,6 +218,11 @@ fun Modifier.pinchToZoomColumns(
             while (true) {
                 val event = awaitPointerEvent(pass = PointerEventPass.Initial)
                 val changes = event.changes.filter { it.pressed }
+
+                if (!currentIsEnabled()) {
+                    zoomAccumulator = 1f
+                    continue
+                }
                 
                 if (changes.size >= 2) {
                     val change1 = changes[0]

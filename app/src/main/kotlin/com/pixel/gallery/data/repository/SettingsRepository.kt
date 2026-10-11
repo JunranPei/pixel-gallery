@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.pixel.gallery.model.ThemeMode
+import com.pixel.gallery.model.QuickSortPreferences
+import com.pixel.gallery.model.TransferDestination
+import com.google.gson.Gson
 
 import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.preferencesDataStore
@@ -38,6 +41,27 @@ class SettingsRepository @Inject constructor(
     private val ALBUM_SORT_ORDER = stringPreferencesKey("album_sort_order")
     private val GLIDE_THREAD_COUNT = intPreferencesKey("glide_thread_count")
     private val GLIDE_CACHE_SIZE = intPreferencesKey("glide_cache_size")
+    private val QUICK_SORT_TARGETS = stringPreferencesKey("quick_sort_targets")
+    private val QUICK_SORT_DOCK_TOP = booleanPreferencesKey("quick_sort_dock_top")
+
+    val quickSortPreferences: Flow<QuickSortPreferences> = context.dataStore.data.map { preferences ->
+        val targets = runCatching {
+            Gson().fromJson(preferences[QUICK_SORT_TARGETS] ?: "[]", Array<TransferDestination>::class.java)
+                .orEmpty().filter { it.path.isNotBlank() && it.stableKey.isNotBlank() }
+                .distinctBy { it.stableKey }
+        }.getOrDefault(emptyList())
+        QuickSortPreferences(targets, preferences[QUICK_SORT_DOCK_TOP] ?: false)
+    }
+
+    suspend fun setQuickSortTargets(targets: List<TransferDestination>) {
+        context.dataStore.edit { preferences ->
+            preferences[QUICK_SORT_TARGETS] = Gson().toJson(targets.distinctBy { it.stableKey })
+        }
+    }
+
+    suspend fun setQuickSortDockTop(top: Boolean) {
+        context.dataStore.edit { it[QUICK_SORT_DOCK_TOP] = top }
+    }
 
     val startupAtAlbums: Flow<Boolean> = context.dataStore.data
         .map { preferences -> preferences[STARTUP_AT_ALBUMS] ?: false }

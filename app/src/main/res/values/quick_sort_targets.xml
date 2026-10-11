@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qs_targets_search">Search albums</string>
+    <string name="qs_targets_clear_search">Clear search</string>
+    <string name="qs_targets_selected_count">%1$d selected</string>
+    <string name="qs_targets_new_album">New album</string>
+    <string name="qs_targets_empty">No albums yet. Create one to get started.</string>
+    <string name="qs_targets_no_results">No matching albums</string>
+    <string name="qs_targets_create_in">Create in %1$s</string>
+    <string name="qs_targets_album_name">Album name</string>
+    <string name="qs_targets_create">Create</string>
+    <string name="qs_targets_creating">Creating…</string>
+    <string name="qs_targets_create_error">Could not create album</string>
+    <string name="qs_targets_selected_position">Selected, position %1$d</string>
+    <string name="qs_targets_not_selected">Not selected</string>
+    <plurals name="qs_targets_item_count">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+</resources>

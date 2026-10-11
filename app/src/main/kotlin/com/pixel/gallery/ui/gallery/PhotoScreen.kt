@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.FileCopy
+import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.R
 import androidx.compose.material.icons.outlined.FolderOff
@@ -33,6 +34,7 @@ import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
 import com.pixel.gallery.data.local.entity.MediaEntry
 import kotlinx.coroutines.flow.*
+import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,6 +48,9 @@ fun PhotoScreen(
     onAlbumPhotosChanged: (List<MediaEntry>) -> Unit = {},
     onDeduplicate: (List<MediaEntry>) -> Unit = {},
     gridState: LazyGridState = rememberLazyGridState(),
+    quickSort: QuickSortUiConfig? = null,
+    onToggleQuickSort: () -> Unit = {},
+    onQueueClick: () -> Unit = {},
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val allPhotos by viewModel.allPhotos.collectAsState()
@@ -56,7 +61,8 @@ fun PhotoScreen(
     val albumItems by remember(albumName, gridColumns, photoSortOrder) {
         viewModel.photos.map { all ->
             val filtered = all.filter { 
-                viewModel.getParentFolderName(it.path) == albumName 
+                if (albumName.contains('/')) java.io.File(it.path).parent == albumName
+                else viewModel.getParentFolderName(it.path) == albumName
             }
             // groupMedia owns ordering and grouping, so both use the same
             // effective timestamp instead of mixing bestTimestamp and EXIF time.
@@ -79,7 +85,8 @@ fun PhotoScreen(
     val albumPath by remember(allPhotos, albumName) {
         flow {
             val path = allPhotos.find { 
-                viewModel.getParentFolderName(it.path) == albumName 
+                if (albumName.contains('/')) java.io.File(it.path).parent == albumName
+                else viewModel.getParentFolderName(it.path) == albumName
             }?.let { 
                 val lastSlash = it.path.lastIndexOf('/')
                 if (lastSlash > 0) it.path.substring(0, lastSlash) else ""
@@ -97,7 +104,7 @@ fun PhotoScreen(
                     title = { 
                         Column {
                             Text(
-                                albumName,
+                                java.io.File(albumName).name,
                                 style = EmphasizedTypography.TitleLarge
                             )
                             Text(
@@ -120,6 +127,11 @@ fun PhotoScreen(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
+                            if (quickSort == null) DropdownMenuItem(
+                                text = { Text(stringResource(R.string.qs_start)) },
+                                onClick = { showMenu = false; onToggleQuickSort() },
+                                leadingIcon = { Icon(Icons.Outlined.DriveFileMove, null) },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Sort Photos") },
                                 onClick = {
@@ -169,6 +181,8 @@ fun PhotoScreen(
 
 
             PhotosScreen(
+                quickSort = quickSort,
+                bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
                 items = albumItems,
                 onNavigateToViewer = onNavigateToViewer,
                 selectedIds = selectedIds,

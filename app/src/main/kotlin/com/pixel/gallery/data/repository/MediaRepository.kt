@@ -31,6 +31,17 @@ import com.pixel.gallery.model.ReplacementStage
 import com.pixel.gallery.model.getAvailableTransferName
 import com.pixel.gallery.model.isVerifiedTransferSize
 import com.pixel.gallery.model.replacementRecoveryAction
+import com.pixel.gallery.model.QuickMoveCheckpoint
+import com.pixel.gallery.model.QuickMoveStage
+import com.pixel.gallery.model.TransferReceipt
+import com.pixel.gallery.model.MediaFileFingerprint
+import com.pixel.gallery.model.fingerprintMediaFile
+import com.pixel.gallery.model.verifyMediaFile
+import com.pixel.gallery.model.restoreMediaModifiedTime
+import com.pixel.gallery.model.copyVerifiedMediaBytes
+import com.pixel.gallery.model.mediaStreamSha256
+import com.pixel.gallery.model.quickMoveRecoveryDecision
+import com.pixel.gallery.model.QuickMoveRecoveryDecision
 import com.pixel.gallery.utils.StorageUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.indexedbmp.IndexedBmpStore
@@ -182,12 +193,34 @@ class MediaRepository @Inject constructor(
 
     fun isFavourite(id: Long): Flow<Boolean> = mediaDao.isFavourite(id)
 
-    suspend fun addFavourite(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun addFavourite(id: Long) = withValidLabelMedia(setOf(id)) {
         mediaDao.addFavourite(com.pixel.gallery.data.local.entity.FavouriteEntry(id))
     }
 
-    suspend fun removeFavourite(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun removeFavourite(id: Long) = withValidLabelMedia(setOf(id)) {
         mediaDao.removeFavourite(id)
+    }
+
+    /** Serialize label writes with moves and reject stale IDs held by another window. */
+    suspend fun <T> withValidLabelMedia(contentIds: Set<Long>, block: suspend () -> T): T = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            val entries = contentIds.toList().chunked(400).flatMap { mediaDao.getEntriesByIds(it) }
+            if (entries.map { it.contentId }.toSet() != contentIds) {
+                throw LabelMediaUnavailableException("Some selected files changed; reopen their labels")
+            }
+            for (entry in entries) {
+                val columns = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.IS_TRASHED)
+                else arrayOf(MediaStore.MediaColumns._ID)
+                val valid = runCatching {
+                    context.contentResolver.query(Uri.parse(entry.uri), columns, null, null, null)?.use { cursor ->
+                        cursor.moveToFirst() && (columns.size < 2 || cursor.getInt(1) == 0)
+                    } == true
+                }.getOrDefault(false)
+                if (!valid) throw LabelMediaUnavailableException("A selected file moved or was removed; reopen its labels")
+            }
+            block()
+        }
     }
 
     // --- Trash ---
@@ -413,25 +446,22 @@ class MediaRepository @Inject constructor(
         }
 
         if (restored) {
-            relocatePersistentIndexes(vaultFile.absolutePath, originalFile.absolutePath)
             val originalEntry = gson.fromJson(vaultEntry.entryJson, MediaEntry::class.java)
-            mediaDao.deleteVaultEntry(id)
-            
-            // Rescan the file to add it back to MediaStore
-            android.media.MediaScannerConnection.scanFile(context, arrayOf(originalFile.absolutePath), null) { _, uri ->
-                if (uri != null) {
-                    val values = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.MediaColumns.DATE_ADDED, originalEntry.dateAddedSecs)
-                        put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, originalEntry.dateModifiedMillis / 1000)
-                        originalEntry.sourceDateTakenMillis?.let { put("datetaken", it) }
-                    }
-                    try {
-                        context.contentResolver.update(uri, values, null, null)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
+            val uri = scanFile(originalFile, originalEntry.sourceMimeType)
+            if (uri == null) {
+                // Keep the vault record until the new ID is known, restoring the original location if possible.
+                originalFile.renameTo(vaultFile)
+                return@withContext false
             }
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DATE_ADDED, originalEntry.dateAddedSecs)
+                put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, originalEntry.dateModifiedMillis / 1000)
+                originalEntry.sourceDateTakenMillis?.let { put("datetaken", it) }
+            }
+            runCatching { context.contentResolver.update(uri, values, null, null) }
+            migrateMediaLabels(id, uri)
+            relocatePersistentIndexes(vaultFile.absolutePath, originalFile.absolutePath)
+            mediaDao.deleteVaultEntry(id)
             true
         } else {
             false
@@ -734,12 +764,11 @@ class MediaRepository @Inject constructor(
                 ?: throw IOException("Destination could not be indexed; source was kept")
 
             if (mode == TransferMode.MOVE) {
-                val wasFavourite = mediaDao.isFavourite(entry.contentId).first()
                 if (!removeOriginal(entry, sourceFile)) {
                     throw IOException("Destination is valid, but the source could not be removed")
                 }
                 relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
-                migrateFavourite(entry.contentId, scannedUri, wasFavourite)
+                migrateMediaLabels(entry.contentId, scannedUri)
             }
             return TransferOutcome.COMPLETED
         } catch (error: Exception) {
@@ -810,7 +839,8 @@ class MediaRepository @Inject constructor(
         targetUri: Uri,
         targetFile: File? = null
     ) {
-        val expectedBytes = sourceFile.length()
+        val fingerprint = fingerprintMediaFile(sourceFile)
+        val expectedBytes = fingerprint.bytes
         val resolver = context.contentResolver
         val source = resolver.openInputStream(Uri.parse(entry.uri)) ?: FileInputStream(sourceFile)
         source.use { input ->
@@ -834,6 +864,10 @@ class MediaRepository @Inject constructor(
         if (!isVerifiedTransferSize(expectedBytes, actualBytes)) {
             throw IOException("Destination verification failed ($actualBytes of $expectedBytes bytes)")
         }
+        val targetHash = resolver.openInputStream(targetUri)?.use(::mediaStreamSha256)
+            ?: throw IOException("Destination could not be reopened for verification")
+        if (targetHash != fingerprint.sha256) throw IOException("Destination content verification failed; source was kept")
+        verifyMediaFile(sourceFile, fingerprint, verifyTime = true)
     }
 
     private fun queryDocumentSize(uri: Uri): Long {
@@ -852,14 +886,11 @@ class MediaRepository @Inject constructor(
         return runCatching { sourceFile.delete() && !sourceFile.exists() }.getOrDefault(false)
     }
 
-    private suspend fun migrateFavourite(sourceId: Long, targetUri: Uri, wasFavourite: Boolean) {
-        if (!wasFavourite) return
+    private suspend fun migrateMediaLabels(sourceId: Long, targetUri: Uri) {
         val newId = targetUri.lastPathSegment?.toLongOrNull() ?: run {
-            android.util.Log.w("MediaRepository", "Could not migrate favourite for target URI $targetUri")
-            return
+            throw IOException("Could not migrate labels for target URI $targetUri")
         }
-        mediaDao.addFavourite(com.pixel.gallery.data.local.entity.FavouriteEntry(newId))
-        mediaDao.removeFavourite(sourceId)
+        if (newId != sourceId) mediaDao.remapMediaLabels(sourceId, newId)
     }
 
     private suspend fun replaceEntry(
@@ -890,7 +921,6 @@ class MediaRepository @Inject constructor(
         var targetBackedUp = false
         var targetCommitted = false
         val sourceLastModified = sourceFile.lastModified()
-        val wasFavourite = mode == TransferMode.MOVE && mediaDao.isFavourite(entry.contentId).first()
 
         writeReplaceJournal(journalFile, journal)
         try {
@@ -922,7 +952,7 @@ class MediaRepository @Inject constructor(
                 relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
                 journal = journal.copy(stage = ReplacementStage.SOURCE_REMOVED)
                 writeReplaceJournal(journalFile, journal)
-                migrateFavourite(entry.contentId, targetUri, wasFavourite)
+                migrateMediaLabels(entry.contentId, targetUri)
             }
 
             if (!backup.exists() || backup.delete()) {
@@ -949,16 +979,7 @@ class MediaRepository @Inject constructor(
     }
 
     private fun copyFileVerified(sourceFile: File, targetFile: File) {
-        FileInputStream(sourceFile).use { input ->
-            FileOutputStream(targetFile, false).use { output ->
-                input.copyTo(output)
-                output.flush()
-                output.fd.sync()
-            }
-        }
-        if (!isVerifiedTransferSize(sourceFile.length(), targetFile.length())) {
-            throw IOException("Destination verification failed")
-        }
+        copyVerifiedMediaBytes(sourceFile, targetFile, fingerprintMediaFile(sourceFile))
     }
 
     private suspend fun rollbackReplacement(
@@ -1037,6 +1058,224 @@ class MediaRepository @Inject constructor(
         directory.listFiles { file -> file.name.endsWith(".json.new") }?.forEach { it.delete() }
     }
 
+    /** Quick classification always moves. Unsupported document providers are rejected before mutation. */
+    suspend fun moveForQuickSort(
+        entry: MediaEntry,
+        destination: TransferDestination,
+        operationId: String,
+        onCheckpoint: suspend (QuickMoveCheckpoint) -> Unit,
+    ): TransferReceipt = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            replacementRecoveryComplete.await()
+            require(destination.documentUri == null) {
+                "This document provider cannot guarantee original timestamps; choose a local album"
+            }
+            val source = File(entry.path)
+            val directory = File(destination.path)
+            require(directory.isDirectory) { "Destination album is unavailable" }
+            require(!isSameTransferDirectory(entry.path, destination.path)) { "Item is already in this album" }
+            val indexedSourcePath = mediaPath(Uri.parse(entry.uri))
+                ?: throw IOException("Source media record is unavailable; original was kept")
+            if (File(indexedSourcePath).canonicalPath != source.canonicalPath) {
+                throw IOException("Source media record changed; original was kept")
+            }
+            val originalLibraryTimes = mediaTimes(Uri.parse(entry.uri))
+                ?: throw IOException("Original media timestamps could not be read; source was kept")
+            val fingerprint = fingerprintMediaFile(source)
+            val target = getAvailableTarget(directory, source.name)
+            val sameVolume = StorageUtils.getVolumePath(context, source.path)?.let {
+                it == StorageUtils.getVolumePath(context, target.path)
+            } == true
+            val temporary = File(directory, ".pixel-transfer-$operationId.tmp")
+            val verifiedSource = entry.copy(dateAddedSecs = originalLibraryTimes.first,
+                sourceDateTakenMillis = originalLibraryTimes.third?.takeIf { it > 0L })
+            var checkpoint = QuickMoveCheckpoint(verifiedSource, target.absolutePath, temporary.absolutePath,
+                fingerprint.modifiedMillis, fingerprint.bytes, fingerprint.sha256)
+            onCheckpoint(checkpoint)
+
+            // Preserve the existing MediaStore row (including DATE_ADDED) whenever possible.
+            if (sameVolume && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val relative = StorageUtils.PathSegments(context, target.path).relativeDir
+                    ?: throw IOException("Could not resolve destination album")
+                if (target.exists()) throw IOException("Destination changed; source was kept")
+                val updated = context.contentResolver.update(Uri.parse(entry.uri), ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relative.replace(File.separatorChar, '/'))
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, target.name)
+                }, null, null)
+                if (updated > 0) {
+                    val actualTarget = mediaPath(Uri.parse(entry.uri))?.let(::File) ?: target
+                    checkpoint = checkpoint.copy(targetPath = actualTarget.absolutePath,
+                        targetUri = entry.uri, stage = QuickMoveStage.SourceRemoved)
+                    onCheckpoint(checkpoint)
+                    try {
+                        if (actualTarget.parentFile?.canonicalPath != directory.canonicalPath || source.exists()) {
+                            throw IOException("Media provider did not complete the requested directory move")
+                        }
+                        verifyMediaFile(actualTarget, fingerprint)
+                        restoreMediaModifiedTime(actualTarget, fingerprint.modifiedMillis)
+                        val receipt = finishQuickMove(checkpoint, Uri.parse(entry.uri))
+                        onCheckpoint(checkpoint.copy(stage = QuickMoveStage.Completed))
+                        return@withContext receipt
+                    } catch (failure: Exception) {
+                        // An in-place move already changed the directory. Try to restore it without overwriting.
+                        if (!source.exists()) {
+                            runCatching {
+                                val originalRelative = StorageUtils.PathSegments(context, source.path).relativeDir
+                                    ?: throw IOException("Original directory is unavailable")
+                                context.contentResolver.update(Uri.parse(entry.uri), ContentValues().apply {
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, originalRelative.replace(File.separatorChar, '/'))
+                                    put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+                                }, null, null)
+                                restoreMediaModifiedTime(source, fingerprint.modifiedMillis)
+                                verifyMediaFile(source, fingerprint, verifyTime = true)
+                            }
+                        }
+                        throw IOException(if (source.exists()) "Move could not be verified; inspect original and destination: ${failure.message}"
+                            else "File is at ${actualTarget.path}; verification needs attention: ${failure.message}", failure)
+                    }
+                }
+            }
+
+            // Direct local fallback uses exclusive owned files. No provider fallback silently loses timestamps.
+            if (!directory.canWrite()) throw IOException("Destination cannot preserve timestamps with current storage access")
+            if (!temporary.createNewFile()) throw IOException("A previous transfer needs recovery; source was kept")
+            var ownsTarget = false
+            try {
+                copyVerifiedMediaBytes(source, temporary, fingerprint)
+                if (!target.createNewFile()) throw IOException("Destination changed; source was kept")
+                ownsTarget = true
+                // A second verified copy avoids rename-overwrite races on filesystems without hard links.
+                copyVerifiedMediaBytes(temporary, target, fingerprint)
+                val targetUri = scanFile(target, entry.sourceMimeType)
+                    ?: throw IOException("Destination could not be indexed; source was kept")
+                checkpoint = checkpoint.copy(targetUri = targetUri.toString(), stage = QuickMoveStage.TargetReady)
+                onCheckpoint(checkpoint)
+                verifyQuickMoveTimes(checkpoint, targetUri)
+                verifyMediaFile(target, fingerprint, verifyTime = true)
+                // Recheck the source last, immediately before authorizing its removal.
+                verifyMediaFile(source, fingerprint, verifyTime = true)
+                if (!removeOriginal(entry, source)) throw IOException("Source could not be removed; source was kept")
+                checkpoint = checkpoint.copy(stage = QuickMoveStage.SourceRemoved)
+                onCheckpoint(checkpoint)
+                val receipt = finishQuickMove(checkpoint, targetUri)
+                onCheckpoint(checkpoint.copy(stage = QuickMoveStage.Completed))
+                temporary.delete()
+                receipt
+            } catch (failure: Exception) {
+                // Never remove the sole verified copy. A retained target is recorded in the checkpoint.
+                if (source.exists()) {
+                    if (ownsTarget) {
+                        checkpoint.targetUri?.let { runCatching { context.contentResolver.delete(Uri.parse(it), null, null) } }
+                        runCatching { target.delete() }
+                    }
+                    runCatching { temporary.delete() }
+                }
+                throw failure
+            }
+        }
+    }
+
+    /** Recovery never deletes an original. Both copies present is an explicit review state. */
+    suspend fun recoverQuickMove(checkpoint: QuickMoveCheckpoint): TransferReceipt = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            replacementRecoveryComplete.await()
+            val source = File(checkpoint.source.path)
+            val fingerprint = MediaFileFingerprint(checkpoint.sourceSize, checkpoint.originalModifiedMillis, checkpoint.sourceSha256)
+            if (source.exists()) {
+                val sourceVerified = runCatching { verifyMediaFile(source, fingerprint, verifyTime = true) }.isSuccess
+                if (quickMoveRecoveryDecision(true, sourceVerified, File(checkpoint.targetPath).exists(), false) == QuickMoveRecoveryDecision.NeedsReview) {
+                    throw IOException("Interrupted move: original changed; both locations were left untouched")
+                }
+                throw IOException(if (File(checkpoint.targetPath).exists())
+                    "Interrupted move: both source and destination were kept; review before retrying"
+                else "Interrupted before source removal; original was kept")
+            }
+            val knownUri = checkpoint.targetUri?.let(Uri::parse) ?: Uri.parse(checkpoint.source.uri)
+            val candidates = listOfNotNull(checkpoint.targetPath, mediaPath(knownUri)?.takeIf { it != checkpoint.source.path }).distinct()
+            val actualPath = candidates.firstOrNull { path ->
+                runCatching { verifyMediaFile(File(path), fingerprint, verifyTime = true) }.isSuccess
+            }
+            if (quickMoveRecoveryDecision(false, false, actualPath != null, actualPath != null) != QuickMoveRecoveryDecision.RepairCommitted) {
+                throw IOException("Interrupted move: destination could not be verified; no files were removed")
+            }
+            val recovered = checkpoint.copy(targetPath = requireNotNull(actualPath))
+            val targetUri = scanFile(File(actualPath), checkpoint.source.sourceMimeType)
+                ?: throw IOException("Verified destination exists but cannot yet be indexed: $actualPath")
+            val receipt = finishQuickMove(recovered, targetUri)
+            checkpoint.temporaryPath?.let { path ->
+                // Only remove our own verified temporary after the committed target is confirmed.
+                val temp = File(path)
+                if (temp.isFile && temp.name.startsWith(".pixel-transfer-")) {
+                    runCatching { verifyMediaFile(temp, fingerprint); temp.delete() }
+                }
+            }
+            receipt
+        }
+    }
+
+    private fun mediaPath(uri: Uri): String? = runCatching {
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }.getOrNull()
+
+    private fun mediaTimes(uri: Uri): Triple<Long, Long, Long?>? = runCatching {
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.Images.Media.DATE_TAKEN), null, null, null)?.use {
+            if (!it.moveToFirst()) null else Triple(it.getLong(0), it.getLong(1), if (it.isNull(2)) null else it.getLong(2))
+        }
+    }.getOrNull()
+
+    private suspend fun verifyQuickMoveTimes(checkpoint: QuickMoveCheckpoint, targetUri: Uri): Boolean {
+        val source = checkpoint.source
+        val target = File(checkpoint.targetPath)
+        restoreMediaModifiedTime(target, checkpoint.originalModifiedMillis)
+        val expectedTaken = source.sourceDateTakenMillis?.takeIf { it > 0 }
+        val before = mediaTimes(targetUri)
+        val changes = ContentValues().apply {
+            if (before?.first != source.dateAddedSecs && source.dateAddedSecs > 0) put(MediaStore.MediaColumns.DATE_ADDED, source.dateAddedSecs)
+            if (before?.second != checkpoint.originalModifiedMillis / 1000) put(MediaStore.MediaColumns.DATE_MODIFIED, checkpoint.originalModifiedMillis / 1000)
+            if (expectedTaken != null && before?.third != expectedTaken) put(MediaStore.Images.Media.DATE_TAKEN, expectedTaken)
+        }
+        if (changes.size() > 0) runCatching { context.contentResolver.update(targetUri, changes, null, null) }
+        var after = mediaTimes(targetUri)
+        // Modern MediaProvider treats derived date columns as read-only. Rescan the unchanged
+        // embedded metadata and restored filesystem mtime instead of trusting an ignored update.
+        if (after?.second != checkpoint.originalModifiedMillis / 1000 ||
+            after?.third?.takeIf { it > 0L } != expectedTaken) {
+            val scannedUri = scanFile(target, source.sourceMimeType)
+                ?: throw IOException("Destination timestamps could not be refreshed; source was kept where possible")
+            if (scannedUri != targetUri) throw IOException("Destination media identity changed during timestamp verification")
+            after = mediaTimes(targetUri)
+        }
+        after ?: throw IOException("Destination media timestamps could not be read back; source was kept where possible")
+        if (after.third?.takeIf { it > 0L } != expectedTaken) throw IOException("Original capture time could not be preserved")
+        if (after.second != checkpoint.originalModifiedMillis / 1000) throw IOException("Media library modification time could not be preserved")
+        restoreMediaModifiedTime(target, checkpoint.originalModifiedMillis)
+        return after.first == source.dateAddedSecs
+    }
+
+    private suspend fun finishQuickMove(checkpoint: QuickMoveCheckpoint, targetUri: Uri): TransferReceipt {
+        val addedPreserved = verifyQuickMoveTimes(checkpoint, targetUri)
+        verifyMediaFile(File(checkpoint.targetPath), MediaFileFingerprint(checkpoint.sourceSize,
+            checkpoint.originalModifiedMillis, checkpoint.sourceSha256), verifyTime = true)
+        val originalTaken = checkpoint.source.sourceDateTakenMillis?.takeIf { it > 0L }
+        val finalTimes = mediaTimes(targetUri) ?: throw IOException("Destination timestamps could not be confirmed")
+        val capturePreserved = finalTimes.third?.takeIf { it > 0L } == originalTaken
+        if (!capturePreserved) throw IOException("Capture timestamp changed during final verification")
+        val newId = targetUri.lastPathSegment?.toLongOrNull() ?: throw IOException("Destination media ID is unavailable")
+        // Remap before any full scan can remove the old media record.
+        if (checkpoint.source.contentId != newId) mediaDao.remapMediaLabels(checkpoint.source.contentId, newId)
+        relocatePersistentIndexes(checkpoint.source.path, checkpoint.targetPath)
+        return TransferReceipt(checkpoint.source.contentId, checkpoint.source.uri, checkpoint.source.path,
+            newId, targetUri.toString(), checkpoint.targetPath, checkpoint.originalModifiedMillis,
+            originalTaken, true, true, capturePreserved, addedPreserved,
+            listOfNotNull(
+                if (originalTaken == null) "No capture timestamp was present; the empty value was checked" else null,
+                if (!addedPreserved) "Android assigned a new library-added time; content and original modification time were verified" else null,
+            ).takeIf { it.isNotEmpty() }?.joinToString("; "))
+    }
+
     private suspend fun moveEntry(entry: MediaEntry, sourceFile: File, targetFile: File) {
         val sourceLastModified = sourceFile.lastModified()
         val sourceVolume = StorageUtils.getVolumePath(context, sourceFile.absolutePath)
@@ -1056,7 +1295,6 @@ class MediaRepository @Inject constructor(
             if (updated > 0) return
         }
 
-        val wasFavourite = mediaDao.isFavourite(entry.contentId).first()
         if (sameVolume && sourceFile.renameTo(targetFile)) {
             targetFile.setLastModified(sourceLastModified)
             val scannedUri = scanFile(targetFile, entry.sourceMimeType)
@@ -1067,7 +1305,7 @@ class MediaRepository @Inject constructor(
             val sourceUri = Uri.parse(entry.uri)
             if (scannedUri != sourceUri) {
                 runCatching { context.contentResolver.delete(sourceUri, null, null) }
-                migrateFavourite(entry.contentId, scannedUri, wasFavourite)
+                migrateMediaLabels(entry.contentId, scannedUri)
             }
             relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
             return
@@ -1084,7 +1322,7 @@ class MediaRepository @Inject constructor(
         }
 
         relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
-        migrateFavourite(entry.contentId, copiedUri, wasFavourite)
+        migrateMediaLabels(entry.contentId, copiedUri)
     }
 
     private suspend fun copyEntry(entry: MediaEntry, sourceFile: File, targetFile: File): Uri {

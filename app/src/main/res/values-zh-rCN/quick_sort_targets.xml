@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qs_targets_search">搜索相册</string>
+    <string name="qs_targets_clear_search">清除搜索</string>
+    <string name="qs_targets_selected_count">已选 %1$d 个</string>
+    <string name="qs_targets_new_album">新建相册</string>
+    <string name="qs_targets_empty">还没有相册，可以先新建一个。</string>
+    <string name="qs_targets_no_results">没有匹配的相册</string>
+    <string name="qs_targets_create_in">创建到 %1$s</string>
+    <string name="qs_targets_album_name">相册名称</string>
+    <string name="qs_targets_create">创建</string>
+    <string name="qs_targets_creating">正在创建…</string>
+    <string name="qs_targets_create_error">无法创建相册</string>
+    <string name="qs_targets_selected_position">已选择，第 %1$d 位</string>
+    <string name="qs_targets_not_selected">未选择</string>
+    <plurals name="qs_targets_item_count">
+        <item quantity="other">%d 项</item>
+    </plurals>
+</resources>
