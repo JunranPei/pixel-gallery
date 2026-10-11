@@ -43,6 +43,7 @@ import com.pixel.gallery.ui.settings.ExcludedFoldersScreen
 import com.pixel.gallery.ui.settings.LicensesScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.components.DeleteConfirmDialog
+import com.pixel.gallery.ui.components.HomeOverflowMenu
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
 import com.pixel.gallery.ui.settings.ThemeSettingsScreen
 import com.pixel.gallery.ui.settings.DisplaySettingsScreen
@@ -53,15 +54,12 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.filled.MoreVert
 import kotlinx.coroutines.flow.*
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
-import androidx.compose.material.icons.filled.Sort
 import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
 import com.pixel.gallery.ui.viewmodel.AlbumSortOrder
 import androidx.compose.foundation.clickable
@@ -79,7 +77,6 @@ import com.pixel.gallery.ui.components.SortCriterion
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.outlined.FileCopy
-import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.model.DeduplicationScope
@@ -982,119 +979,49 @@ fun MainScaffold(
                                                         contentDescription = "More",
                                                     )
                                                 }
-                                                DropdownMenu(
+                                                HomeOverflowMenu(
                                                     expanded = showMenu,
                                                     onDismissRequest = { showMenu = false },
-                                                ) {
-                                                    if (homePagerState.currentPage == 0) {
-                                                        if (!quickSortEnabled) DropdownMenuItem(
-                                                            text = { Text(stringResource(R.string.qs_start)) },
-                                                            onClick = {
-                                                                showMenu = false
-                                                                toggleQuickSort()
-                                                            },
-                                                            leadingIcon = { Icon(Icons.Outlined.DriveFileMove, null) },
+                                                    showQuickSort = homePagerState.currentPage == 0 && !quickSortEnabled,
+                                                    sortLabel = if (homePagerState.currentPage == 0) "Sort photos" else "Sort albums",
+                                                    duplicateLabel = stringResource(
+                                                        if (homePagerState.currentPage == 0) R.string.duplicate_find_all
+                                                        else R.string.duplicate_find_each_album,
+                                                    ),
+                                                    canFindDuplicates = allPhotos.size > 1,
+                                                    onQuickSort = {
+                                                        showMenu = false
+                                                        toggleQuickSort()
+                                                    },
+                                                    onSort = {
+                                                        showMenu = false
+                                                        if (homePagerState.currentPage == 0) showPhotoSortDialog = true
+                                                        else showAlbumSortDialog = true
+                                                    },
+                                                    onFindDuplicates = {
+                                                        showMenu = false
+                                                        val isPhotosPage = homePagerState.currentPage == 0
+                                                        duplicateViewModel.start(
+                                                            allPhotos,
+                                                            if (isPhotosPage) DeduplicationScope.ALL_FILES else DeduplicationScope.WITHIN_ALBUMS,
+                                                            context.getString(
+                                                                if (isPhotosPage) R.string.duplicate_scope_all else R.string.duplicate_scope_each_album,
+                                                            ),
                                                         )
-                                                        DropdownMenuItem(
-                                                            text = { Text("Sort Photos") },
-                                                            onClick = {
-                                                                showMenu = false
-                                                                showPhotoSortDialog = true
-                                                            },
-                                                            leadingIcon = {
-                                                                Icon(
-                                                                    Icons.Default.Sort,
-                                                                    contentDescription = null,
-                                                                )
-                                                            },
-                                                        )
-                                                    } else {
-                                                        DropdownMenuItem(
-                                                            text = { Text("Sort Albums") },
-                                                            onClick = {
-                                                                showMenu = false
-                                                                showAlbumSortDialog = true
-                                                            },
-                                                            leadingIcon = {
-                                                                Icon(
-                                                                    Icons.Default.Sort,
-                                                                    contentDescription = null,
-                                                                )
-                                                            },
-                                                        )
-                                                    }
-                                                    DropdownMenuItem(
-                                                        text = { Text("Hidden Albums") },
-                                                        onClick = {
-                                                            showMenu = false
-                                                            navigationStack =
-                                                                navigationStack + Screen.HiddenAlbums
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(
-                                                                Icons.Outlined.VisibilityOff,
-                                                                contentDescription = null,
-                                                            )
-                                                        },
-                                                    )
-                                                    DropdownMenuItem(
-                                                        text = { Text("Locked Folder") },
-                                                        onClick = {
-                                                            showMenu = false
-                                                            navigationStack =
-                                                                navigationStack + Screen.LockedFolder
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(
-                                                                Icons.Outlined.Lock,
-                                                                contentDescription = null,
-                                                            )
-                                                        },
-                                                    )
-                                                    if (homePagerState.currentPage == 0) {
-                                                        DropdownMenuItem(
-                                                            text = { Text(stringResource(R.string.duplicate_find_all)) },
-                                                            enabled = allPhotos.size > 1,
-                                                            onClick = {
-                                                                showMenu = false
-                                                                duplicateViewModel.start(
-                                                                    allPhotos,
-                                                                    DeduplicationScope.ALL_FILES,
-                                                                    context.getString(R.string.duplicate_scope_all),
-                                                                )
-                                                            },
-                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
-                                                        )
-                                                    } else {
-                                                        DropdownMenuItem(
-                                                            text = { Text(stringResource(R.string.duplicate_find_each_album)) },
-                                                            enabled = allPhotos.size > 1,
-                                                            onClick = {
-                                                                showMenu = false
-                                                                duplicateViewModel.start(
-                                                                    allPhotos,
-                                                                    DeduplicationScope.WITHIN_ALBUMS,
-                                                                    context.getString(R.string.duplicate_scope_each_album),
-                                                                )
-                                                            },
-                                                            leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) },
-                                                        )
-                                                    }
-                                                    DropdownMenuItem(
-                                                        text = { Text("Settings") },
-                                                        onClick = {
-                                                            showMenu = false
-                                                            navigationStack =
-                                                                navigationStack + Screen.Settings
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(
-                                                                Icons.Outlined.Settings,
-                                                                contentDescription = null,
-                                                            )
-                                                        },
-                                                    )
-                                                }
+                                                    },
+                                                    onHiddenAlbums = {
+                                                        showMenu = false
+                                                        navigationStack = navigationStack + Screen.HiddenAlbums
+                                                    },
+                                                    onLockedFolder = {
+                                                        showMenu = false
+                                                        navigationStack = navigationStack + Screen.LockedFolder
+                                                    },
+                                                    onSettings = {
+                                                        showMenu = false
+                                                        navigationStack = navigationStack + Screen.Settings
+                                                    },
+                                                )
                                             }
                                         } else {
                                             Row(

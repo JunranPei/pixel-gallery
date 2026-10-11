@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -117,6 +119,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
@@ -381,6 +384,7 @@ internal fun ViewerScreen(
     var showUI by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var expandedBottomActions by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var rotationLocked by remember { mutableStateOf(true) }
     var ultraHdrActive by remember { mutableStateOf(false) }
@@ -618,6 +622,7 @@ internal fun ViewerScreen(
     }
 
     LaunchedEffect(currentMediaCacheKey) {
+        expandedBottomActions = false
         val metadataToken = ViewerLoadMetrics.workStarted(
             type = "MOTION_METADATA",
             imageKey = currentMediaCacheKey ?: "none",
@@ -682,14 +687,14 @@ internal fun ViewerScreen(
     }
 
     // Auto-hide UI timer
-    LaunchedEffect(showUI, showMenu, pagerState.currentPage, isPlayingMotion) {
+    LaunchedEffect(showUI, showMenu, expandedBottomActions, pagerState.currentPage, isPlayingMotion) {
         ViewerLoadMetrics.event(
             "UI_AUTO_HIDE_SCHEDULE",
             "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
         )
         // A menu is anchored to the top bar. Keep both bars present while it
         // is open so the menu cannot disappear before the user taps an item.
-        if (showUI && !showMenu && !isPlayingMotion) {
+        if (showUI && !showMenu && !expandedBottomActions && !isPlayingMotion) {
             delay(3000)
             showUI = false
             ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
@@ -1283,7 +1288,7 @@ internal fun ViewerScreen(
             exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { -it },
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -1335,30 +1340,22 @@ internal fun ViewerScreen(
                                 )
                             }
                         }
-                        IconButton(onClick = { 
-                            rotationLocked = !rotationLocked
-                            val activity = context as? Activity
-                            activity?.requestedOrientation = if (rotationLocked) {
-                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            } else {
-                                ActivityInfo.SCREEN_ORIENTATION_SENSOR
+                        if (currentIndexTarget != null) {
+                            IconButton(onClick = {
+                                showUI = true
+                                showMenu = true
+                            }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
                             }
-                        }) {
-                            Icon(
-                                imageVector = if (rotationLocked) Icons.Outlined.ScreenLockRotation else Icons.Outlined.ScreenRotation,
-                                contentDescription = "Auto-Rotate",
-                                tint = Color.White
-                            )
-                        }
-                        IconButton(onClick = {
-                            showUI = true
-                            showMenu = true
-                        }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
                         }
                         DropdownMenu(
                             expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
+                            onDismissRequest = { showMenu = false },
+                            modifier = Modifier.width(236.dp),
+                            shape = RoundedCornerShape(32.dp),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            tonalElevation = 0.dp,
+                            shadowElevation = 6.dp,
                         ) {
                             currentIndexTarget?.let { indexTarget ->
                                 val indexReady = imageIndexReady == true
@@ -1411,74 +1408,22 @@ internal fun ViewerScreen(
                                         }
                                     },
                                     leadingIcon = {
-                                        Icon(
-                                            if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("Set as Wallpaper") },
-                                onClick = {
-                                    showMenu = false
-                                    currentMedia?.let { media ->
-                                        val intent = WallpaperManager.getInstance(context).getCropAndSetWallpaperIntent(Uri.parse(media.uri))
-                                        context.startActivity(intent)
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.Wallpaper, contentDescription = null) }
-                            )
-                            if (allowTransfer) {
-                                DropdownMenuItem(
-                                    text = { Text("Move or copy to…") },
-                                    enabled = !isCurrentReserved,
-                                    onClick = {
-                                        showMenu = false
-                                        currentMedia?.let(onRequestTransfer)
-                                    },
-                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = null) }
-                                )
-                            }
-                            if (allowLabels) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.label_edit)) },
-                                    enabled = !isCurrentReserved,
-                                    onClick = {
-                                        showMenu = false
-                                        currentMedia?.let { onEditLabels(setOf(it.contentId)) }
-                                    },
-                                    leadingIcon = { Icon(Icons.Outlined.Label, contentDescription = null) }
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("Move to locked folder") },
-                                enabled = !isCurrentReserved,
-                                onClick = {
-                                    showMenu = false
-                                    currentMedia?.let { media ->
-                                        viewModel.moveToVault(media)
-                                        onBack()
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Open With") },
-                                onClick = {
-                                    showMenu = false
-                                    currentMedia?.let { media ->
-                                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                                            setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(
+                                                if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp),
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            )
                                         }
-                                        try {
-                                            context.startActivity(Intent.createChooser(intent, "Open with..."))
-                                        } catch (e: Exception) { }
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null) }
-                            )
+                                    },
+                                )
+                            }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -1496,7 +1441,7 @@ internal fun ViewerScreen(
             exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { it },
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -1506,13 +1451,28 @@ internal fun ViewerScreen(
                     )
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(bottom = 16.dp, top = 24.dp)
+                    .pointerInput(expandedBottomActions) {
+                        var cumulativeDrag = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { cumulativeDrag = 0f },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                cumulativeDrag += dragAmount
+                                when {
+                                    cumulativeDrag < -32f -> expandedBottomActions = true
+                                    cumulativeDrag > 32f -> expandedBottomActions = false
+                                }
+                            },
+                        )
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ViewerAction(Icons.Outlined.Share, "Share") {
+                    ViewerAction(Icons.Outlined.Share, "Share", showLabel = expandedBottomActions) {
                         currentMedia?.let { media ->
                             val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", File(media.path))
                             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -1523,7 +1483,7 @@ internal fun ViewerScreen(
                             context.startActivity(Intent.createChooser(intent, "Share Media"))
                         }
                     }
-                    ViewerAction(Icons.Outlined.Edit, "Edit", enabled = !isCurrentReserved) {
+                    ViewerAction(Icons.Outlined.Edit, "Edit", enabled = !isCurrentReserved, showLabel = expandedBottomActions) {
                         currentMedia?.let { media ->
                             val intent = Intent(Intent.ACTION_EDIT).apply {
                                 setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
@@ -1534,45 +1494,125 @@ internal fun ViewerScreen(
                             } catch (e: Exception) { }
                         }
                     }
-                    Box(
-                        modifier = Modifier.size(48.dp).clip(CircleShape).combinedClickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(bounded = false, radius = 24.dp),
-                            enabled = !isCurrentReserved,
-                            role = Role.Button,
-                            onLongClickLabel = if (allowLabels) editLabelsDescription else null,
-                            onLongClick = if (allowLabels) {
-                                { currentMedia?.let { onEditLabels(setOf(it.contentId)) } }
-                            } else null,
-                            onClick = {
-                                currentMedia?.let {
-                                    viewModel.toggleFavourite(it.contentId, isFavourite) { message ->
-                                        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                    Column(
+                        modifier = Modifier.width(64.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            modifier = Modifier.size(48.dp).clip(CircleShape).combinedClickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(bounded = false, radius = 24.dp),
+                                enabled = !isCurrentReserved,
+                                role = Role.Button,
+                                onLongClickLabel = if (allowLabels) editLabelsDescription else null,
+                                onLongClick = if (allowLabels) {
+                                    { currentMedia?.let { onEditLabels(setOf(it.contentId)) } }
+                                } else null,
+                                onClick = {
+                                    currentMedia?.let {
+                                        viewModel.toggleFavourite(it.contentId, isFavourite) { message ->
+                                            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 }
-                            }
-                        ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isFavourite || currentLabels.isNotEmpty()) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = stringResource(R.string.labels_favourites),
-                            tint = (if (isFavourite) Color.Red else Color.White).copy(alpha = if (isCurrentReserved) 0.38f else 1f)
-                        )
+                            ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isFavourite || currentLabels.isNotEmpty()) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                contentDescription = stringResource(R.string.labels_favourites),
+                                tint = (if (isFavourite) Color.Red else Color.White).copy(alpha = if (isCurrentReserved) 0.38f else 1f)
+                            )
+                        }
+                        if (expandedBottomActions) {
+                            Text(
+                                text = "Favourite",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = if (isCurrentReserved) 0.38f else 0.9f),
+                                maxLines = 1,
+                            )
+                        }
                     }
-                    ViewerAction(Icons.Outlined.Info, "Info") {
+                    ViewerAction(Icons.Outlined.Info, "Info", showLabel = expandedBottomActions) {
                         showInfo = true
                     }
                     if (currentMedia?.isTrashed == true) {
-                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore", enabled = !isCurrentReserved) {
+                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore", enabled = !isCurrentReserved, showLabel = expandedBottomActions) {
                             currentMedia?.let { media ->
                                 viewModel.restoreMedia(media.contentId, media.uri)
                                 onBack()
                             }
                         }
                     } else {
-                        ViewerAction(Icons.Outlined.Delete, "Delete", enabled = !isCurrentReserved) {
+                        ViewerAction(Icons.Outlined.Delete, "Delete", enabled = !isCurrentReserved, showLabel = expandedBottomActions) {
                             showDeleteConfirm = true
+                        }
+                    }
+                }
+                AnimatedVisibility(
+                    visible = expandedBottomActions,
+                    enter = fadeIn(animationSpec = tween(140)) + expandVertically(animationSpec = tween(180)),
+                    exit = fadeOut(animationSpec = tween(100)) + shrinkVertically(animationSpec = tween(160)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (allowTransfer) {
+                            ViewerSecondaryAction(Icons.AutoMirrored.Outlined.DriveFileMove, "Move") {
+                                expandedBottomActions = false
+                                currentMedia?.let(onRequestTransfer)
+                            }
+                        }
+                        if (allowLabels) {
+                            ViewerSecondaryAction(Icons.Outlined.Label, "Labels", enabled = !isCurrentReserved) {
+                                expandedBottomActions = false
+                                currentMedia?.let { onEditLabels(setOf(it.contentId)) }
+                            }
+                        }
+                        ViewerSecondaryAction(Icons.Outlined.Lock, "Lock", enabled = !isCurrentReserved) {
+                            expandedBottomActions = false
+                            currentMedia?.let { media ->
+                                viewModel.moveToVault(media)
+                                onBack()
+                            }
+                        }
+                        ViewerSecondaryAction(Icons.Outlined.Wallpaper, "Wallpaper") {
+                            expandedBottomActions = false
+                            currentMedia?.let { media ->
+                                val intent = WallpaperManager.getInstance(context)
+                                    .getCropAndSetWallpaperIntent(Uri.parse(media.uri))
+                                context.startActivity(intent)
+                            }
+                        }
+                        ViewerSecondaryAction(
+                            if (rotationLocked) Icons.Outlined.ScreenLockRotation else Icons.Outlined.ScreenRotation,
+                            "Rotate",
+                        ) {
+                            rotationLocked = !rotationLocked
+                            val activity = context as? Activity
+                            activity?.requestedOrientation = if (rotationLocked) {
+                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            } else {
+                                ActivityInfo.SCREEN_ORIENTATION_SENSOR
+                            }
+                        }
+                        ViewerSecondaryAction(Icons.AutoMirrored.Outlined.OpenInNew, "Open with") {
+                            expandedBottomActions = false
+                            currentMedia?.let { media ->
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                runCatching {
+                                    context.startActivity(Intent.createChooser(intent, "Open with..."))
+                                }
+                            }
                         }
                     }
                 }
@@ -2335,9 +2375,54 @@ fun ViewerAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     enabled: Boolean = true,
+    showLabel: Boolean = false,
     onClick: () -> Unit
 ) {
-    IconButton(onClick = onClick, enabled = enabled) {
-        Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f))
+    if (showLabel) {
+        Column(
+            modifier = Modifier.width(64.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            IconButton(onClick = onClick, enabled = enabled) {
+                Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f))
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = if (enabled) 0.9f else 0.38f),
+                maxLines = 1,
+            )
+        }
+    } else {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f))
+        }
+    }
+}
+
+@Composable
+private fun ViewerSecondaryAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.width(72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = if (enabled) 0.9f else 0.38f),
+            maxLines = 1,
+        )
     }
 }
