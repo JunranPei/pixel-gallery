@@ -52,6 +52,7 @@ data class QuickSortJob(
     val permissionToken: String? = null,
     val permissionGranted: Boolean = false,
     val cancelRequested: Boolean = false,
+    val firstSucceededAt: Long? = null,
 ) {
     val completed: Int get() = items.count { it.status == QuickSortItemStatus.Succeeded }
     val failed: Int get() = items.count { it.status == QuickSortItemStatus.Failed }
@@ -65,6 +66,7 @@ data class QuickSortQueueState(
     val error: String? = null,
     val serviceActive: Boolean = false,
     val permissionRevision: Long = 0,
+    val albumUses: List<QuickSortAlbumUse> = emptyList(),
 ) {
     val reservedIds: Set<Long> get() = jobs.filterNot { it.isTerminal }.flatMap { it.items }
         .filter { it.status == QuickSortItemStatus.Queued || it.status == QuickSortItemStatus.Running }
@@ -81,7 +83,11 @@ sealed class QuickSortEnqueueResult {
 
 data class QuickSortPermissionRequest(val jobId: String, val token: String, val request: IntentSenderRequest)
 
-data class QuickSortQueueJournal(val version: Int = 1, val jobs: List<QuickSortJob> = emptyList())
+data class QuickSortQueueJournal(
+    val version: Int = 1,
+    val jobs: List<QuickSortJob> = emptyList(),
+    val albumUses: List<QuickSortAlbumUse>? = emptyList(),
+)
 
 enum class QuickMoveRecoveryDecision { KeepOriginal, RepairCommitted, NeedsReview }
 

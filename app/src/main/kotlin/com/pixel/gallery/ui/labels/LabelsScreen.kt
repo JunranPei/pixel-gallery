@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.labels
 
+import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.ConfirmationReminder
+import com.pixel.gallery.ui.components.ConfirmationFact
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -163,8 +166,9 @@ fun LabelsScreen(
         var attempted by remember { mutableStateOf(false) }
         val duplicate = labels.any { it.label.id != editingLabel?.id && it.label.normalizedName == normalizeLabelName(name) }
         val valid = isValidLabelName(name) && !duplicate
-        AlertDialog(
+        GalleryDialog(
             onDismissRequest = { showNameDialog = false },
+            icon = Icons.Outlined.Label,
             title = { Text(stringResource(if (editingLabel == null) R.string.labels_new else R.string.labels_rename)) },
             text = {
                 OutlinedTextField(
@@ -179,7 +183,7 @@ fun LabelsScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                Button(onClick = {
                     attempted = true
                     if (valid) {
                         editingLabel?.let { onRenameLabel(it.id, name.trim()) } ?: onCreateLabel(name.trim())
@@ -191,11 +195,12 @@ fun LabelsScreen(
         )
     }
     deletingLabel?.let { label ->
-        AlertDialog(
+        GalleryDialog(
             onDismissRequest = { deletingLabel = null },
+            icon = Icons.Outlined.Delete,
             title = { Text(stringResource(R.string.labels_delete_title, label.name)) },
-            text = { Text(stringResource(R.string.labels_delete_message)) },
-            confirmButton = { TextButton(onClick = { onDeleteLabel(label.id); deletingLabel = null }) { Text(stringResource(R.string.labels_delete)) } },
+            text = { ConfirmationReminder(stringResource(R.string.labels_delete_message)) },
+            confirmButton = { Button(onClick = { onDeleteLabel(label.id); deletingLabel = null }) { Text(stringResource(R.string.labels_delete)) } },
             dismissButton = { TextButton(onClick = { deletingLabel = null }) { Text(stringResource(R.string.labels_cancel)) } }
         )
     }

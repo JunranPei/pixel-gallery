@@ -17,6 +17,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.ConfirmationReminder
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Modifier
 import com.pixel.gallery.model.ThemeMode
@@ -27,6 +34,8 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
+
+    private val showNotificationAccess = mutableStateOf(false)
 
     private val viewModel: PhotosViewModel by viewModels()
 
@@ -69,6 +78,22 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize()
                 ) {
                     MainScaffold()
+                    if (showNotificationAccess.value) {
+                        GalleryDialog(
+                            onDismissRequest = { showNotificationAccess.value = false },
+                            title = { Text(stringResource(R.string.dialog_notifications_title)) },
+                            text = { ConfirmationReminder(stringResource(R.string.dialog_notifications_body)) },
+                            confirmButton = {
+                                Button(onClick = {
+                                    showNotificationAccess.value = false
+                                    runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                                }) { Text(stringResource(R.string.dialog_open_settings)) }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showNotificationAccess.value = false }) { Text(stringResource(R.string.dialog_cancel)) }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -123,20 +148,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun checkNotificationListenerPermission() {
-        if (!isNotificationListenerEnabled()) {
-            android.app.AlertDialog.Builder(this)
-                .setTitle("开启后台保活支持")
-                .setMessage("为防止多分身在后台被系统强杀，请在接下来的设置中，为本应用开启“通知使用权”。\n\n开启后，系统将为其提供硬件级的后台常驻保护。")
-                .setPositiveButton("去开启") { _, _ ->
-                    try {
-                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    } catch (e: Exception) {
-                        android.widget.Toast.makeText(this, "未找到通知监听设置页面，请手动开启", android.widget.Toast.LENGTH_LONG).show()
-                    }
-                }
-                .setNegativeButton("取消", null)
-                .show()
-        }
+        showNotificationAccess.value = !isNotificationListenerEnabled()
     }
 
     private fun isNotificationListenerEnabled(): Boolean {

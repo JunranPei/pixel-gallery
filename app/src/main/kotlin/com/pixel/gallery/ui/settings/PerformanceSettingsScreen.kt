@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.settings
 
+import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.ConfirmationReminder
+import com.pixel.gallery.ui.components.ConfirmationFact
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,6 +13,8 @@ import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -33,19 +38,23 @@ fun PerformanceSettingsScreen(
     var showClearCacheConfirm by remember { mutableStateOf(false) }
 
     if (showClearCacheConfirm) {
-        AlertDialog(
+        GalleryDialog(
             onDismissRequest = { showClearCacheConfirm = false },
-            title = { Text("Clear Cache") },
-            text = { Text("Are you sure you want to clear all thumbnail cache directories and free up disk space? Thumbnails will need to be re-decoded next time.") },
+            title = { Text(stringResource(R.string.dialog_cache_title)) },
+            icon = Icons.Outlined.DeleteSweep,
+            text = {
+                ConfirmationReminder(stringResource(R.string.dialog_cache_body), Icons.Outlined.DeleteSweep)
+                ConfirmationReminder(stringResource(R.string.dialog_cache_decode))
+            },
             confirmButton = {
                 Button(onClick = {
                     showClearCacheConfirm = false
                     viewModel.clearAllCaches(context) {
                         scope.launch { snackbarHostState.showSnackbar("Cache cleared successfully") }
                     }
-                }) { Text("Clear") }
+                }) { Text(stringResource(R.string.dialog_clear)) }
             },
-            dismissButton = { TextButton(onClick = { showClearCacheConfirm = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showClearCacheConfirm = false }) { Text(stringResource(R.string.dialog_cancel)) } },
         )
     }
 

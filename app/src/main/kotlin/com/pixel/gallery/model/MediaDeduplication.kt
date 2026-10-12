@@ -42,6 +42,18 @@ data class DuplicateValidationResult(
     val skippedCount: Int get() = (skipped.map { it.entry.contentId } + rejectedIds).distinct().size
 }
 
+/** Same media-time basis as the gallery, followed by the oldest physical copy on ties. */
+fun duplicateMediaTimestamp(entry: MediaEntry): Long? =
+    entry.bestTimestamp.takeIf { it > 0 }
+        ?: entry.sourceDateTakenMillis?.takeIf { it > 0 }
+        ?: entry.dateModifiedMillis.takeIf { it > 0 }
+        ?: entry.dateAddedSecs.takeIf { it > 0 }?.let { it * 1000L }
+
+private val duplicateKeeperOrder = compareBy<MediaEntry> { duplicateMediaTimestamp(it) ?: Long.MAX_VALUE }
+    .thenBy { it.dateModifiedMillis.takeIf { value -> value > 0 } ?: Long.MAX_VALUE }
+    .thenBy { it.dateAddedSecs.takeIf { value -> value > 0 } ?: Long.MAX_VALUE }
+    .thenBy { it.path }.thenBy { it.contentId }
+
 /**
  * Content comparison only; this class never deletes files. The caller supplies the stream opener
  * and runs it on an IO dispatcher. A scan describes a snapshot, so [validate] must run immediately
@@ -91,7 +103,10 @@ class MediaDeduplication(private val openInputStream: (MediaEntry) -> InputStrea
                 onProgress(DuplicateScanProgress(++completed, total))
             }
             hashes.forEach { (hash, matches) ->
-                if (matches.size > 1) groups += DuplicateGroup(matches.first(), matches.drop(1), hash)
+                if (matches.size > 1) {
+                    val ordered = matches.sortedWith(duplicateKeeperOrder)
+                    groups += DuplicateGroup(ordered.first(), ordered.drop(1), hash)
+                }
             }
         }
         currentCoroutineContext().ensureActive()

@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.quicksort
 
+import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.ConfirmationReminder
+import com.pixel.gallery.ui.components.ConfirmationFact
 import android.os.Environment
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -8,18 +11,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowDownward
-import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,20 +35,33 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
 import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.QuickSortAlbumUse
+import com.pixel.gallery.model.frequentQuickSortAlbums
+import com.pixel.gallery.ui.components.rememberVerticalRevealState
+import com.pixel.gallery.ui.components.verticalRevealDrag
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import com.pixel.gallery.model.matchesTransferDestinationQuery
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import java.util.Locale
 
-/** Explicit target selection. Draft order and edge are only persisted on Apply. */
+/** Non-modal chooser: selections apply immediately and the photo dock remains available above it. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickSortTargetsSheet(
     availableTargets: List<TransferDestination>,
+    albumUses: List<QuickSortAlbumUse> = emptyList(),
     selectedTargets: List<TransferDestination>,
     dockTop: Boolean,
     onDockTopChange: (Boolean) -> Unit,
@@ -69,7 +81,10 @@ fun QuickSortTargetsSheet(
     val density = LocalDensity.current
     var draft by remember { mutableStateOf(selectedTargets.distinctBy { it.stableKey }) }
     LaunchedEffect(selectedTargets) { draft = selectedTargets.distinctBy { it.stableKey } }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var activeTab by rememberSaveable { mutableStateOf("all") }
+    val albumGridState = rememberLazyGridState()
+    LaunchedEffect(activeTab, query) { albumGridState.scrollToItem(0) }
     var createdTargets by remember { mutableStateOf(emptyList<TransferDestination>()) }
     var showCreateAlbum by remember { mutableStateOf(false) }
     var albumName by remember { mutableStateOf("") }
@@ -89,181 +104,171 @@ fun QuickSortTargetsSheet(
         (createdTargets + availableTargets + selectedTargets).distinctBy { it.stableKey }
     }
     val parentLabels = remember(available) { quickSortTargetParentLabels(available) }
-    val filtered = remember(available, query) {
-        val search = query.trim()
-        available.filter {
-            search.isEmpty() || it.displayName.contains(search, ignoreCase = true) ||
-                matchesTransferDestinationQuery(it, search)
-        }
+    val usageNow = remember(albumUses) { System.currentTimeMillis() }
+    val frequent = remember(available, albumUses, usageNow) {
+        frequentQuickSortAlbums(available, albumUses, usageNow)
     }
+    val filtered = remember(available, frequent, draft, activeTab, query) {
+        val source = when (activeTab) {
+            "frequent" -> frequent
+            "selected" -> draft
+            else -> available
+        }
+        val search = query.trim()
+        source.filter { search.isEmpty() || it.displayName.contains(search, ignoreCase = true) ||
+            matchesTransferDestinationQuery(it, search) }
+    }
+    val selectionIndices = remember(draft) { draft.mapIndexed { index, target -> target.stableKey to index }.toMap() }
     var expanded by rememberSaveable { mutableStateOf(true) }
-    var dragDistance by remember { mutableFloatStateOf(0f) }
+    val panel = rememberVerticalRevealState(expanded) { expanded = it }
+    val flingThreshold = with(density) { 600.dp.toPx() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val panelHeight by animateDpAsState(
-            // Keep a stable strip above the panel for the quick-sort capsules.
-            // The capsules stay mounted at the bottom of the grid and must
-            // never be covered by the chooser surface.
-            targetValue = if (expanded) (maxHeight - 320.dp).coerceAtLeast(68.dp) else 68.dp,
-            label = "quick-sort-target-panel-height",
-        )
+        val collapsedHeight = 68.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val expandedHeight = (maxHeight - 240.dp).coerceAtLeast(collapsedHeight)
+        val range = with(density) { (expandedHeight - collapsedHeight).toPx() }
+        val panelHeight = collapsedHeight + (expandedHeight - collapsedHeight) * panel.fraction
+        val latestRange by rememberUpdatedState(range)
+        val enabled by rememberUpdatedState(!isCreating)
+        val nestedScroll = remember(panel) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (enabled && source == NestedScrollSource.UserInput && available.y < 0f && panel.fraction < 1f) {
+                        if (!panel.dragging) panel.start()
+                        val before = panel.fraction
+                        panel.dragBy(available.y, latestRange)
+                        return Offset(0f, -(panel.fraction - before) * latestRange)
+                    }
+                    return Offset.Zero
+                }
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (enabled && source == NestedScrollSource.UserInput && available.y > 0f && panel.fraction > 0f) {
+                        if (!panel.dragging) panel.start()
+                        val before = panel.fraction
+                        panel.dragBy(available.y, latestRange)
+                        return Offset(0f, -(panel.fraction - before) * latestRange)
+                    }
+                    return Offset.Zero
+                }
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (!panel.dragging) return Velocity.Zero
+                    panel.finish(available.y, flingThreshold)
+                    return available
+                }
+            }
+        }
         Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(panelHeight)
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(panelHeight)
                 .onGloballyPositioned { coordinates ->
                     onPanelHeightChange(with(density) { coordinates.size.height.toDp() })
                 },
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
-            shadowElevation = 8.dp,
+            shadowElevation = 6.dp,
         ) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-                Spacer(
-                    Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .width(36.dp)
-                        .height(4.dp)
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant),
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(expanded, isCreating) {
-                            if (!isCreating) {
-                                detectVerticalDragGestures(
-                                    onVerticalDrag = { _, amount -> dragDistance += amount },
-                                    onDragEnd = {
-                                        if (dragDistance > 48f) expanded = false
-                                        if (dragDistance < -48f) expanded = true
-                                        dragDistance = 0f
-                                    },
-                                    onDragCancel = { dragDistance = 0f },
-                                )
-                            }
-                        },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                Text(
-                    stringResource(R.string.qs_manage_albums),
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    stringResource(R.string.qs_targets_selected_count, draft.size),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                IconButton(
-                    onClick = { if (!isCreating) expanded = false },
-                    enabled = !isCreating,
-                ) {
-                    Icon(Icons.Outlined.Check, stringResource(R.string.qs_done))
-                }
-                }
-            if (expanded) {
-            Text(
-                stringResource(R.string.qs_choose_sorting_albums_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                enabled = !isCreating,
-                placeholder = { Text(stringResource(R.string.qs_targets_search)) },
-                leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }, enabled = !isCreating) {
-                            Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_search))
+            Column(Modifier.fillMaxSize().navigationBarsPadding()) {
+                Column(Modifier.fillMaxWidth().verticalRevealDrag(panel, range, !isCreating, flingThreshold)) {
+                    Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
+                        Spacer(Modifier.width(32.dp).height(4.dp).background(MaterialTheme.colorScheme.outlineVariant, CircleShape))
+                    }
+                    Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.qs_manage_albums), style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                            Text(stringResource(R.string.qs_targets_selected_count, draft.size),
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                        }
+                        FilledTonalButton(onClick = { expanded = !expanded }, enabled = !isCreating,
+                            contentPadding = PaddingValues(horizontal = 12.dp)) {
+                            Text(stringResource(if (expanded) R.string.qs_done else R.string.qs_targets_expand))
                         }
                     }
-                },
-                shape = CircleShape,
-            )
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                FilledTonalButton(
-                    onClick = {
-                        albumName = ""
-                        albumNameError = null
-                        showCreateAlbum = true
-                    },
-                    enabled = !isCreating,
-                ) {
-                    Icon(Icons.Outlined.CreateNewFolder, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.qs_targets_new_album))
                 }
-
-            }
-
-            if (filtered.isEmpty()) {
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Text(
-                        stringResource(
-                            if (query.isBlank()) R.string.qs_targets_empty else R.string.qs_targets_no_results,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(104.dp),
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    items(filtered, key = { it.stableKey }) { target ->
-                        val index = draft.indexOfFirst { it.stableKey == target.stableKey }
-                        QuickSortTargetAlbumCard(
-                            target = target,
-                            selectionIndex = index,
-                            selectedCount = draft.size,
-                            parentLabel = parentLabels[target.stableKey],
-                            enabled = !isCreating,
-                            onToggle = {
-                                val next = if (index >= 0) {
-                                    draft.filterNot { it.stableKey == target.stableKey }
-                                } else {
-                                    draft + target
+                // Keep the grid mounted through the entire drag, including a return from collapsed.
+                if (panel.fraction > 0f) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextField(value = query, onValueChange = { query = it }, modifier = Modifier.weight(1f),
+                            singleLine = true, enabled = !isCreating, shape = CircleShape,
+                            placeholder = { Text(stringResource(R.string.qs_search_albums), style = MaterialTheme.typography.bodySmall) },
+                            leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(20.dp)) },
+                            trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_search))
+                            } },
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ))
+                        FilledTonalIconButton(onClick = { albumName = ""; albumNameError = null; showCreateAlbum = true },
+                            enabled = !isCreating, modifier = Modifier.size(48.dp), shape = ExpressiveShapes.LargeIncreased) {
+                            Icon(Icons.Outlined.CreateNewFolder, stringResource(R.string.qs_targets_new_album))
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("frequent" to R.string.qs_targets_frequent, "all" to R.string.qs_targets_all,
+                            "selected" to R.string.qs_targets_selected).forEach { (tab, label) ->
+                            FilterChip(selected = activeTab == tab, onClick = { activeTab = tab }, enabled = !isCreating,
+                                label = { Text(stringResource(label), modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.Center, maxLines = 1) }, modifier = Modifier.weight(1f), shape = CircleShape)
+                        }
+                    }
+                    if (activeTab == "frequent") {
+                        Text(stringResource(R.string.qs_targets_frequent_rule), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    }
+                    if (filtered.isEmpty()) {
+                        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            Text(stringResource(when {
+                                query.isNotBlank() -> R.string.qs_targets_no_results
+                                activeTab == "frequent" -> R.string.qs_targets_no_frequent
+                                activeTab == "selected" -> R.string.qs_targets_no_selection
+                                else -> R.string.qs_targets_empty
+                            }), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(24.dp))
+                        }
+                    } else {
+                        val frequentKeys = remember(frequent) { frequent.mapTo(mutableSetOf()) { it.stableKey } }
+                        val showSections = activeTab == "all" && query.isBlank() && frequent.isNotEmpty()
+                        LazyVerticalGrid(columns = GridCells.Fixed(4), state = albumGridState,
+                            modifier = Modifier.fillMaxWidth().weight(1f).nestedScroll(nestedScroll),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            val sections = if (showSections) listOf(
+                                R.string.qs_targets_frequent to frequent,
+                                R.string.qs_targets_all to filtered.filterNot { it.stableKey in frequentKeys },
+                            ) else listOf(R.string.qs_targets_all to filtered)
+                            sections.forEach { (title, targets) ->
+                                if (showSections && targets.isNotEmpty()) item(key = "section-$title", span = { GridItemSpan(maxLineSpan) }) {
+                                    Text(stringResource(title), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                draft = next
-                                onTargetsChange(next)
-                            },
-                            onMoveEarlier = {
-                                val next = moveQuickSortTarget(draft, index, index - 1)
-                                draft = next
-                                onTargetsChange(next)
-                            },
-                            onMoveLater = {
-                                val next = moveQuickSortTarget(draft, index, index + 1)
-                                draft = next
-                                onTargetsChange(next)
-                            },
-                        )
+                                items(targets, key = { it.stableKey }) { target ->
+                                    val index = selectionIndices[target.stableKey] ?: -1
+                                    QuickSortTargetAlbumCard(target, index, draft.size, parentLabels[target.stableKey], !isCreating,
+                                        onToggle = {
+                                            val next = if (index >= 0) draft.filterNot { it.stableKey == target.stableKey } else draft + target
+                                            draft = next; onTargetsChange(next)
+                                        },
+                                        onMoveEarlier = { val next = moveQuickSortTarget(draft, index, index - 1); draft = next; onTargetsChange(next) },
+                                        onMoveLater = { val next = moveQuickSortTarget(draft, index, index + 1); draft = next; onTargetsChange(next) })
+                                }
+                            }
+                        }
                     }
                 }
-            }
-            Spacer(Modifier.height(12.dp))
-            }
             }
         }
     }
 
     if (showCreateAlbum) {
-        AlertDialog(
+        GalleryDialog(
             onDismissRequest = { if (!isCreating) showCreateAlbum = false },
+            dismissEnabled = !isCreating,
+            icon = Icons.Outlined.CreateNewFolder,
             title = { Text(stringResource(R.string.qs_targets_new_album)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -352,72 +357,31 @@ private fun QuickSortTargetAlbumCard(
     } else {
         stringResource(R.string.qs_targets_not_selected)
     }
-    Column {
-        Box(
-            Modifier.alpha(if (enabled) 1f else 0.45f).semantics(mergeDescendants = true) {
-                selected = isSelected
-                stateDescription = selectedDescription
-            },
-        ) {
-            AlbumCoverCard(
-                title = target.displayName,
-                subtitle = pluralStringResource(R.plurals.qs_targets_item_count, target.itemCount, target.itemCount),
-                coverUri = target.coverUri?.takeIf { it.isNotBlank() },
-                coverModifiedMillis = target.lastModified,
-                onClick = onToggle,
-                columns = 3,
-                enabled = enabled,
-            ) {
-                if (parentLabel != null) {
-                    Text(
-                        parentLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 4.dp, top = 2.dp),
-                    )
-                }
-            }
-            Box(
-                Modifier.fillMaxWidth().aspectRatio(1f).clearAndSetSemantics {}.then(
-                    if (isSelected) {
-                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, ExpressiveShapes.ExtraLargeIncreased)
-                    } else Modifier,
-                ),
-            ) {
-                Box(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(28.dp)
-                        .background(
-                            if (isSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                            CircleShape,
-                        )
-                        .then(
-                            if (isSelected) Modifier else Modifier.border(
-                                BorderStroke(1.dp, MaterialTheme.colorScheme.outline), CircleShape,
-                            ),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isSelected) {
-                        Text(
-                            (selectionIndex + 1).toString(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    }
-                }
-            }
+    val earlierLabel = stringResource(R.string.qs_move_earlier)
+    val laterLabel = stringResource(R.string.qs_move_later)
+    Box(Modifier.alpha(if (enabled) 1f else .45f).semantics(mergeDescendants = true) {
+        selected = isSelected
+        stateDescription = selectedDescription
+        customActions = buildList {
+            if (enabled && isSelected && selectionIndex > 0) add(CustomAccessibilityAction(earlierLabel) { onMoveEarlier(); true })
+            if (enabled && isSelected && selectionIndex < selectedCount - 1) add(CustomAccessibilityAction(laterLabel) { onMoveLater(); true })
         }
-        Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            if (isSelected) {
-                IconButton(enabled = enabled && selectionIndex > 0, onClick = onMoveEarlier) {
-                    Icon(Icons.Outlined.ArrowUpward, stringResource(R.string.qs_move_earlier))
-                }
-                IconButton(enabled = enabled && selectionIndex < selectedCount - 1, onClick = onMoveLater) {
-                    Icon(Icons.Outlined.ArrowDownward, stringResource(R.string.qs_move_later))
-                }
+    }) {
+        AlbumCoverCard(title = target.displayName,
+            subtitle = pluralStringResource(R.plurals.qs_targets_item_count, target.itemCount, target.itemCount),
+            coverUri = target.coverUri?.takeIf { it.isNotBlank() }, coverModifiedMillis = target.lastModified,
+            onClick = onToggle, columns = 4, enabled = enabled, coverShape = ExpressiveShapes.LargeIncreased, titleMaxLines = 1) {
+            if (parentLabel != null) Text(parentLabel, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp))
+        }
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).clearAndSetSemantics {}.then(
+            if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, ExpressiveShapes.LargeIncreased) else Modifier)) {
+            Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(24.dp)
+                .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = .9f), CircleShape)
+                .then(if (isSelected) Modifier else Modifier.border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline), CircleShape)),
+                contentAlignment = Alignment.Center) {
+                if (isSelected) Text((selectionIndex + 1).toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary)
             }
         }
     }

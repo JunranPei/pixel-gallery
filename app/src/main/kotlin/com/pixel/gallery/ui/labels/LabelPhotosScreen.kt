@@ -17,6 +17,8 @@ import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
+import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.GalleryMenuRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,11 +37,12 @@ fun LabelPhotosScreen(
             actions = {
                 Box {
                     IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, null) }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                        if (quickSort == null) DropdownMenuItem(
-                            text = { Text(stringResource(R.string.qs_start)) },
+                    GalleryOverflowMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        if (quickSort == null) GalleryMenuRow(
+                            label = stringResource(R.string.qs_start),
+                            icon = Icons.Outlined.DriveFileMove,
+                            accented = true,
                             onClick = { showMenu = false; onToggleQuickSort() },
-                            leadingIcon = { Icon(Icons.Outlined.DriveFileMove, null) },
                         )
                     }
                 }

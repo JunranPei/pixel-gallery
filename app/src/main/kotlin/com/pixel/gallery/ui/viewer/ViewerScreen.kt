@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.viewer
 
+import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.ConfirmationReminder
+import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
 import android.app.WallpaperManager
 import android.content.Intent
@@ -24,6 +27,8 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -119,7 +124,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import com.pixel.gallery.ui.components.rememberVerticalRevealState
+import com.pixel.gallery.ui.components.verticalRevealDrag
+import com.pixel.gallery.ui.components.revealHeight
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
@@ -385,6 +393,12 @@ internal fun ViewerScreen(
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var expandedBottomActions by remember { mutableStateOf(false) }
+    val bottomActionsReveal = rememberVerticalRevealState(expandedBottomActions) { expandedBottomActions = it }
+    val actionDensity = LocalDensity.current
+    var actionLabelsHeight by remember { mutableIntStateOf(0) }
+    var secondaryActionsHeight by remember { mutableIntStateOf(0) }
+    val actionsRangePx = (actionLabelsHeight + secondaryActionsHeight).toFloat().coerceAtLeast(with(actionDensity) { 80.dp.toPx() })
+    val actionsFlingThresholdPx = with(actionDensity) { 600.dp.toPx() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var rotationLocked by remember { mutableStateOf(true) }
     var ultraHdrActive by remember { mutableStateOf(false) }
@@ -687,14 +701,14 @@ internal fun ViewerScreen(
     }
 
     // Auto-hide UI timer
-    LaunchedEffect(showUI, showMenu, expandedBottomActions, pagerState.currentPage, isPlayingMotion) {
+    LaunchedEffect(showUI, showMenu, expandedBottomActions, bottomActionsReveal.dragging, pagerState.currentPage, isPlayingMotion) {
         ViewerLoadMetrics.event(
             "UI_AUTO_HIDE_SCHEDULE",
             "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
         )
         // A menu is anchored to the top bar. Keep both bars present while it
         // is open so the menu cannot disappear before the user taps an item.
-        if (showUI && !showMenu && !expandedBottomActions && !isPlayingMotion) {
+        if (showUI && !showMenu && !expandedBottomActions && !bottomActionsReveal.dragging && !isPlayingMotion) {
             delay(3000)
             showUI = false
             ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
@@ -1451,20 +1465,7 @@ internal fun ViewerScreen(
                     )
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(bottom = 16.dp, top = 24.dp)
-                    .pointerInput(expandedBottomActions) {
-                        var cumulativeDrag = 0f
-                        detectVerticalDragGestures(
-                            onDragStart = { cumulativeDrag = 0f },
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                cumulativeDrag += dragAmount
-                                when {
-                                    cumulativeDrag < -32f -> expandedBottomActions = true
-                                    cumulativeDrag > 32f -> expandedBottomActions = false
-                                }
-                            },
-                        )
-                    },
+                    .verticalRevealDrag(bottomActionsReveal, actionsRangePx, flingThresholdPx = actionsFlingThresholdPx),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(
@@ -1472,7 +1473,7 @@ internal fun ViewerScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ViewerAction(Icons.Outlined.Share, "Share", showLabel = expandedBottomActions) {
+                    ViewerAction(Icons.Outlined.Share, "Share", labelFraction = bottomActionsReveal.fraction) {
                         currentMedia?.let { media ->
                             val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", File(media.path))
                             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -1483,7 +1484,7 @@ internal fun ViewerScreen(
                             context.startActivity(Intent.createChooser(intent, "Share Media"))
                         }
                     }
-                    ViewerAction(Icons.Outlined.Edit, "Edit", enabled = !isCurrentReserved, showLabel = expandedBottomActions) {
+                    ViewerAction(Icons.Outlined.Edit, "Edit", enabled = !isCurrentReserved, labelFraction = bottomActionsReveal.fraction) {
                         currentMedia?.let { media ->
                             val intent = Intent(Intent.ACTION_EDIT).apply {
                                 setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
@@ -1524,36 +1525,37 @@ internal fun ViewerScreen(
                                 tint = (if (isFavourite) Color.Red else Color.White).copy(alpha = if (isCurrentReserved) 0.38f else 1f)
                             )
                         }
-                        if (expandedBottomActions) {
+                        run {
                             Text(
                                 text = "Favourite",
+                                modifier = Modifier.revealHeight(bottomActionsReveal.fraction) { height ->
+                                    if (actionLabelsHeight != height) actionLabelsHeight = height
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.White.copy(alpha = if (isCurrentReserved) 0.38f else 0.9f),
                                 maxLines = 1,
                             )
                         }
                     }
-                    ViewerAction(Icons.Outlined.Info, "Info", showLabel = expandedBottomActions) {
+                    ViewerAction(Icons.Outlined.Info, "Info", labelFraction = bottomActionsReveal.fraction) {
                         showInfo = true
                     }
                     if (currentMedia?.isTrashed == true) {
-                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore", enabled = !isCurrentReserved, showLabel = expandedBottomActions) {
+                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore", enabled = !isCurrentReserved, labelFraction = bottomActionsReveal.fraction) {
                             currentMedia?.let { media ->
                                 viewModel.restoreMedia(media.contentId, media.uri)
                                 onBack()
                             }
                         }
                     } else {
-                        ViewerAction(Icons.Outlined.Delete, "Delete", enabled = !isCurrentReserved, showLabel = expandedBottomActions) {
+                        ViewerAction(Icons.Outlined.Delete, "Delete", enabled = !isCurrentReserved, labelFraction = bottomActionsReveal.fraction) {
                             showDeleteConfirm = true
                         }
                     }
                 }
-                AnimatedVisibility(
-                    visible = expandedBottomActions,
-                    enter = fadeIn(animationSpec = tween(140)) + expandVertically(animationSpec = tween(180)),
-                    exit = fadeOut(animationSpec = tween(100)) + shrinkVertically(animationSpec = tween(160)),
-                ) {
+                Box(Modifier.revealHeight(bottomActionsReveal.fraction) { height ->
+                    if (secondaryActionsHeight != height) secondaryActionsHeight = height
+                }) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1653,58 +1655,40 @@ internal fun ViewerScreen(
             val target = currentIndexTarget ?: return@let
             val formatName = target.format.displayName
             val isBuild = action == IndexedImageAction.BUILD
-            val detectedFormatMessage = if (target.detectedFromContent) {
-                "This file is named .${File(target.path).extension}, but its actual content is $formatName. " +
-                    "It will be indexed as $formatName.\n\n"
-            } else {
-                ""
-            }
-            AlertDialog(
+            GalleryDialog(
                 onDismissRequest = { if (!imageIndexBusy) imageIndexAction = null },
-                title = {
-                    Text(if (isBuild) "Build $formatName index?" else "Delete $formatName index?")
-                },
+                dismissEnabled = !imageIndexBusy,
+                icon = if (isBuild) Icons.Outlined.Description else Icons.Outlined.DeleteOutline,
+                title = { Text(stringResource(if (isBuild) R.string.dialog_build_index else R.string.dialog_delete_index, formatName)) },
                 text = {
-                    Text(
-                        if (isBuild) {
-                            detectedFormatMessage + when (target.format) {
-                                IndexedImageFormat.JPEG ->
-                                    "This reads the complete JPEG once and may briefly use significant power. " +
-                                        "The saved seek index applies only to this image and every zoom level."
-                                IndexedImageFormat.PNG ->
-                                    "This decodes the complete PNG once and builds a lossless multi-resolution " +
-                                        "tile index. It may temporarily use significant power and storage."
-                                IndexedImageFormat.TIFF ->
-                                    "This validates and activates the TIFF's existing tiles, strips, and " +
-                                        "reduced-resolution directories. It does not decode or duplicate the full image."
-                                IndexedImageFormat.WEBP ->
-                                    "This decodes the complete static WebP once and builds a lossless " +
-                                        "multi-resolution tile index. Animated WebP is not changed or indexed."
-                                IndexedImageFormat.RAW ->
-                                    "This develops the complete camera RAW once with camera white balance and " +
-                                        "builds a lossless sRGB tile pyramid. The original RAW is never changed."
-                                IndexedImageFormat.HEIF ->
-                                    "This reads bounded HEIF/AVIF regions once and builds a lossless tile " +
-                                        "pyramid. The complete decoded image is never held in memory."
-                                IndexedImageFormat.BMP ->
-                                    "This validates the uncompressed BMP row layout and writes a 56-byte " +
-                                        "activation. Later zoom reads only scan lines crossing the viewport."
-                                IndexedImageFormat.JXL ->
-                                    "This streams the complete still JPEG XL once and builds a lossless sRGB " +
-                                        "multi-resolution tile index without holding the complete image in memory. " +
-                                        "Animated and HDR JPEG XL are not indexed yet."
-                            }
-                        } else {
-                            "Delete the saved $formatName index for this image? Future uncached tiles will use " +
-                                "the standard decoder again."
+                    ConfirmationFact(stringResource(R.string.dialog_file), File(target.path).name, formatName)
+                    if (target.detectedFromContent && isBuild) {
+                        ConfirmationReminder(stringResource(R.string.dialog_format_detected, File(target.path).extension, formatName))
+                    }
+                    if (isBuild) {
+                        val descriptions = when (target.format) {
+                            IndexedImageFormat.JPEG -> R.string.dialog_index_jpeg_body to R.string.dialog_index_jpeg_note
+                            IndexedImageFormat.PNG -> R.string.dialog_index_png_body to R.string.dialog_index_png_note
+                            IndexedImageFormat.TIFF -> R.string.dialog_index_tiff_body to R.string.dialog_index_tiff_note
+                            IndexedImageFormat.WEBP -> R.string.dialog_index_webp_body to R.string.dialog_index_webp_note
+                            IndexedImageFormat.RAW -> R.string.dialog_index_raw_body to R.string.dialog_index_raw_note
+                            IndexedImageFormat.HEIF -> R.string.dialog_index_heif_body to R.string.dialog_index_heif_note
+                            IndexedImageFormat.BMP -> R.string.dialog_index_bmp_body to R.string.dialog_index_bmp_note
+                            IndexedImageFormat.JXL -> R.string.dialog_index_jxl_body to R.string.dialog_index_jxl_note
                         }
-                    )
+                        ConfirmationReminder(stringResource(descriptions.first), Icons.Outlined.Description)
+                        ConfirmationReminder(stringResource(descriptions.second))
+                        ConfirmationReminder(stringResource(R.string.dialog_original_unchanged), Icons.Default.Check)
+                    } else {
+                        ConfirmationReminder(stringResource(R.string.dialog_index_remove_body, formatName), Icons.Outlined.DeleteOutline)
+                        ConfirmationReminder(stringResource(R.string.dialog_index_remove_decode))
+                    }
                 },
                 confirmButton = {
-                    TextButton(
+                    Button(
                         enabled = !imageIndexBusy && !isCurrentReserved,
-                        onClick = {
-                            val operationTarget = currentIndexTarget ?: return@TextButton
+                        onClick = confirm@ {
+                            val operationTarget = currentIndexTarget ?: return@confirm
                             imageIndexAction = null
                             imageIndexBusy = isBuild
                             viewerScope.launch {
@@ -1810,7 +1794,7 @@ internal fun ViewerScreen(
                             }
                         },
                     ) {
-                        Text(if (isBuild) "Build index" else "Delete index")
+                        Text(stringResource(if (isBuild) R.string.dialog_build else R.string.dialog_delete))
                     }
                 },
                 dismissButton = {
@@ -1818,25 +1802,22 @@ internal fun ViewerScreen(
                         enabled = !imageIndexBusy,
                         onClick = { imageIndexAction = null },
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.dialog_cancel))
                     }
                 },
             )
         }
 
         unsupportedIndexFormat?.let { formatName ->
-            AlertDialog(
+            GalleryDialog(
                 onDismissRequest = { unsupportedIndexFormat = null },
-                title = { Text("$formatName indexing is not supported") },
+                title = { Text(stringResource(R.string.dialog_unsupported_title, formatName)) },
                 text = {
-                    Text(
-                        "This file is named .${currentMedia?.path?.let(::File)?.extension ?: ""}, " +
-                            "but its actual content is $formatName. It can still be viewed normally, " +
-                            "but a zoom index cannot be built for this format yet.",
-                    )
+                    ConfirmationReminder(stringResource(R.string.dialog_unsupported_body, currentMedia?.path?.let(::File)?.extension ?: "", formatName))
+                    ConfirmationReminder(stringResource(R.string.dialog_unsupported_view))
                 },
                 confirmButton = {
-                    TextButton(onClick = { unsupportedIndexFormat = null }) { Text("Got it") }
+                    Button(onClick = { unsupportedIndexFormat = null }) { Text(stringResource(R.string.dialog_got_it)) }
                 },
             )
         }
@@ -2375,28 +2356,16 @@ fun ViewerAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     enabled: Boolean = true,
-    showLabel: Boolean = false,
-    onClick: () -> Unit
+    labelFraction: Float = 0f,
+    onClick: () -> Unit,
 ) {
-    if (showLabel) {
-        Column(
-            modifier = Modifier.width(64.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            IconButton(onClick = onClick, enabled = enabled) {
-                Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f))
-            }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = if (enabled) 0.9f else 0.38f),
-                maxLines = 1,
-            )
-        }
-    } else {
+    Column(modifier = Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         IconButton(onClick = onClick, enabled = enabled) {
-            Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f))
+            Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else .38f))
         }
+        Text(text = label, style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = if (enabled) .9f else .38f), maxLines = 1,
+            modifier = Modifier.revealHeight(labelFraction))
     }
 }
 

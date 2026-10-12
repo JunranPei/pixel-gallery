@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.deduplication
 
+import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.ConfirmationReminder
+import com.pixel.gallery.ui.components.ConfirmationFact
 import android.text.format.Formatter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,9 +20,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material3.Button
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,9 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +60,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import com.pixel.gallery.R
+import com.pixel.gallery.model.duplicateMediaTimestamp
 import com.pixel.gallery.data.local.entity.MediaEntry
 import java.io.File
 import java.text.DateFormat
@@ -93,19 +99,19 @@ fun DuplicateReviewDialog(
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            color = Color.White,
+            color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
         ) {
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
-                containerColor = Color.White,
+                containerColor = MaterialTheme.colorScheme.surface,
                 topBar = {
                     TopAppBar(
                         title = { Text(stringResource(R.string.duplicate_review_title)) },
                         colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.White,
-                            scrolledContainerColor = Color.White,
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            scrolledContainerColor = MaterialTheme.colorScheme.surface,
                         ),
                         navigationIcon = {
                             IconButton(onClick = onDismiss, enabled = canDismiss) {
@@ -119,7 +125,7 @@ fun DuplicateReviewDialog(
                     Surface(
                         // Keep this area opaque and aligned with the page background so it
                         // reads as part of the screen instead of a floating color block.
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.surface,
                         tonalElevation = 0.dp,
                         shadowElevation = 0.dp,
                     ) {
@@ -185,7 +191,7 @@ fun DuplicateReviewDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.White)
+                            .background(MaterialTheme.colorScheme.surface)
                             .padding(padding)
                             .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -198,6 +204,7 @@ fun DuplicateReviewDialog(
                             LinearProgressIndicator(
                                 progress = { (progress.completed.toFloat() / progress.total).coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth(),
+                                drawStopIndicator = {},
                             )
                             Spacer(Modifier.height(12.dp))
                             Text(stringResource(R.string.duplicate_scan_progress, progress.completed, progress.total))
@@ -227,7 +234,7 @@ fun DuplicateReviewDialog(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.White)
+                            .background(MaterialTheme.colorScheme.surface)
                             .padding(padding),
                     ) {
                         item("summary") {
@@ -237,6 +244,7 @@ fun DuplicateReviewDialog(
                             ) {
                                 Text(state.title, style = MaterialTheme.typography.titleMedium)
                                 Text(stringResource(R.string.duplicate_scan_short), style = MaterialTheme.typography.bodyMedium)
+                                Text(stringResource(R.string.duplicate_keeper_rule), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(stringResource(R.string.duplicate_scan_summary, state.result?.scannedCount ?: 0, groups.size), style = MaterialTheme.typography.bodyMedium)
                                 val skipped = state.result?.skippedCount ?: 0
                                 if (skipped > 0) {
@@ -307,26 +315,25 @@ fun DuplicateReviewDialog(
         }
 
         if (showConfirmation && state.phase == DuplicatePhase.REVIEW) {
-            AlertDialog(
+            GalleryDialog(
                 onDismissRequest = { showConfirmation = false },
-                title = { Text(stringResource(R.string.duplicate_confirm_title)) },
+                title = { Text(stringResource(R.string.dialog_duplicate_title)) },
+                icon = Icons.Outlined.DeleteOutline,
                 text = {
-                    Text(
-                        stringResource(
-                            R.string.duplicate_confirm_message,
-                            selectedEntries.size,
-                            state.title,
-                        ),
-                    )
+                    ConfirmationFact(stringResource(R.string.dialog_selected_copies), pluralStringResource(R.plurals.dialog_item_count, selectedEntries.size, selectedEntries.size))
+                    ConfirmationFact(stringResource(R.string.dialog_scope), state.title)
+                    ConfirmationReminder(stringResource(R.string.dialog_duplicate_action), Icons.Outlined.DeleteOutline)
+                    ConfirmationReminder(stringResource(R.string.dialog_duplicate_safety))
+                    ConfirmationReminder(stringResource(R.string.dialog_restore), Icons.Outlined.Restore)
                 },
                 confirmButton = {
-                    TextButton(
+                    Button(
                         enabled = selectedEntries.isNotEmpty() && state.canTrash,
                         onClick = {
                             showConfirmation = false
                             onConfirm()
                         },
-                    ) { Text(stringResource(R.string.duplicate_move_to_bin)) }
+                    ) { Text(stringResource(R.string.dialog_move_to_bin)) }
                 },
                 dismissButton = {
                     TextButton(onClick = { showConfirmation = false }) {
@@ -451,9 +458,7 @@ private fun DuplicateMediaRow(
             val folder = File(entry.path).parentFile?.name
                 ?.takeIf { it.isNotBlank() }
                 ?: stringResource(R.string.duplicate_unknown_folder)
-            val timestamp = entry.bestTimestamp.takeIf { it > 0L }
-                ?: entry.sourceDateTakenMillis
-                ?: (entry.dateAddedSecs * 1000L).takeIf { it > 0L }
+            val timestamp = duplicateMediaTimestamp(entry)
             val date = timestamp?.let {
                 DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
             }

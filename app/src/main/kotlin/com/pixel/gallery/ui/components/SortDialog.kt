@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -82,11 +83,26 @@ fun SortDialog(
                     .padding(24.dp)
                     .fillMaxWidth()
             ) {
-                Text(
-                    text = title,
-                    style = EmphasizedTypography.TitleLarge, // Match Settings title style (EmphasizedTypography)
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    Text(
+                        text = title,
+                        style = EmphasizedTypography.TitleLarge, // Match Settings title style (EmphasizedTypography)
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
                 
                 Spacer(modifier = Modifier.height(20.dp))
 

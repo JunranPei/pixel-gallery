@@ -14,6 +14,35 @@ import org.junit.Test
 
 class MediaDeduplicationTest {
     @Test
+    fun keeperUsesEarlierMediaTimeEvenWhenItsPathSortsLast() = runBlocking {
+        val newer = entry(1, "/A/new.jpg").copy(bestTimestamp = 2000)
+        val older = entry(2, "/Z/old.jpg").copy(bestTimestamp = 1000)
+        val engine = engine(mapOf(1L to "same", 2L to "same"))
+        for (input in listOf(listOf(newer, older), listOf(older, newer))) {
+            assertEquals(older, engine.scan(input).groups.single().keeper)
+        }
+    }
+
+    @Test
+    fun identicalCaptureTimesPreferOlderModificationThenEarlierDateAdded() = runBlocking {
+        val original = entry(1, "/Z/original.jpg").copy(sourceDateTakenMillis = 1000, dateModifiedMillis = 2000, dateAddedSecs = 3)
+        val copied = entry(2, "/A/copy.jpg").copy(sourceDateTakenMillis = 1000, dateModifiedMillis = 3000, dateAddedSecs = 2)
+        val engine = engine(mapOf(1L to "same", 2L to "same"))
+        assertEquals(original, engine.scan(listOf(copied, original)).groups.single().keeper)
+        val sameModified = copied.copy(dateModifiedMillis = 2000, dateAddedSecs = 4)
+        assertEquals(original, engine.scan(listOf(sameModified, original)).groups.single().keeper)
+    }
+
+    @Test
+    fun unknownTimesCannotDisplaceDatedCopiesAndFallbacksIgnoreZero() = runBlocking {
+        val unknown = entry(1, "/A/unknown.jpg").copy(dateAddedSecs = 0, dateModifiedMillis = 0, sourceDateTakenMillis = 0)
+        val known = entry(2, "/Z/known.jpg").copy(dateAddedSecs = 5, dateModifiedMillis = 0, sourceDateTakenMillis = -1)
+        assertEquals(5000L, duplicateMediaTimestamp(known))
+        assertEquals(null, duplicateMediaTimestamp(unknown))
+        assertEquals(known, engine(mapOf(1L to "same", 2L to "same")).scan(listOf(unknown, known)).groups.single().keeper)
+    }
+
+    @Test
     fun globalScanFindsCrossAlbumDuplicatesWithStableKeeper() = runBlocking {
         val first = entry(2, "/Pictures/A/photo.jpg")
         val second = entry(1, "/Pictures/B/photo.jpg")

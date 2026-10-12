@@ -45,6 +45,7 @@ class QuickSortQueueRepository @Inject constructor(
                         ?: error("Queue journal is empty")
                 } else QuickSortQueueJournal()
                 require(persisted.version == 1) { "Unsupported queue journal version" }
+                mutableState.value = state.value.copy(albumUses = persisted.albumUses.orEmpty())
                 var recoveredJobs = persisted.jobs
                 // No destructive replay: recover a committed target or leave both copies for review.
                 recoveredJobs = recoveredJobs.map { job ->
@@ -290,7 +291,9 @@ class QuickSortQueueRepository @Inject constructor(
     }
 
     private fun updateItem(jobId: String, index: Int, change: (QuickSortQueueItem) -> QuickSortQueueItem) = updateJob(jobId) { job ->
-        job.copy(items = job.items.mapIndexed { position, item -> if (position == index) change(item) else item })
+        val items = job.items.mapIndexed { position, item -> if (position == index) change(item) else item }
+        job.copy(items = items, firstSucceededAt = job.firstSucceededAt ?: System.currentTimeMillis()
+            .takeIf { items.any { it.status == QuickSortItemStatus.Succeeded } })
     }
 
     private fun updateJob(jobId: String, change: (QuickSortJob) -> QuickSortJob) =
@@ -303,16 +306,17 @@ class QuickSortQueueRepository @Inject constructor(
 
     /** Commit to disk before publishing. Call only while holding mutex. */
     private fun persist(jobs: List<QuickSortJob>) {
+        val albumUses = quickSortAlbumUses(state.value.albumUses, jobs, System.currentTimeMillis())
         val output = journal.startWrite()
         try {
-            output.write(gson.toJson(QuickSortQueueJournal(jobs = jobs)).toByteArray(Charsets.UTF_8))
+            output.write(gson.toJson(QuickSortQueueJournal(jobs = jobs, albumUses = albumUses)).toByteArray(Charsets.UTF_8))
             journal.finishWrite(output)
         } catch (error: Exception) {
             journal.failWrite(output)
             mutableState.value = state.value.copy(error = "Could not persist queue; execution stopped: ${error.message}")
             throw error
         }
-        mutableState.value = state.value.copy(jobs = jobs, loaded = true)
+        mutableState.value = state.value.copy(jobs = jobs, albumUses = albumUses, loaded = true)
     }
 
     companion object {

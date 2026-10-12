@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +50,32 @@ fun HomeOverflowMenu(
     onLockedFolder: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    GalleryOverflowMenu(expanded, onDismissRequest) {
+        if (showQuickSort) {
+            GalleryMenuRow(
+                label = stringResource(R.string.qs_start),
+                icon = Icons.AutoMirrored.Outlined.DriveFileMove,
+                accented = true,
+                onClick = onQuickSort,
+            )
+        }
+        GalleryMenuRow(sortLabel, Icons.AutoMirrored.Filled.Sort, accented = true, onClick = onSort)
+        GalleryMenuRow(duplicateLabel, Icons.Outlined.FileCopy, accented = true,
+            enabled = canFindDuplicates, onClick = onFindDuplicates)
+        Spacer(Modifier.height(8.dp))
+        GalleryMenuRow("Hidden albums", Icons.Outlined.VisibilityOff, onClick = onHiddenAlbums)
+        GalleryMenuRow("Locked folder", Icons.Outlined.Lock, onClick = onLockedFolder)
+        Spacer(Modifier.height(8.dp))
+        GalleryMenuRow("Settings", Icons.Outlined.Settings, onClick = onSettings)
+    }
+}
+
+@Composable
+fun GalleryOverflowMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
@@ -57,35 +84,12 @@ fun HomeOverflowMenu(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 0.dp,
         shadowElevation = 6.dp,
-    ) {
-        if (showQuickSort) {
-            HomeMenuRow(
-                label = stringResource(R.string.qs_start),
-                icon = Icons.AutoMirrored.Outlined.DriveFileMove,
-                accented = true,
-                onClick = onQuickSort,
-            )
-        }
-        HomeMenuRow(sortLabel, Icons.AutoMirrored.Filled.Sort, accented = true, onClick = onSort)
-        HomeMenuRow(
-            label = duplicateLabel,
-            icon = Icons.Outlined.FileCopy,
-            accented = true,
-            enabled = canFindDuplicates,
-            onClick = onFindDuplicates,
-        )
-
-        Spacer(Modifier.height(8.dp))
-        HomeMenuRow("Hidden albums", Icons.Outlined.VisibilityOff, onClick = onHiddenAlbums)
-        HomeMenuRow("Locked folder", Icons.Outlined.Lock, onClick = onLockedFolder)
-
-        Spacer(Modifier.height(8.dp))
-        HomeMenuRow("Settings", Icons.Outlined.Settings, onClick = onSettings)
-    }
+        content = content,
+    )
 }
 
 @Composable
-private fun HomeMenuRow(
+fun GalleryMenuRow(
     label: String,
     icon: ImageVector,
     accented: Boolean = false,

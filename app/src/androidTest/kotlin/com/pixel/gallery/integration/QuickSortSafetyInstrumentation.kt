@@ -35,16 +35,34 @@ import kotlin.coroutines.resume
 
 /** Self-contained instrumentation; no production media or production queue is submitted for mutation. */
 class QuickSortSafetyInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var confirmationSuite = false
+    private var scrollbarSuite = false
+    private var uiSuite = false
+    private var duplicateSuite = false
+    override fun onCreate(arguments: Bundle?) {
+        confirmationSuite = arguments?.getString("suite") == "confirmations"
+        scrollbarSuite = arguments?.getString("suite") == "scrollbar"
+        uiSuite = arguments?.getString("suite") == "redesign"
+        duplicateSuite = arguments?.getString("suite") == "duplicates"
+        super.onCreate(arguments)
+        start()
+    }
 
     override fun onStart() {
         val results = Bundle()
         try {
-            val report = runBlocking { exercise() }
-            results.putString("stream", "\nQuick-sort synthetic safety checks passed:\n$report\n")
+            val report = when {
+                confirmationSuite -> ConfirmationTouchChecks(this).exercise()
+                duplicateSuite -> DuplicateTouchChecks(this).exercise()
+                uiSuite -> RedesignTouchChecks(this).exercise()
+                scrollbarSuite -> ScrollbarTouchChecks(this).exercise()
+                else -> runBlocking { exercise() }
+            }
+            val suite = when { confirmationSuite -> "Confirmation and transfer UI"; duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort synthetic safety" }
+            results.putString("stream", "\n$suite checks passed:\n$report\n")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {
-            results.putString("stream", "\nQuick-sort safety check failed:\n${error.stackTraceToString()}\n")
+            results.putString("stream", "\n${when { duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort safety" }} check failed:\n${error.stackTraceToString()}\n")
             finish(Activity.RESULT_CANCELED, results)
         }
     }
@@ -175,6 +193,13 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 createdUris += Uri.parse(queuedReceipt.targetUri)
                 check(!File(queued.path).exists())
                 report += "Persisted queue executed exactly one synthetic MOVE and saved a success receipt"
+                val use = resumedQueue.state.value.albumUses.single { it.jobId == run.jobId }
+                check(use.destinationKey == destination.stableKey && use.usedAt == job.firstSucceededAt)
+                check(resumedQueue.state.value.albumUses.none { it.jobId == accepted.jobId })
+                val reloadedUsage = QuickSortQueueRepository(isolated, repository)
+                reloadedUsage.state.first { it.loaded }
+                check(reloadedUsage.state.value.albumUses == resumedQueue.state.value.albumUses)
+                report += "Only successful batches count as album uses; first-success time and usage survive journal reload"
             }
 
             // Reconstruct an interrupted on-disk batch in the isolated journal, never the application's queue.

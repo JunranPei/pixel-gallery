@@ -1683,6 +1683,7 @@ fun MainScaffold(
     }
     if (showQuickTargets) {
         QuickSortTargetsSheet(
+            albumUses = quickQueue.albumUses,
             availableTargets = transferTargets.filter { it.documentUri == null },
             selectedTargets = quickPreferences.targets,
             dockTop = quickPreferences.dockTop,

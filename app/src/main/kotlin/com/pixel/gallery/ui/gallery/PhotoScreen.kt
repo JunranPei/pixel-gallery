@@ -35,6 +35,8 @@ import com.pixel.gallery.ui.components.SortCriterion
 import com.pixel.gallery.data.local.entity.MediaEntry
 import kotlinx.coroutines.flow.*
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
+import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.GalleryMenuRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,25 +125,36 @@ fun PhotoScreen(
                         IconButton(onClick = { showMenu = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More")
                         }
-                        DropdownMenu(
+                        GalleryOverflowMenu(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
-                            if (quickSort == null) DropdownMenuItem(
-                                text = { Text(stringResource(R.string.qs_start)) },
+                            if (quickSort == null) GalleryMenuRow(
+                                label = stringResource(R.string.qs_start),
+                                icon = Icons.Outlined.DriveFileMove,
+                                accented = true,
                                 onClick = { showMenu = false; onToggleQuickSort() },
-                                leadingIcon = { Icon(Icons.Outlined.DriveFileMove, null) },
                             )
-                            DropdownMenuItem(
-                                text = { Text("Sort Photos") },
+                            GalleryMenuRow(
+                                label = "Sort Photos",
+                                icon = Icons.Default.Sort,
+                                accented = true,
                                 onClick = {
                                     showMenu = false
                                     showSortDialog = true
                                 },
-                                leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
                             )
-                            DropdownMenuItem(
-                                text = { Text("Hide Album") },
+                            GalleryMenuRow(
+                                label = stringResource(R.string.duplicate_find_album),
+                                icon = Icons.Outlined.FileCopy,
+                                accented = true,
+                                enabled = albumPhotos.size > 1,
+                                onClick = { showMenu = false; onDeduplicate(albumPhotos) },
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            GalleryMenuRow(
+                                label = "Hide Album",
+                                icon = Icons.Outlined.VisibilityOff,
                                 onClick = {
                                     showMenu = false
                                     if (albumPath.isNotEmpty()) {
@@ -149,10 +162,10 @@ fun PhotoScreen(
                                         onBack()
                                     }
                                 },
-                                leadingIcon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null) }
                             )
-                            DropdownMenuItem(
-                                text = { Text("Exclude Album") },
+                            GalleryMenuRow(
+                                label = "Exclude Album",
+                                icon = Icons.Outlined.FolderOff,
                                 onClick = {
                                     showMenu = false
                                     if (albumPath.isNotEmpty()) {
@@ -160,16 +173,6 @@ fun PhotoScreen(
                                         onBack()
                                     }
                                 },
-                                leadingIcon = { Icon(Icons.Outlined.FolderOff, contentDescription = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.duplicate_find_album)) },
-                                enabled = albumPhotos.size > 1,
-                                onClick = {
-                                    showMenu = false
-                                    onDeduplicate(albumPhotos)
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.FileCopy, contentDescription = null) }
                             )
                         }
                     }

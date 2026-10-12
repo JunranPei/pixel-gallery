@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qs_targets_frequent">常用</string>
+    <string name="qs_targets_all">全部相册</string>
+    <string name="qs_targets_selected">已选</string>
+    <string name="qs_targets_expand">展开</string>
+    <string name="qs_targets_no_frequent">成功分类后，常用相册会显示在这里。</string>
+    <string name="qs_targets_no_selection">到“全部相册”选择分类目标。</string>
+    <string name="qs_targets_frequent_rule">按近 30 天成功批次排序；同次数时最近使用的靠前，最多 8 个。</string>
+    <string name="duplicate_keeper_rule">优先保留媒体时间更早的文件；时间相同再比较修改时间、入库时间，未知时间排后。你也可以手动更换保留项。</string>
+</resources>

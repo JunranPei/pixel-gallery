@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -705,6 +706,8 @@ fun AlbumCoverCard(
     coverSizeBytes: Long? = null,
     coverRotationDegrees: Int = 0,
     emptyIcon: ImageVector = Icons.Outlined.Folder,
+    coverShape: androidx.compose.ui.graphics.Shape = ExpressiveShapes.ExtraLargeIncreased,
+    titleMaxLines: Int = Int.MAX_VALUE,
     captionContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -773,9 +776,9 @@ fun AlbumCoverCard(
                 .aspectRatio(1f)
                 .background(
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = ExpressiveShapes.ExtraLargeIncreased
+                    shape = coverShape
                 )
-                .clip(ExpressiveShapes.ExtraLargeIncreased),
+                .clip(coverShape),
             contentAlignment = Alignment.Center
         ) {
             if (coverUri != null) {
@@ -799,6 +802,8 @@ fun AlbumCoverCard(
         Text(
             text = title,
             style = titleStyle,
+            maxLines = titleMaxLines,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 4.dp)
         )
         Text(
