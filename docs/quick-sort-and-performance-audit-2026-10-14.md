@@ -62,4 +62,4 @@
 
 最终结果：101 项单元测试全部通过，模拟器文件操作与界面检查通过，Debug / Release 编译通过。安装包为 `scratch/PixelGallery-4.3.4.4-quick-sort-fixes.apk`，包名 `com.pixel.gallery.multitask`，版本 4.3.4.4-auto-multitask / 2054，包含 arm64-v8a、armeabi-v7a、x86、x86_64。
 
-发布版本递增为 4.3.4.5-auto-multitask / 2055。上述 4.3.4.4 为修复验证时的版本；新版本安装包路径为 `scratch/PixelGallery-4.3.4.5-auto-multitask.apk`。
+发布版本递增为 4.3.4.5-auto-multitask / 2055。上述 4.3.4.4 为修复验证时的版本；交付安装包改为仅含 arm64-v8a，路径为 `scratch/PixelGallery-4.3.4.5-auto-multitask-arm64-v8a.apk`。常规 Release 已设置 ABI 过滤；开发 Debug 和官方多架构分包配置保留。

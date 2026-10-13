@@ -124,6 +124,11 @@ android {
 
     buildTypes {
         release {
+            // ABI includes inside a disabled splits block do not filter JNI libraries.
+            // The ordinary release is for arm64; official releases retain ABI splits.
+            if (!officialRelease) {
+                ndk { abiFilters += "arm64-v8a" }
+            }
             val releaseConfig = signingConfigs.getByName("release")
             if (releaseConfig.storeFile != null && releaseConfig.storeFile!!.exists()) {
                 signingConfig = releaseConfig
