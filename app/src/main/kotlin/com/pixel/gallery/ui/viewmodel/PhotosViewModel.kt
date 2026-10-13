@@ -293,6 +293,13 @@ class PhotosViewModel @Inject constructor(
     val themeMode: StateFlow<ThemeMode> = settingsRepository.themeMode
         .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
 
+    val handedness = settingsRepository.handedness
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.pixel.gallery.model.Handedness.RIGHT)
+
+    fun setHandedness(value: com.pixel.gallery.model.Handedness) {
+        viewModelScope.launch { settingsRepository.setHandedness(value) }
+    }
+
     val glideThreadCount: StateFlow<Int> = settingsRepository.glideThreadCount
         .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
  

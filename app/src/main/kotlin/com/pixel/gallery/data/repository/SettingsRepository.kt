@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.pixel.gallery.model.ThemeMode
+import com.pixel.gallery.model.Handedness
 import com.pixel.gallery.model.QuickSortPreferences
 import com.pixel.gallery.model.TransferDestination
 import com.google.gson.Gson
@@ -33,6 +34,7 @@ class SettingsRepository @Inject constructor(
     private val STARTUP_AT_ALBUMS = booleanPreferencesKey("flutter.albums")
     private val MATERIAL_YOU = booleanPreferencesKey("flutter.material_you")
     private val THEME_MODE = stringPreferencesKey("theme_mode")
+    private val HANDEDNESS = stringPreferencesKey("handedness")
     private val EXCLUDED_FOLDERS = stringSetPreferencesKey("excluded_folders")
     private val HIDDEN_FOLDERS = stringSetPreferencesKey("hidden_folders")
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
@@ -94,6 +96,14 @@ class SettingsRepository @Inject constructor(
         context.dataStore.edit { preferences ->
             preferences[THEME_MODE] = value.name
         }
+    }
+
+    val handedness: Flow<Handedness> = context.dataStore.data.map {
+        if (it[HANDEDNESS] == Handedness.LEFT.name) Handedness.LEFT else Handedness.RIGHT
+    }
+
+    suspend fun setHandedness(value: Handedness) {
+        context.dataStore.edit { it[HANDEDNESS] = value.name }
     }
 
     val excludedFolders: Flow<Set<String>> = context.dataStore.data

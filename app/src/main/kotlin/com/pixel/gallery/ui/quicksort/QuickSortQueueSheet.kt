@@ -40,7 +40,8 @@ fun QuickSortQueueSheet(
                     var expanded by remember { mutableStateOf(false) }
                     Surface(shape = ExpressiveShapes.LargeIncreased, color = MaterialTheme.colorScheme.surfaceContainerLow) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(job.destination.displayName, style = MaterialTheme.typography.titleMedium)
+                            Text(if (job.undoOfJobId != null) stringResource(R.string.qs_undo_batch)
+                                else job.destination.displayName, style = MaterialTheme.typography.titleMedium)
                             Text(job.destination.path, style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(stringResource(when (job.status) {
@@ -50,8 +51,11 @@ fun QuickSortQueueSheet(
                                 QuickSortJobStatus.Completed -> R.string.qs_status_complete
                                 QuickSortJobStatus.Cancelled -> R.string.qs_status_cancelled
                                 QuickSortJobStatus.Paused -> R.string.qs_status_paused
+                                QuickSortJobStatus.NeedsConflictDecision -> R.string.qs_conflict_title
                             }))
                             Text(stringResource(R.string.qs_task_counts, job.completed, job.total, job.failed))
+                            if (job.resolved > 0) Text(stringResource(R.string.qs_resolved_on_retry, job.resolved),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (!job.isTerminal) LinearProgressIndicator(
                                 progress = { job.items.count { it.status !in setOf(QuickSortItemStatus.Queued, QuickSortItemStatus.Running) }.toFloat() / job.total.coerceAtLeast(1) },
                                 modifier = Modifier.fillMaxWidth())

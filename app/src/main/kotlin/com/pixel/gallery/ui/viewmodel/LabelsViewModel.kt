@@ -46,6 +46,7 @@ class LabelsViewModel @Inject constructor(
     ) { entries, hidden, excluded ->
         val invisible = hidden + excluded
         entries.filter { media ->
+            !media.path.contains("/PixelGallery-QuickSortUndo/") &&
             // Match PhotosViewModel / MediaRepository visibility exactly so
             // label counts never include files missing from the normal grid.
             !media.isTrashed && invisible.none { media.path.startsWith(it) }

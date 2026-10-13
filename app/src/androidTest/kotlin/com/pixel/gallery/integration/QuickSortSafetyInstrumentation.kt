@@ -39,11 +39,13 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var scrollbarSuite = false
     private var uiSuite = false
     private var duplicateSuite = false
+    private var undoHandednessSuite = false
     override fun onCreate(arguments: Bundle?) {
         confirmationSuite = arguments?.getString("suite") == "confirmations"
         scrollbarSuite = arguments?.getString("suite") == "scrollbar"
         uiSuite = arguments?.getString("suite") == "redesign"
         duplicateSuite = arguments?.getString("suite") == "duplicates"
+        undoHandednessSuite = arguments?.getString("suite") == "undo-handedness"
         super.onCreate(arguments)
         start()
     }
@@ -52,6 +54,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                undoHandednessSuite -> UndoHandednessTouchChecks(this).exercise()
                 confirmationSuite -> ConfirmationTouchChecks(this).exercise()
                 duplicateSuite -> DuplicateTouchChecks(this).exercise()
                 uiSuite -> RedesignTouchChecks(this).exercise()
@@ -181,7 +184,9 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
             check(File(queued.path).exists()) { "Cancelling unstarted job modified source" }
             report += "Atomic journal readback, reconstructed queue reservations, duplicate rejection and pending cancellation checked"
 
-            val run = resumedQueue.enqueue(listOf(queued), destination) as QuickSortEnqueueResult.Accepted
+            val session = "session-$token"
+            val queuedFingerprint = fingerprintMediaFile(File(queued.path))
+            val run = resumedQueue.enqueue(listOf(queued), destination, session) as QuickSortEnqueueResult.Accepted
             resumedQueue.runUntilIdle()
             val job = resumedQueue.state.value.jobs.first { it.id == run.jobId }
             if (job.status == QuickSortJobStatus.NeedsPermission) {
@@ -200,6 +205,120 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 reloadedUsage.state.first { it.loaded }
                 check(reloadedUsage.state.value.albumUses == resumedQueue.state.value.albumUses)
                 report += "Only successful batches count as album uses; first-success time and usage survive journal reload"
+
+                check(resumedQueue.requestUndo(run.jobId, "wrong-session") != null)
+                check(resumedQueue.requestUndo(run.jobId, session) == null)
+                resumedQueue.runUntilIdle()
+                val undo = resumedQueue.state.value.jobs.single { it.undoOfJobId == run.jobId }
+                check(undo.completed == 1 && undo.failed == 0) { undo.items.joinToString { it.error.orEmpty() } }
+                verifyMediaFile(File(queued.path), queuedFingerprint, verifyTime = true)
+                createdUris += Uri.parse(undo.items.single().receipt!!.targetUri)
+                check(!File(queuedReceipt.targetPath).exists())
+                check(resumedQueue.state.value.albumUses.none { it.jobId == run.jobId || it.jobId == undo.id })
+                report += "Session-bound undo restored exact original filename, SHA-256 and mtime; reversal is not another album use"
+
+                val untouched = synthetic("undo-pending.jpg", "Source", 0xff443355.toInt())
+                val pendingUndo = resumedQueue.enqueue(listOf(untouched), destination, session) as QuickSortEnqueueResult.Accepted
+                check(resumedQueue.requestUndo(pendingUndo.jobId, session) == null)
+                resumedQueue.runUntilIdle()
+                check(File(untouched.path).exists())
+                check(resumedQueue.state.value.jobs.single { it.id == pendingUndo.jobId }.items.single().status == QuickSortItemStatus.Cancelled)
+                report += "Undo cancelled an unstarted move without touching the source"
+
+                val conflictingSource = synthetic("conflict.jpg", "Source", 0xff335577.toInt())
+                val conflictingTarget = synthetic("conflict.jpg", "Target", 0xff997744.toInt())
+                val conflictingFingerprint = fingerprintMediaFile(File(conflictingSource.path))
+                val existingFingerprint = fingerprintMediaFile(File(conflictingTarget.path))
+                val skip = resumedQueue.enqueue(listOf(conflictingSource), destination, session) as QuickSortEnqueueResult.Accepted
+                resumedQueue.runUntilIdle()
+                check(resumedQueue.state.value.jobs.single { it.id == skip.jobId }.status == QuickSortJobStatus.NeedsConflictDecision)
+                verifyMediaFile(File(conflictingSource.path), conflictingFingerprint, verifyTime = true)
+                resumedQueue.resolveConflict(skip.jobId, ConflictPolicy.SKIP)
+                resumedQueue.runUntilIdle()
+                check(resumedQueue.state.value.jobs.single { it.id == skip.jobId }.items.single().status == QuickSortItemStatus.Skipped)
+                verifyMediaFile(File(conflictingSource.path), conflictingFingerprint, verifyTime = true)
+                verifyMediaFile(File(conflictingTarget.path), existingFingerprint, verifyTime = true)
+
+                val keep = resumedQueue.enqueue(listOf(conflictingSource), destination, session) as QuickSortEnqueueResult.Accepted
+                resumedQueue.runUntilIdle()
+                resumedQueue.resolveConflict(keep.jobId, ConflictPolicy.KEEP_BOTH)
+                resumedQueue.runUntilIdle()
+                val keptReceipt = resumedQueue.state.value.jobs.single { it.id == keep.jobId }.items.single().receipt!!
+                createdUris += Uri.parse(keptReceipt.targetUri)
+                check(keptReceipt.targetPath != conflictingTarget.path)
+                verifyMediaFile(File(keptReceipt.targetPath), conflictingFingerprint, verifyTime = true)
+                verifyMediaFile(File(conflictingTarget.path), existingFingerprint, verifyTime = true)
+                report += "Same-name moves pause before mutation; SKIP retains source and KEEP_BOTH preserves existing target"
+
+                val blocker = synthetic("conflict.jpg", "Source", 0xff552244.toInt())
+                val blockerFingerprint = fingerprintMediaFile(File(blocker.path))
+                check(resumedQueue.requestUndo(keep.jobId, session) == null)
+                resumedQueue.runUntilIdle()
+                val failedUndo = resumedQueue.state.value.jobs.single { it.undoOfJobId == keep.jobId }
+                check(failedUndo.failed == 1 && failedUndo.items.single().error!!.contains("occupied"))
+                verifyMediaFile(File(blocker.path), blockerFingerprint, verifyTime = true)
+                verifyMediaFile(File(keptReceipt.targetPath), conflictingFingerprint, verifyTime = true)
+                report += "Undo collision reports occupied original path and leaves both distinct files unchanged"
+
+                check(targetContext.contentResolver.delete(Uri.parse(blocker.uri), null, null) > 0)
+                val retry = resumedQueue.retry(failedUndo.id) as QuickSortEnqueueResult.Accepted
+                check(resumedQueue.retry(failedUndo.id) is QuickSortEnqueueResult.Rejected)
+                resumedQueue.runUntilIdle()
+                val retryJob = resumedQueue.state.value.jobs.single { it.id == retry.jobId }
+                check(retryJob.completed == 1 && retryJob.failed == 0) { retryJob.items.joinToString { it.error.orEmpty() } }
+                createdUris += Uri.parse(retryJob.items.single().receipt!!.targetUri)
+                val settledFailure = resumedQueue.state.value.jobs.single { it.id == failedUndo.id }
+                check(settledFailure.failed == 0 && settledFailure.resolved == 1)
+                verifyMediaFile(File(conflictingSource.path), conflictingFingerprint, verifyTime = true)
+                report += "Retry reservations prevent duplicate retries; successful reverse retry settles its exact old failure"
+
+                val replaceSource = synthetic("replace.jpg", "Source", 0xff113355.toInt())
+                val replaceTarget = synthetic("replace.jpg", "Target", 0xff885522.toInt())
+                val replaceSourceFingerprint = fingerprintMediaFile(File(replaceSource.path))
+                val replaceTargetFingerprint = fingerprintMediaFile(File(replaceTarget.path))
+                val replace = resumedQueue.enqueue(listOf(replaceSource), destination, session) as QuickSortEnqueueResult.Accepted
+                resumedQueue.runUntilIdle()
+                resumedQueue.resolveConflict(replace.jobId, ConflictPolicy.REPLACE)
+                resumedQueue.runUntilIdle()
+                val replaced = resumedQueue.state.value.jobs.single { it.id == replace.jobId }
+                check(replaced.completed == 1 && replaced.failed == 0) { replaced.items.joinToString { it.error.orEmpty() } }
+                val replacedItem = replaced.items.single()
+                val backup = requireNotNull(replacedItem.replacementReceipt)
+                createdUris += Uri.parse(backup.targetUri)
+                createdUris += Uri.parse(replacedItem.receipt!!.targetUri)
+                verifyMediaFile(File(replaceTarget.path), replaceSourceFingerprint, verifyTime = true)
+                verifyMediaFile(File(backup.targetPath), replaceTargetFingerprint, verifyTime = true)
+                check(resumedQueue.requestUndo(replace.jobId, session) == null)
+                resumedQueue.runUntilIdle()
+                val reversedReplacement = resumedQueue.state.value.jobs.single { it.undoOfJobId == replace.jobId }
+                check(reversedReplacement.completed == 2 && reversedReplacement.failed == 0) { reversedReplacement.items.joinToString { it.error.orEmpty() } }
+                reversedReplacement.items.mapNotNull { it.receipt?.targetUri }.forEach { createdUris += Uri.parse(it) }
+                verifyMediaFile(File(replaceSource.path), replaceSourceFingerprint, verifyTime = true)
+                verifyMediaFile(File(replaceTarget.path), replaceTargetFingerprint, verifyTime = true)
+                check(!File(backup.targetPath).exists())
+                report += "REPLACE kept a verified undo backup; undo restored both original contents, names and timestamps"
+
+                val finalSource = synthetic("session-close.jpg", "Source", 0xff334499.toInt())
+                val finalTarget = synthetic("session-close.jpg", "Target", 0xff775511.toInt())
+                val finalFingerprint = fingerprintMediaFile(File(finalSource.path))
+                val close = resumedQueue.enqueue(listOf(finalSource), destination, session) as QuickSortEnqueueResult.Accepted
+                resumedQueue.runUntilIdle()
+                resumedQueue.resolveConflict(close.jobId, ConflictPolicy.REPLACE)
+                resumedQueue.runUntilIdle()
+                val closingItem = resumedQueue.state.value.jobs.single { it.id == close.jobId }.items.single()
+                check(closingItem.status == QuickSortItemStatus.Succeeded) { closingItem.error.orEmpty() }
+                createdUris += Uri.parse(closingItem.receipt!!.targetUri)
+                createdUris += Uri.parse(closingItem.replacementReceipt!!.targetUri)
+                val backupPath = closingItem.replacementReceipt!!.targetPath
+                check(File(backupPath).exists())
+                resumedQueue.finishSessionFromOwner(session)
+                withTimeout(15_000) { resumedQueue.state.first { state ->
+                    state.jobs.single { it.id == close.jobId }.items.single().replacementReleased
+                } }
+                check(!File(backupPath).exists())
+                verifyMediaFile(File(finalTarget.path), finalFingerprint, verifyTime = true)
+                check(latestUndoableQuickSortJob(resumedQueue.state.value, session) == null)
+                report += "Leaving the sort session retires verified replacement backups and closes undo eligibility"
             }
 
             // Reconstruct an interrupted on-disk batch in the isolated journal, never the application's queue.

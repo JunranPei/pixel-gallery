@@ -22,9 +22,9 @@ class QuickSortViewModel @Inject constructor(private val repository: QuickSortQu
     val permissionRequest = _permissionRequest.asStateFlow()
     private var requestingPermission = false
     private var cleared = false
-    fun enqueue(entries: List<MediaEntry>, destination: TransferDestination, onResult: (QuickSortEnqueueResult) -> Unit) {
+    fun enqueue(entries: List<MediaEntry>, destination: TransferDestination, onResult: (QuickSortEnqueueResult) -> Unit, sessionId: String? = null) {
         viewModelScope.launch {
-            val result = repository.enqueue(entries, destination)
+            val result = repository.enqueue(entries, destination, sessionId)
             if (result is QuickSortEnqueueResult.Accepted) repository.startFromForeground()
             onResult(result)
         }
@@ -60,6 +60,20 @@ class QuickSortViewModel @Inject constructor(private val repository: QuickSortQu
         }
     }
     fun cancel(jobId: String) { viewModelScope.launch { repository.cancel(jobId) } }
+    fun finishSession(sessionId: String) { repository.finishSessionFromOwner(sessionId) }
+    fun undo(jobId: String, sessionId: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val error = repository.requestUndo(jobId, sessionId)
+            if (error == null) repository.startFromForeground()
+            onResult(error)
+        }
+    }
+    fun resolveConflict(jobId: String, policy: com.pixel.gallery.model.ConflictPolicy) {
+        viewModelScope.launch {
+            repository.resolveConflict(jobId, policy)
+            repository.startFromForeground()
+        }
+    }
     fun retry(jobId: String, onResult: (QuickSortEnqueueResult) -> Unit) {
         viewModelScope.launch {
             val result = repository.retry(jobId)

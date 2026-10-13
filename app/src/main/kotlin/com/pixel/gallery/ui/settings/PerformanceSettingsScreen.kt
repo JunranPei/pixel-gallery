@@ -111,7 +111,7 @@ fun PerformanceSettingsScreen(
                         value = glidePersistentGridCacheSize.toFloat(),
                         valueRange = 50f..2000f,
                         steps = 38,
-                        onValueChangeFinished = { viewModel.setGlidePersistentCacheSize(it.toInt()) },
+                        onValueChangeFinished = { viewModel.setGlidePersistentGridCacheSize(it.toInt()) },
                     )
                 }
             }

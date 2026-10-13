@@ -175,30 +175,6 @@ private val AlbumGridStatesSaver = listSaver<MutableMap<String, LazyGridState>, 
     },
 )
 
-internal fun reconcileViewerSessionPhotos(
-    current: List<MediaEntry>,
-    latest: List<MediaEntry>,
-): List<MediaEntry> {
-    if (current.isEmpty()) return latest
-    if (latest.isEmpty()) return current
-    val latestById = latest.associateBy(MediaEntry::contentId)
-    val refreshed = current.map { entry -> latestById[entry.contentId] ?: entry }
-    return if (refreshed == current) current else refreshed
-}
-
-/** A move may keep its MediaStore ID or obtain a new one. Preserve the page order in both cases. */
-internal fun remapMovedViewerPhotos(
-    current: List<MediaEntry>,
-    receipts: List<com.pixel.gallery.model.TransferReceipt>,
-): List<MediaEntry> = current.map { original ->
-    receipts.fold(original) { entry, receipt ->
-        if (entry.contentId == receipt.sourceId && entry.path == receipt.sourcePath) {
-            entry.copy(contentId = receipt.targetId, uri = receipt.targetUri, path = receipt.targetPath,
-                dateModifiedMillis = receipt.modifiedMillis, sourceDateTakenMillis = receipt.dateTakenMillis)
-        } else entry
-    }
-}
-
 internal fun MediaEntry.matchesFileSearch(query: String): Boolean {
     val normalizedQuery = query.trim()
     if (normalizedQuery.isEmpty()) return true
@@ -285,7 +261,9 @@ fun MainScaffold(
     val labelSaveGeneration by labelsViewModel.editorSaveGeneration.collectAsState()
     var observedLabelSaveGeneration by rememberSaveable { mutableLongStateOf(0L) }
     val quickQueue by quickSortViewModel.state.collectAsState()
-    val quickReceipts = remember(quickQueue.jobs) { quickQueue.jobs.flatMap { job -> job.items.mapNotNull { it.receipt } } }
+    val quickReceipts = remember(quickQueue.jobs) { quickQueue.jobs.flatMap { job ->
+        job.items.flatMap { listOfNotNull(it.replacementReceipt, it.receipt, it.replacementRestoreReceipt) }
+    } }
     val quickPreferences by photosViewModel.quickSortPreferences.collectAsState()
     val transferTargets by photosViewModel.transferDestinations.collectAsState()
     var editingLabelIds by rememberSaveable(stateSaver = listSaver(
@@ -296,6 +274,31 @@ fun MainScaffold(
         observedLabelSaveGeneration = labelSaveGeneration
     }
     var quickSortEnabled by rememberSaveable { mutableStateOf(false) }
+    val quickSortSessionId = remember(quickSortEnabled) {
+        if (quickSortEnabled) java.util.UUID.randomUUID().toString() else null
+    }
+    DisposableEffect(quickSortSessionId) {
+        onDispose { quickSortSessionId?.let(quickSortViewModel::finishSession) }
+    }
+    val handedness by photosViewModel.handedness.collectAsState()
+    val undoableQuickJob = com.pixel.gallery.model.latestUndoableQuickSortJob(quickQueue, quickSortSessionId)
+    var quickWarning by remember { mutableStateOf<String?>(null) }
+    val warnedQuickJobs = remember { mutableSetOf<String>() }
+    LaunchedEffect(quickQueue.jobs, quickSortSessionId) {
+        val failedJob = quickQueue.jobs.firstOrNull {
+            it.sessionId == quickSortSessionId && quickSortSessionId != null && it.failed > 0 && it.id !in warnedQuickJobs
+        }
+        if (failedJob != null) {
+            warnedQuickJobs.add(failedJob.id)
+            quickWarning = failedJob.items.filter { it.status == com.pixel.gallery.model.QuickSortItemStatus.Failed }
+                .take(3).joinToString("\n") { "${java.io.File(it.entry.path).name}: ${it.error.orEmpty()}" }
+        }
+    }
+    quickQueue.needsConflictDecision?.let { job ->
+        QuickSortConflictDialog(job, onResolve = { quickSortViewModel.resolveConflict(job.id, it) },
+            onCancel = { quickSortViewModel.cancel(job.id); quickSortViewModel.resume() })
+    }
+    quickWarning?.let { message -> QuickSortWarningDialog(message) { quickWarning = null } }
     var showQuickTargets by remember { mutableStateOf(false) }
     var quickTargetsPanelHeight by remember { mutableStateOf(0.dp) }
     var showQuickQueue by remember { mutableStateOf(false) }
@@ -642,7 +645,7 @@ fun MainScaffold(
         onReorderTargets = photosViewModel::setQuickSortTargets,
         onManageTargets = { showQuickTargets = true },
         onMove = { ids, destination ->
-            quickSortViewModel.enqueue(allPhotos.filter { it.contentId in ids }, destination, onQuickEnqueued)
+            quickSortViewModel.enqueue(allPhotos.filter { it.contentId in ids }, destination, onQuickEnqueued, quickSortSessionId)
         },
         // Do not draw the dock at the screen edge during the first frame of
         // the chooser. It is measured immediately by the sheet; reserving a
@@ -653,6 +656,16 @@ fun MainScaffold(
             quickTargetsPanelHeight
         },
         reservedIds = quickQueue.reservedIds,
+        handedness = handedness,
+        undoAvailable = undoableQuickJob != null,
+        onUndo = {
+            val job = undoableQuickJob
+            val session = quickSortSessionId
+            if (job != null && session != null) quickSortViewModel.undo(job.id, session) { error ->
+                if (error != null) quickWarning = error
+                else scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.qs_undo_requested)) }
+            }
+        },
         onExit = {
             selectedIds = emptySet()
             quickSortEnabled = false
@@ -1531,12 +1544,17 @@ fun MainScaffold(
                 // A Viewer session owns a stable sequence. Live MediaStore changes may
                 // refresh an existing item's path/metadata, but must not reorder pages
                 // underneath Pager or make the current numeric index point at another image.
-                var photosForViewer by remember(viewer) { mutableStateOf(livePhotosForViewer) }
+                var photosForViewer by remember(viewer) {
+                    mutableStateOf(livePhotosForViewer, referentialEqualityPolicy())
+                }
                 LaunchedEffect(viewer, livePhotosForViewer, quickReceipts) {
-                    val reconciled = reconcileViewerSessionPhotos(
-                        current = remapMovedViewerPhotos(photosForViewer, quickReceipts),
-                        latest = remapMovedViewerPhotos(livePhotosForViewer, quickReceipts),
-                    )
+                    val current = photosForViewer
+                    // A main-page session can contain over 100,000 entries. Receipt
+                    // replay and metadata reconciliation must not delay the first image
+                    // frame, even after the user has accumulated quick-sort history.
+                    val reconciled = withContext(Dispatchers.Default) {
+                        refreshViewerSessionPhotos(current, livePhotosForViewer, quickReceipts)
+                    }
                     if (reconciled !== photosForViewer) {
                         photosForViewer = reconciled
                         ViewerLoadMetrics.event(

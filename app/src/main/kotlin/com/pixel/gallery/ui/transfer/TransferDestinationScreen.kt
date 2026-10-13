@@ -77,6 +77,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import com.pixel.gallery.model.QuickSortAlbumUse
 import com.pixel.gallery.model.frequentQuickSortAlbums
 import com.pixel.gallery.ui.viewmodel.QuickSortViewModel
+import com.pixel.gallery.model.Handedness
+import com.pixel.gallery.ui.utils.actionBottomAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -114,6 +116,7 @@ fun TransferDestinationScreen(
 ) {
     val context = LocalContext.current
     val destinations by viewModel.transferDestinations.collectAsState()
+    val handedness by viewModel.handedness.collectAsState()
     val quickQueue by quickSortViewModel.state.collectAsState()
     val transferState by viewModel.transferUiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -283,6 +286,7 @@ fun TransferDestinationScreen(
             onOtherFolders = { directoryPickerLauncher.launch(null) },
             onCopy = { reviewTransfer(TransferMode.COPY) },
             onMove = { reviewTransfer(TransferMode.MOVE) },
+            handedness = handedness,
             modifier = Modifier.padding(innerPadding),
         )
     }
@@ -430,7 +434,7 @@ fun TransferDestinationScreen(
 }
 
 @Composable
-private fun ConflictChoice(
+internal fun ConflictChoice(
     label: String,
     supportingText: String,
     selected: Boolean,
@@ -588,6 +592,7 @@ fun TransferDestinationContent(
     onCopy: () -> Unit,
     onMove: () -> Unit,
     modifier: Modifier = Modifier,
+    handedness: Handedness = Handedness.RIGHT,
 ) {
     val frequent = if (query.isBlank()) frequentQuickSortAlbums(destinations, albumUses, System.currentTimeMillis()) else emptyList()
     val duplicateNames = destinations.groupBy { it.displayName.lowercase() }.filterValues { it.size > 1 }.keys
@@ -653,7 +658,7 @@ fun TransferDestinationContent(
                     }
                 }
             } else {
-                Column(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.align(handedness.actionBottomAlignment).navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     val enabled = selectedDestination != null
                     Surface(onClick = onCopy, enabled = enabled, shape = CircleShape, shadowElevation = 1.dp,
                         color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer,

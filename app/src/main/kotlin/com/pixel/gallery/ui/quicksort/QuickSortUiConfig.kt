@@ -22,6 +22,9 @@ data class QuickSortUiConfig(
     val dockBottomInset: Dp = 0.dp,
     val reservedIds: Set<Long> = emptySet(),
     val onExit: () -> Unit = {},
+    val handedness: com.pixel.gallery.model.Handedness = com.pixel.gallery.model.Handedness.RIGHT,
+    val undoAvailable: Boolean = false,
+    val onUndo: () -> Unit = {},
 )
 
 internal enum class QuickSortInteraction { Idle, Selecting, Moving, Dock, Reordering }

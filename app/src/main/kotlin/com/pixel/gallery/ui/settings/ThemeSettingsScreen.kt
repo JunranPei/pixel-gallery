@@ -94,7 +94,8 @@ fun ThemeSettingsScreen(
                                 )
                             }
                         }
-                        ThemeModeSegmentedControl(
+                        SettingsOptionControl(
+                            options = listOf(ThemeMode.SYSTEM to "System", ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark"),
                             selectedMode = themeMode,
                             onSelected = viewModel::setThemeMode,
                             modifier = Modifier.padding(top = 8.dp),
@@ -122,21 +123,17 @@ fun ThemeSettingsScreen(
 }
 
 @Composable
-private fun ThemeModeSegmentedControl(
-    selectedMode: ThemeMode,
-    onSelected: (ThemeMode) -> Unit,
+internal fun <T> SettingsOptionControl(
+    options: List<Pair<T, String>>,
+    selectedMode: T,
+    onSelected: (T) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val modes = listOf(
-        ThemeMode.SYSTEM to "System",
-        ThemeMode.LIGHT to "Light",
-        ThemeMode.DARK to "Dark",
-    )
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        modes.forEach { (mode, label) ->
+        options.forEach { (mode, label) ->
             val selected = selectedMode == mode
             val shape = if (selected) CircleShape else RoundedCornerShape(10.dp)
             val containerColor by animateColorAsState(

@@ -161,7 +161,7 @@ class MediaRepository @Inject constructor(
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
-            !excluded.any { entry.path.startsWith(it) }
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.startsWith(it) }
         }
     }.stateIn(
         scope = repositoryScope,
@@ -174,7 +174,7 @@ class MediaRepository @Inject constructor(
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
-            !excluded.any { entry.path.startsWith(it) }
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.startsWith(it) }
         }
     }.stateIn(
         scope = repositoryScope,
@@ -1059,10 +1059,51 @@ class MediaRepository @Inject constructor(
     }
 
     /** Quick classification always moves. Unsupported document providers are rejected before mutation. */
+    suspend fun quickSortReplacementEntry(path: String, fallbackMime: String): MediaEntry = withContext(Dispatchers.IO) {
+        require(Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())) {
+            "Replacing existing files requires all-files access"
+        }
+        val file = File(path)
+        val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: fallbackMime
+        val uri = scanFile(file, mime) ?: throw IOException("Existing destination could not be indexed; files were kept")
+        val id = uri.lastPathSegment?.toLongOrNull() ?: throw IOException("Existing destination has no media identity")
+        mediaDao.getEntriesByIds(listOf(id)).firstOrNull()?.takeIf { File(it.path).canonicalPath == file.canonicalPath }
+            ?: run {
+                val times = mediaTimes(uri) ?: throw IOException("Existing destination timestamps could not be read")
+                MediaEntry(id, uri.toString(), file.absolutePath, mime, 0, 0, 0, file.length(), times.first,
+                    file.lastModified(), sourceDateTakenMillis = times.third, bestTimestamp = file.lastModified())
+            }
+    }
+
+    suspend fun releaseQuickSortReplacementBackup(item: com.pixel.gallery.model.QuickSortQueueItem): Boolean = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            val checkpoint = item.replacementCheckpoint ?: return@withContext true
+            val receipt = item.replacementReceipt ?: return@withContext false
+            val backup = File(receipt.targetPath)
+            require(backup.canonicalPath.contains("/PixelGallery-QuickSortUndo/")) { "Unexpected replacement backup location" }
+            if (!backup.exists()) return@withContext true
+            verifyMediaFile(backup, MediaFileFingerprint(checkpoint.sourceSize, checkpoint.originalModifiedMillis,
+                checkpoint.sourceSha256), verifyTime = true)
+            val entry = checkpoint.source.copy(contentId = receipt.targetId, uri = receipt.targetUri, path = receipt.targetPath)
+            require(mediaPath(Uri.parse(entry.uri))?.let { File(it).canonicalPath } == backup.canonicalPath) {
+                "Replacement backup media identity changed; file was kept"
+            }
+            val removed = removeOriginal(entry, backup)
+            if (removed) {
+                backup.parentFile?.delete() // only an empty, operation-owned directory
+                mediaDao.deleteByIds(listOf(receipt.targetId))
+            }
+            removed
+        }
+    }
+
     suspend fun moveForQuickSort(
         entry: MediaEntry,
         destination: TransferDestination,
         operationId: String,
+        restoreCheckpoint: QuickMoveCheckpoint? = null,
+        conflictPolicy: ConflictPolicy? = ConflictPolicy.KEEP_BOTH,
         onCheckpoint: suspend (QuickMoveCheckpoint) -> Unit,
     ): TransferReceipt = withMediaMutation {
         withContext(Dispatchers.IO) {
@@ -1082,7 +1123,23 @@ class MediaRepository @Inject constructor(
             val originalLibraryTimes = mediaTimes(Uri.parse(entry.uri))
                 ?: throw IOException("Original media timestamps could not be read; source was kept")
             val fingerprint = fingerprintMediaFile(source)
-            val target = getAvailableTarget(directory, source.name)
+            if (restoreCheckpoint != null) {
+                require(source.canonicalPath == File(restoreCheckpoint.targetPath).canonicalPath) { "Moved file path changed; undo was stopped" }
+                verifyMediaFile(source, MediaFileFingerprint(restoreCheckpoint.sourceSize,
+                    restoreCheckpoint.originalModifiedMillis, restoreCheckpoint.sourceSha256), verifyTime = true)
+            }
+            val target = if (restoreCheckpoint != null) {
+                File(restoreCheckpoint.source.path).also {
+                    require(it.parentFile?.canonicalPath == directory.canonicalPath) { "Original album changed; undo was stopped" }
+                    if (it.exists()) throw IOException("Original filename is occupied: ${it.path}; both files were kept")
+                }
+            } else if (conflictPolicy == ConflictPolicy.KEEP_BOTH) {
+                getAvailableTarget(directory, source.name)
+            } else {
+                File(directory, source.name).also {
+                    if (it.exists()) throw com.pixel.gallery.model.QuickSortNameConflictException(it.path)
+                }
+            }
             val sameVolume = StorageUtils.getVolumePath(context, source.path)?.let {
                 it == StorageUtils.getVolumePath(context, target.path)
             } == true
@@ -1108,7 +1165,9 @@ class MediaRepository @Inject constructor(
                         targetUri = entry.uri, stage = QuickMoveStage.SourceRemoved)
                     onCheckpoint(checkpoint)
                     try {
-                        if (actualTarget.parentFile?.canonicalPath != directory.canonicalPath || source.exists()) {
+                        if (actualTarget.parentFile?.canonicalPath != directory.canonicalPath || source.exists() ||
+                            ((restoreCheckpoint != null || conflictPolicy != ConflictPolicy.KEEP_BOTH) &&
+                                actualTarget.canonicalPath != target.canonicalPath)) {
                             throw IOException("Media provider did not complete the requested directory move")
                         }
                         verifyMediaFile(actualTarget, fingerprint)

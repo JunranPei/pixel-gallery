@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridS
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +27,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +41,9 @@ import com.bumptech.glide.load.DecodeFormat
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.pixel.gallery.glide.MediaStoreThumbnail
 import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.Handedness
+import com.pixel.gallery.ui.utils.actionHorizontalAlignment
+import com.pixel.gallery.R
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -61,6 +66,7 @@ internal fun QuickSortDock(
     var reorderWidth by remember { mutableIntStateOf(0) }
     val scrollState = rememberLazyStaggeredGridState()
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val alignRight = config.handedness == Handedness.RIGHT
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
 
@@ -98,8 +104,8 @@ internal fun QuickSortDock(
             val point = if (reorderKey != null) reorderPointer else gestures.pointerInWindow
             if (bounds != null && bounds.contains(point)) {
                 val delta = when {
-                    point.x < bounds.left + edge -> if (isRtl) step else -step
-                    point.x > bounds.right - edge -> if (isRtl) -step else step
+                    point.x < bounds.left + edge -> if (alignRight) step else -step
+                    point.x > bounds.right - edge -> if (alignRight) -step else step
                     else -> 0f
                 }
                 if (delta != 0f && scrollState.scrollBy(delta) != 0f) {
@@ -125,13 +131,25 @@ internal fun QuickSortDock(
             "${target.displayName} · ${quickSortPathSuffix(target, previewTargets)}"
         else target.displayName
 
-    Box(modifier, contentAlignment = Alignment.Center) {
+    Column(modifier.onGloballyPositioned { onMeasuredHeight(it.size.height) },
+        horizontalAlignment = config.handedness.actionHorizontalAlignment) {
+        Surface(onClick = config.onUndo, enabled = config.undoAvailable && !gestures.busy,
+            shape = CircleShape, shadowElevation = 1.dp,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.padding(horizontal = 16.dp).size(56.dp)
+                .alpha(if (config.undoAvailable) 1f else .38f)) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Outlined.Undo, stringResource(R.string.qs_undo))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(if (previewTargets.size == 1) 68.dp else 132.dp)
                 .onGloballyPositioned {
-                    onMeasuredHeight(it.size.height)
                     dockOrigin = it.positionInWindow()
                     gestures.dockBounds = it.boundsInWindow()
                 }
@@ -190,6 +208,7 @@ internal fun QuickSortDock(
             LazyHorizontalStaggeredGrid(
                 rows = StaggeredGridCells.Fixed(if (previewTargets.size == 1) 1 else 2),
                 state = scrollState,
+                reverseLayout = alignRight != isRtl,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 horizontalItemSpacing = 8.dp,
@@ -240,6 +259,7 @@ internal fun QuickSortDock(
                 onClick = {},
             )
         }
+    }
     }
 }
 

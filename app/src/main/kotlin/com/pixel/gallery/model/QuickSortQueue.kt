@@ -3,8 +3,10 @@ package com.pixel.gallery.model
 import androidx.activity.result.IntentSenderRequest
 import com.pixel.gallery.data.local.entity.MediaEntry
 
-enum class QuickSortJobStatus { Queued, NeedsPermission, Running, Completed, Cancelled, Paused }
-enum class QuickSortItemStatus { Queued, Running, Succeeded, Failed, Skipped, Cancelled }
+enum class QuickSortJobStatus { Queued, NeedsPermission, Running, Completed, Cancelled, Paused, NeedsConflictDecision }
+enum class QuickSortItemStatus { Queued, Running, Succeeded, Failed, Skipped, Cancelled, Resolved }
+
+data class QuickSortRetryOrigin(val jobId: String, val itemIndex: Int)
 enum class QuickMoveStage { Planned, TargetReady, SourceRemoved, Completed }
 
 /** Every checkpoint is persisted before the next filesystem mutation. */
@@ -41,6 +43,14 @@ data class QuickSortQueueItem(
     val checkpoint: QuickMoveCheckpoint? = null,
     val receipt: TransferReceipt? = null,
     val error: String? = null,
+    val restoreCheckpoint: QuickMoveCheckpoint? = null,
+    val replacementCheckpoint: QuickMoveCheckpoint? = null,
+    val replacementReceipt: TransferReceipt? = null,
+    val replacementRestoreCheckpoint: QuickMoveCheckpoint? = null,
+    val replacementRestoreReceipt: TransferReceipt? = null,
+    val replacementReleased: Boolean = false,
+    val retryOrigin: QuickSortRetryOrigin? = null,
+    val resolvedByJobId: String? = null,
 )
 
 data class QuickSortJob(
@@ -53,11 +63,45 @@ data class QuickSortJob(
     val permissionGranted: Boolean = false,
     val cancelRequested: Boolean = false,
     val firstSucceededAt: Long? = null,
+    val sessionId: String? = null,
+    val undoRequested: Boolean = false,
+    val undoJobId: String? = null,
+    val undoOfJobId: String? = null,
+    val conflictPolicy: ConflictPolicy? = null,
+    val conflictCount: Int = 0,
+    val sessionClosed: Boolean = false,
+    val sessionProcessId: String? = null,
 ) {
     val completed: Int get() = items.count { it.status == QuickSortItemStatus.Succeeded }
     val failed: Int get() = items.count { it.status == QuickSortItemStatus.Failed }
+    val resolved: Int get() = items.count { it.status == QuickSortItemStatus.Resolved }
     val total: Int get() = items.size
     val isTerminal: Boolean get() = status == QuickSortJobStatus.Completed || status == QuickSortJobStatus.Cancelled
+}
+
+/** A verified retry settles the exact old failed item and any earlier retries of it. */
+fun resolveQuickSortRetrySuccess(jobs: List<QuickSortJob>, jobId: String, itemIndex: Int): List<QuickSortJob> {
+    val success = jobs.firstOrNull { it.id == jobId }?.items?.getOrNull(itemIndex) ?: return jobs
+    val receipt = success.receipt ?: return jobs
+    if (success.status != QuickSortItemStatus.Succeeded || !receipt.contentVerified || !receipt.modifiedTimeVerified || !receipt.captureTimeVerified) return jobs
+    var origin = success.retryOrigin ?: return jobs
+    var updated = jobs
+    val visited = mutableSetOf<QuickSortRetryOrigin>()
+    while (visited.add(origin)) {
+        val previousJob = updated.firstOrNull { it.id == origin.jobId } ?: break
+        val previous = previousJob.items.getOrNull(origin.itemIndex) ?: break
+        if (previous.entry.contentId != success.entry.contentId || previous.entry.path != success.entry.path) break
+        if (previous.status != QuickSortItemStatus.Failed && previous.status != QuickSortItemStatus.Resolved) break
+        val currentOrigin = origin
+        updated = updated.map { job ->
+            if (job.id != currentOrigin.jobId) job else job.copy(items = job.items.mapIndexed { index, item ->
+                if (index != currentOrigin.itemIndex) item else item.copy(status = QuickSortItemStatus.Resolved,
+                    resolvedByJobId = jobId, error = null)
+            })
+        }
+        origin = previous.retryOrigin ?: break
+    }
+    return updated
 }
 
 data class QuickSortQueueState(
@@ -73,7 +117,36 @@ data class QuickSortQueueState(
         .mapTo(mutableSetOf()) { it.entry.contentId }
     val isRunning: Boolean get() = jobs.any { it.status == QuickSortJobStatus.Running }
     val needsPermission: QuickSortJob? get() = jobs.firstOrNull { it.status == QuickSortJobStatus.NeedsPermission }
+    val needsConflictDecision: QuickSortJob? get() = jobs.firstOrNull { it.status == QuickSortJobStatus.NeedsConflictDecision }
     val pendingCount: Int get() = reservedIds.size
+}
+
+/** Undo belongs to the current quick-sort session; reverse jobs are never undo candidates. */
+fun latestUndoableQuickSortJob(state: QuickSortQueueState, sessionId: String?): QuickSortJob? {
+    if (sessionId == null || state.jobs.any { (it.undoOfJobId != null && !it.isTerminal) ||
+        (it.undoRequested && it.undoJobId == null) }) return null
+    return state.jobs.lastOrNull { job ->
+        job.sessionId == sessionId && job.undoOfJobId == null && !job.undoRequested &&
+            !job.sessionClosed && job.items.any { it.status == QuickSortItemStatus.Queued || it.status == QuickSortItemStatus.Running ||
+                (it.status == QuickSortItemStatus.Succeeded && it.receipt != null && it.checkpoint != null) ||
+                (!it.replacementReleased && it.replacementReceipt != null && it.replacementCheckpoint != null) }
+    }
+}
+
+fun quickSortUndoItems(job: QuickSortJob): List<QuickSortQueueItem> = buildList {
+    fun reverse(receipt: TransferReceipt, checkpoint: QuickMoveCheckpoint) = QuickSortQueueItem(
+        entry = checkpoint.source.copy(contentId = receipt.targetId, uri = receipt.targetUri,
+            path = receipt.targetPath, dateModifiedMillis = receipt.modifiedMillis,
+            sourceDateTakenMillis = receipt.dateTakenMillis), restoreCheckpoint = checkpoint)
+    job.items.asReversed().forEach { item ->
+        if (item.status == QuickSortItemStatus.Succeeded && item.receipt != null && item.checkpoint != null) {
+            add(reverse(item.receipt, item.checkpoint))
+        }
+        // Restore the displaced destination only after moving the incoming file back.
+        if (!item.replacementReleased && item.replacementReceipt != null && item.replacementCheckpoint != null) {
+            add(reverse(item.replacementReceipt, item.replacementCheckpoint))
+        }
+    }
 }
 
 sealed class QuickSortEnqueueResult {

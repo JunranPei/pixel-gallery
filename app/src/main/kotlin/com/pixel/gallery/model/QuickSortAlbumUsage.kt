@@ -9,10 +9,11 @@ fun quickSortAlbumUses(
     previous: List<QuickSortAlbumUse>,
     jobs: List<QuickSortJob>,
     now: Long,
-): List<QuickSortAlbumUse> = (previous + jobs.filter { it.completed > 0 }.map {
+): List<QuickSortAlbumUse> = (previous + jobs.filter { it.completed > 0 && it.undoOfJobId == null && !it.undoRequested }.map {
     // Existing journals have no success timestamp; their batch creation time is the migration fallback.
     QuickSortAlbumUse(it.id, it.destination.stableKey, it.firstSucceededAt ?: it.createdAt)
-}).distinctBy { it.jobId }.filter { it.usedAt in (now - QUICK_SORT_USAGE_WINDOW_MILLIS)..now }
+}).distinctBy { it.jobId }.filter { it.usedAt in (now - QUICK_SORT_USAGE_WINDOW_MILLIS)..now &&
+    jobs.none { job -> job.id == it.jobId && job.undoRequested } }
 
 fun frequentQuickSortAlbums(
     available: List<TransferDestination>,
