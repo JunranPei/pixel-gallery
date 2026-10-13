@@ -167,12 +167,13 @@ android {
         }
     }
 
-    // Apply Flutter-style version code offsets for ABI splits
-    // This ensures that the version code is strictly higher than previous split builds
+    // Keep a single-ABI arm64 release on the same version-code track as
+    // historical arm64 splits, so changing packaging does not cause a downgrade.
     applicationVariants.all {
         val variant = this
         variant.outputs.map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }.forEach { output ->
             val abi = output.getFilter(com.android.build.OutputFile.ABI)
+                ?: if (variant.buildType.name == "release" && !officialRelease) "arm64-v8a" else null
             if (abi != null) {
                 val abiMultiplier = when (abi) {
                     "armeabi-v7a" -> 1
