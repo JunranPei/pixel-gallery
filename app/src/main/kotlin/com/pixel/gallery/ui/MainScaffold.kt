@@ -1600,7 +1600,7 @@ fun MainScaffold(
                             if (summary.failed > 0) append("; ${summary.failed} failed")
                             if (summary.skipped > 0) append("; ${summary.skipped} skipped")
                         }
-                        scope.launch { snackbarHostState.showSnackbar(message) }
+                        if (summary.failed == 0) scope.launch { snackbarHostState.showSnackbar(message) }
                         selectedIds = emptySet()
                         navigationStack = if (
                             transferScreen.origin == Screen.TransferOrigin.Viewer &&

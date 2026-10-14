@@ -21,6 +21,7 @@ import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import com.pixel.gallery.ui.transfer.ConflictChoice
+import com.pixel.gallery.ui.transfer.transferFailureReason
 
 @Composable
 internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPolicy) -> Unit, onCancel: () -> Unit) {
@@ -57,7 +58,7 @@ internal fun QuickSortWarningDialog(message: String, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.qs_warning_title)) },
         icon = Icons.Outlined.Warning,
-        text = { Text(stringResource(quickSortFailureReason(message))) },
+        text = { Text(stringResource(transferFailureReason(message) ?: R.string.qs_move_failed)) },
         confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.dialog_got_it)) } },
     )
 }
@@ -70,24 +71,12 @@ internal fun QuickSortFailureDialog(failure: com.pixel.gallery.model.QuickSortMo
         icon = Icons.Outlined.Warning,
         text = { Column {
             Text(stringResource(R.string.qs_move_failed_count, failure.count))
-            val reason = quickSortFailureReason(failure.reason.orEmpty())
-            if (reason != R.string.qs_move_failed) {
+            val reason = transferFailureReason(failure.reason.orEmpty())
+            if (reason != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(reason))
             }
         } },
         confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.dialog_got_it)) } },
     )
-}
-
-private fun quickSortFailureReason(message: String): Int {
-    val text = message.lowercase(java.util.Locale.ROOT)
-    return when {
-        "permission" in text || "access denied" in text -> R.string.qs_move_no_permission
-        "occupied" in text || "filename already exists" in text -> R.string.qs_move_name_conflict
-        "space left" in text || "disk full" in text -> R.string.qs_move_no_space
-        "queue is full" in text || "wait for" in text -> R.string.qs_move_busy
-        "destination album is unavailable" in text || "original album is unavailable" in text -> R.string.qs_move_album_missing
-        else -> R.string.qs_move_failed
-    }
 }

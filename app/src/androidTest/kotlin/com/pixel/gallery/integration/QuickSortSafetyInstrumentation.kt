@@ -35,12 +35,14 @@ import kotlin.coroutines.resume
 
 /** Self-contained instrumentation; no production media or production queue is submitted for mutation. */
 class QuickSortSafetyInstrumentation : Instrumentation() {
+    private var transferFailureSuite = false
     private var confirmationSuite = false
     private var scrollbarSuite = false
     private var uiSuite = false
     private var duplicateSuite = false
     private var undoHandednessSuite = false
     override fun onCreate(arguments: Bundle?) {
+        transferFailureSuite = arguments?.getString("suite") == "transfer-failures"
         confirmationSuite = arguments?.getString("suite") == "confirmations"
         scrollbarSuite = arguments?.getString("suite") == "scrollbar"
         uiSuite = arguments?.getString("suite") == "redesign"
@@ -54,6 +56,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                transferFailureSuite -> TransferFailureTouchChecks(this).exercise()
                 undoHandednessSuite -> UndoHandednessTouchChecks(this).exercise()
                 confirmationSuite -> ConfirmationTouchChecks(this).exercise()
                 duplicateSuite -> DuplicateTouchChecks(this).exercise()

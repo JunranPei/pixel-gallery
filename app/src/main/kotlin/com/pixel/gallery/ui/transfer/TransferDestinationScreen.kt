@@ -68,6 +68,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.R
@@ -119,6 +121,8 @@ fun TransferDestinationScreen(
     val handedness by viewModel.handedness.collectAsState()
     val quickQueue by quickSortViewModel.state.collectAsState()
     val transferState by viewModel.transferUiState.collectAsState()
+    var lastTransferMode by rememberSaveable { mutableStateOf(TransferMode.MOVE) }
+    BackHandler(enabled = transferState.isRunning) {}
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val createdDestinations = remember { mutableStateListOf<TransferDestination>() }
@@ -198,29 +202,13 @@ fun TransferDestinationScreen(
         }
     }
 
-    LaunchedEffect(transferState.summary) {
-        val summary = transferState.summary ?: return@LaunchedEffect
-        if (summary.completedAny) {
-            onFinished(summary)
-        } else {
-            val reason = summary.failures.firstOrNull()?.reason ?: "No items were transferred"
-            snackbarHostState.showSnackbar(reason)
-            viewModel.clearTransferState()
-        }
-    }
-
-    LaunchedEffect(transferState.error) {
-        val error = transferState.error ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(error)
-        viewModel.clearTransferState()
-    }
-
     fun executeTransfer(
         mode: TransferMode,
         policy: ConflictPolicy,
         transferEntries: List<MediaEntry>
     ) {
         val destination = confirmedDestination ?: return
+        lastTransferMode = mode
         viewModel.requestTransfer(
             entries = transferEntries,
             destination = destination,
@@ -290,6 +278,14 @@ fun TransferDestinationScreen(
             modifier = Modifier.padding(innerPadding),
         )
     }
+
+    TransferResultFeedback(
+        summary = transferState.summary,
+        error = transferState.error,
+        mode = lastTransferMode,
+        onFinished = onFinished,
+        onClear = viewModel::clearTransferState,
+    )
 
     confirmation?.let { plan ->
         TransferConfirmationDialog(

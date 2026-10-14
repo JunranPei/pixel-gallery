@@ -1,0 +1,7 @@
+<resources>
+    <string name="transfer_copy_incomplete">复制未完成</string>
+    <string name="transfer_copy_failed">未能完成复制。</string>
+    <string name="transfer_move_failed_result">已移动 %1$d 项，%2$d 项未成功。</string>
+    <string name="transfer_copy_failed_result">已复制 %1$d 项，%2$d 项未成功。</string>
+    <string name="transfer_source_missing">原文件已不可用。</string>
+</resources>

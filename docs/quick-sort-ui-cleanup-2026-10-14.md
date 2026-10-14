@@ -78,3 +78,13 @@
 证据：`scratch/move-simplify-final-build.log`、`scratch/move-simplify-final-safety.log`、`scratch/move-simplify-final-ui.log`、`scratch/move-simplify-qa/`。
 
 APK：4.3.4.8-auto-multitask，基础 versionCode 2058，实际 versionCode **4058**，仅 **arm64-v8a**，签名证书与 vc4057 相同。没有推送。
+
+## 普通移动、复制失败提示：2026-10-15，4.3.4.9
+
+原有普通移动/复制会报错，但全失败仅显示第一条错误的短 Snackbar，部分失败则退出相册选择页后显示英文成功/失败数量，后台时容易错过。现改用共享 GalleryDialog，显示已成功数量、未成功数量和可识别的简短原因，只有“知道了”。部分失败在确认结果之后才返回；全失败留在相册选择页。权限错误和操作异常也使用同一弹窗，未知异常显示简短的移动/复制失败文字。
+
+结果在活动恢复到 RESUMED 时才展示或消费，后台完成不会提前清掉结果；普通传输执行中拦截系统返回，与原有禁用返回按钮一致，避免离开页面后漏掉结果。关闭结果后清除原有内存状态，不增加任务、失败历史或重试入口。Quick Sort 与普通传输共用简短原因映射。全部跳过同名文件属于正常结束，不再误报为没有传输成功。
+
+验证：107 项 JVM 测试通过；Debug、AndroidTest、Release 构建通过。新增模拟器检查覆盖复制和移动的部分失败、移动全失败、权限错误、未知异常、后台暂不显示及回到前台后显示、全部跳过，确认在关闭之前结果没有被清理，操作按钮只有“知道了”；回归 Quick Sort 提示、冲突三选项、撤回、利手、Grid 缓存滑条。移动/复制失败截图已查看。证据在 `scratch/transfer-failure-4.3.4.9-build.log`、`scratch/transfer-failure-4.3.4.9-ui.log`、`scratch/transfer-failure-4.3.4.9-regression.log` 和 `scratch/transfer-failure-4.3.4.9-qa/`。
+
+APK：4.3.4.9-auto-multitask，实际 versionCode **4059**，仅 **arm64-v8a**，签名证书与 vc4058 相同。没有推送。
