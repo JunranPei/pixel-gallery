@@ -73,13 +73,6 @@ fun FavouritesScreen(
                     style = EmphasizedTypography.HeadlineMedium,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Photos and videos you mark as favourites will appear here.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
             }
         } else {
             Box(modifier = Modifier.padding(innerPadding)) {

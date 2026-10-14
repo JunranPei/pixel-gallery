@@ -1806,9 +1806,9 @@ fun MainScaffold(
             onDismissRequest = { showDeleteConfirmDialog = false },
             title = if (isDeletePermanentlyConfirm) "Delete permanently?" else "Move to Recycle Bin?",
             message = if (isDeletePermanentlyConfirm) {
-                "Are you sure you want to permanently delete the selected items? This action cannot be undone."
+                "This action cannot be undone."
             } else {
-                "Move the selected items to the recycle bin?"
+                context.getString(R.string.dialog_restore)
             },
             confirmLabel = if (isDeletePermanentlyConfirm) "Delete" else "Move to Bin",
             isDeletePermanently = isDeletePermanentlyConfirm,

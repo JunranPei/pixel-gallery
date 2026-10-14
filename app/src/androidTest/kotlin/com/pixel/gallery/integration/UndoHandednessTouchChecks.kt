@@ -14,6 +14,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -26,6 +29,7 @@ import com.pixel.gallery.ui.settings.DisplaySettingsScreen
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
 import com.pixel.gallery.ui.theme.PixelGalleryTheme
 import com.pixel.gallery.ui.transfer.TransferDestinationContent
+import com.pixel.gallery.ui.home.PhotosScreen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -34,9 +38,13 @@ import java.io.File
 internal class UndoHandednessTouchChecks(private val instrumentation: Instrumentation) {
     private val mode = mutableIntStateOf(0)
     private val hand = mutableStateOf(Handedness.RIGHT)
+    private val undoAvailable = mutableStateOf(true)
+    private val raisedInset = mutableStateOf(0.dp)
+    private var disabledColor = 0
     private val targets = (1..3).map { TransferDestination("hand-fixture-$it", "Album $it", "/Pictures/HandFixture/$it") }
     private val gestures = QuickSortGestureState()
     private var root = ComposeRect.Zero
+    private var photoViewport = ComposeRect.Zero
     private var undoClicks = 0
     private var copyClicks = 0
     private var moveClicks = 0
@@ -55,12 +63,14 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
             instrumentation.runOnMainSync {
                 activity.setContent {
                     PixelGalleryTheme(darkTheme = false, dynamicColor = false) {
+                        val containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
+                        SideEffect { disabledColor = containerColor }
                         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
                             .then(if (mode.intValue <= 1) Modifier.statusBarsPadding() else Modifier)
                             .onGloballyPositioned { root = it.boundsInWindow() }) {
                             when (mode.intValue) {
                                 0 -> QuickSortDock(QuickSortUiConfig(targets, false, {}, {}, {}, { _, _ -> },
-                                    handedness = hand.value, undoAvailable = true, onUndo = { undoClicks++ }),
+                                    handedness = hand.value, undoAvailable = undoAvailable.value, onUndo = { undoClicks++ }),
                                     gestures, emptySet(), Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                                         .navigationBarsPadding().padding(bottom = 16.dp), { dockHeight = it })
                                 1 -> TransferDestinationContent(targets, emptyList(), "", targets.first(), false, null, null,
@@ -71,6 +81,16 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                                     status = QuickSortJobStatus.NeedsConflictDecision, conflictCount = 2),
                                     onResolve = { resolved = it }, onCancel = {})
                                 5 -> QuickSortWarningDialog("Original filename is occupied. Files were kept.") {}
+                                6 -> Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                                    Surface(Modifier.fillMaxWidth().height(64.dp)) {
+                                        Box(contentAlignment = Alignment.Center) { Text("Photos") }
+                                    }
+                                    Box(Modifier.weight(1f).onGloballyPositioned { photoViewport = it.boundsInWindow() }) {
+                                        PhotosScreen(emptyList(), {}, quickSort = QuickSortUiConfig(
+                                            targets, false, {}, {}, {}, { _, _ -> }, dockBottomInset = raisedInset.value,
+                                            handedness = hand.value, undoAvailable = false))
+                                    }
+                                }
                             }
                         }
                     }
@@ -95,6 +115,44 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
             snapshot("quick-sort-left")
             tap(leftUndo)
             check(undoClicks == 2)
+
+            instrumentation.runOnMainSync { undoAvailable.value = false }
+            settle()
+            val disabledUndo = bounds(requireNode { it.contentDescription?.toString() == undoDescription })
+            tap(disabledUndo)
+            check(undoClicks == 2) { "Disabled undo executed its callback" }
+            val disabledBitmap = instrumentation.uiAutomation.takeScreenshot() ?: error("Screenshot unavailable")
+            val density = context.resources.displayMetrics.density
+            check(disabledBitmap.getPixel((disabledUndo.centerX() + 18 * density).toInt(), disabledUndo.centerY()) == disabledColor) {
+                "Unavailable undo container is translucent"
+            }
+            disabledBitmap.recycle()
+            snapshot("quick-sort-no-undo")
+
+            // Exercise PhotosScreen's actual dock placement with less room than the
+            // full dock requires. Album capsules retain their height while the top clips.
+            changeMode(6)
+            fun albumBounds(index: Int) = bounds(requireNode {
+                it.contentDescription?.toString() == "${targets[index].displayName}, ${targets[index].path}"
+            })
+            val before = targets.indices.map(::albumBounds)
+            val inset = (photoViewport.height / density - 180).dp
+            instrumentation.runOnMainSync { raisedInset.value = inset }
+            settle()
+            val raised = targets.indices.map(::albumBounds)
+            before.zip(raised).forEach { (original, current) ->
+                check(kotlin.math.abs(original.height() - current.height()) <= 2) { "Album capsule compressed: $original -> $current" }
+                check(kotlin.math.abs(original.top - current.top - inset.value * density) <= 2) {
+                    "Dock failed to translate with panel: $original -> $current, inset=${inset.value * density}"
+                }
+            }
+            snapshot("quick-sort-raised-intact")
+            instrumentation.runOnMainSync { raisedInset.value = (photoViewport.height / density - 110).dp }
+            settle()
+            val clipped = targets.indices.map(::albumBounds)
+            check(clipped.all { it.top >= photoViewport.top - 2 }) { "Dock escaped the photo viewport into the header" }
+            check(clipped.maxOf { it.height() } >= (56 * density).toInt() - 2) { "Visible album row compressed under header" }
+            snapshot("quick-sort-header-clipping")
 
             changeMode(1)
             val copyDescription = context.getString(R.string.dialog_copy)
@@ -139,7 +197,7 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
             check(resolved == ConflictPolicy.REPLACE)
             changeMode(5)
             snapshot("undo-warning")
-            return "Undo capsule above album row; right/left dock and Copy/Move controls; persisted Display hand preference; Grid slider writes its own key; three conflict choices and shared warning dialog checked. Screenshots: ${output.path}"
+            return "Album capsules retain height as dock rises and clip at the header; unavailable undo is opaque and ignores taps; right/left dock and Copy/Move controls; persisted Display hand preference; Grid slider writes its own key; conflict choices checked. Screenshots: ${output.path}"
         } finally {
             runBlocking { settings.setHandedness(originalHand); settings.setGlidePersistentGridCacheSize(originalGrid) }
             instrumentation.runOnMainSync { activity.finish() }
@@ -170,6 +228,7 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
         return instrumentation.uiAutomation.rootInActiveWindow?.let(::visit)
     }
     private fun requireNode(predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo {
+        instrumentation.uiAutomation.clearCache()
         repeat(8) { find(predicate)?.let { return it }; SystemClock.sleep(150) }
         error("Expected UI node not found")
     }

@@ -4,7 +4,6 @@
     <string name="label_edit">Edit labels</string>
     <string name="labels_favourites">Favourites</string>
     <string name="labels_empty">No labels yet</string>
-    <string name="labels_empty_hint">Create labels to organize photos and videos across albums.</string>
     <string name="labels_new">New label</string>
     <string name="labels_name">Label name</string>
     <string name="labels_search">Search or create a label</string>

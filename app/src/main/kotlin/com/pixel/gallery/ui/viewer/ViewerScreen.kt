@@ -1640,7 +1640,7 @@ internal fun ViewerScreen(
             visible = showDeleteConfirm && !isCurrentReserved,
             onDismissRequest = { showDeleteConfirm = false },
             title = "Move to Recycle Bin?",
-            message = "Move this item to the recycle bin?",
+            message = stringResource(R.string.dialog_restore),
             confirmLabel = "Move to Bin",
             isDeletePermanently = false,
             onConfirm = {
@@ -1666,18 +1666,14 @@ internal fun ViewerScreen(
                         ConfirmationReminder(stringResource(R.string.dialog_format_detected, File(target.path).extension, formatName))
                     }
                     if (isBuild) {
-                        val descriptions = when (target.format) {
-                            IndexedImageFormat.JPEG -> R.string.dialog_index_jpeg_body to R.string.dialog_index_jpeg_note
-                            IndexedImageFormat.PNG -> R.string.dialog_index_png_body to R.string.dialog_index_png_note
-                            IndexedImageFormat.TIFF -> R.string.dialog_index_tiff_body to R.string.dialog_index_tiff_note
-                            IndexedImageFormat.WEBP -> R.string.dialog_index_webp_body to R.string.dialog_index_webp_note
-                            IndexedImageFormat.RAW -> R.string.dialog_index_raw_body to R.string.dialog_index_raw_note
-                            IndexedImageFormat.HEIF -> R.string.dialog_index_heif_body to R.string.dialog_index_heif_note
-                            IndexedImageFormat.BMP -> R.string.dialog_index_bmp_body to R.string.dialog_index_bmp_note
-                            IndexedImageFormat.JXL -> R.string.dialog_index_jxl_body to R.string.dialog_index_jxl_note
+                        val warning = when (target.format) {
+                            IndexedImageFormat.JPEG -> R.string.dialog_index_jpeg_note
+                            IndexedImageFormat.PNG -> R.string.dialog_index_png_note
+                            IndexedImageFormat.WEBP -> R.string.dialog_index_webp_note
+                            IndexedImageFormat.JXL -> R.string.dialog_index_jxl_note
+                            else -> null
                         }
-                        ConfirmationReminder(stringResource(descriptions.first), Icons.Outlined.Description)
-                        ConfirmationReminder(stringResource(descriptions.second))
+                        warning?.let { ConfirmationReminder(stringResource(it)) }
                         ConfirmationReminder(stringResource(R.string.dialog_original_unchanged), Icons.Default.Check)
                     } else {
                         ConfirmationReminder(stringResource(R.string.dialog_index_remove_body, formatName), Icons.Outlined.DeleteOutline)

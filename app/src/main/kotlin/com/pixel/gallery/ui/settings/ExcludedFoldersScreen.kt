@@ -68,7 +68,7 @@ fun ExcludedFoldersScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Folders you exclude will not be scanned for media. This is useful for folders containing many non-gallery images.",
+                    text = "Excluded folders are not scanned for media.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center

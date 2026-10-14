@@ -224,7 +224,7 @@ fun DuplicateReviewDialog(
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            stringResource(R.string.duplicate_scan_explanation),
+                            stringResource(R.string.duplicate_scan_short),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }

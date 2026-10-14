@@ -72,10 +72,6 @@ fun DisplaySettingsScreen(
                             Column {
                                 Text(stringResource(R.string.display_handedness),
                                     style = EmphasizedTypography.LabelLarge.copy(fontWeight = FontWeight.Bold))
-                                Text(stringResource(R.string.display_handedness_description),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 2.dp))
                             }
                         }
                         SettingsOptionControl(
@@ -96,7 +92,6 @@ fun DisplaySettingsScreen(
                 ) {
                     SettingsToggleItem(
                         title = "Start at Albums",
-                        description = "Open the albums tab by default",
                         icon = Icons.Outlined.Tab,
                         checked = startupAtAlbums,
                         onCheckedChange = viewModel::setStartupAtAlbums,
@@ -111,7 +106,6 @@ fun DisplaySettingsScreen(
                 ) {
                     SettingsClickItem(
                         title = "Excluded Folders",
-                        description = "Manage ignored media locations",
                         icon = Icons.Outlined.FolderOff,
                         onClick = onNavigateToExcludedFolders,
                     )

@@ -123,10 +123,11 @@ internal class ConfirmationTouchChecks(private val instrumentation: Instrumentat
         instrumentation.runOnMainSync { mode.intValue = 1; dark.value = false }
         settle(1800)
         click("More"); settle(250); click("Build JPEG index"); settle(500)
-        check(find("IMG_0241.jpg") != null && find("significant power") != null && find("every zoom level") != null)
+        check(find("IMG_0241.jpg") != null && find("significant power") != null && find("original image stays unchanged") != null)
+        check(find("every zoom level") == null)
         snapshot("index-confirmation-light")
         click("Cancel"); settle(250)
-        report += "Production viewer: Build JPEG index opens Family 6-A with file facts and separate complete-read/power paragraphs; cancellation leaves the fixture unchanged."
+        report += "Production viewer: index confirmation keeps file facts, power warning and original-preservation reminder without decoder implementation text; cancellation leaves the fixture unchanged."
         instrumentation.runOnMainSync { mode.intValue = 2 }
         settle(450); click("Move selected to recycle bin"); settle(350)
         check(find("Selected copies") != null && find("Marked originals stay") != null && deleteDecisions == 0)
@@ -159,9 +160,13 @@ internal class ConfirmationTouchChecks(private val instrumentation: Instrumentat
         }
         return match(root, true) ?: match(root, false)
     }
-    private fun bounds(text: String) = Rect().also {
-        instrumentation.uiAutomation.clearCache()
-        checkNotNull(find(text)) { "Missing control: $text" }.getBoundsInScreen(it)
+    private fun bounds(text: String): Rect {
+        repeat(12) {
+            instrumentation.uiAutomation.clearCache()
+            find(text)?.let { node -> return Rect().also(node::getBoundsInScreen) }
+            settle(150)
+        }
+        error("Missing control: $text")
     }
     private fun click(text: String) {
         val rect = bounds(text); val now = SystemClock.uptimeMillis(); downTime = now

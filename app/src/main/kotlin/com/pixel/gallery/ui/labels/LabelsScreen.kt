@@ -142,8 +142,6 @@ fun LabelsScreen(
                     item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(stringResource(R.string.labels_empty), style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(8.dp))
-                            Text(stringResource(R.string.labels_empty_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(16.dp))
                             FilledTonalButton(onClick = { editingLabel = null; showNameDialog = true }, enabled = !isSaving) {
                                 Icon(Icons.Default.Add, null)

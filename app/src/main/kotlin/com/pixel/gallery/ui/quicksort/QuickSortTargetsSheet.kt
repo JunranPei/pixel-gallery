@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -217,10 +216,6 @@ fun QuickSortTargetsSheet(
                                     textAlign = TextAlign.Center, maxLines = 1) }, modifier = Modifier.weight(1f), shape = CircleShape)
                         }
                     }
-                    if (activeTab == "frequent") {
-                        Text(stringResource(R.string.qs_targets_frequent_rule), style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                    }
                     if (filtered.isEmpty()) {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             Text(stringResource(when {
@@ -232,30 +227,19 @@ fun QuickSortTargetsSheet(
                                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(24.dp))
                         }
                     } else {
-                        val frequentKeys = remember(frequent) { frequent.mapTo(mutableSetOf()) { it.stableKey } }
-                        val showSections = activeTab == "all" && query.isBlank() && frequent.isNotEmpty()
                         LazyVerticalGrid(columns = GridCells.Fixed(4), state = albumGridState,
                             modifier = Modifier.fillMaxWidth().weight(1f).nestedScroll(nestedScroll),
                             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            val sections = if (showSections) listOf(
-                                R.string.qs_targets_frequent to frequent,
-                                R.string.qs_targets_all to filtered.filterNot { it.stableKey in frequentKeys },
-                            ) else listOf(R.string.qs_targets_all to filtered)
-                            sections.forEach { (title, targets) ->
-                                if (showSections && targets.isNotEmpty()) item(key = "section-$title", span = { GridItemSpan(maxLineSpan) }) {
-                                    Text(stringResource(title), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                items(targets, key = { it.stableKey }) { target ->
-                                    val index = selectionIndices[target.stableKey] ?: -1
-                                    QuickSortTargetAlbumCard(target, index, draft.size, parentLabels[target.stableKey], !isCreating,
-                                        onToggle = {
-                                            val next = if (index >= 0) draft.filterNot { it.stableKey == target.stableKey } else draft + target
-                                            draft = next; onTargetsChange(next)
-                                        },
-                                        onMoveEarlier = { val next = moveQuickSortTarget(draft, index, index - 1); draft = next; onTargetsChange(next) },
-                                        onMoveLater = { val next = moveQuickSortTarget(draft, index, index + 1); draft = next; onTargetsChange(next) })
-                                }
+                            items(filtered, key = { it.stableKey }) { target ->
+                                val index = selectionIndices[target.stableKey] ?: -1
+                                QuickSortTargetAlbumCard(target, index, draft.size, parentLabels[target.stableKey], !isCreating,
+                                    onToggle = {
+                                        val next = if (index >= 0) draft.filterNot { it.stableKey == target.stableKey } else draft + target
+                                        draft = next; onTargetsChange(next)
+                                    },
+                                    onMoveEarlier = { val next = moveQuickSortTarget(draft, index, index - 1); draft = next; onTargetsChange(next) },
+                                    onMoveLater = { val next = moveQuickSortTarget(draft, index, index + 1); draft = next; onTargetsChange(next) })
                             }
                         }
                     }

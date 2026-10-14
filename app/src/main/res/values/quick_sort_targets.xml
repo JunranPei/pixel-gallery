@@ -4,7 +4,7 @@
     <string name="qs_targets_clear_search">Clear search</string>
     <string name="qs_targets_selected_count">%1$d selected</string>
     <string name="qs_targets_new_album">New album</string>
-    <string name="qs_targets_empty">No albums yet. Create one to get started.</string>
+    <string name="qs_targets_empty">No albums yet</string>
     <string name="qs_targets_no_results">No matching albums</string>
     <string name="qs_targets_create_in">Create in %1$s</string>
     <string name="qs_targets_album_name">Album name</string>

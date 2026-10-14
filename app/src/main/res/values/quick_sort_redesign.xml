@@ -4,8 +4,7 @@
     <string name="qs_targets_all">All albums</string>
     <string name="qs_targets_selected">Selected</string>
     <string name="qs_targets_expand">Expand</string>
-    <string name="qs_targets_no_frequent">Albums appear here after successful quick-sort moves.</string>
+    <string name="qs_targets_no_frequent">No frequent albums</string>
     <string name="qs_targets_no_selection">Choose albums in All albums to add sorting targets.</string>
-    <string name="qs_targets_frequent_rule">Successful batches in the last 30 days; ties use the most recent move. Up to 8 albums.</string>
-    <string name="duplicate_keeper_rule">Prefer the earliest media time; ties use modification time, then date added. Unknown times come last. You can choose another copy to keep.</string>
+    <string name="duplicate_keeper_rule">Keep the earliest media date by default. You can choose another copy to keep.</string>
 </resources>

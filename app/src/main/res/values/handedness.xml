@@ -1,21 +1,21 @@
 <resources>
     <string name="display_handedness">Hand preference</string>
-    <string name="display_handedness_description">Place album and transfer controls on your preferred side</string>
     <string name="display_right_handed">Right-handed</string>
     <string name="display_left_handed">Left-handed</string>
     <string name="qs_undo">Undo quick sort</string>
+    <string name="qs_undo_unavailable">Nothing to undo in this sort session</string>
     <string name="qs_undo_requested">Undo requested</string>
     <string name="qs_undo_batch">Undo</string>
     <string name="qs_resolved_on_retry">Resolved on retry: %1$d</string>
     <string name="qs_conflict_title">Filename already exists</string>
-    <string name="qs_conflict_body">%1$d filename conflicts in %2$s. Choose how to handle them before moving files.</string>
+    <string name="qs_conflict_body">%1$d filename conflicts in %2$s.</string>
     <string name="qs_keep_both">Keep both</string>
     <string name="qs_keep_both_description">Add a number to the incoming filename</string>
     <string name="qs_skip_conflicts">Skip conflicts</string>
     <string name="qs_skip_conflicts_description">Keep conflicting files in their current album</string>
     <string name="qs_continue">Continue</string>
     <string name="qs_replace">Replace</string>
-    <string name="qs_replace_description">Replace existing files; undo can restore them during this sort session</string>
+    <string name="qs_replace_description">Undo can restore replaced files during this sort session</string>
     <string name="qs_replace_permission">Requires all-files access on this Android version</string>
     <string name="qs_warning_title">Quick sort needs attention</string>
     <string name="qs_warning_review">Check the original and current locations listed in the queue before retrying.</string>

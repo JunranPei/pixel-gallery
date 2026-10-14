@@ -86,12 +86,6 @@ fun ThemeSettingsScreen(
                             )
                             Column {
                                 Text("Theme mode", style = EmphasizedTypography.LabelLarge.copy(fontWeight = FontWeight.Bold))
-                                Text(
-                                    "Follow system, or choose light and dark appearance",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 2.dp),
-                                )
                             }
                         }
                         SettingsOptionControl(

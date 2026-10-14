@@ -27,8 +27,10 @@ fun QuickSortQueueSheet(
         shape = ExpressiveShapes.ExtraLargeIncreased) {
         Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).padding(horizontal = 20.dp)) {
             Text(stringResource(R.string.qs_tasks), style = EmphasizedTypography.TitleLarge)
-            Text(stringResource(R.string.qs_queue_explanation), style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (state.jobs.any { !it.isTerminal }) {
+                Text(stringResource(R.string.qs_queue_explanation), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (state.jobs.any { it.status == QuickSortJobStatus.Paused } ||
                 (!state.serviceActive && state.jobs.any { it.status == QuickSortJobStatus.Queued })) {

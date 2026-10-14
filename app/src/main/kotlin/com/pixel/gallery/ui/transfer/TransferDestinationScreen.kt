@@ -377,7 +377,7 @@ fun TransferDestinationScreen(
             icon = Icons.Outlined.ContentCopy,
             text = {
                 Column {
-                    ConfirmationReminder("$conflictCount conflict${if (conflictCount == 1) "" else "s"}. Choose how to handle all of them.")
+                    ConfirmationReminder("$conflictCount conflict${if (conflictCount == 1) "" else "s"}.")
                     Spacer(Modifier.height(12.dp))
                     ConflictChoice(
                         label = "Keep both",
@@ -388,7 +388,7 @@ fun TransferDestinationScreen(
                     )
                     ConflictChoice(
                         label = "Skip",
-                        supportingText = "Leave existing items unchanged",
+                        supportingText = null,
                         selected = conflictPolicy == ConflictPolicy.SKIP,
                         enabled = true,
                         onClick = { conflictPolicy = ConflictPolicy.SKIP }
@@ -396,7 +396,7 @@ fun TransferDestinationScreen(
                     ConflictChoice(
                         label = "Replace",
                         supportingText = if (canReplace) {
-                            "Replace existing items safely"
+                            null
                         } else {
                             "Requires all-files access on this Android version"
                         },
@@ -436,7 +436,7 @@ fun TransferDestinationScreen(
 @Composable
 internal fun ConflictChoice(
     label: String,
-    supportingText: String,
+    supportingText: String?,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit
@@ -457,11 +457,11 @@ internal fun ConflictChoice(
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
             )
-            Text(
-                supportingText,
+            supportingText?.let { Text(
+                it,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.5f)
-            )
+            ) }
         }
     }
 }
@@ -567,7 +567,7 @@ fun TransferConfirmationDialog(mode: TransferMode, destination: TransferDestinat
             ConfirmationFact(stringResource(R.string.dialog_destination), destination.displayName, destination.path)
             ConfirmationReminder(stringResource(if (move) R.string.dialog_move_body else R.string.dialog_copy_body),
                 if (move) Icons.AutoMirrored.Outlined.DriveFileMove else Icons.Outlined.ContentCopy)
-            ConfirmationReminder(stringResource(if (move) R.string.dialog_move_destination else R.string.dialog_copy_source))
+            if (!move) ConfirmationReminder(stringResource(R.string.dialog_copy_source))
         },
         confirmButton = { Button(onClick = onConfirm) { Text(stringResource(if (move) R.string.dialog_move else R.string.dialog_copy)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.dialog_cancel)) } },

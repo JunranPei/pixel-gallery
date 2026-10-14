@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -144,6 +145,7 @@ fun PhotosScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()
+        .then(if (quickSort != null) Modifier.clipToBounds() else Modifier)
         .then(if (quickSort != null) Modifier.quickSortGestureArbitration(quickSortGestures) else Modifier)
         .onGloballyPositioned { quickSortGestures.containerBounds = it.boundsInWindow() }
     ) {
@@ -316,8 +318,11 @@ fun PhotosScreen(
                 selectedIds = selectedIds,
                 modifier = Modifier.align(if (quickSort.dockTop) Alignment.TopCenter else Alignment.BottomCenter)
                     .fillMaxWidth()
+                    // Translate the intact dock as the chooser rises. A growing bottom
+                    // padding would constrain its measurement and squash the album rows.
+                    .offset(y = if (quickSort.dockTop) 0.dp else -effectiveBottomPadding)
                     .padding(top = if (quickSort.dockTop) 8.dp else 0.dp,
-                        bottom = if (quickSort.dockTop) 0.dp else effectiveBottomPadding + 16.dp),
+                        bottom = if (quickSort.dockTop) 0.dp else 16.dp),
                 onMeasuredHeight = { dockHeightPx = it },
             )
             QuickSortPhotoDragPreview(quickSortGestures)

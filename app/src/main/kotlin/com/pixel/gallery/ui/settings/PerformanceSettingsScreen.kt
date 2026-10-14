@@ -80,7 +80,7 @@ fun PerformanceSettingsScreen(
                 SettingsSurface {
                     SettingsSliderItem(
                         title = "Image Decoding Threads: $glideThreadCount",
-                        description = "Controls source-image decoding threads. Lower values save battery; higher values load faster. Restart the app after changing it.",
+                        description = "Requires app restart.",
                         icon = Icons.Outlined.Speed,
                         value = glideThreadCount.toFloat(),
                         valueRange = 1f..8f,
@@ -93,7 +93,7 @@ fun PerformanceSettingsScreen(
                 SettingsSurface {
                     SettingsSliderItem(
                         title = "Flowing Cache Limit: $glideCacheSize MB",
-                        description = "Limits the maximum disk space used by Glide's standard LRU cache (for smaller files). Requires app restart to take effect.",
+                        description = "Requires app restart.",
                         icon = Icons.Outlined.Storage,
                         value = glideCacheSize.toFloat(),
                         valueRange = 100f..2000f,
@@ -106,7 +106,7 @@ fun PerformanceSettingsScreen(
                 SettingsSurface {
                     SettingsSliderItem(
                         title = "Persistent Grid Limit: $glidePersistentGridCacheSize MB",
-                        description = "Limits the maximum space for persistent thumbnails of heavy Grid files (>5MB) to avoid re-decoding. Managed independently.",
+                        description = "Thumbnails for files over 5 MB.",
                         icon = Icons.Outlined.Storage,
                         value = glidePersistentGridCacheSize.toFloat(),
                         valueRange = 50f..2000f,
@@ -123,7 +123,6 @@ fun PerformanceSettingsScreen(
                 ) {
                     SettingsClickItem(
                         title = "Clear Cache",
-                        description = "Clear all thumbnail cache directories and free up disk space.",
                         icon = Icons.Outlined.DeleteSweep,
                         onClick = { showClearCacheConfirm = true },
                     )

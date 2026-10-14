@@ -69,13 +69,6 @@ fun HiddenAlbumsScreen(
                     style = EmphasizedTypography.HeadlineMedium,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Albums you hide from the main gallery will appear here. They are not visible in Recents or Albums grid.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
             }
         } else {
             LazyColumn(

@@ -96,8 +96,9 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         }
         check(panelHeight > 100 * density) { "Chooser was not expanded" }
         snapshot("quicksort-light")
-        // The frequent header occupies a full span; all album rows still have four cells.
-        val row = (2..5).map { boundsFor("Album %02d".format(it)) }
+        // All albums appear in inventory order without a separate Frequent section.
+        check(countText("Frequent") + countText("常用") == 1) { "All tab contains a duplicate Frequent section" }
+        val row = (1..4).map { boundsFor("Album %02d".format(it)) }
         check(row.maxOf { it.top } - row.minOf { it.top } <= 3) { "Albums are not in one four-column row: $row" }
         check(row.map { it.left }.distinct().size == 4) { "Four album columns missing: $row" }
         val heightBefore = panelHeight
@@ -116,6 +117,7 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         tap(frequent.centerX().toFloat(), frequent.centerY().toFloat())
         settle(300)
         check(findText("Album 01") != null && findText("Album 02") == null) { "Frequent tab did not use successful-batch history" }
+        check(findText("Successful batches in the last 30 days") == null && findText("按近 30 天成功批次排序") == null)
         snapshot("quicksort-frequent")
         report += "Frequent tab shows the album with a successful fixture batch and excludes unused albums."
         instrumentation.runOnMainSync { dark.value = true; mode.intValue = 1 }
@@ -172,6 +174,10 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         if (node.text?.toString()?.contains(text) == true || node.contentDescription?.toString()?.contains(text) == true) return node
         for (index in 0 until node.childCount) findText(text, node.getChild(index))?.let { return it }
         return null
+    }
+    private fun countText(text: String, node: AccessibilityNodeInfo? = instrumentation.uiAutomation.rootInActiveWindow): Int {
+        if (node == null) return 0
+        return (if (node.text?.toString() == text) 1 else 0) + (0 until node.childCount).sumOf { countText(text, node.getChild(it)) }
     }
     private fun boundsFor(text: String): Rect = Rect().also { bounds ->
         // Animated layout changes can leave UiAutomation's node bounds cached between MOVE events.

@@ -2,7 +2,7 @@
     <string name="qs_start">Quick sort</string>
     <string name="qs_finish">Exit quick sort</string>
     <string name="qs_tasks">Move tasks</string>
-    <string name="qs_queue_explanation">Files move one at a time. Leaving quick sort keeps the queue running. Cancelling stops the remaining files after the current file is safe.</string>
+    <string name="qs_queue_explanation">Leaving quick sort keeps the queue running.</string>
     <string name="qs_resume">Resume queue</string>
     <string name="qs_no_tasks">No move tasks</string>
     <string name="qs_status_queued">Waiting</string>

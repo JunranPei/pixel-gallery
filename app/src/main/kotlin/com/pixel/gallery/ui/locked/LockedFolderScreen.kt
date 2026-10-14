@@ -158,13 +158,6 @@ fun LockedFolderScreen(
                     style = EmphasizedTypography.HeadlineMedium,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Move sensitive photos and videos here to hide them from your main gallery and other apps.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
             }
         } else {
             Box(modifier = Modifier.padding(innerPadding)) {

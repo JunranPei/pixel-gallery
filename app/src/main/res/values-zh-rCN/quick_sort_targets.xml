@@ -4,7 +4,7 @@
     <string name="qs_targets_clear_search">清除搜索</string>
     <string name="qs_targets_selected_count">已选 %1$d 个</string>
     <string name="qs_targets_new_album">新建相册</string>
-    <string name="qs_targets_empty">还没有相册，可以先新建一个。</string>
+    <string name="qs_targets_empty">暂无相册</string>
     <string name="qs_targets_no_results">没有匹配的相册</string>
     <string name="qs_targets_create_in">创建到 %1$s</string>
     <string name="qs_targets_album_name">相册名称</string>

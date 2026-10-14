@@ -60,7 +60,6 @@ fun SettingsScreen(
                 SettingsSurface(shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp)) {
                     SettingsClickItem(
                         title = "Themes",
-                        description = "Material You and light/dark mode",
                         icon = Icons.Outlined.Palette,
                         onClick = onNavigateToThemeSettings,
                     )
@@ -70,7 +69,6 @@ fun SettingsScreen(
                 SettingsSurface {
                     SettingsClickItem(
                         title = "Display",
-                        description = "Choose startup tab and manage excluded folders",
                         icon = Icons.Outlined.Tab,
                         onClick = onNavigateToDisplaySettings,
                     )
@@ -80,7 +78,6 @@ fun SettingsScreen(
                 SettingsSurface(shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp)) {
                     SettingsClickItem(
                         title = "Performance & Caching",
-                        description = "Manage cache limit, threads and cleanup",
                         icon = Icons.Outlined.Speed,
                         onClick = onNavigateToPerformanceSettings,
                     )
@@ -123,7 +120,7 @@ fun SettingsSurface(
 @Composable
 fun SettingsToggleItem(
     title: String,
-    description: String,
+    description: String? = null,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
@@ -136,7 +133,7 @@ fun SettingsToggleItem(
                 style = EmphasizedTypography.LabelLarge
             ) 
         },
-        supportingContent = { Text(description) },
+        supportingContent = description?.let { { Text(it) } },
         leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         trailingContent = {
             Switch(
@@ -150,7 +147,7 @@ fun SettingsToggleItem(
 @Composable
 fun SettingsClickItem(
     title: String,
-    description: String,
+    description: String? = null,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit
 ) {
@@ -163,7 +160,7 @@ fun SettingsClickItem(
                 style = EmphasizedTypography.LabelLarge
             ) 
         },
-        supportingContent = { Text(description) },
+        supportingContent = description?.let { { Text(it) } },
         leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
     )
 }
