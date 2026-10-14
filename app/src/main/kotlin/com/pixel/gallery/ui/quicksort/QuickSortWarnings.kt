@@ -19,6 +19,7 @@ import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.QuickSortJob
 import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
+import com.pixel.gallery.ui.components.ConfirmationFact
 import com.pixel.gallery.ui.transfer.ConflictChoice
 
 @Composable
@@ -30,7 +31,9 @@ internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPoli
         icon = Icons.Outlined.Warning,
         text = {
             Column {
-                ConfirmationReminder(stringResource(R.string.qs_conflict_body, job.conflictCount, job.destination.displayName))
+                ConfirmationFact(stringResource(R.string.dialog_destination), job.destination.displayName, job.destination.path)
+                Spacer(Modifier.height(12.dp))
+                ConfirmationReminder(stringResource(R.string.qs_conflict_count, job.conflictCount), Icons.Outlined.Warning)
                 Spacer(Modifier.height(12.dp))
                 ConflictChoice(stringResource(R.string.qs_keep_both), stringResource(R.string.qs_keep_both_description),
                     policy == ConflictPolicy.KEEP_BOTH, true) { policy = ConflictPolicy.KEEP_BOTH }
@@ -49,14 +52,14 @@ internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPoli
 }
 
 @Composable
-internal fun QuickSortWarningDialog(message: String, onDismiss: () -> Unit) {
+internal fun QuickSortWarningDialog(message: String, reviewQueue: Boolean = true, onDismiss: () -> Unit) {
     GalleryDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.qs_warning_title)) },
         icon = Icons.Outlined.Warning,
         text = { Column {
             ConfirmationReminder(message, Icons.Outlined.Warning)
-            ConfirmationReminder(stringResource(R.string.qs_warning_review))
+            if (reviewQueue) ConfirmationReminder(stringResource(R.string.qs_warning_review))
         } },
         confirmButton = { Button(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) } },
     )

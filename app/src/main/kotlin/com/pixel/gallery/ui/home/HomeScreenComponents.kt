@@ -530,10 +530,10 @@ fun PhotoTileContent(
         }
         
         // Video indicators
-        if (isVideo && !isSelectionMode) {
+        if (isVideo) {
             Row(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
+                    .align(if (isSelectionMode) Alignment.TopStart else Alignment.TopEnd)
                     .padding(8.dp)
                     .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),

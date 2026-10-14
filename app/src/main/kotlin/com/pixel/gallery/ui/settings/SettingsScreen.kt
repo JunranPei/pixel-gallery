@@ -194,6 +194,7 @@ fun SettingsSliderItem(
                     onValueChangeFinished = { onValueChangeFinished(sliderValue) },
                     valueRange = valueRange,
                     steps = steps,
+                    track = { state -> SliderDefaults.Track(sliderState = state, drawStopIndicator = null) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }

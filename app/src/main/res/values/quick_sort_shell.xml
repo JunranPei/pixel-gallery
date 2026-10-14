@@ -16,7 +16,6 @@
     <string name="qs_cancel_remaining">Cancel remaining</string>
     <string name="qs_details">Details</string>
     <string name="qs_retry_failed">Retry failed</string>
-    <string name="qs_enqueued">Added %1$d files to the move queue</string>
     <string name="qs_pending_count">%1$d files waiting or moving</string>
     <string name="qs_reserved">This file is in the move queue</string>
 </resources>

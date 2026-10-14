@@ -77,10 +77,18 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                                     {}, {}, {}, {}, { copyClicks++ }, { moveClicks++ }, handedness = hand.value)
                                 2 -> DisplaySettingsScreen({}, {})
                                 3 -> PerformanceSettingsScreen({})
-                                4 -> QuickSortConflictDialog(QuickSortJob("fixture-conflict", targets.first(), emptyList(), 0,
-                                    status = QuickSortJobStatus.NeedsConflictDecision, conflictCount = 2),
-                                    onResolve = { resolved = it }, onCancel = {})
-                                5 -> QuickSortWarningDialog("Original filename is occupied. Files were kept.") {}
+                                4 -> {
+                                    QuickSortTargetsSheet(availableTargets = targets, selectedTargets = targets, dockTop = false,
+                                        onDockTopChange = {}, onApply = {}, onDismiss = {})
+                                    QuickSortConflictDialog(QuickSortJob("fixture-conflict", targets.first(), emptyList(), 0,
+                                        status = QuickSortJobStatus.NeedsConflictDecision, conflictCount = 2),
+                                        onResolve = { resolved = it }, onCancel = {})
+                                }
+                                5 -> {
+                                    QuickSortTargetsSheet(availableTargets = targets, selectedTargets = targets, dockTop = false,
+                                        onDockTopChange = {}, onApply = {}, onDismiss = {})
+                                    QuickSortWarningDialog("Original filename is occupied. Files were kept.") {}
+                                }
                                 6 -> Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                                     Surface(Modifier.fillMaxWidth().height(64.dp)) {
                                         Box(contentAlignment = Alignment.Center) { Text("Photos") }
@@ -191,11 +199,16 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
             requireNode { it.text?.toString() == context.getString(R.string.qs_keep_both) }
             requireNode { it.text?.toString() == context.getString(R.string.qs_skip_conflicts) }
             val replace = requireNode { it.text?.toString() == context.getString(R.string.qs_replace) }
+            requireNode { it.text?.toString() == targets.first().path }
+            val continueBounds = bounds(requireNode { it.text?.toString() == context.getString(R.string.qs_continue) })
+            check(continueBounds.bottom <= root.bottom && continueBounds.top >= root.top) { "Conflict actions are off-screen" }
             snapshot("same-name-three-choices")
             tap(bounds(replace))
             tap(bounds(requireNode { it.text?.toString() == context.getString(R.string.qs_continue) }))
             check(resolved == ConflictPolicy.REPLACE)
             changeMode(5)
+            val okBounds = bounds(requireNode { it.text?.toString() == context.getString(android.R.string.ok) })
+            check(okBounds.bottom <= root.bottom && okBounds.top >= root.top) { "Failure alert is hidden by the chooser" }
             snapshot("undo-warning")
             return "Album capsules retain height as dock rises and clip at the header; unavailable undo is opaque and ignores taps; right/left dock and Copy/Move controls; persisted Display hand preference; Grid slider writes its own key; conflict choices checked. Screenshots: ${output.path}"
         } finally {

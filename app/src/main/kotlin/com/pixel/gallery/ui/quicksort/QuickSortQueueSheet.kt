@@ -60,6 +60,7 @@ fun QuickSortQueueSheet(
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (!job.isTerminal) LinearProgressIndicator(
                                 progress = { job.items.count { it.status !in setOf(QuickSortItemStatus.Queued, QuickSortItemStatus.Running) }.toFloat() / job.total.coerceAtLeast(1) },
+                                drawStopIndicator = {},
                                 modifier = Modifier.fillMaxWidth())
                             Row {
                                 if (!job.isTerminal) TextButton(onClick = { onCancel(job.id) }, enabled = !job.cancelRequested) {

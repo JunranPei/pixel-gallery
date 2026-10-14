@@ -2289,6 +2289,11 @@ fun VideoControls(
                     .padding(horizontal = 24.dp)
                     .fillMaxWidth()
             ) {
+                val progressColors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.White,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                )
                 Slider(
                     value = currentPosition.toFloat(),
                     onValueChange = { 
@@ -2306,11 +2311,12 @@ fun VideoControls(
                         } catch (e: Exception) {}
                     },
                     valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                    )
+                    colors = progressColors,
+                    track = { state -> SliderDefaults.Track(
+                        sliderState = state,
+                        colors = progressColors,
+                        drawStopIndicator = null,
+                    ) },
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),

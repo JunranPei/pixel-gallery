@@ -4,11 +4,10 @@
     <string name="display_left_handed">左利手</string>
     <string name="qs_undo">撤回快速分拣</string>
     <string name="qs_undo_unavailable">本次分拣暂无可撤回操作</string>
-    <string name="qs_undo_requested">已请求撤回</string>
     <string name="qs_undo_batch">撤回</string>
     <string name="qs_resolved_on_retry">重试后已处理：%1$d</string>
     <string name="qs_conflict_title">已有同名文件</string>
-    <string name="qs_conflict_body">目标相册“%2$s”中有 %1$d 个同名冲突。</string>
+    <string name="qs_conflict_count">%1$d 个同名冲突</string>
     <string name="qs_keep_both">保留两份</string>
     <string name="qs_keep_both_description">给移入的文件名添加编号</string>
     <string name="qs_skip_conflicts">跳过同名文件</string>

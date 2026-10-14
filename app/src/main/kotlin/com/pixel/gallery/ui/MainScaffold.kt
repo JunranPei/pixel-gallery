@@ -283,6 +283,7 @@ fun MainScaffold(
     val handedness by photosViewModel.handedness.collectAsState()
     val undoableQuickJob = com.pixel.gallery.model.latestUndoableQuickSortJob(quickQueue, quickSortSessionId)
     var quickWarning by remember { mutableStateOf<String?>(null) }
+    var quickWarningNeedsReview by remember { mutableStateOf(true) }
     val warnedQuickJobs = remember { mutableSetOf<String>() }
     LaunchedEffect(quickQueue.jobs, quickSortSessionId) {
         val failedJob = quickQueue.jobs.firstOrNull {
@@ -290,15 +291,11 @@ fun MainScaffold(
         }
         if (failedJob != null) {
             warnedQuickJobs.add(failedJob.id)
+            quickWarningNeedsReview = true
             quickWarning = failedJob.items.filter { it.status == com.pixel.gallery.model.QuickSortItemStatus.Failed }
                 .take(3).joinToString("\n") { "${java.io.File(it.entry.path).name}: ${it.error.orEmpty()}" }
         }
     }
-    quickQueue.needsConflictDecision?.let { job ->
-        QuickSortConflictDialog(job, onResolve = { quickSortViewModel.resolveConflict(job.id, it) },
-            onCancel = { quickSortViewModel.cancel(job.id); quickSortViewModel.resume() })
-    }
-    quickWarning?.let { message -> QuickSortWarningDialog(message) { quickWarning = null } }
     var showQuickTargets by remember { mutableStateOf(false) }
     var quickTargetsPanelHeight by remember { mutableStateOf(0.dp) }
     var showQuickQueue by remember { mutableStateOf(false) }
@@ -618,9 +615,11 @@ fun MainScaffold(
         when (result) {
             is QuickSortEnqueueResult.Accepted -> {
                 selectedIds = selectedIds - result.acceptedIds
-                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.qs_enqueued, result.acceptedCount)) }
             }
-            is QuickSortEnqueueResult.Rejected -> scope.launch { snackbarHostState.showSnackbar(result.reason) }
+            is QuickSortEnqueueResult.Rejected -> {
+                quickWarningNeedsReview = false
+                quickWarning = result.reason
+            }
         }
     }
     val toggleQuickSort: () -> Unit = {
@@ -662,8 +661,10 @@ fun MainScaffold(
             val job = undoableQuickJob
             val session = quickSortSessionId
             if (job != null && session != null) quickSortViewModel.undo(job.id, session) { error ->
-                if (error != null) quickWarning = error
-                else scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.qs_undo_requested)) }
+                if (error != null) {
+                    quickWarningNeedsReview = true
+                    quickWarning = error
+                }
             }
         },
         onExit = {
@@ -1713,7 +1714,7 @@ fun MainScaffold(
             onCreateAlbum = { parent, name, onResult -> photosViewModel.createTransferFolder(parent, name, onResult) },
         )
     }
-    if (showQuickQueue) {
+    if (showQuickQueue && quickQueue.needsConflictDecision == null && quickWarning == null) {
         QuickSortQueueSheet(state = quickQueue, onCancel = quickSortViewModel::cancel,
             onRetry = { quickSortViewModel.retry(it, onQuickEnqueued) },
             onResume = { quickSortViewModel.resume() }, onDismiss = { showQuickQueue = false })
@@ -1821,6 +1822,19 @@ fun MainScaffold(
                 selectedIds = emptySet()
             }
         )
+    }
+
+    // Keep one alert above the chooser and temporarily suspend the queue's
+    // modal window so it cannot cover the conflict or failure dialog.
+    val quickConflict = quickQueue.needsConflictDecision
+    if (quickConflict != null) {
+        QuickSortConflictDialog(quickConflict,
+            onResolve = { quickSortViewModel.resolveConflict(quickConflict.id, it) },
+            onCancel = { quickSortViewModel.cancel(quickConflict.id); quickSortViewModel.resume() })
+    } else {
+        quickWarning?.let { message ->
+            QuickSortWarningDialog(message, reviewQueue = quickWarningNeedsReview) { quickWarning = null }
+        }
     }
 }
 

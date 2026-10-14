@@ -46,3 +46,15 @@
 版本：4.3.4.6-auto-multitask，基础 versionCode 2056；实际普通 Release APK versionCode **4056**，仅 **arm64-v8a**。aapt 核实 APK 内字段，apksigner 验签通过，签名证书与上一包 vc4055 相同。
 
 证据位于 `scratch/quick-sort-layout-final-build.log`、`scratch/quick-sort-layout-ui-result.log`、`scratch/quick-sort-layout-redesign-result.log`、`scratch/quick-sort-layout-confirmations-result.log` 与 `scratch/quick-sort-layout-qa/`。
+
+## 后续修补：4.3.4.7
+
+- 补齐 Copy/Move、Quick Sort 队列进度条的端点亮点设置；同时关闭视频播放滑条和设置滑条的 stop indicator。查重原有设置保持一致。
+- 选择模式仍绘制视频时长和播放图标，移动到左上角，避免与右上角勾选重叠。图片和视频同时选中、只选图片而视频未选中均在模拟器实际网格中查看。
+- 正常加入队列、撤回请求不再额外弹出成功提示。拒绝入队改用共享 GalleryDialog；没有队列记录的拒绝不再要求用户检查队列位置。
+- 冲突提示采用共享的目标相册名称/路径信息区和三选项组件。
+- 冲突、失败弹窗统一在其他面板之后绘制，队列模态面板在警告期间暂时隐藏；冲突与失败警告依次显示，避免彼此遮挡。
+
+验证：101 项 JVM 测试通过；Debug、AndroidTest、Release 构建通过；undo-handedness 界面检查通过，覆盖展开目标面板上的冲突/失败提示与可见操作按钮，并回归 Persistent Grid Limit 和利手控件。截图已查看，证据在 `scratch/selection-notice-qa/`、`scratch/selection-notice-4.3.4.7-ui-result.log` 与 `scratch/selection-feedback-4.3.4.7-build.log`。
+
+新 APK：4.3.4.7-auto-multitask，基础 versionCode 2057，实际 versionCode **4057**，仅 **arm64-v8a**；APK 内版本/ABI 和签名已核实，证书与 vc4056 相同。

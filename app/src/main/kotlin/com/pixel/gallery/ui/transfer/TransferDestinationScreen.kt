@@ -654,7 +654,11 @@ fun TransferDestinationContent(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.extraLarge) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(progressLabel.orEmpty(), style = MaterialTheme.typography.labelLarge)
-                        LinearProgressIndicator(progress = { (progress ?: 0f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                        LinearProgressIndicator(
+                            progress = { (progress ?: 0f).coerceIn(0f, 1f) },
+                            drawStopIndicator = {},
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 }
             } else {
