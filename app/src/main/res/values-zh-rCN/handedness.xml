@@ -4,8 +4,6 @@
     <string name="display_left_handed">左利手</string>
     <string name="qs_undo">撤回快速分拣</string>
     <string name="qs_undo_unavailable">本次分拣暂无可撤回操作</string>
-    <string name="qs_undo_batch">撤回</string>
-    <string name="qs_resolved_on_retry">重试后已处理：%1$d</string>
     <string name="qs_conflict_title">已有同名文件</string>
     <string name="qs_conflict_count">%1$d 个同名冲突</string>
     <string name="qs_keep_both">保留两份</string>
@@ -16,6 +14,5 @@
     <string name="qs_replace">替换</string>
     <string name="qs_replace_description">本次分拣期间可撤回恢复被替换的文件</string>
     <string name="qs_replace_permission">当前 Android 版本需要所有文件访问权限</string>
-    <string name="qs_warning_title">快速分拣需要处理</string>
-    <string name="qs_warning_review">重试前请检查队列中列出的原位置和当前位置。</string>
+    <string name="qs_warning_title">移动未完成</string>
 </resources>

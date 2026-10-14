@@ -7,7 +7,6 @@
     <string name="qs_manage_albums">选择分类相册</string>
     <string name="qs_choose_sorting_albums_hint">选择相册；长按拖动胶囊可调整排列位置。</string>
     <string name="qs_options">快速分类选项</string>
-    <string name="qs_queue">移动任务</string>
     <string name="qs_exit">退出快速分类</string>
     <string name="qs_dock_top">上沿</string>
     <string name="qs_dock_bottom">下沿</string>

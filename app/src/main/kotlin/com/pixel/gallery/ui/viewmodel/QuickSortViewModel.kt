@@ -18,6 +18,8 @@ import javax.inject.Inject
 @HiltViewModel
 class QuickSortViewModel @Inject constructor(private val repository: QuickSortQueueRepository) : ViewModel() {
     val state = repository.state
+    val failure = repository.failure
+    fun dismissFailure(failure: com.pixel.gallery.model.QuickSortMoveFailure) = repository.dismissFailure(failure)
     private val _permissionRequest = MutableStateFlow<QuickSortPermissionRequest?>(null)
     val permissionRequest = _permissionRequest.asStateFlow()
     private var requestingPermission = false
@@ -72,13 +74,6 @@ class QuickSortViewModel @Inject constructor(private val repository: QuickSortQu
         viewModelScope.launch {
             repository.resolveConflict(jobId, policy)
             repository.startFromForeground()
-        }
-    }
-    fun retry(jobId: String, onResult: (QuickSortEnqueueResult) -> Unit) {
-        viewModelScope.launch {
-            val result = repository.retry(jobId)
-            if (result is QuickSortEnqueueResult.Accepted) repository.startFromForeground()
-            onResult(result)
         }
     }
     fun resume() = repository.startFromForeground()

@@ -261,16 +261,13 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 report += "Undo collision reports occupied original path and leaves both distinct files unchanged"
 
                 check(targetContext.contentResolver.delete(Uri.parse(blocker.uri), null, null) > 0)
-                val retry = resumedQueue.retry(failedUndo.id) as QuickSortEnqueueResult.Accepted
-                check(resumedQueue.retry(failedUndo.id) is QuickSortEnqueueResult.Rejected)
+                check(Gson().fromJson(journalFile.readText(), QuickSortQueueJournal::class.java).jobs.none { it.id == failedUndo.id })
+                resumedQueue.dismissFailure(requireNotNull(resumedQueue.failure.value))
+                check(resumedQueue.failure.value == null)
                 resumedQueue.runUntilIdle()
-                val retryJob = resumedQueue.state.value.jobs.single { it.id == retry.jobId }
-                check(retryJob.completed == 1 && retryJob.failed == 0) { retryJob.items.joinToString { it.error.orEmpty() } }
-                createdUris += Uri.parse(retryJob.items.single().receipt!!.targetUri)
-                val settledFailure = resumedQueue.state.value.jobs.single { it.id == failedUndo.id }
-                check(settledFailure.failed == 0 && settledFailure.resolved == 1)
-                verifyMediaFile(File(conflictingSource.path), conflictingFingerprint, verifyTime = true)
-                report += "Retry reservations prevent duplicate retries; successful reverse retry settles its exact old failure"
+                check(resumedQueue.state.value.jobs.single { it.id == failedUndo.id }.failed == 1)
+                verifyMediaFile(File(keptReceipt.targetPath), conflictingFingerprint, verifyTime = true)
+                report += "Failure is a dismissible result; clearing the blocker does not automatically repeat the move"
 
                 val replaceSource = synthetic("replace.jpg", "Source", 0xff113355.toInt())
                 val replaceTarget = synthetic("replace.jpg", "Target", 0xff885522.toInt())
@@ -336,7 +333,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
             val recoveredItem = recoveredQueue.state.value.jobs.single().items.single()
             check(recoveredItem.status == QuickSortItemStatus.Failed && recoveredItem.error!!.contains("both"))
             check(File(interruptedSource.path).exists() && File(interruptedTarget.path).exists())
-            report += "Startup journal recovery retained ambiguous copies and persisted a review failure"
+            report += "Startup recovery retains ambiguous files and reports failure without making a saved retry task"
             return report.joinToString("\n")
         } finally {
             // URIs are created by this invocation only. No broad collection deletion or folder traversal.

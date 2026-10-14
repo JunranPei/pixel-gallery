@@ -89,6 +89,11 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                                         onDockTopChange = {}, onApply = {}, onDismiss = {})
                                     QuickSortWarningDialog("Original filename is occupied. Files were kept.") {}
                                 }
+                                7 -> {
+                                    QuickSortTargetsSheet(availableTargets = targets, selectedTargets = targets, dockTop = false,
+                                        onDockTopChange = {}, onApply = {}, onDismiss = {})
+                                    QuickSortFailureDialog(QuickSortMoveFailure(2, "Storage permission was denied")) {}
+                                }
                                 6 -> Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                                     Surface(Modifier.fillMaxWidth().height(64.dp)) {
                                         Box(contentAlignment = Alignment.Center) { Text("Photos") }
@@ -207,9 +212,17 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
             tap(bounds(requireNode { it.text?.toString() == context.getString(R.string.qs_continue) }))
             check(resolved == ConflictPolicy.REPLACE)
             changeMode(5)
-            val okBounds = bounds(requireNode { it.text?.toString() == context.getString(android.R.string.ok) })
+            val okBounds = bounds(requireNode { it.text?.toString() == context.getString(R.string.dialog_got_it) })
             check(okBounds.bottom <= root.bottom && okBounds.top >= root.top) { "Failure alert is hidden by the chooser" }
             snapshot("undo-warning")
+            check(find { it.text?.toString() == "View tasks" || it.text?.toString() == "Retry failed" } == null)
+            changeMode(7)
+            requireNode { it.text?.toString() == context.getString(R.string.qs_move_failed_count, 2) }
+            requireNode { it.text?.toString() == context.getString(R.string.qs_move_no_permission) }
+            val failureButton = bounds(requireNode { it.text?.toString() == context.getString(R.string.dialog_got_it) })
+            check(failureButton.bottom <= root.bottom && failureButton.top >= root.top)
+            check(find { it.text?.toString() == "View tasks" || it.text?.toString() == "Retry failed" } == null)
+            snapshot("move-failure-simple")
             return "Album capsules retain height as dock rises and clip at the header; unavailable undo is opaque and ignores taps; right/left dock and Copy/Move controls; persisted Display hand preference; Grid slider writes its own key; conflict choices checked. Screenshots: ${output.path}"
         } finally {
             runBlocking { settings.setHandedness(originalHand); settings.setGlidePersistentGridCacheSize(originalGrid) }

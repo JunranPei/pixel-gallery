@@ -104,6 +104,23 @@ fun resolveQuickSortRetrySuccess(jobs: List<QuickSortJob>, jobId: String, itemIn
     return updated
 }
 
+/** A transient result message, never saved as a retry task or history entry. */
+data class QuickSortMoveFailure(val count: Int, val reason: String?)
+
+/** Retain only evidence needed to finish bookkeeping or restore a displaced file. */
+fun quickSortNeedsRecovery(job: QuickSortJob): Boolean = job.items.any { item ->
+    (item.status == QuickSortItemStatus.Failed && item.checkpoint?.stage?.let {
+        it >= QuickMoveStage.SourceRemoved && it < QuickMoveStage.Completed } == true) ||
+    (!item.replacementReleased && item.replacementCheckpoint?.stage?.let {
+        it >= QuickMoveStage.SourceRemoved } == true)
+}
+
+fun quickSortJobsToSave(jobs: List<QuickSortJob>): List<QuickSortJob> = jobs.filter { job ->
+    !job.isTerminal || (job.undoRequested && job.undoJobId == null) || quickSortNeedsRecovery(job) ||
+        (job.sessionId != null && !job.sessionClosed && job.undoOfJobId == null && !job.undoRequested &&
+            job.items.any { it.status == QuickSortItemStatus.Succeeded && it.receipt != null && it.checkpoint != null })
+}
+
 data class QuickSortQueueState(
     val jobs: List<QuickSortJob> = emptyList(),
     val loaded: Boolean = false,

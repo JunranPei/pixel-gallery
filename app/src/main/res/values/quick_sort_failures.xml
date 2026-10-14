@@ -1,0 +1,9 @@
+<resources>
+    <string name="qs_move_failed">Could not move these items.</string>
+    <string name="qs_move_failed_count">%1$d items could not be moved.</string>
+    <string name="qs_move_no_permission">Storage permission is missing.</string>
+    <string name="qs_move_name_conflict">A file with the same name already exists.</string>
+    <string name="qs_move_no_space">Not enough storage space.</string>
+    <string name="qs_move_busy">Please wait for the current move to finish.</string>
+    <string name="qs_move_album_missing">The destination album is unavailable.</string>
+</resources>

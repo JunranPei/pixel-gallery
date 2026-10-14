@@ -283,22 +283,9 @@ fun MainScaffold(
     val handedness by photosViewModel.handedness.collectAsState()
     val undoableQuickJob = com.pixel.gallery.model.latestUndoableQuickSortJob(quickQueue, quickSortSessionId)
     var quickWarning by remember { mutableStateOf<String?>(null) }
-    var quickWarningNeedsReview by remember { mutableStateOf(true) }
-    val warnedQuickJobs = remember { mutableSetOf<String>() }
-    LaunchedEffect(quickQueue.jobs, quickSortSessionId) {
-        val failedJob = quickQueue.jobs.firstOrNull {
-            it.sessionId == quickSortSessionId && quickSortSessionId != null && it.failed > 0 && it.id !in warnedQuickJobs
-        }
-        if (failedJob != null) {
-            warnedQuickJobs.add(failedJob.id)
-            quickWarningNeedsReview = true
-            quickWarning = failedJob.items.filter { it.status == com.pixel.gallery.model.QuickSortItemStatus.Failed }
-                .take(3).joinToString("\n") { "${java.io.File(it.entry.path).name}: ${it.error.orEmpty()}" }
-        }
-    }
+    val quickFailure by quickSortViewModel.failure.collectAsState()
     var showQuickTargets by remember { mutableStateOf(false) }
     var quickTargetsPanelHeight by remember { mutableStateOf(0.dp) }
-    var showQuickQueue by remember { mutableStateOf(false) }
     var pendingQuickJob by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingQuickToken by rememberSaveable { mutableStateOf<String?>(null) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -617,7 +604,6 @@ fun MainScaffold(
                 selectedIds = selectedIds - result.acceptedIds
             }
             is QuickSortEnqueueResult.Rejected -> {
-                quickWarningNeedsReview = false
                 quickWarning = result.reason
             }
         }
@@ -662,7 +648,6 @@ fun MainScaffold(
             val session = quickSortSessionId
             if (job != null && session != null) quickSortViewModel.undo(job.id, session) { error ->
                 if (error != null) {
-                    quickWarningNeedsReview = true
                     quickWarning = error
                 }
             }
@@ -1328,7 +1313,6 @@ fun MainScaffold(
                         onSelectionChange = updateSelection, onToggleSelection = toggleSelection,
                         onColumnsChange = photosViewModel::setGridColumns,
                         quickSort = quickSortConfig, onToggleQuickSort = toggleQuickSort,
-                        onQueueClick = { showQuickQueue = true },
                     )
                 }
                 Screen.Favourites -> FavouritesScreen(
@@ -1392,7 +1376,6 @@ fun MainScaffold(
                     PhotoScreen(
                         quickSort = quickSortConfig,
                         onToggleQuickSort = toggleQuickSort,
-                        onQueueClick = { showQuickQueue = true },
                         albumName = albumName,
                         onBack = navigateBack,
                         onNavigateToViewer = { id ->
@@ -1714,11 +1697,6 @@ fun MainScaffold(
             onCreateAlbum = { parent, name, onResult -> photosViewModel.createTransferFolder(parent, name, onResult) },
         )
     }
-    if (showQuickQueue && quickQueue.needsConflictDecision == null && quickWarning == null) {
-        QuickSortQueueSheet(state = quickQueue, onCancel = quickSortViewModel::cancel,
-            onRetry = { quickSortViewModel.retry(it, onQuickEnqueued) },
-            onResume = { quickSortViewModel.resume() }, onDismiss = { showQuickQueue = false })
-    }
 
     DuplicateReviewDialog(
         state = duplicateState,
@@ -1824,16 +1802,18 @@ fun MainScaffold(
         )
     }
 
-    // Keep one alert above the chooser and temporarily suspend the queue's
-    // modal window so it cannot cover the conflict or failure dialog.
+    // Render alerts above the album chooser when the activity is visible.
     val quickConflict = quickQueue.needsConflictDecision
-    if (quickConflict != null) {
+    if (lifecycleState == Lifecycle.State.RESUMED && quickConflict != null) {
         QuickSortConflictDialog(quickConflict,
             onResolve = { quickSortViewModel.resolveConflict(quickConflict.id, it) },
             onCancel = { quickSortViewModel.cancel(quickConflict.id); quickSortViewModel.resume() })
-    } else {
+    } else if (lifecycleState == Lifecycle.State.RESUMED) {
         quickWarning?.let { message ->
-            QuickSortWarningDialog(message, reviewQueue = quickWarningNeedsReview) { quickWarning = null }
+            QuickSortWarningDialog(message) { quickWarning = null }
+        }
+        if (quickWarning == null) quickFailure?.let { failure ->
+            QuickSortFailureDialog(failure) { quickSortViewModel.dismissFailure(failure) }
         }
     }
 }

@@ -52,7 +52,6 @@ fun PhotoScreen(
     gridState: LazyGridState = rememberLazyGridState(),
     quickSort: QuickSortUiConfig? = null,
     onToggleQuickSort: () -> Unit = {},
-    onQueueClick: () -> Unit = {},
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val allPhotos by viewModel.allPhotos.collectAsState()

@@ -27,7 +27,7 @@ fun LabelPhotosScreen(
     gridState: LazyGridState, onBack: () -> Unit, onNavigateToViewer: (Long) -> Unit,
     onSelectionChange: (Set<Long>) -> Unit, onToggleSelection: (Long) -> Unit,
     onColumnsChange: (Int) -> Unit, quickSort: QuickSortUiConfig?,
-    onToggleQuickSort: () -> Unit, onQueueClick: () -> Unit,
+    onToggleQuickSort: () -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     Scaffold(contentWindowInsets = WindowInsets(0), topBar = {

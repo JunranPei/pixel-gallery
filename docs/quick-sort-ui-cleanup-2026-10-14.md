@@ -58,3 +58,23 @@
 验证：101 项 JVM 测试通过；Debug、AndroidTest、Release 构建通过；undo-handedness 界面检查通过，覆盖展开目标面板上的冲突/失败提示与可见操作按钮，并回归 Persistent Grid Limit 和利手控件。截图已查看，证据在 `scratch/selection-notice-qa/`、`scratch/selection-notice-4.3.4.7-ui-result.log` 与 `scratch/selection-feedback-4.3.4.7-build.log`。
 
 新 APK：4.3.4.7-auto-multitask，基础 versionCode 2057，实际 versionCode **4057**，仅 **arm64-v8a**；APK 内版本/ABI 和签名已核实，证书与 vc4056 相同。
+
+## 删除任务界面与失败重试：4.3.4.8
+
+用户要求失败直接告知结果，取消移动任务和失败重试流程。本次删除 QuickSortQueueSheet、各屏幕的任务入口参数、ViewModel 和 Repository 的失败重试方法，以及任务、详情、重试、历史状态的专用文案。成功接受移动仍保持静默。
+
+失败完成后使用共享 GalleryDialog，显示失败数量和可识别的简短原因，仅有“知道了”。活动不可见时保留进程内结果，回到前台后显示；结果关闭后清空，不增加已读状态、失败管理入口或重试记录。这个结果不跨进程保存，也不自动重新执行失败文件。
+
+磁盘记录只保留未完成的操作、本次分拣可撤回的成功操作，以及文件已经移动但记账未完成或替换原件尚未释放的必要恢复证据。普通已结束失败不再作为待处理任务保存在磁盘；现存普通失败记录在加载时清除。执行状态的内存保留上限继续是最近 30 个已结束操作，普通失败不再绕过上限永久累加。未明确完成的文件恢复证据不参与普通历史淘汰，避免删除唯一副本或丢失替换原件。
+
+网络核查与本地对照：
+
+- Android 官方文档确认更新 MediaStore 的 RELATIVE_PATH / DISPLAY_NAME 可以移动文件。现有普通移动和 Quick Sort 已使用此接口，本次没有增加新的文件移动引擎：[Access media files](https://developer.android.com/training/data-storage/shared/media#update-item)。
+- Aves 维护者在 2026-09-08 说明优先 MediaStore、必要时回退 SAF；同时说明跨存储卷及目标目录限制：[Aves #2144](https://github.com/deckerst/aves/issues/2144)。
+- 原生 rename 默认可能覆盖目标，同名处理必须显式防覆盖，跨文件系统无法直接 rename：[Linux rename](https://man7.org/linux/man-pages/man2/rename.2.html)。因此保留现有“保留两份 / 跳过 / 替换”选择和已验证复制后的删源保护。
+
+验证：107 项 JVM 测试通过；Debug、AndroidTest、Release 构建通过。新增磁盘筛选测试覆盖普通失败清除、未完成操作保留、移动已提交但记账未完成、当前会话撤回、替换原件保护和未安排的撤回。模拟器文件测试覆盖 SHA-256、时间、标签、重启恢复、冲突三选项和撤回，新增检查失败没有落成保存的重试任务，关闭失败提示及清除冲突后也不自动重新移动。界面检查覆盖失败数量、权限原因、只有“知道了”的操作，以及在相册面板上方可见；失败截图已查看。
+
+证据：`scratch/move-simplify-final-build.log`、`scratch/move-simplify-final-safety.log`、`scratch/move-simplify-final-ui.log`、`scratch/move-simplify-qa/`。
+
+APK：4.3.4.8-auto-multitask，基础 versionCode 2058，实际 versionCode **4058**，仅 **arm64-v8a**，签名证书与 vc4057 相同。没有推送。

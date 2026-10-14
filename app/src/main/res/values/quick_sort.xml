@@ -7,7 +7,6 @@
     <string name="qs_manage_albums">Choose sorting albums</string>
     <string name="qs_choose_sorting_albums_hint">Choose albums. Long-press and drag a capsule to arrange its position.</string>
     <string name="qs_options">Quick sort options</string>
-    <string name="qs_queue">Move queue</string>
     <string name="qs_exit">Exit quick sort</string>
     <string name="qs_dock_top">Top</string>
     <string name="qs_dock_bottom">Bottom</string>

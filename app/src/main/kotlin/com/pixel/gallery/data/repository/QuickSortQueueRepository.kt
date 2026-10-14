@@ -34,6 +34,21 @@ class QuickSortQueueRepository @Inject constructor(
     private val ready = CompletableDeferred<Unit>()
     private val mutableState = MutableStateFlow(QuickSortQueueState())
     val state: StateFlow<QuickSortQueueState> = mutableState.asStateFlow()
+    private val pendingFailure = MutableStateFlow<QuickSortMoveFailure?>(null)
+    val failure: StateFlow<QuickSortMoveFailure?> = pendingFailure.asStateFlow()
+    fun dismissFailure(shown: QuickSortMoveFailure) { pendingFailure.compareAndSet(shown, null) }
+
+    private fun reportFinishedFailures(previous: List<QuickSortJob>, jobs: List<QuickSortJob>) {
+        val finished = jobs.filter { job -> job.isTerminal && job.failed > 0 &&
+            previous.any { it.id == job.id && !it.isTerminal } }
+        val failures = finished.flatMap { it.items }.filter { it.status == QuickSortItemStatus.Failed }
+        if (failures.isEmpty()) return
+        val reason = failures.map { it.error }.distinct().singleOrNull()
+        val current = pendingFailure.value
+        pendingFailure.value = QuickSortMoveFailure((current?.count ?: 0) + failures.size,
+            if (current == null || current.reason == reason) reason else null)
+    }
+
     private var claimedPermissionToken: String? = null
     @Volatile private var pauseRequested = false
 
@@ -93,6 +108,7 @@ class QuickSortQueueRepository @Inject constructor(
                     }
                 }
                 recoveredJobs = resolveLegacyQuickSortFailures(recoveredJobs)
+                reportFinishedFailures(persisted.jobs, recoveredJobs)
                 mutex.withLock { persist(trimHistory(recoveredJobs)) }
                 cleanupClosedSessionBackups()
                 if (recoveredJobs.any { job -> job.items.any { it.receipt != null } }) {
@@ -305,44 +321,6 @@ class QuickSortQueueRepository @Inject constructor(
         }
     }
 
-    suspend fun retry(jobId: String): QuickSortEnqueueResult {
-        ready.await()
-        val job = state.value.jobs.firstOrNull { it.id == jobId }
-            ?: return QuickSortEnqueueResult.Rejected("Batch is no longer available")
-        // Recovery with a target present requires explicit inspection, never a blind duplicate move.
-        if (!job.isTerminal) return QuickSortEnqueueResult.Rejected("Wait for the batch to finish before retrying")
-        val failures = job.items.withIndex().filter { it.value.status == QuickSortItemStatus.Failed }
-        val ambiguous = failures.any { (_, item) -> (item.checkpoint?.let { File(it.targetPath).exists() } == true &&
-            !(item.replacementReleased && item.replacementRestoreReceipt != null)) ||
-            (item.replacementReceipt != null && !item.replacementReleased) }
-        if (ambiguous) return QuickSortEnqueueResult.Rejected("An interrupted destination still exists; review both files before retrying")
-        return withContext(Dispatchers.IO) {
-            mutex.withLock {
-                state.value.error?.let { return@withLock QuickSortEnqueueResult.Rejected(it) }
-                val candidates = selectUnreservedQuickSortEntries(failures.map { it.value.entry }, state.value)
-                val currentJob = state.value.jobs.firstOrNull { it.id == job.id }
-                    ?: return@withLock QuickSortEnqueueResult.Rejected("Batch is no longer available")
-                val selected = failures.filter { it.value.entry in candidates &&
-                    currentJob.items.getOrNull(it.index)?.status == QuickSortItemStatus.Failed }
-                if (selected.isEmpty()) return@withLock QuickSortEnqueueResult.Rejected("Failed items are already queued or already resolved")
-                if (state.value.pendingCount + selected.size > MAX_PENDING_ITEMS || state.value.jobs.count { !it.isTerminal } >= MAX_PENDING_JOBS) {
-                    return@withLock QuickSortEnqueueResult.Rejected("Queue is full; wait for a batch to finish")
-                }
-                val id = UUID.randomUUID().toString()
-                persist(trimHistory(state.value.jobs) + currentJob.copy(id = id,
-                    items = selected.map { (index, item) -> item.copy(status = QuickSortItemStatus.Queued,
-                        checkpoint = null, receipt = null, error = null, retryOrigin = QuickSortRetryOrigin(job.id, index),
-                        replacementCheckpoint = null, replacementReceipt = null, replacementRestoreCheckpoint = null,
-                        replacementRestoreReceipt = null, replacementReleased = false, resolvedByJobId = null) },
-                    createdAt = System.currentTimeMillis(), firstSucceededAt = null,
-                    status = QuickSortJobStatus.Queued, permissionGranted = false, permissionToken = null, cancelRequested = false,
-                    undoRequested = false, undoJobId = null, conflictPolicy = null, conflictCount = 0))
-                QuickSortEnqueueResult.Accepted(id, selected.size, failures.size - selected.size, selected.mapTo(mutableSetOf()) { it.value.entry.contentId })
-            }
-        }
-    }
-
-    /** Called by the service. A second service start cannot create a second writer. */
     suspend fun runUntilIdle() = executionMutex.withLock {
         ready.await()
         if (state.value.error != null) return@withLock
@@ -479,8 +457,8 @@ class QuickSortQueueRepository @Inject constructor(
 
     private fun trimHistory(jobs: List<QuickSortJob>): List<QuickSortJob> {
         val retained = jobs.filter { it.isTerminal }.takeLast(30).mapTo(mutableSetOf()) { it.id }
-        return jobs.filter { !it.isTerminal || it.id in retained || (it.undoRequested && it.undoJobId == null) || it.items.any { item -> item.status == QuickSortItemStatus.Failed ||
-            (item.replacementReceipt != null && !item.replacementReleased && !it.undoRequested) } }
+        return jobs.filter { !it.isTerminal || it.id in retained ||
+            (it.undoRequested && it.undoJobId == null) || quickSortNeedsRecovery(it) }
     }
 
     /** Commit to disk before publishing. Call only while holding mutex. */
@@ -488,14 +466,18 @@ class QuickSortQueueRepository @Inject constructor(
         val albumUses = quickSortAlbumUses(state.value.albumUses, jobs, System.currentTimeMillis())
         val output = journal.startWrite()
         try {
-            output.write(gson.toJson(QuickSortQueueJournal(jobs = jobs, albumUses = albumUses)).toByteArray(Charsets.UTF_8))
+            // Persist only unfinished moves, current-session undo, and incomplete
+            // recovery checkpoints. Finished failures have no saved task history.
+            val savedJobs = quickSortJobsToSave(jobs)
+            output.write(gson.toJson(QuickSortQueueJournal(jobs = savedJobs, albumUses = albumUses)).toByteArray(Charsets.UTF_8))
             journal.finishWrite(output)
         } catch (error: Exception) {
             journal.failWrite(output)
             mutableState.value = state.value.copy(error = "Could not persist queue; execution stopped: ${error.message}")
             throw error
         }
-        mutableState.value = state.value.copy(jobs = jobs, albumUses = albumUses, loaded = true)
+        reportFinishedFailures(state.value.jobs, jobs)
+        mutableState.value = state.value.copy(jobs = trimHistory(jobs), albumUses = albumUses, loaded = true)
     }
 
     companion object {

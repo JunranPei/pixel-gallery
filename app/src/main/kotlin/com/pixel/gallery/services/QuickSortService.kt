@@ -36,7 +36,7 @@ class QuickSortService : Service() {
             enableVibration(false)
             setShowBadge(false)
         })
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Preparing saved queue", 0, 0),
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Preparing move", 0, 0),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0)
         scope.launch {
             var lastUpdate = 0L
