@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import kotlinx.coroutines.flow.*
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -812,6 +813,33 @@ fun MainScaffold(
                         }
                     },
                     actions = {
+                        if (currentScreen is Screen.Photo) {
+                            val currentAlbumName = currentScreen.albumName
+                            val currentAlbumIds = albumPhotoLists[currentAlbumName]
+                                .orEmpty()
+                                .map { it.contentId }
+                                .filterNot { it in quickQueue.reservedIds }
+                                .toSet()
+                            val isAlbumFullySelected = currentAlbumIds.isNotEmpty() &&
+                                currentAlbumIds.all { it in selectedIds }
+                            IconButton(
+                                enabled = currentAlbumIds.isNotEmpty(),
+                                onClick = {
+                                    selectedIds = if (isAlbumFullySelected) {
+                                        selectedIds - currentAlbumIds
+                                    } else {
+                                        (selectedIds + currentAlbumIds) - quickQueue.reservedIds
+                                    }
+                                },
+                            ) {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = stringResource(
+                                        if (isAlbumFullySelected) R.string.deselect_all else R.string.select_all
+                                    ),
+                                )
+                            }
+                        }
                         if (currentScreen == Screen.Trash) {
                             IconButton(onClick = {
                                 photosViewModel.restoreMediaBulk(selectedEntries.map { it.uri })

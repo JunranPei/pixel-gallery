@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="select_all">全选</string>
+    <string name="deselect_all">取消全选</string>
     <string name="duplicate_find_all">查找重复文件</string>
     <string name="duplicate_find_album">在此相册内去重</string>
     <string name="duplicate_find_each_album">各相册内分别去重</string>
