@@ -122,6 +122,7 @@ fun TransferDestinationScreen(
     val quickQueue by quickSortViewModel.state.collectAsState()
     val transferState by viewModel.transferUiState.collectAsState()
     var lastTransferMode by rememberSaveable { mutableStateOf(TransferMode.MOVE) }
+    var alreadyInDestination by remember { mutableStateOf(false) }
     BackHandler(enabled = transferState.isRunning) {}
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -222,7 +223,7 @@ fun TransferDestinationScreen(
         val destination = selectedDestination ?: return
         val transferEntries = entries.filterNot { isSameTransferDirectory(it.path, destination.path) }
         if (transferEntries.isEmpty()) {
-            scope.launch { snackbarHostState.showSnackbar("Selected items are already in this folder") }
+            alreadyInDestination = true
             return
         }
         confirmation = PendingTransfer(mode, destination, transferEntries)
@@ -286,6 +287,10 @@ fun TransferDestinationScreen(
         onFinished = onFinished,
         onClear = viewModel::clearTransferState,
     )
+
+    if (alreadyInDestination) {
+        TransferNoticeDialog(R.string.transfer_already_in_album) { alreadyInDestination = false }
+    }
 
     confirmation?.let { plan ->
         TransferConfirmationDialog(

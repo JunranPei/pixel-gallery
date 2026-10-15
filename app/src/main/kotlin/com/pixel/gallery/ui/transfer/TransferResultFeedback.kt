@@ -65,6 +65,9 @@ internal fun TransferResultFeedback(
 internal fun transferFailureReason(message: String): Int? {
     val text = message.lowercase(java.util.Locale.ROOT)
     return when {
+        "already in the destination album" in text || "already in this album" in text ||
+            "already in this folder" in text -> R.string.transfer_already_in_album
+        "already being moved" in text -> R.string.transfer_already_moving
         "permission" in text || "access denied" in text -> R.string.qs_move_no_permission
         "occupied" in text || "filename already exists" in text -> R.string.qs_move_name_conflict
         "space left" in text || "disk full" in text -> R.string.qs_move_no_space
@@ -74,4 +77,14 @@ internal fun transferFailureReason(message: String): Int? {
         "source file no longer exists" in text || "source media record is unavailable" in text -> R.string.transfer_source_missing
         else -> null
     }
+}
+
+@Composable
+internal fun TransferNoticeDialog(message: Int, onDismiss: () -> Unit) {
+    GalleryDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(message)) },
+        text = {},
+        confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.dialog_got_it)) } },
+    )
 }

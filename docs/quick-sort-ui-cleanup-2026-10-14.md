@@ -88,3 +88,11 @@ APK：4.3.4.8-auto-multitask，基础 versionCode 2058，实际 versionCode **40
 验证：107 项 JVM 测试通过；Debug、AndroidTest、Release 构建通过。新增模拟器检查覆盖复制和移动的部分失败、移动全失败、权限错误、未知异常、后台暂不显示及回到前台后显示、全部跳过，确认在关闭之前结果没有被清理，操作按钮只有“知道了”；回归 Quick Sort 提示、冲突三选项、撤回、利手、Grid 缓存滑条。移动/复制失败截图已查看。证据在 `scratch/transfer-failure-4.3.4.9-build.log`、`scratch/transfer-failure-4.3.4.9-ui.log`、`scratch/transfer-failure-4.3.4.9-regression.log` 和 `scratch/transfer-failure-4.3.4.9-qa/`。
 
 APK：4.3.4.9-auto-multitask，实际 versionCode **4059**，仅 **arm64-v8a**，签名证书与 vc4058 相同。没有推送。
+
+## 已在目标相册的提示：4.3.4.10
+
+Quick Sort 原先将“已经在目标相册”和“已经在移动中”合并为拒绝原因，又被通用失败提示改写成无法移动。现在分别判断：全部文件已在目标目录时，直接用信息提示“已经在目标相册里”；只是重复提交正在移动的文件时显示“正在移动这些文件”。这两种情况不再使用“移动未完成”的标题或警告图标。普通移动、复制的同目录预检查也使用同一条本地化信息提示。
+
+本次只调整提示和两类拒绝的区分，没有增加任务记录或重试流程。验证记录：`scratch/already-in-album-4.3.4.10-build.log`。
+
+107 项 JVM 测试与 Release 构建通过。APK 内版本核实为 4.3.4.10-auto-multitask / versionCode **4060**，仅 **arm64-v8a**，签名验证通过且与 vc4059 相同。没有推送。

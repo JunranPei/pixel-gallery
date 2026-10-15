@@ -22,6 +22,7 @@ import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import com.pixel.gallery.ui.transfer.ConflictChoice
 import com.pixel.gallery.ui.transfer.transferFailureReason
+import com.pixel.gallery.ui.transfer.TransferNoticeDialog
 
 @Composable
 internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPolicy) -> Unit, onCancel: () -> Unit) {
@@ -54,11 +55,16 @@ internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPoli
 
 @Composable
 internal fun QuickSortWarningDialog(message: String, onDismiss: () -> Unit) {
+    val reason = transferFailureReason(message)
+    if (reason == R.string.transfer_already_in_album || reason == R.string.transfer_already_moving) {
+        TransferNoticeDialog(reason, onDismiss)
+        return
+    }
     GalleryDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.qs_warning_title)) },
         icon = Icons.Outlined.Warning,
-        text = { Text(stringResource(transferFailureReason(message) ?: R.string.qs_move_failed)) },
+        text = { Text(stringResource(reason ?: R.string.qs_move_failed)) },
         confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.dialog_got_it)) } },
     )
 }

@@ -131,9 +131,11 @@ class QuickSortQueueRepository @Inject constructor(
             if (destination.documentUri != null) return@withLock QuickSortEnqueueResult.Rejected(
                 "Quick sort requires a local album that can preserve original timestamps")
             if (!File(destination.path).isDirectory) return@withLock QuickSortEnqueueResult.Rejected("Destination album is unavailable")
+            if (entries.isEmpty()) return@withLock QuickSortEnqueueResult.Rejected("No files selected")
             val eligible = entries.filterNot { isSameTransferDirectory(it.path, destination.path) }
+            if (eligible.isEmpty()) return@withLock QuickSortEnqueueResult.Rejected("Items are already in the destination album")
             val accepted = selectUnreservedQuickSortEntries(eligible, state.value)
-            if (accepted.isEmpty()) return@withLock QuickSortEnqueueResult.Rejected("Items are already queued or already in this album")
+            if (accepted.isEmpty()) return@withLock QuickSortEnqueueResult.Rejected("Items are already being moved")
             if (state.value.pendingCount + accepted.size > MAX_PENDING_ITEMS || state.value.jobs.count { !it.isTerminal } >= MAX_PENDING_JOBS) {
                 return@withLock QuickSortEnqueueResult.Rejected("Queue is full; wait for a batch to finish")
             }
