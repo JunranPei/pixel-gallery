@@ -146,6 +146,20 @@ internal fun shouldSwitchHomeHeader(
         abs(velocityPxPerSecond) / widthPx >= HomeHeaderSwipeVelocityInWidthsPerSecond
 }
 
+internal fun toggleAlbumSelection(
+    selectedIds: Set<Long>,
+    albumIds: Set<Long>,
+    reservedIds: Set<Long>,
+): Set<Long> {
+    val selectableIds = albumIds - reservedIds
+    if (selectableIds.isEmpty()) return selectedIds - reservedIds
+    return if (selectableIds.all { it in selectedIds }) {
+        selectedIds - selectableIds
+    } else {
+        (selectedIds + selectableIds) - reservedIds
+    }
+}
+
 private val AlbumGridStatesSaver = listSaver<MutableMap<String, LazyGridState>, Any>(
     save = { states ->
         buildList {
@@ -825,11 +839,11 @@ fun MainScaffold(
                             IconButton(
                                 enabled = currentAlbumIds.isNotEmpty(),
                                 onClick = {
-                                    selectedIds = if (isAlbumFullySelected) {
-                                        selectedIds - currentAlbumIds
-                                    } else {
-                                        (selectedIds + currentAlbumIds) - quickQueue.reservedIds
-                                    }
+                                    selectedIds = toggleAlbumSelection(
+                                        selectedIds = selectedIds,
+                                        albumIds = currentAlbumIds,
+                                        reservedIds = quickQueue.reservedIds,
+                                    )
                                 },
                             ) {
                                 Icon(
