@@ -63,6 +63,9 @@
     <string name="deselect_all">Deselect all</string>
     <string name="selected">Selected</string>
     <string name="selected_count">%1$d selected</string>
+    <string name="album_search_files">Search files in this album</string>
+    <string name="album_clear_search">Clear album search</string>
+    <string name="album_no_matching_files">No matching files</string>
     <string name="set_as_wallpaper">Set as Wallpaper</string>
     <string name="move_to_locked_folder">Move to locked folder</string>
     <string name="unlock_with_biometrics">Unlock with Biometrics</string>
