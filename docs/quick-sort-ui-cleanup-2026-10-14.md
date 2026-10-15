@@ -96,3 +96,11 @@ Quick Sort 原先将“已经在目标相册”和“已经在移动中”合并
 本次只调整提示和两类拒绝的区分，没有增加任务记录或重试流程。验证记录：`scratch/already-in-album-4.3.4.10-build.log`。
 
 107 项 JVM 测试与 Release 构建通过。APK 内版本核实为 4.3.4.10-auto-multitask / versionCode **4060**，仅 **arm64-v8a**，签名验证通过且与 vc4059 相同。没有推送。
+
+## 同目录提示自动消失：4.3.4.11
+
+按用户要求，“已经在目标相册里”改成自动消失的短 Toast，移除专门的信息确认窗口及其状态。Quick Sort、普通移动、复制都使用同样的非阻断提示；重复提交正在移动的文件也以短 Toast 提示。真正的失败仍使用原来的失败反馈。
+
+验证记录：`scratch/album-notice-toast-4.3.4.11-build.log`。
+
+107 项 JVM 测试和 Release 构建通过。实际 APK 为 versionCode **4061**、仅 **arm64-v8a**，签名验证通过，证书与 vc4060 相同。没有推送。

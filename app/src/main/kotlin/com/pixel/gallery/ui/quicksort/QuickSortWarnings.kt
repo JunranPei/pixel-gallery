@@ -12,6 +12,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import android.os.Build
 import android.os.Environment
 import com.pixel.gallery.R
@@ -22,7 +24,6 @@ import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import com.pixel.gallery.ui.transfer.ConflictChoice
 import com.pixel.gallery.ui.transfer.transferFailureReason
-import com.pixel.gallery.ui.transfer.TransferNoticeDialog
 
 @Composable
 internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPolicy) -> Unit, onCancel: () -> Unit) {
@@ -57,7 +58,11 @@ internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPoli
 internal fun QuickSortWarningDialog(message: String, onDismiss: () -> Unit) {
     val reason = transferFailureReason(message)
     if (reason == R.string.transfer_already_in_album || reason == R.string.transfer_already_moving) {
-        TransferNoticeDialog(reason, onDismiss)
+        val context = LocalContext.current
+        LaunchedEffect(message) {
+            Toast.makeText(context, reason, Toast.LENGTH_SHORT).show()
+            onDismiss()
+        }
         return
     }
     GalleryDialog(

@@ -4,6 +4,7 @@ import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
+import android.widget.Toast
 import android.content.Intent
 import android.os.Environment
 import android.os.Build
@@ -122,7 +123,6 @@ fun TransferDestinationScreen(
     val quickQueue by quickSortViewModel.state.collectAsState()
     val transferState by viewModel.transferUiState.collectAsState()
     var lastTransferMode by rememberSaveable { mutableStateOf(TransferMode.MOVE) }
-    var alreadyInDestination by remember { mutableStateOf(false) }
     BackHandler(enabled = transferState.isRunning) {}
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -223,7 +223,7 @@ fun TransferDestinationScreen(
         val destination = selectedDestination ?: return
         val transferEntries = entries.filterNot { isSameTransferDirectory(it.path, destination.path) }
         if (transferEntries.isEmpty()) {
-            alreadyInDestination = true
+            Toast.makeText(context, R.string.transfer_already_in_album, Toast.LENGTH_SHORT).show()
             return
         }
         confirmation = PendingTransfer(mode, destination, transferEntries)
@@ -287,10 +287,6 @@ fun TransferDestinationScreen(
         onFinished = onFinished,
         onClear = viewModel::clearTransferState,
     )
-
-    if (alreadyInDestination) {
-        TransferNoticeDialog(R.string.transfer_already_in_album) { alreadyInDestination = false }
-    }
 
     confirmation?.let { plan ->
         TransferConfirmationDialog(

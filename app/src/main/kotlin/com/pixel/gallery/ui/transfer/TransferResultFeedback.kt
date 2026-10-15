@@ -78,13 +78,3 @@ internal fun transferFailureReason(message: String): Int? {
         else -> null
     }
 }
-
-@Composable
-internal fun TransferNoticeDialog(message: Int, onDismiss: () -> Unit) {
-    GalleryDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(message)) },
-        text = {},
-        confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.dialog_got_it)) } },
-    )
-}
