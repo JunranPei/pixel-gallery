@@ -52,6 +52,12 @@ import com.pixel.gallery.ui.components.SortCriterion
 import com.pixel.gallery.data.local.entity.MediaEntry
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
+import com.pixel.gallery.ui.viewmodel.MediaBrowseScope
+import com.pixel.gallery.ui.viewmodel.MediaBrowseResult
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.components.GalleryOverflowMenu
 import com.pixel.gallery.ui.components.MediaTypeMenuSection
@@ -111,8 +117,7 @@ internal fun filterAlbumGridItems(
 private data class AlbumBrowseResult(
     val mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     val query: String = "",
-    val albumPhotos: List<MediaEntry> = emptyList(),
-    val items: List<GridItem> = emptyList(),
+    val media: MediaBrowseResult = MediaBrowseResult(),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -133,7 +138,7 @@ fun PhotoScreen(
     isForeground: Boolean = true,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
-    val allPhotos by viewModel.allPhotos.collectAsState()
+    val browsingIndex by viewModel.browsingIndex.collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
@@ -156,30 +161,31 @@ fun PhotoScreen(
         }
     }
     
-    val albumResult by remember(albumName, gridColumns, photoSortOrder) {
-        combine(viewModel.photos, snapshotFlow { mediaType to searchQuery.trim() }) { all, (type, query) ->
-            val filtered = all.filter {
-                if (albumName.contains('/')) java.io.File(it.path).parent == albumName
-                else viewModel.getParentFolderName(it.path) == albumName
-            }
-            val items = viewModel.groupMedia(filtered, gridColumns, photoSortOrder)
-            AlbumBrowseResult(
-                mediaType = type,
-                query = query,
-                albumPhotos = items.mapNotNull { (it as? GridItem.Photo)?.entry },
-                items = filterAlbumGridItems(items, query, type),
-            )
-        }.flowOn(kotlinx.coroutines.Dispatchers.Default)
-    }.collectAsState(initial = AlbumBrowseResult())
-    val albumPhotos = albumResult.albumPhotos
-    val displayedAlbumItems = if (albumResult.mediaType == mediaType && albumResult.query == normalizedSearchQuery) {
-        albumResult.items
-    } else {
-        emptyList()
+    val albumScope by produceState<MediaBrowseScope?>(null, browsingIndex, albumName) {
+        value = withContext(Dispatchers.Default) {
+            val taskContext = coroutineContext
+            browsingIndex.album(albumName) { taskContext.ensureActive() }
+        }
     }
-    val displayedAlbumPhotos = remember(displayedAlbumItems) {
-        displayedAlbumItems.mapNotNull { (it as? GridItem.Photo)?.entry }
+    val albumResult by produceState(AlbumBrowseResult(), albumScope, mediaType, normalizedSearchQuery) {
+        val type = mediaType
+        val query = normalizedSearchQuery
+        value = withContext(Dispatchers.Default) {
+            val taskContext = coroutineContext
+            val media = albumScope?.get(type)?.search(query, { taskContext.ensureActive() }) { entry, text ->
+                entry.matchesAlbumSearch(text)
+            } ?: MediaBrowseResult()
+            AlbumBrowseResult(type, query, media)
+        }
     }
+    val albumPhotos = albumScope?.get(MediaTypeFilter.ALL)?.media?.photos.orEmpty()
+    val visibleMedia = if (normalizedSearchQuery.isEmpty()) {
+        albumScope?.get(mediaType)?.media ?: MediaBrowseResult()
+    } else if (albumResult.mediaType == mediaType && albumResult.query == normalizedSearchQuery) {
+        albumResult.media
+    } else MediaBrowseResult()
+    val displayedAlbumItems = visibleMedia.gridItems
+    val displayedAlbumPhotos = visibleMedia.photos
     LaunchedEffect(albumName, displayedAlbumPhotos) {
         onAlbumPhotosChanged(displayedAlbumPhotos)
     }
@@ -198,18 +204,9 @@ fun PhotoScreen(
     val photoCount = displayedAlbumPhotos.size
 
     var showMenu by remember { mutableStateOf(false) }
-    val albumPath by remember(allPhotos, albumName) {
-        flow {
-            val path = allPhotos.find { 
-                if (albumName.contains('/')) java.io.File(it.path).parent == albumName
-                else viewModel.getParentFolderName(it.path) == albumName
-            }?.let { 
-                val lastSlash = it.path.lastIndexOf('/')
-                if (lastSlash > 0) it.path.substring(0, lastSlash) else ""
-            } ?: ""
-            emit(path)
-        }.flowOn(kotlinx.coroutines.Dispatchers.Default)
-    }.collectAsState(initial = "")
+    val albumPath = remember(albumPhotos) {
+        albumPhotos.firstOrNull()?.path?.substringBeforeLast('/', "").orEmpty()
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -405,7 +402,12 @@ fun PhotoScreen(
                 quickSort = quickSort,
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
                 items = displayedAlbumItems,
-                onNavigateToViewer = { id -> onNavigateToViewer(id, mediaType, albumResult.query) },
+                positionLabels = visibleMedia.positionLabels,
+                onNavigateToViewer = { id ->
+                    // Publish this exact displayed snapshot before the parent opens its viewer.
+                    onAlbumPhotosChanged(displayedAlbumPhotos)
+                    onNavigateToViewer(id, mediaType, if (normalizedSearchQuery.isEmpty()) "" else albumResult.query)
+                },
                 selectedIds = selectedIds,
                 onSelectionChange = onSelectionChange,
                 onToggleSelection = onToggleSelection,

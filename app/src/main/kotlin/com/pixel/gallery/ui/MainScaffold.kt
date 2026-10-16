@@ -28,7 +28,9 @@ import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.MediaTypeFilter
-import com.pixel.gallery.ui.viewmodel.buildMediaAlbums
+import com.pixel.gallery.ui.viewmodel.MediaBrowseIndex
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import com.pixel.gallery.ui.gallery.matchesAlbumSearch
 import com.pixel.gallery.model.Album
 import com.pixel.gallery.ui.home.PhotosScreen
@@ -128,12 +130,17 @@ private data class HomeHeaderTransitionState(
     val dragOffsetPx: Float = 0f,
 )
 
-private data class HomeBrowseResult(
+private data class HomePhotoSearchResult(
     val mediaType: MediaTypeFilter,
     val photoQuery: String = "",
-    val albumQuery: String = "",
     val photos: List<MediaEntry> = emptyList(),
     val gridItems: List<GridItem> = emptyList(),
+    val positionLabels: List<String?> = emptyList(),
+)
+
+private data class HomeAlbumSearchResult(
+    val mediaType: MediaTypeFilter,
+    val albumQuery: String = "",
     val albums: List<Album> = emptyList(),
 )
 
@@ -376,6 +383,7 @@ fun MainScaffold(
         }
     }
     val allPhotos by photosViewModel.photos.collectAsState()
+    val browsingIndex by photosViewModel.browsingIndex.collectAsState()
     val groupedPhotos by photosViewModel.groupedPhotos.collectAsState()
     val favourites by photosViewModel.favourites.collectAsState()
     val groupedFavourites by photosViewModel.groupedFavourites.collectAsState()
@@ -517,45 +525,50 @@ fun MainScaffold(
     var albumSearchQuery by rememberSaveable { mutableStateOf("") }
     val normalizedPhotoSearchQuery = photoSearchQuery.trim()
     val normalizedAlbumSearchQuery = albumSearchQuery.trim()
-    // Publish the grid and album metadata together, from one filtered snapshot.
-    // Large libraries and date grouping stay off the UI thread.
-    val browseResult by produceState(
-        HomeBrowseResult(MediaTypeFilter.ALL),
-        allPhotos, gridColumns, photoSortOrder, albumSortOrder,
-        homeMediaType, normalizedPhotoSearchQuery, normalizedAlbumSearchQuery,
+    // Cached category views are selected immediately. Only search scans run again.
+    val categoryView = browsingIndex.library[homeMediaType]
+    val photoSearchResult by produceState(
+        HomePhotoSearchResult(homeMediaType), browsingIndex, homeMediaType, normalizedPhotoSearchQuery,
     ) {
         val type = homeMediaType
-        val photoQuery = normalizedPhotoSearchQuery
-        val albumQuery = normalizedAlbumSearchQuery
-        if (photoQuery.isNotEmpty() || albumQuery.isNotEmpty()) delay(HomeSearchDebounceMillis)
+        val query = normalizedPhotoSearchQuery
+        if (query.isNotEmpty()) delay(HomeSearchDebounceMillis)
         value = withContext(Dispatchers.Default) {
-            val media = if (type == MediaTypeFilter.ALL) allPhotos else allPhotos.filter(type::matches)
-            val photos = if (photoQuery.isEmpty()) media else media.filter { it.matchesFileSearch(photoQuery) }
-            val mediaAlbums = buildMediaAlbums(media, albumSortOrder)
-            HomeBrowseResult(
-                mediaType = type,
-                photoQuery = photoQuery,
-                albumQuery = albumQuery,
-                photos = photos,
-                gridItems = photosViewModel.groupMedia(photos, gridColumns, photoSortOrder),
-                albums = if (albumQuery.isEmpty()) mediaAlbums else mediaAlbums.filter {
-                    it.name.contains(albumQuery, ignoreCase = true)
-                },
-            )
+            val taskContext = coroutineContext
+            val result = browsingIndex.library[type].search(query, { taskContext.ensureActive() }) { entry, text ->
+                entry.matchesFileSearch(text)
+            }
+            HomePhotoSearchResult(type, query, result.photos, result.gridItems, result.positionLabels)
         }
     }
-    // Never let the previous type remain selectable while a new snapshot is built.
-    val searchedPhotos = if (browseResult.mediaType == homeMediaType) browseResult.photos else emptyList()
-    val searchedPhotoGridItems = if (browseResult.mediaType == homeMediaType) browseResult.gridItems else emptyList()
-    val searchedAlbums = if (browseResult.mediaType == homeMediaType) browseResult.albums else emptyList()
+    val albumSearchResult by produceState(
+        HomeAlbumSearchResult(homeMediaType), browsingIndex, homeMediaType, albumSortOrder, normalizedAlbumSearchQuery,
+    ) {
+        val type = homeMediaType
+        val query = normalizedAlbumSearchQuery
+        if (query.isNotEmpty()) delay(HomeSearchDebounceMillis)
+        value = withContext(Dispatchers.Default) {
+            val albums = browsingIndex.library[type].albums(albumSortOrder)
+            HomeAlbumSearchResult(type, query, if (query.isEmpty()) albums else albums.filter {
+                it.name.contains(query, ignoreCase = true)
+            })
+        }
+    }
+    val searchedPhotos = if (normalizedPhotoSearchQuery.isEmpty()) categoryView.media.photos
+        else if (photoSearchResult.mediaType == homeMediaType) photoSearchResult.photos else emptyList()
+    val searchedPhotoGridItems = if (normalizedPhotoSearchQuery.isEmpty()) categoryView.media.gridItems
+        else if (photoSearchResult.mediaType == homeMediaType) photoSearchResult.gridItems else emptyList()
+    val searchedAlbums = if (albumSearchResult.mediaType == homeMediaType) albumSearchResult.albums else emptyList()
+    val searchedPositionLabels = if (normalizedPhotoSearchQuery.isEmpty()) categoryView.media.positionLabels
+        else if (photoSearchResult.mediaType == homeMediaType) photoSearchResult.positionLabels else emptyList()
     val photoSearchGridState = rememberLazyGridState()
     val albumSearchGridState = rememberLazyGridState()
 
-    LaunchedEffect(browseResult.photoQuery) {
-        if (browseResult.photoQuery.isNotEmpty()) photoSearchGridState.scrollToItem(0)
+    LaunchedEffect(photoSearchResult.photoQuery) {
+        if (photoSearchResult.photoQuery.isNotEmpty()) photoSearchGridState.scrollToItem(0)
     }
-    LaunchedEffect(browseResult.albumQuery) {
-        if (browseResult.albumQuery.isNotEmpty()) albumSearchGridState.scrollToItem(0)
+    LaunchedEffect(albumSearchResult.albumQuery) {
+        if (albumSearchResult.albumQuery.isNotEmpty()) albumSearchGridState.scrollToItem(0)
     }
 
     // Initialize tab based on preference once
@@ -1229,8 +1242,9 @@ fun MainScaffold(
                             0 -> PhotosScreen(
                                 quickSort = quickSortConfig,
                                 items = searchedPhotoGridItems,
+                                positionLabels = searchedPositionLabels,
                                 onNavigateToViewer = { id ->
-                                    val isSearchActive = browseResult.photoQuery.isNotEmpty()
+                                    val isSearchActive = normalizedPhotoSearchQuery.isNotEmpty() && photoSearchResult.photoQuery.isNotEmpty()
                                     ViewerLoadMetrics.entryRequested(
                                         context.applicationContext,
                                         id,
@@ -1248,7 +1262,7 @@ fun MainScaffold(
                                         } else {
                                             Screen.ViewerSource.All
                                         },
-                                        searchQuery = browseResult.photoQuery.takeIf { isSearchActive },
+                                        searchQuery = photoSearchResult.photoQuery.takeIf { isSearchActive },
                                         mediaType = homeMediaType,
                                     )
                                 },
@@ -1496,6 +1510,8 @@ fun MainScaffold(
                 val livePhotosForViewer = remember(
                     viewer,
                     allPhotos,
+                    browsingIndex,
+                    photoSearchResult,
                     favourites,
                     trash,
                     vault,
@@ -1505,9 +1521,14 @@ fun MainScaffold(
                     val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
                     var listSource = "DIRECT"
                     val result = when (viewer.source) {
-                        Screen.ViewerSource.All -> if (viewer.mediaType == MediaTypeFilter.ALL) allPhotos else allPhotos.filter(viewer.mediaType::matches)
-                        Screen.ViewerSource.Search -> allPhotos.filter {
-                            viewer.mediaType.matches(it) && it.matchesFileSearch(viewer.searchQuery.orEmpty())
+                        Screen.ViewerSource.All -> browsingIndex.library[viewer.mediaType].media.photos
+                        Screen.ViewerSource.Search -> if (photoSearchResult.mediaType == viewer.mediaType &&
+                            photoSearchResult.photoQuery == viewer.searchQuery.orEmpty()) {
+                            photoSearchResult.photos
+                        } else {
+                            browsingIndex.library[viewer.mediaType].media.photos.filter {
+                                it.matchesFileSearch(viewer.searchQuery.orEmpty())
+                            }
                         }
                         Screen.ViewerSource.Favourites -> favourites
                         Screen.ViewerSource.Label -> activeLabelPhotos
@@ -1523,12 +1544,12 @@ fun MainScaffold(
                                         val parentPath = it.path.substring(0, lastSlash)
                                         val prevSlash = parentPath.lastIndexOf('/')
                                         val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
-                                        if (viewer.albumName?.contains('/') == true) parentPath == viewer.albumName else parentName == viewer.albumName
+                                        val inAlbum = if (viewer.albumName?.contains('/') == true) parentPath == viewer.albumName else parentName == viewer.albumName
+                                        inAlbum && viewer.mediaType.matches(it) && it.matchesAlbumSearch(viewer.searchQuery.orEmpty())
                                     }
                                 }
-                            }.filter {
-                                viewer.mediaType.matches(it) && it.matchesAlbumSearch(viewer.searchQuery.orEmpty())
                             }
+
                         }
                         Screen.ViewerSource.External -> {
                             val uri = viewer.externalUri ?: ""

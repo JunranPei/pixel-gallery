@@ -36,6 +36,7 @@ import kotlin.coroutines.resume
 /** Self-contained instrumentation; no production media or production queue is submitted for mutation. */
 class QuickSortSafetyInstrumentation : Instrumentation() {
     private var mediaTypeSuite = false
+    private var mediaPerformanceSuite = false
     private var transferFailureSuite = false
     private var confirmationSuite = false
     private var scrollbarSuite = false
@@ -44,6 +45,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var undoHandednessSuite = false
     override fun onCreate(arguments: Bundle?) {
         mediaTypeSuite = arguments?.getString("suite") == "media-types"
+        mediaPerformanceSuite = arguments?.getString("suite") == "media-performance"
         transferFailureSuite = arguments?.getString("suite") == "transfer-failures"
         confirmationSuite = arguments?.getString("suite") == "confirmations"
         scrollbarSuite = arguments?.getString("suite") == "scrollbar"
@@ -58,6 +60,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                mediaPerformanceSuite -> MediaBrowsePerformanceChecks(this).exercise()
                 mediaTypeSuite -> MediaTypeTouchChecks(this).exercise()
                 transferFailureSuite -> TransferFailureTouchChecks(this).exercise()
                 undoHandednessSuite -> UndoHandednessTouchChecks(this).exercise()
@@ -67,7 +70,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 scrollbarSuite -> ScrollbarTouchChecks(this).exercise()
                 else -> runBlocking { exercise() }
             }
-            val suite = when { mediaTypeSuite -> "Media type UI"; confirmationSuite -> "Confirmation and transfer UI"; duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort synthetic safety" }
+            val suite = when { mediaPerformanceSuite -> "Media browse performance"; mediaTypeSuite -> "Media type UI"; confirmationSuite -> "Confirmation and transfer UI"; duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort synthetic safety" }
             results.putString("stream", "\n$suite checks passed:\n$report\n")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {

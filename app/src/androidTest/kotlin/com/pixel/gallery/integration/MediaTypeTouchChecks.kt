@@ -42,6 +42,7 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
     private val images get() = context.getString(R.string.media_type_images)
     private val videos get() = context.getString(R.string.media_type_videos)
     private var downTime = 0L
+    private lateinit var photosViewModel: PhotosViewModel
 
     fun exercise(): String = runBlocking {
         val settings = SettingsRepository(context)
@@ -62,6 +63,7 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             instrumentation.runOnMainSync {
                 val viewModel = ViewModelProvider(activity!!)[PhotosViewModel::class.java]
+                photosViewModel = viewModel
                 activity!!.setContent {
                     PixelGalleryTheme(darkTheme = dark.value, dynamicColor = false) {
                         val density = LocalDensity.current.density
@@ -147,9 +149,25 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
             settle(350)
             selected(images); snapshot("menu-large-text-dark")
             check(bounds(images).width() > 0 && bounds(videos).right < screenWidth())
+            back()
+            instrumentation.runOnMainSync { fontScale.value = 1f }
+            val countBeforeMove = photosViewModel.photos.value.size
+            check(resolver.update(created.last(), ContentValues().apply {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${root}MT-Mixed/")
+            }, null, null) == 1)
+            instrumentation.runOnMainSync { photosViewModel.refresh() }
+            await("same-count move invalidates album cache") {
+                find("MT-Images") == null && find("3 items") != null
+            }
+            check(photosViewModel.photos.value.size == countBeforeMove)
+            click("MT-Mixed")
+            await("moved image reaches inherited image filter") { tiles().size == 3 }
+            click("More"); selected(images)
+            snapshot("cache-updated-after-move")
             "Home and album grid share the filter; album detail inherits once and remains independent.\n" +
                 "Re-entry inherits the parent again; image-only/video-only albums are excluded appropriately.\n" +
                 "Select all selects only the two visible videos; search narrows to one video and viewer paging stays in that result.\n" +
+                "Moving a fixture without changing library count invalidates the album cache and updates the visible image count.\n" +
                 "Empty-video state and 150% font scale checked; light/dark menus reuse the Theme mode control. Screenshots: ${output.absolutePath}"
         } finally {
             activity?.let { current -> instrumentation.runOnMainSync { current.finish() } }

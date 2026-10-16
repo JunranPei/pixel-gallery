@@ -10,6 +10,10 @@ import com.pixel.gallery.services.MetadataService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import com.pixel.gallery.model.Album
 import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.ConflictPolicy
@@ -65,6 +69,7 @@ class PhotosViewModel @Inject constructor(
     }
 
     private val resumedState = MutableStateFlow(false)
+    private val browseTimeZone = MutableStateFlow(java.util.TimeZone.getDefault().id)
 
     val allPhotos: StateFlow<List<MediaEntry>> = repository.allEntries
 
@@ -79,30 +84,22 @@ class PhotosViewModel @Inject constructor(
         .map { runCatching { AlbumSortOrder.valueOf(it) }.getOrDefault(AlbumSortOrder.NAME_ASC) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AlbumSortOrder.NAME_ASC)
 
-    val photos: StateFlow<List<MediaEntry>> = resumedState.flatMapLatest { resumed ->
-        if (!resumed) {
-            emptyFlow()
-        } else {
-            combine(allPhotos, hiddenFolders, photoSortOrder) { all, hidden, sort ->
-                val filtered = all.filter { entry ->
-                    !hidden.any { entry.path.startsWith(it) }
-                }
-                sortMedia(filtered, sort)
-            }
+    private data class OrderedMedia(val entries: List<MediaEntry>, val sort: PhotoSortOrder)
+
+    private val orderedMedia = resumedState.flatMapLatest { resumed ->
+        if (!resumed) emptyFlow() else combine(allPhotos, hiddenFolders, photoSortOrder) { all, hidden, sort ->
+            val visible = all.filter { entry -> !hidden.any { entry.path.startsWith(it) } }
+            OrderedMedia(sortMedia(visible, sort), sort)
         }
-    }
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, OrderedMedia(emptyList(), PhotoSortOrder.DATE_DESC))
+
+    val photos: StateFlow<List<MediaEntry>> = orderedMedia.map { it.entries }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Keeps ordering and time headers on the same effective timestamp. */
-    fun sortMedia(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> = when (sort) {
-        PhotoSortOrder.DATE_DESC -> entries.sortedWith(MEDIA_DATE_DESCENDING)
-        PhotoSortOrder.DATE_ASC -> entries.sortedWith(MEDIA_DATE_ASCENDING)
-        PhotoSortOrder.NAME_ASC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
-        PhotoSortOrder.NAME_DESC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
-        PhotoSortOrder.SIZE_DESC -> entries.sortedByDescending { it.sizeBytes }
-        PhotoSortOrder.SIZE_ASC -> entries.sortedBy { it.sizeBytes }
-    }
+    fun sortMedia(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> =
+        sortMediaEntries(entries, sort)
 
     val transferDestinations: StateFlow<List<TransferDestination>> = photos
         .map(::buildTransferDestinations)
@@ -224,22 +221,7 @@ class PhotosViewModel @Inject constructor(
         if (sortOrder != PhotoSortOrder.DATE_DESC && sortOrder != PhotoSortOrder.DATE_ASC) {
             return sortedEntries.map { GridItem.Photo(it) }
         }
-        val items = mutableListOf<GridItem>()
-        var lastHeader = ""
-        val format = if (columns >= 6) "MMMM yyyy" else "MMMM d, yyyy"
-        val sdf = java.text.SimpleDateFormat(format, java.util.Locale.US)
-        
-        sortedEntries.forEach { entry ->
-            val timestamp = entry.chronologicalTimestamp()
-            val date = java.util.Date(timestamp)
-            val header = sdf.format(date)
-            if (header != lastHeader) {
-                items.add(GridItem.Header(header, timestamp))
-                lastHeader = header
-            }
-            items.add(GridItem.Photo(entry))
-        }
-        return items
+        return groupOrderedMedia(sortedEntries, columns, sortOrder)
     }
 
     val gridColumns: StateFlow<Int> = settingsRepository.gridColumns
@@ -248,11 +230,19 @@ class PhotosViewModel @Inject constructor(
     val albumGridColumns: StateFlow<Int> = settingsRepository.albumGridColumns
         .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
 
-    val groupedPhotos: StateFlow<List<GridItem>> = combine(photos, gridColumns, photoSortOrder) { media, cols, sort ->
-        groupMedia(media, cols, sort)
-    }
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    internal val browsingIndex: StateFlow<MediaBrowseIndex> = combine(
+        orderedMedia, gridColumns.map { it >= 6 }.distinctUntilChanged(), browseTimeZone,
+    ) { media, monthly, zone -> Triple(media, monthly, zone) }.mapLatest { (media, monthly, zone) ->
+        withContext(Dispatchers.Default) {
+            val taskContext = coroutineContext
+            MediaBrowseIndex.build(media.entries, if (monthly) 6 else 3, media.sort,
+                timeZone = java.util.TimeZone.getTimeZone(zone), checkCancelled = { taskContext.ensureActive() })
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, MediaBrowseIndex.Empty)
+
+    val groupedPhotos: StateFlow<List<GridItem>> = browsingIndex.map {
+        it.library[com.pixel.gallery.model.MediaTypeFilter.ALL].media.gridItems
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val favourites: StateFlow<List<MediaEntry>> = resumedState.flatMapLatest { resumed ->
         if (resumed) repository.favourites else emptyFlow()
@@ -329,14 +319,10 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    val albums: StateFlow<List<Album>> = combine(
-        photos,
-        albumSortOrder
-    ) { photosList, sort ->
-        buildMediaAlbums(photosList, sort)
-    }
-    .flowOn(kotlinx.coroutines.Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val albums: StateFlow<List<Album>> = combine(browsingIndex, albumSortOrder) { index, sort ->
+        index.library[com.pixel.gallery.model.MediaTypeFilter.ALL].albums(sort)
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
@@ -368,6 +354,7 @@ class PhotosViewModel @Inject constructor(
     private var contentObserver: android.database.ContentObserver? = null
 
     fun setResumed(resumed: Boolean) {
+        if (resumed) browseTimeZone.value = java.util.TimeZone.getDefault().id
         resumedState.value = resumed
         if (resumed) {
             refresh()
@@ -692,7 +679,7 @@ private val CASE_INSENSITIVE_NATURAL_ORDER = Comparator<String> { s1, s2 ->
     len1.compareTo(len2)
 }
 
-private fun MediaEntry.chronologicalTimestamp(): Long {
+internal fun MediaEntry.chronologicalTimestamp(): Long {
     val addedMillis = dateAddedSecs.takeIf { it > 0L }?.times(1000L) ?: 0L
     val scannedTimestamp = bestTimestamp.takeIf {
         it > 0L && (addedMillis == 0L || it != addedMillis)
@@ -722,7 +709,10 @@ internal fun buildMediaAlbums(photosList: List<MediaEntry>, sort: AlbumSortOrder
         val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
         Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
     }
-    return when (sort) {
+    return sortMediaAlbums(grouped, sort)
+}
+
+internal fun sortMediaAlbums(grouped: List<Album>, sort: AlbumSortOrder): List<Album> = when (sort) {
         AlbumSortOrder.NAME_ASC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a1.name, a2.name) }
         AlbumSortOrder.NAME_DESC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a2.name, a1.name) }
         AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
@@ -730,4 +720,12 @@ internal fun buildMediaAlbums(photosList: List<MediaEntry>, sort: AlbumSortOrder
         AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
         AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
     }
+
+internal fun sortMediaEntries(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> = when (sort) {
+    PhotoSortOrder.DATE_DESC -> entries.sortedWith(MEDIA_DATE_DESCENDING)
+    PhotoSortOrder.DATE_ASC -> entries.sortedWith(MEDIA_DATE_ASCENDING)
+    PhotoSortOrder.NAME_ASC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
+    PhotoSortOrder.NAME_DESC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
+    PhotoSortOrder.SIZE_DESC -> entries.sortedByDescending { it.sizeBytes }
+    PhotoSortOrder.SIZE_ASC -> entries.sortedBy { it.sizeBytes }
 }

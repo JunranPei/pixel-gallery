@@ -87,6 +87,7 @@ fun PhotosScreen(
     state: LazyGridState = rememberLazyGridState(),
     emptyMessage: String? = null,
     quickSort: QuickSortUiConfig? = null,
+    positionLabels: List<String?>? = null,
 ) {
     var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
@@ -99,8 +100,8 @@ fun PhotosScreen(
     val gridSidePaddingPx = with(LocalDensity.current) { gridSidePadding.roundToPx().toFloat() }
     val reservedIds = quickSort?.reservedIds.orEmpty()
     val quickSortBusy = quickSort != null && quickSortGestures.busy
-    val idsByIndex = remember(items) {
-        items.map { (it as? GridItem.Photo)?.entry?.contentId }
+    val idsByIndex = remember(items, quickSort != null) {
+        if (quickSort != null) items.map { (it as? GridItem.Photo)?.entry?.contentId } else emptyList()
     }
     SideEffect { quickSortGestures.scrollbarDragging = isScrollbarDragging }
 
@@ -128,7 +129,7 @@ fun PhotosScreen(
         }
     }
 
-    val scrollbarPositionLabels = remember(items) {
+    val scrollbarPositionLabels = positionLabels ?: remember(items) {
         var currentDateLabel: String? = null
         List(items.size) { index ->
             when (val item = items[index]) {
