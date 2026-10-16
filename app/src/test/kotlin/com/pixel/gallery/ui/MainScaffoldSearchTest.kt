@@ -48,6 +48,21 @@ class MainScaffoldSearchTest {
         )
     }
 
+    @Test
+    fun albumSelectAllTogglesOnlySelectableAlbumItems() {
+        val albumIds = setOf(1L, 2L, 3L)
+        val reserved = setOf(3L)
+
+        assertEquals(
+            setOf(1L, 2L, 9L),
+            toggleAlbumSelection(setOf(9L), albumIds, reserved),
+        )
+        assertEquals(
+            setOf(9L),
+            toggleAlbumSelection(setOf(1L, 2L, 9L), albumIds, reserved),
+        )
+    }
+
     private fun mediaEntry(id: Long, path: String) = MediaEntry(
         contentId = id,
         uri = "content://media/$id",

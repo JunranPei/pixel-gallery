@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import kotlinx.coroutines.flow.*
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
@@ -143,6 +144,20 @@ internal fun shouldSwitchHomeHeader(
     if (widthPx <= 0f) return false
     return abs(dragOffsetPx) / widthPx >= HomeHeaderSwipeDistanceFraction ||
         abs(velocityPxPerSecond) / widthPx >= HomeHeaderSwipeVelocityInWidthsPerSecond
+}
+
+internal fun toggleAlbumSelection(
+    selectedIds: Set<Long>,
+    albumIds: Set<Long>,
+    reservedIds: Set<Long>,
+): Set<Long> {
+    val selectableIds = albumIds - reservedIds
+    if (selectableIds.isEmpty()) return selectedIds - reservedIds
+    return if (selectableIds.all { it in selectedIds }) {
+        selectedIds - selectableIds
+    } else {
+        (selectedIds + selectableIds) - reservedIds
+    }
 }
 
 private val AlbumGridStatesSaver = listSaver<MutableMap<String, LazyGridState>, Any>(
@@ -812,6 +827,33 @@ fun MainScaffold(
                         }
                     },
                     actions = {
+                        if (currentScreen is Screen.Photo) {
+                            val currentAlbumName = currentScreen.albumName
+                            val currentAlbumIds = albumPhotoLists[currentAlbumName]
+                                .orEmpty()
+                                .map { it.contentId }
+                                .filterNot { it in quickQueue.reservedIds }
+                                .toSet()
+                            val isAlbumFullySelected = currentAlbumIds.isNotEmpty() &&
+                                currentAlbumIds.all { it in selectedIds }
+                            IconButton(
+                                enabled = currentAlbumIds.isNotEmpty(),
+                                onClick = {
+                                    selectedIds = toggleAlbumSelection(
+                                        selectedIds = selectedIds,
+                                        albumIds = currentAlbumIds,
+                                        reservedIds = quickQueue.reservedIds,
+                                    )
+                                },
+                            ) {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = stringResource(
+                                        if (isAlbumFullySelected) R.string.deselect_all else R.string.select_all
+                                    ),
+                                )
+                            }
+                        }
                         if (currentScreen == Screen.Trash) {
                             IconButton(onClick = {
                                 photosViewModel.restoreMediaBulk(selectedEntries.map { it.uri })

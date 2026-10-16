@@ -1,11 +1,14 @@
 package com.pixel.gallery.ui.gallery
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.ui.res.stringResource
@@ -13,7 +16,20 @@ import com.pixel.gallery.R
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.home.PhotosScreen
@@ -37,6 +53,55 @@ import kotlinx.coroutines.flow.*
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.components.GalleryOverflowMenu
 import com.pixel.gallery.ui.components.GalleryMenuRow
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+private const val PhotoHeaderSwipeDistanceFraction = 0.2f
+private const val PhotoHeaderSwipeVelocityInWidthsPerSecond = 1.25f
+
+internal fun shouldSwitchPhotoHeader(
+    dragOffsetPx: Float,
+    widthPx: Float,
+    velocityPxPerSecond: Float,
+): Boolean {
+    if (widthPx <= 0f) return false
+    return abs(dragOffsetPx) / widthPx >= PhotoHeaderSwipeDistanceFraction ||
+        abs(velocityPxPerSecond) / widthPx >= PhotoHeaderSwipeVelocityInWidthsPerSecond
+}
+
+private data class PhotoHeaderTransitionState(
+    val isSearchMode: Boolean = false,
+    val dragOffsetPx: Float = 0f,
+)
+
+private fun MediaEntry.matchesAlbumSearch(query: String): Boolean {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isEmpty()) return true
+    return path.contains(normalizedQuery, ignoreCase = true) ||
+        uri.contains(normalizedQuery, ignoreCase = true)
+}
+
+internal fun filterAlbumGridItems(
+    items: List<GridItem>,
+    query: String,
+): List<GridItem> {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isEmpty()) return items
+
+    val result = ArrayList<GridItem>(items.size)
+    var pendingHeader: GridItem.Header? = null
+    items.forEach { item ->
+        when (item) {
+            is GridItem.Header -> pendingHeader = item
+            is GridItem.Photo -> if (item.entry.matchesAlbumSearch(normalizedQuery)) {
+                pendingHeader?.let(result::add)
+                pendingHeader = null
+                result.add(item)
+            }
+        }
+    }
+    return result
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +123,21 @@ fun PhotoScreen(
     val gridColumns by viewModel.gridColumns.collectAsState()
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
+    var headerTransition by remember { mutableStateOf(PhotoHeaderTransitionState()) }
+    var isHeaderAnimating by remember { mutableStateOf(false) }
+    var headerWidthPx by remember { mutableFloatStateOf(0f) }
+    var searchQuery by rememberSaveable(albumName) { mutableStateOf("") }
+    val normalizedSearchQuery = searchQuery.trim()
+    val searchFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val headerDraggableState = rememberDraggableState { delta ->
+        if (!isHeaderAnimating && headerWidthPx > 0f) {
+            headerTransition = headerTransition.copy(
+                dragOffsetPx = (headerTransition.dragOffsetPx + delta)
+                    .coerceIn(-headerWidthPx, headerWidthPx),
+            )
+        }
+    }
     
     val albumItems by remember(albumName, gridColumns, photoSortOrder) {
         viewModel.photos.map { all ->
@@ -74,8 +154,22 @@ fun PhotoScreen(
     val albumPhotos = remember(albumItems) {
         albumItems.mapNotNull { (it as? GridItem.Photo)?.entry }
     }
+    val displayedAlbumItems = remember(albumItems, normalizedSearchQuery) {
+        filterAlbumGridItems(albumItems, normalizedSearchQuery)
+    }
     LaunchedEffect(albumName, albumPhotos) {
         onAlbumPhotosChanged(albumPhotos)
+    }
+    LaunchedEffect(headerTransition.isSearchMode) {
+        if (headerTransition.isSearchMode) {
+            searchFocusRequester.requestFocus()
+        } else {
+            focusManager.clearFocus(force = true)
+            searchQuery = ""
+        }
+    }
+    BackHandler(enabled = headerTransition.isSearchMode) {
+        headerTransition = PhotoHeaderTransitionState()
     }
 
     val photoCount = remember(albumItems) {
@@ -102,17 +196,106 @@ fun PhotoScreen(
         topBar = {
             if (selectedIds.isEmpty()) {
                 TopAppBar(
-                    title = { 
-                        Column {
-                            Text(
-                                java.io.File(albumName).name,
-                                style = EmphasizedTypography.TitleLarge
-                            )
-                            Text(
-                                "$photoCount items",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    title = {
+                        val dragOffsetPx = headerTransition.dragOffsetPx
+                        val dragDirection = when {
+                            dragOffsetPx > 0f -> 1f
+                            dragOffsetPx < 0f -> -1f
+                            else -> 1f
+                        }
+                        val nextPageOffsetPx = dragOffsetPx - dragDirection * headerWidthPx
+                        val titleOffsetPx = if (headerTransition.isSearchMode) nextPageOffsetPx else dragOffsetPx
+                        val searchOffsetPx = if (headerTransition.isSearchMode) dragOffsetPx else nextPageOffsetPx
+                        val headerPage: @Composable (Boolean, Modifier) -> Unit = { searchPage, pageModifier ->
+                            Box(
+                                modifier = pageModifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (!searchPage) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Text(
+                                            java.io.File(albumName).name,
+                                            style = EmphasizedTypography.TitleLarge,
+                                        )
+                                        Text(
+                                            "$photoCount items",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                } else {
+                                    OutlinedTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(56.dp)
+                                            .focusRequester(searchFocusRequester),
+                                        placeholder = {
+                                            Text(stringResource(R.string.album_search_files))
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Search, contentDescription = null)
+                                        },
+                                        trailingIcon = {
+                                            if (searchQuery.isNotEmpty()) {
+                                                IconButton(onClick = { searchQuery = "" }) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = stringResource(R.string.album_clear_search),
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        singleLine = true,
+                                        shape = CircleShape,
+                                    )
+                                }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .onSizeChanged { headerWidthPx = it.width.toFloat() }
+                                .draggable(
+                                    state = headerDraggableState,
+                                    orientation = Orientation.Horizontal,
+                                    enabled = !isHeaderAnimating,
+                                    onDragStopped = { velocity ->
+                                        if (headerWidthPx <= 0f || headerTransition.dragOffsetPx == 0f) {
+                                            headerTransition = headerTransition.copy(dragOffsetPx = 0f)
+                                            return@draggable
+                                        }
+                                        val startingState = headerTransition
+                                        val switchPage = shouldSwitchPhotoHeader(
+                                            startingState.dragOffsetPx,
+                                            headerWidthPx,
+                                            velocity,
+                                        )
+                                        val direction = if (startingState.dragOffsetPx > 0f) 1f else -1f
+                                        val targetOffset = if (switchPage) direction * headerWidthPx else 0f
+                                        isHeaderAnimating = true
+                                        try {
+                                            val animation = Animatable(startingState.dragOffsetPx)
+                                            animation.animateTo(
+                                                targetValue = targetOffset,
+                                                animationSpec = tween(durationMillis = 180),
+                                            ) {
+                                                headerTransition = startingState.copy(dragOffsetPx = value)
+                                            }
+                                            headerTransition = PhotoHeaderTransitionState(
+                                                isSearchMode = if (switchPage) !startingState.isSearchMode else startingState.isSearchMode,
+                                            )
+                                        } finally {
+                                            isHeaderAnimating = false
+                                        }
+                                    },
+                                ),
+                        ) {
+                            headerPage(false, Modifier.offset { IntOffset(titleOffsetPx.roundToInt(), 0) })
+                            headerPage(true, Modifier.offset { IntOffset(searchOffsetPx.roundToInt(), 0) })
                         }
                     },
                     navigationIcon = {
@@ -185,14 +368,19 @@ fun PhotoScreen(
             PhotosScreen(
                 quickSort = quickSort,
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
-                items = albumItems,
+                items = displayedAlbumItems,
                 onNavigateToViewer = onNavigateToViewer,
                 selectedIds = selectedIds,
                 onSelectionChange = onSelectionChange,
                 onToggleSelection = onToggleSelection,
                 columns = gridColumns,
                 onColumnsChange = { viewModel.setGridColumns(it) },
-                state = gridState
+                state = gridState,
+                emptyMessage = if (normalizedSearchQuery.isNotEmpty()) {
+                    stringResource(R.string.album_no_matching_files)
+                } else {
+                    null
+                },
             )
         }
     }
