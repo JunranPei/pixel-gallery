@@ -68,7 +68,7 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
                             1 -> DuplicateReviewDialog(
                                 DuplicateUiState(title = "Synthetic duplicates", phase = DuplicatePhase.REVIEW,
                                     result = DuplicateScanResult(emptyList(), emptyList(), 2)), {}, {}, {})
-                            2 -> PhotoScreen(albumName = "/Pictures/UiFixture", onBack = {}, onNavigateToViewer = {})
+                            2 -> PhotoScreen(albumName = "/Pictures/UiFixture", onBack = {}, onNavigateToViewer = { _, _, _ -> })
                             3 -> ViewerScreen(initialId = media.contentId, photos = listOf(media),
                                 transformStateStore = remember { ViewerTransformStateStore() }, onBack = {})
                         }

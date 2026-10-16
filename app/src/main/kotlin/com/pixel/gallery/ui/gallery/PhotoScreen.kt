@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.R
 import androidx.compose.material.icons.outlined.FolderOff
@@ -50,8 +51,11 @@ import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
 import com.pixel.gallery.data.local.entity.MediaEntry
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.MediaTypeMenuSection
+import com.pixel.gallery.model.MediaTypeFilter
 import com.pixel.gallery.ui.components.GalleryMenuRow
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -74,7 +78,7 @@ private data class PhotoHeaderTransitionState(
     val dragOffsetPx: Float = 0f,
 )
 
-private fun MediaEntry.matchesAlbumSearch(query: String): Boolean {
+internal fun MediaEntry.matchesAlbumSearch(query: String): Boolean {
     val normalizedQuery = query.trim()
     if (normalizedQuery.isEmpty()) return true
     return path.contains(normalizedQuery, ignoreCase = true) ||
@@ -84,16 +88,17 @@ private fun MediaEntry.matchesAlbumSearch(query: String): Boolean {
 internal fun filterAlbumGridItems(
     items: List<GridItem>,
     query: String,
+    mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
 ): List<GridItem> {
     val normalizedQuery = query.trim()
-    if (normalizedQuery.isEmpty()) return items
+    if (normalizedQuery.isEmpty() && mediaType == MediaTypeFilter.ALL) return items
 
     val result = ArrayList<GridItem>(items.size)
     var pendingHeader: GridItem.Header? = null
     items.forEach { item ->
         when (item) {
             is GridItem.Header -> pendingHeader = item
-            is GridItem.Photo -> if (item.entry.matchesAlbumSearch(normalizedQuery)) {
+            is GridItem.Photo -> if (mediaType.matches(item.entry) && item.entry.matchesAlbumSearch(normalizedQuery)) {
                 pendingHeader?.let(result::add)
                 pendingHeader = null
                 result.add(item)
@@ -103,12 +108,19 @@ internal fun filterAlbumGridItems(
     return result
 }
 
+private data class AlbumBrowseResult(
+    val mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
+    val query: String = "",
+    val albumPhotos: List<MediaEntry> = emptyList(),
+    val items: List<GridItem> = emptyList(),
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhotoScreen(
     albumName: String,
     onBack: () -> Unit,
-    onNavigateToViewer: (Long) -> Unit,
+    onNavigateToViewer: (Long, MediaTypeFilter, String) -> Unit,
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
@@ -117,6 +129,8 @@ fun PhotoScreen(
     gridState: LazyGridState = rememberLazyGridState(),
     quickSort: QuickSortUiConfig? = null,
     onToggleQuickSort: () -> Unit = {},
+    initialMediaType: MediaTypeFilter = MediaTypeFilter.ALL,
+    isForeground: Boolean = true,
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val allPhotos by viewModel.allPhotos.collectAsState()
@@ -128,6 +142,9 @@ fun PhotoScreen(
     var headerWidthPx by remember { mutableFloatStateOf(0f) }
     var searchQuery by rememberSaveable(albumName) { mutableStateOf("") }
     val normalizedSearchQuery = searchQuery.trim()
+    // This visit inherits the parent once; subsequent choices stay local.
+    var mediaType by rememberSaveable(albumName) { mutableStateOf(initialMediaType) }
+    val scope = rememberCoroutineScope()
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val headerDraggableState = rememberDraggableState { delta ->
@@ -139,26 +156,32 @@ fun PhotoScreen(
         }
     }
     
-    val albumItems by remember(albumName, gridColumns, photoSortOrder) {
-        viewModel.photos.map { all ->
-            val filtered = all.filter { 
+    val albumResult by remember(albumName, gridColumns, photoSortOrder) {
+        combine(viewModel.photos, snapshotFlow { mediaType to searchQuery.trim() }) { all, (type, query) ->
+            val filtered = all.filter {
                 if (albumName.contains('/')) java.io.File(it.path).parent == albumName
                 else viewModel.getParentFolderName(it.path) == albumName
             }
-            // groupMedia owns ordering and grouping, so both use the same
-            // effective timestamp instead of mixing bestTimestamp and EXIF time.
-            viewModel.groupMedia(filtered, gridColumns, photoSortOrder)
+            val items = viewModel.groupMedia(filtered, gridColumns, photoSortOrder)
+            AlbumBrowseResult(
+                mediaType = type,
+                query = query,
+                albumPhotos = items.mapNotNull { (it as? GridItem.Photo)?.entry },
+                items = filterAlbumGridItems(items, query, type),
+            )
         }.flowOn(kotlinx.coroutines.Dispatchers.Default)
-    }.collectAsState(initial = emptyList())
-
-    val albumPhotos = remember(albumItems) {
-        albumItems.mapNotNull { (it as? GridItem.Photo)?.entry }
+    }.collectAsState(initial = AlbumBrowseResult())
+    val albumPhotos = albumResult.albumPhotos
+    val displayedAlbumItems = if (albumResult.mediaType == mediaType && albumResult.query == normalizedSearchQuery) {
+        albumResult.items
+    } else {
+        emptyList()
     }
-    val displayedAlbumItems = remember(albumItems, normalizedSearchQuery) {
-        filterAlbumGridItems(albumItems, normalizedSearchQuery)
+    val displayedAlbumPhotos = remember(displayedAlbumItems) {
+        displayedAlbumItems.mapNotNull { (it as? GridItem.Photo)?.entry }
     }
-    LaunchedEffect(albumName, albumPhotos) {
-        onAlbumPhotosChanged(albumPhotos)
+    LaunchedEffect(albumName, displayedAlbumPhotos) {
+        onAlbumPhotosChanged(displayedAlbumPhotos)
     }
     LaunchedEffect(headerTransition.isSearchMode) {
         if (headerTransition.isSearchMode) {
@@ -168,13 +191,11 @@ fun PhotoScreen(
             searchQuery = ""
         }
     }
-    BackHandler(enabled = headerTransition.isSearchMode) {
+    BackHandler(enabled = isForeground && headerTransition.isSearchMode) {
         headerTransition = PhotoHeaderTransitionState()
     }
 
-    val photoCount = remember(albumItems) {
-        albumItems.count { it is GridItem.Photo }
-    }
+    val photoCount = displayedAlbumPhotos.size
 
     var showMenu by remember { mutableStateOf(false) }
     val albumPath by remember(allPhotos, albumName) {
@@ -218,7 +239,14 @@ fun PhotoScreen(
                                             style = EmphasizedTypography.TitleLarge,
                                         )
                                         Text(
-                                            "$photoCount items",
+                                            pluralStringResource(
+                                                when (mediaType) {
+                                                    MediaTypeFilter.ALL -> R.plurals.media_type_item_count
+                                                    MediaTypeFilter.IMAGES -> R.plurals.media_type_image_count
+                                                    MediaTypeFilter.VIDEOS -> R.plurals.media_type_video_count
+                                                },
+                                                photoCount, photoCount,
+                                            ),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -311,6 +339,14 @@ fun PhotoScreen(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
+                            MediaTypeMenuSection(mediaType) { type ->
+                                showMenu = false
+                                if (type != mediaType) {
+                                    mediaType = type
+                                    onSelectionChange(emptySet())
+                                    scope.launch { gridState.scrollToItem(0) }
+                                }
+                            }
                             if (quickSort == null) GalleryMenuRow(
                                 label = stringResource(R.string.qs_start),
                                 icon = Icons.Outlined.DriveFileMove,
@@ -369,7 +405,7 @@ fun PhotoScreen(
                 quickSort = quickSort,
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
                 items = displayedAlbumItems,
-                onNavigateToViewer = onNavigateToViewer,
+                onNavigateToViewer = { id -> onNavigateToViewer(id, mediaType, albumResult.query) },
                 selectedIds = selectedIds,
                 onSelectionChange = onSelectionChange,
                 onToggleSelection = onToggleSelection,
@@ -378,8 +414,10 @@ fun PhotoScreen(
                 state = gridState,
                 emptyMessage = if (normalizedSearchQuery.isNotEmpty()) {
                     stringResource(R.string.album_no_matching_files)
-                } else {
-                    null
+                } else when (mediaType) {
+                    MediaTypeFilter.ALL -> null
+                    MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_images)
+                    MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_videos)
                 },
             )
         }

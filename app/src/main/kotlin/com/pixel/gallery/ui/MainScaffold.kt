@@ -27,6 +27,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
 import com.pixel.gallery.data.local.entity.MediaEntry
+import com.pixel.gallery.model.MediaTypeFilter
+import com.pixel.gallery.ui.viewmodel.buildMediaAlbums
+import com.pixel.gallery.ui.gallery.matchesAlbumSearch
 import com.pixel.gallery.model.Album
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
@@ -125,15 +128,13 @@ private data class HomeHeaderTransitionState(
     val dragOffsetPx: Float = 0f,
 )
 
-private data class HomePhotoSearchResult(
-    val query: String,
-    val photos: List<MediaEntry>,
-    val gridItems: List<GridItem>,
-)
-
-private data class HomeAlbumSearchResult(
-    val query: String,
-    val albums: List<Album>,
+private data class HomeBrowseResult(
+    val mediaType: MediaTypeFilter,
+    val photoQuery: String = "",
+    val albumQuery: String = "",
+    val photos: List<MediaEntry> = emptyList(),
+    val gridItems: List<GridItem> = emptyList(),
+    val albums: List<Album> = emptyList(),
 )
 
 internal fun shouldSwitchHomeHeader(
@@ -242,10 +243,14 @@ sealed class Screen : Parcelable {
         val externalMimeType: String? = null,
         val searchQuery: String? = null,
         val labelId: Long? = null,
+        val mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     ) : Screen()
     @Parcelize object ExcludedFolders : Screen()
     @Parcelize object Licenses : Screen()
-    @Parcelize data class Photo(val albumName: String) : Screen()
+    @Parcelize data class Photo(
+        val albumName: String,
+        val initialMediaType: MediaTypeFilter = MediaTypeFilter.ALL,
+    ) : Screen()
     @Parcelize object PerformanceSettings : Screen()
     @Parcelize object ThemeSettings : Screen()
     @Parcelize object DisplaySettings : Screen()
@@ -507,90 +512,50 @@ fun MainScaffold(
             )
         }
     }
+    var homeMediaType by rememberSaveable { mutableStateOf(MediaTypeFilter.ALL) }
     var photoSearchQuery by rememberSaveable { mutableStateOf("") }
     var albumSearchQuery by rememberSaveable { mutableStateOf("") }
     val normalizedPhotoSearchQuery = photoSearchQuery.trim()
     val normalizedAlbumSearchQuery = albumSearchQuery.trim()
-    var photoSearchResult by remember {
-        mutableStateOf(
-            HomePhotoSearchResult(
-                query = "",
-                photos = allPhotos,
-                gridItems = groupedPhotos,
-            ),
-        )
+    // Publish the grid and album metadata together, from one filtered snapshot.
+    // Large libraries and date grouping stay off the UI thread.
+    val browseResult by produceState(
+        HomeBrowseResult(MediaTypeFilter.ALL),
+        allPhotos, gridColumns, photoSortOrder, albumSortOrder,
+        homeMediaType, normalizedPhotoSearchQuery, normalizedAlbumSearchQuery,
+    ) {
+        val type = homeMediaType
+        val photoQuery = normalizedPhotoSearchQuery
+        val albumQuery = normalizedAlbumSearchQuery
+        if (photoQuery.isNotEmpty() || albumQuery.isNotEmpty()) delay(HomeSearchDebounceMillis)
+        value = withContext(Dispatchers.Default) {
+            val media = if (type == MediaTypeFilter.ALL) allPhotos else allPhotos.filter(type::matches)
+            val photos = if (photoQuery.isEmpty()) media else media.filter { it.matchesFileSearch(photoQuery) }
+            val mediaAlbums = buildMediaAlbums(media, albumSortOrder)
+            HomeBrowseResult(
+                mediaType = type,
+                photoQuery = photoQuery,
+                albumQuery = albumQuery,
+                photos = photos,
+                gridItems = photosViewModel.groupMedia(photos, gridColumns, photoSortOrder),
+                albums = if (albumQuery.isEmpty()) mediaAlbums else mediaAlbums.filter {
+                    it.name.contains(albumQuery, ignoreCase = true)
+                },
+            )
+        }
     }
-    var albumSearchResult by remember {
-        mutableStateOf(HomeAlbumSearchResult(query = "", albums = albums))
-    }
-    val searchedPhotos = if (normalizedPhotoSearchQuery.isEmpty()) {
-        allPhotos
-    } else {
-        photoSearchResult.photos
-    }
-    val searchedPhotoGridItems = if (normalizedPhotoSearchQuery.isEmpty()) {
-        groupedPhotos
-    } else {
-        photoSearchResult.gridItems
-    }
-    val searchedAlbums = if (normalizedAlbumSearchQuery.isEmpty()) {
-        albums
-    } else {
-        albumSearchResult.albums
-    }
+    // Never let the previous type remain selectable while a new snapshot is built.
+    val searchedPhotos = if (browseResult.mediaType == homeMediaType) browseResult.photos else emptyList()
+    val searchedPhotoGridItems = if (browseResult.mediaType == homeMediaType) browseResult.gridItems else emptyList()
+    val searchedAlbums = if (browseResult.mediaType == homeMediaType) browseResult.albums else emptyList()
     val photoSearchGridState = rememberLazyGridState()
     val albumSearchGridState = rememberLazyGridState()
 
-    // Keep text entry on the UI thread and move the potentially large file scan
-    // off it. A new keystroke cancels this effect, so an obsolete result cannot
-    // replace a newer query.
-    LaunchedEffect(allPhotos, groupedPhotos, normalizedPhotoSearchQuery) {
-        val query = normalizedPhotoSearchQuery
-        if (query.isEmpty()) {
-            photoSearchResult = HomePhotoSearchResult(
-                query = "",
-                photos = allPhotos,
-                gridItems = groupedPhotos,
-            )
-        } else {
-            delay(HomeSearchDebounceMillis)
-            val result = withContext(Dispatchers.Default) {
-                HomePhotoSearchResult(
-                    query = query,
-                    photos = allPhotos.filter { it.matchesFileSearch(query) },
-                    gridItems = filterPhotoGridItems(groupedPhotos, query),
-                )
-            }
-            photoSearchResult = result
-        }
+    LaunchedEffect(browseResult.photoQuery) {
+        if (browseResult.photoQuery.isNotEmpty()) photoSearchGridState.scrollToItem(0)
     }
-    LaunchedEffect(albums, normalizedAlbumSearchQuery) {
-        val query = normalizedAlbumSearchQuery
-        if (query.isEmpty()) {
-            albumSearchResult = HomeAlbumSearchResult(query = "", albums = albums)
-        } else {
-            delay(HomeSearchDebounceMillis)
-            val result = withContext(Dispatchers.Default) {
-                HomeAlbumSearchResult(
-                    query = query,
-                    albums = albums.filter { album ->
-                        album.name.contains(query, ignoreCase = true)
-                    },
-                )
-            }
-            albumSearchResult = result
-        }
-    }
-
-    LaunchedEffect(photoSearchResult.query, searchedPhotos.size) {
-        if (photoSearchResult.query.isNotEmpty() && searchedPhotos.isNotEmpty()) {
-            photoSearchGridState.scrollToItem(0)
-        }
-    }
-    LaunchedEffect(albumSearchResult.query, searchedAlbums.size) {
-        if (albumSearchResult.query.isNotEmpty() && searchedAlbums.isNotEmpty()) {
-            albumSearchGridState.scrollToItem(0)
-        }
+    LaunchedEffect(browseResult.albumQuery) {
+        if (browseResult.albumQuery.isNotEmpty()) albumSearchGridState.scrollToItem(0)
     }
 
     // Initialize tab based on preference once
@@ -1022,6 +987,20 @@ fun MainScaffold(
                                                 }
                                                 HomeOverflowMenu(
                                                     expanded = showMenu,
+                                                    mediaType = homeMediaType,
+                                                    onMediaTypeChange = { type ->
+                                                        showMenu = false
+                                                        if (type != homeMediaType) {
+                                                            homeMediaType = type
+                                                            selectedIds = emptySet()
+                                                            scope.launch {
+                                                                recentsGridState.scrollToItem(0)
+                                                                albumsGridState.scrollToItem(0)
+                                                                photoSearchGridState.scrollToItem(0)
+                                                                albumSearchGridState.scrollToItem(0)
+                                                            }
+                                                        }
+                                                    },
                                                     onDismissRequest = { showMenu = false },
                                                     showQuickSort = homePagerState.currentPage == 0 && !quickSortEnabled,
                                                     sortLabel = if (homePagerState.currentPage == 0) "Sort photos" else "Sort albums",
@@ -1251,7 +1230,7 @@ fun MainScaffold(
                                 quickSort = quickSortConfig,
                                 items = searchedPhotoGridItems,
                                 onNavigateToViewer = { id ->
-                                    val isSearchActive = normalizedPhotoSearchQuery.isNotEmpty()
+                                    val isSearchActive = browseResult.photoQuery.isNotEmpty()
                                     ViewerLoadMetrics.entryRequested(
                                         context.applicationContext,
                                         id,
@@ -1260,7 +1239,7 @@ fun MainScaffold(
                                         } else {
                                             Screen.ViewerSource.All.name
                                         },
-                                        if (isSearchActive) searchedPhotos.size else allPhotos.size,
+                                        searchedPhotos.size,
                                     )
                                     navigationStack = navigationStack + Screen.Viewer(
                                         initialId = id,
@@ -1269,7 +1248,8 @@ fun MainScaffold(
                                         } else {
                                             Screen.ViewerSource.All
                                         },
-                                        searchQuery = normalizedPhotoSearchQuery.takeIf { isSearchActive },
+                                        searchQuery = browseResult.photoQuery.takeIf { isSearchActive },
+                                        mediaType = homeMediaType,
                                     )
                                 },
                                 selectedIds = selectedIds,
@@ -1285,8 +1265,10 @@ fun MainScaffold(
                                 },
                                 emptyMessage = if (normalizedPhotoSearchQuery.isNotEmpty()) {
                                     "No matching files"
-                                } else {
-                                    null
+                                } else when (homeMediaType) {
+                                    MediaTypeFilter.ALL -> null
+                                    MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_images)
+                                    MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_videos)
                                 },
                             )
                             1 -> AlbumsScreen(
@@ -1299,7 +1281,7 @@ fun MainScaffold(
                                 },
                                 onNavigateToFavourites = { navigationStack = navigationStack + Screen.Labels },
                                 onNavigateToTrash = { navigationStack = navigationStack + Screen.Trash },
-                                onNavigateToAlbum = { name -> navigationStack = navigationStack + Screen.Photo(name) },
+                                onNavigateToAlbum = { name -> navigationStack = navigationStack + Screen.Photo(name, homeMediaType) },
                                 onExclude = { path -> photosViewModel.addExcludedFolder(path) },
                                 onHide = { path -> photosViewModel.addHiddenFolder(path) },
                                 columns = albumGridColumns,
@@ -1307,8 +1289,10 @@ fun MainScaffold(
                                 showHeaderButtons = normalizedAlbumSearchQuery.isEmpty(),
                                 emptyMessage = if (normalizedAlbumSearchQuery.isNotEmpty()) {
                                     "No matching albums"
-                                } else {
-                                    null
+                                } else when (homeMediaType) {
+                                    MediaTypeFilter.ALL -> null
+                                    MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_image_albums)
+                                    MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_video_albums)
                                 },
                             )
                         }
@@ -1419,8 +1403,10 @@ fun MainScaffold(
                         quickSort = quickSortConfig,
                         onToggleQuickSort = toggleQuickSort,
                         albumName = albumName,
+                        initialMediaType = baseScreen.initialMediaType,
+                        isForeground = currentScreen == baseScreen,
                         onBack = navigateBack,
-                        onNavigateToViewer = { id ->
+                        onNavigateToViewer = { id, type, query ->
                             ViewerLoadMetrics.entryRequested(
                                 context.applicationContext,
                                 id,
@@ -1428,7 +1414,10 @@ fun MainScaffold(
                                 allPhotos.size,
                                 detail = "album=$albumName",
                             )
-                            navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Album, albumName)
+                            navigationStack = navigationStack + Screen.Viewer(
+                                id, Screen.ViewerSource.Album, albumName,
+                                searchQuery = query, mediaType = type,
+                            )
                         },
                         selectedIds = selectedIds,
                         onSelectionChange = updateSelection,
@@ -1516,9 +1505,9 @@ fun MainScaffold(
                     val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
                     var listSource = "DIRECT"
                     val result = when (viewer.source) {
-                        Screen.ViewerSource.All -> allPhotos
+                        Screen.ViewerSource.All -> if (viewer.mediaType == MediaTypeFilter.ALL) allPhotos else allPhotos.filter(viewer.mediaType::matches)
                         Screen.ViewerSource.Search -> allPhotos.filter {
-                            it.matchesFileSearch(viewer.searchQuery.orEmpty())
+                            viewer.mediaType.matches(it) && it.matchesFileSearch(viewer.searchQuery.orEmpty())
                         }
                         Screen.ViewerSource.Favourites -> favourites
                         Screen.ViewerSource.Label -> activeLabelPhotos
@@ -1537,6 +1526,8 @@ fun MainScaffold(
                                         if (viewer.albumName?.contains('/') == true) parentPath == viewer.albumName else parentName == viewer.albumName
                                     }
                                 }
+                            }.filter {
+                                viewer.mediaType.matches(it) && it.matchesAlbumSearch(viewer.searchQuery.orEmpty())
                             }
                         }
                         Screen.ViewerSource.External -> {

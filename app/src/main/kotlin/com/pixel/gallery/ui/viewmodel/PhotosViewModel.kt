@@ -333,21 +333,7 @@ class PhotosViewModel @Inject constructor(
         photos,
         albumSortOrder
     ) { photosList, sort ->
-        val grouped = photosList.groupBy { java.io.File(it.path).parent.orEmpty() }
-            .map { (parentPath, entries) ->
-            val firstEntry = entries.first()
-            val name = java.io.File(parentPath).name.ifBlank { "Unknown" }
-            val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
-            Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
-        }
-        when (sort) {
-            AlbumSortOrder.NAME_ASC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a1.name, a2.name) }
-            AlbumSortOrder.NAME_DESC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a2.name, a1.name) }
-            AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
-            AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
-            AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
-            AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
-        }
+        buildMediaAlbums(photosList, sort)
     }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -726,3 +712,22 @@ private val MEDIA_DATE_ASCENDING =
     compareBy<MediaEntry> { it.chronologicalTimestamp() }
         .thenBy { it.dateModifiedMillis }
         .thenBy { it.contentId }
+
+/** Build album metadata exclusively from the entries currently being browsed. */
+internal fun buildMediaAlbums(photosList: List<MediaEntry>, sort: AlbumSortOrder): List<Album> {
+    val grouped = photosList.groupBy { java.io.File(it.path).parent.orEmpty() }
+        .map { (parentPath, entries) ->
+        val firstEntry = entries.first()
+        val name = java.io.File(parentPath).name.ifBlank { "Unknown" }
+        val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
+        Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
+    }
+    return when (sort) {
+        AlbumSortOrder.NAME_ASC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a1.name, a2.name) }
+        AlbumSortOrder.NAME_DESC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a2.name, a1.name) }
+        AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
+        AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
+        AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
+        AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
+    }
+}

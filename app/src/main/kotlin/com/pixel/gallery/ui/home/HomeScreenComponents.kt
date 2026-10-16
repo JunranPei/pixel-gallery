@@ -626,7 +626,7 @@ fun AlbumsScreen(
                 key = { albums[it].path }
             ) { index ->
                 val album = albums[index]
-                val onAlbumClick = remember(album.path) { { onNavigateToAlbum(album.path) } }
+                val onAlbumClick = { onNavigateToAlbum(album.path) }
                 val onAlbumExclude = remember(album.path) { { onExclude(album.path) } }
                 val onAlbumHide = remember(album.path) { { onHide(album.path) } }
                 AlbumCard(

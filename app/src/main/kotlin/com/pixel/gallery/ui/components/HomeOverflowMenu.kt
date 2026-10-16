@@ -31,9 +31,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
+import com.pixel.gallery.model.MediaTypeFilter
 
 @Composable
 fun HomeOverflowMenu(
@@ -49,8 +52,11 @@ fun HomeOverflowMenu(
     onHiddenAlbums: () -> Unit,
     onLockedFolder: () -> Unit,
     onSettings: () -> Unit,
+    mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
+    onMediaTypeChange: (MediaTypeFilter) -> Unit = {},
 ) {
     GalleryOverflowMenu(expanded, onDismissRequest) {
+        MediaTypeMenuSection(mediaType, onMediaTypeChange)
         if (showQuickSort) {
             GalleryMenuRow(
                 label = stringResource(R.string.qs_start),
@@ -76,10 +82,14 @@ fun GalleryOverflowMenu(
     onDismissRequest: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val menuWidth = minOf(
+        (236 * LocalDensity.current.fontScale.coerceAtLeast(1f)).dp,
+        (LocalConfiguration.current.screenWidthDp - 32).dp,
+    )
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
-        modifier = Modifier.width(236.dp),
+        modifier = Modifier.width(menuWidth),
         shape = RoundedCornerShape(32.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 0.dp,
