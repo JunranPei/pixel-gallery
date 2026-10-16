@@ -98,9 +98,22 @@ class MediaDeduplicationTest {
 
         val result = engine.scan(listOf(entry(1, size = 1), entry(2, size = 2)))
 
-        assertEquals(0, opened)
+        assertEquals(2, opened)
         assertEquals(2, result.scannedCount)
         assertTrue(result.groups.isEmpty())
+    }
+
+    @Test
+    fun staleProviderSizesDoNotHideIdenticalCopies() = runBlocking {
+        val first = entry(1, "/Pictures/Target/photo.jpg", size = 1)
+        val copied = entry(2, "/Pictures/Target/photo (1).jpg", size = 999)
+        val engine = MediaDeduplication { "same-content".byteInputStream() }
+
+        val group = engine.scan(listOf(first, copied), DeduplicationScope.WITHIN_ALBUMS).groups.single()
+
+        assertEquals(setOf(1L, 2L), group.entries.map { it.contentId }.toSet())
+        assertEquals("same-content".length.toLong(), group.fingerprint.sizeBytes)
+        assertEquals(group.fingerprint.sizeBytes, group.entries[1].sizeBytes)
     }
 
     @Test
@@ -115,7 +128,7 @@ class MediaDeduplicationTest {
         val result = MediaDeduplication { opened++; "same".byteInputStream() }
             .scan(listOf(a, b, bridge, repeatedId, repeatedPath, a))
 
-        assertEquals(0, opened)
+        assertEquals(1, opened)
         assertTrue(result.groups.isEmpty())
     }
 
@@ -154,9 +167,9 @@ class MediaDeduplicationTest {
         val result = engine.scan((1L..6L).map { entry(it) })
 
         assertEquals(listOf(5L, 6L), result.groups.single().entries.map { it.contentId })
-        assertEquals(4, result.skippedCount)
+        assertEquals(2, result.skippedCount)
         assertEquals(6, result.scannedCount)
-        assertEquals(2, result.skipped.count { it.reason == DuplicateSkipReason.CONTENT_CHANGED })
+        assertEquals(0, result.skipped.count { it.reason == DuplicateSkipReason.CONTENT_CHANGED })
     }
 
     @Test

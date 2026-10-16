@@ -18,6 +18,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.io.File
 import javax.inject.Inject
 
 /** Uses the same content URI for verification and the system recycle-bin request. */
@@ -44,8 +45,31 @@ class DuplicateRepository @Inject constructor(
         scope: DeduplicationScope,
         onProgress: (DuplicateScanProgress) -> Unit,
     ): DuplicateScanResult = withContext(Dispatchers.IO) {
-        scanner.scan(entries, scope, onProgress)
+        // A transfer completes its MediaStore mutation before the gallery's
+        // observer-driven Room snapshot necessarily reaches this screen. Read
+        // the provider again so a just-created keep-both copy participates in
+        // the scan instead of scanning the pre-transfer list supplied by UI.
+        val currentEntries = refreshedScanEntries(entries, scope)
+        scanner.scan(currentEntries, scope, onProgress)
     }
+
+    private suspend fun refreshedScanEntries(
+        seed: List<MediaEntry>,
+        scope: DeduplicationScope,
+    ): List<MediaEntry> {
+        // The all-files page already supplies the repository's complete active
+        // snapshot. Refreshing it here would also pull unrelated MediaStore rows
+        // into isolated scans (and needlessly hash the whole device). Album
+        // scans are the transfer-sensitive path and are refreshed below.
+        if (scope == DeduplicationScope.ALL_FILES) return seed
+        mediaRepository.syncWhenMediaMutationsIdle(force = true)
+        val current = mediaRepository.currentActiveEntries()
+        val folders = seed.mapNotNull { folderOf(it.path) }.toSet()
+        return current.filter { folderOf(it.path) in folders }
+    }
+
+    private fun folderOf(path: String): String? =
+        File(path).parent?.replace('\\', '/')?.trimEnd('/')?.ifBlank { null }
 
     suspend fun validate(
         result: DuplicateScanResult,
@@ -94,12 +118,10 @@ class DuplicateRepository @Inject constructor(
                         // Match the snapshot used during validation. A concurrent writer or
                         // mover then produces zero rows instead of trashing a changed file.
                         val selection = "${MediaStore.MediaColumns.DATA} = ? AND " +
-                            "${MediaStore.MediaColumns.SIZE} = ? AND " +
                             "${MediaStore.MediaColumns.DATE_MODIFIED} = ? AND " +
                             "${MediaStore.MediaColumns.IS_TRASHED} = 0"
                         val selectionArgs = arrayOf(
                             entry.path,
-                            entry.sizeBytes.toString(),
                             (entry.dateModifiedMillis / 1000L).toString(),
                         )
                         resolver.update(Uri.parse(entry.uri), values, selection, selectionArgs) == 1 &&
@@ -113,11 +135,13 @@ class DuplicateRepository @Inject constructor(
     }
 
     private fun isCurrentActiveEntry(entry: MediaEntry): Boolean {
-        val projection = mutableListOf(MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.SIZE)
+        // Do not reject a just-copied file because MediaStore's SIZE column is
+        // still stale. The scanner hashes the stream and records its actual byte
+        // count; the final mutation then uses that verified snapshot size.
+        val projection = mutableListOf(MediaStore.MediaColumns.DATA)
         if (canTrash) projection += MediaStore.MediaColumns.IS_TRASHED
         return query(entry, projection.toTypedArray()) { cursor ->
-            cursor.getString(0) == entry.path && cursor.getLong(1) == entry.sizeBytes &&
-                (!canTrash || cursor.getInt(2) == 0)
+            cursor.getString(0) == entry.path && (!canTrash || cursor.getInt(1) == 0)
         }
     }
 

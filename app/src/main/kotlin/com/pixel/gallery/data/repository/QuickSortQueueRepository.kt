@@ -329,6 +329,7 @@ class QuickSortQueueRepository @Inject constructor(
         mutex.withLock { mutableState.value = state.value.copy(serviceActive = true) }
         var changesSinceSync = 0
         var lastSync = System.currentTimeMillis()
+        val transientRetries = mutableSetOf<String>()
         try {
             while (!pauseRequested && currentCoroutineContext().isActive) {
                 val job = mutex.withLock {
@@ -373,6 +374,7 @@ class QuickSortQueueRepository @Inject constructor(
                 }
                 val entry = job.items[itemIndex].entry
                 mutex.withLock { updateItem(job.id, itemIndex) { it.copy(status = QuickSortItemStatus.Running) } }
+                var retryTransientFailure = false
                 // Cancellation and FGS shutdown stop at the next file boundary, never halfway through source deletion.
                 withContext(NonCancellable) {
                     try {
@@ -405,10 +407,22 @@ class QuickSortQueueRepository @Inject constructor(
                             }
                         }
                     } catch (error: Exception) {
-                        val rollbackError = restoreFailedReplacement(job.id, itemIndex)
-                        mutex.withLock { updateItem(job.id, itemIndex) { it.copy(status = QuickSortItemStatus.Failed,
-                            error = rollbackError ?: error.message ?: "Move failed; inspect original and destination") } }
+                        val retryKey = "${job.id}:$itemIndex"
+                        if (retryKey !in transientRetries && isTransientQuickMoveFailure(error)) {
+                            transientRetries += retryKey
+                            retryTransientFailure = true
+                            mutex.withLock { updateItem(job.id, itemIndex) { it.copy(status = QuickSortItemStatus.Queued, error = null) } }
+                        } else {
+                            val rollbackError = restoreFailedReplacement(job.id, itemIndex)
+                            mutex.withLock { updateItem(job.id, itemIndex) { it.copy(status = QuickSortItemStatus.Failed,
+                                error = rollbackError ?: error.message ?: "Move failed; inspect original and destination") } }
+                        }
                     }
+                }
+                if (retryTransientFailure) {
+                    runCatching { media.syncWhenMediaMutationsIdle(force = true) }
+                    delay(250L)
+                    continue
                 }
                 if (changesSinceSync >= 20 || (changesSinceSync > 0 && System.currentTimeMillis() - lastSync >= 2_000)) {
                     runCatching { media.syncWhenMediaMutationsIdle(force = true) }
@@ -441,6 +455,15 @@ class QuickSortQueueRepository @Inject constructor(
     private fun failQueued(jobId: String, reason: String) = updateJob(jobId) { job ->
         job.copy(status = QuickSortJobStatus.Completed, permissionToken = null,
             items = job.items.map { if (it.status == QuickSortItemStatus.Queued) it.copy(status = QuickSortItemStatus.Failed, error = reason) else it })
+    }
+
+    private fun isTransientQuickMoveFailure(error: Throwable): Boolean {
+        val message = generateSequence(error) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase(java.util.Locale.ROOT)
+        return "source media record is unavailable" in message ||
+            "original media timestamps could not be read" in message
     }
 
     private fun updateItem(jobId: String, index: Int, change: (QuickSortQueueItem) -> QuickSortQueueItem) {

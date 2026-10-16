@@ -118,6 +118,13 @@ class MediaRepository @Inject constructor(
     private val bmpIndexStore by lazy { IndexedBmpStore(context) }
     private val jxlIndexStore by lazy { IndexedJxlStore(context) }
 
+    private companion object {
+        private const val MEDIA_QUERY_ATTEMPTS = 3
+        private val MEDIA_QUERY_RETRY_DELAYS = longArrayOf(40L, 120L)
+        private const val QUICK_MOVE_SETTLE_ATTEMPTS = 4
+        private val QUICK_MOVE_SETTLE_DELAYS = longArrayOf(80L, 160L, 320L)
+    }
+
     internal suspend fun <T> withMediaMutation(block: suspend () -> T): T =
         mediaMutationMutex.withLock {
             mediaMutationInProgress = true
@@ -168,6 +175,15 @@ class MediaRepository @Inject constructor(
         started = SharingStarted.Eagerly,
         initialValue = emptyList()
     )
+
+    /** Reads the post-sync Room snapshot without waiting for the UI StateFlow to re-emit. */
+    internal suspend fun currentActiveEntries(): List<MediaEntry> = withContext(Dispatchers.IO) {
+        val excluded = settingsRepository.excludedFolders.first()
+        mediaDao.getAllEntriesPaged().filter { entry ->
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") &&
+                !excluded.any { entry.path.startsWith(it) }
+        }
+    }
 
     val favourites: StateFlow<List<MediaEntry>> = combine(
         mediaDao.observeFavouritesChanges().map { mediaDao.getFavouritesPaged() },
@@ -511,7 +527,7 @@ class MediaRepository @Inject constructor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
             return null
         }
-        val uris = entries.mapNotNull { runCatching { Uri.parse(it.uri) }.getOrNull() }
+        val uris = entries.mapNotNull { runCatching { Uri.parse(it.uri) }.getOrNull() }.distinct()
         if (uris.isEmpty()) return null
 
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
@@ -605,17 +621,17 @@ class MediaRepository @Inject constructor(
         val failures = mutableListOf<TransferItemFailure>()
 
         entries.forEachIndexed { index, entry ->
-            val sourceFile = File(entry.path)
+            val sourceFile = resolveTransferSource(entry)
             onProgress(
                 TransferProgress(
                     mode = mode,
                     completed = index,
                     total = entries.size,
-                    currentName = sourceFile.name
+                    currentName = sourceFile?.name.orEmpty()
                 )
             )
 
-            if (!sourceFile.exists()) {
+            if (sourceFile == null) {
                 failures += TransferItemFailure(entry, "Source file no longer exists")
                 return@forEachIndexed
             }
@@ -623,7 +639,7 @@ class MediaRepository @Inject constructor(
             // Treat copying or moving a file into the directory it already
             // occupies as a no-op. In particular, KEEP_BOTH must never turn
             // the source itself into an accidental numbered duplicate.
-            if (isSameTransferDirectory(entry.path, destination.path)) {
+            if (isSameTransferDirectory(sourceFile.path, destination.path)) {
                 skipped++
                 return@forEachIndexed
             }
@@ -1111,13 +1127,13 @@ class MediaRepository @Inject constructor(
             require(destination.documentUri == null) {
                 "This document provider cannot guarantee original timestamps; choose a local album"
             }
-            val source = File(entry.path)
+            val source = resolveTransferSource(entry)
+                ?: throw IOException("Source media record is unavailable; original was kept")
             val directory = File(destination.path)
             require(directory.isDirectory) { "Destination album is unavailable" }
-            require(!isSameTransferDirectory(entry.path, destination.path)) { "Item is already in this album" }
+            require(!isSameTransferDirectory(source.path, destination.path)) { "Item is already in this album" }
             val indexedSourcePath = mediaPath(Uri.parse(entry.uri))
-                ?: throw IOException("Source media record is unavailable; original was kept")
-            if (File(indexedSourcePath).canonicalPath != source.canonicalPath) {
+            if (indexedSourcePath != null && File(indexedSourcePath).canonicalPath != source.canonicalPath) {
                 throw IOException("Source media record changed; original was kept")
             }
             val originalLibraryTimes = mediaTimes(Uri.parse(entry.uri))
@@ -1160,7 +1176,12 @@ class MediaRepository @Inject constructor(
                     put(MediaStore.MediaColumns.DISPLAY_NAME, target.name)
                 }, null, null)
                 if (updated > 0) {
-                    val actualTarget = mediaPath(Uri.parse(entry.uri))?.let(::File) ?: target
+                    val actualTarget = awaitQuickMoveTarget(
+                        uri = Uri.parse(entry.uri),
+                        expectedTarget = target,
+                        source = source,
+                        expectedDirectory = directory,
+                    )
                     checkpoint = checkpoint.copy(targetPath = actualTarget.absolutePath,
                         targetUri = entry.uri, stage = QuickMoveStage.SourceRemoved)
                     onCheckpoint(checkpoint)
@@ -1272,18 +1293,76 @@ class MediaRepository @Inject constructor(
         }
     }
 
-    private fun mediaPath(uri: Uri): String? = runCatching {
-        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use {
-            if (it.moveToFirst()) it.getString(0) else null
+    /**
+     * Resolve the physical source again when a list item outlives a MediaStore
+     * relocation. The gallery deliberately keeps a cached path for fast grid
+     * rendering, but that path can lag behind the provider after another move
+     * or after a batch update. A URI query is the authoritative fallback.
+     */
+    private fun resolveTransferSource(entry: MediaEntry): File? {
+        val cached = File(entry.path)
+        val indexed = mediaPath(Uri.parse(entry.uri))?.let(::File)
+        return when {
+            indexed?.isFile == true -> indexed
+            cached.isFile -> cached
+            else -> null
         }
-    }.getOrNull()
+    }
 
-    private fun mediaTimes(uri: Uri): Triple<Long, Long, Long?>? = runCatching {
-        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_ADDED,
-            MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.Images.Media.DATE_TAKEN), null, null, null)?.use {
-            if (!it.moveToFirst()) null else Triple(it.getLong(0), it.getLong(1), if (it.isNull(2)) null else it.getLong(2))
+    /** MediaProvider may briefly publish an empty row while a previous item is moving. */
+    private fun mediaPath(uri: Uri): String? {
+        repeat(MEDIA_QUERY_ATTEMPTS) { attempt ->
+            val path = runCatching {
+                context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use {
+                    if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
+                }
+            }.getOrNull()
+            if (!path.isNullOrBlank()) return path
+            if (attempt + 1 < MEDIA_QUERY_ATTEMPTS) Thread.sleep(MEDIA_QUERY_RETRY_DELAYS[attempt])
         }
-    }.getOrNull()
+        return null
+    }
+
+    /** Same bounded retry for timestamps, which are read immediately after a batch move. */
+    private fun mediaTimes(uri: Uri): Triple<Long, Long, Long?>? {
+        repeat(MEDIA_QUERY_ATTEMPTS) { attempt ->
+            val times = runCatching {
+                context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_ADDED,
+                    MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.Images.Media.DATE_TAKEN), null, null, null)?.use {
+                    if (!it.moveToFirst()) null else Triple(it.getLong(0), it.getLong(1),
+                        if (it.isNull(2)) null else it.getLong(2))
+                }
+            }.getOrNull()
+            if (times != null) return times
+            if (attempt + 1 < MEDIA_QUERY_ATTEMPTS) Thread.sleep(MEDIA_QUERY_RETRY_DELAYS[attempt])
+        }
+        return null
+    }
+
+    /**
+     * A MediaStore RELATIVE_PATH update can publish the row before the provider
+     * has finished moving a large video on disk. Do not let the next item in a
+     * batch observe that intermediate state as an unavailable source.
+     */
+    private fun awaitQuickMoveTarget(
+        uri: Uri,
+        expectedTarget: File,
+        source: File,
+        expectedDirectory: File,
+    ): File {
+        var candidate = expectedTarget
+        repeat(QUICK_MOVE_SETTLE_ATTEMPTS) { attempt ->
+            mediaPath(uri)?.let { candidate = File(it) }
+            val inExpectedDirectory = runCatching {
+                candidate.parentFile?.canonicalPath == expectedDirectory.canonicalPath
+            }.getOrDefault(false)
+            if (inExpectedDirectory && !source.exists() && candidate.isFile) return candidate
+            if (attempt + 1 < QUICK_MOVE_SETTLE_ATTEMPTS) {
+                Thread.sleep(QUICK_MOVE_SETTLE_DELAYS[attempt])
+            }
+        }
+        return candidate
+    }
 
     private suspend fun verifyQuickMoveTimes(checkpoint: QuickMoveCheckpoint, targetUri: Uri): Boolean {
         val source = checkpoint.source

@@ -68,45 +68,39 @@ class MediaDeduplication(private val openInputStream: (MediaEntry) -> InputStrea
         currentCoroutineContext().ensureActive()
         val skipped = mutableListOf<DuplicateSkippedFile>()
         val unique = distinctFiles(entries.filterNot { it.isTrashed })
-        val eligible = unique.filter { entry ->
-            (entry.sizeBytes >= 0).also { valid ->
-                if (!valid) skipped += DuplicateSkippedFile(entry, DuplicateSkipReason.INVALID_SIZE)
-            }
+        val eligible = unique.filter { it.sizeBytes >= 0L }
+        unique.filter { it.sizeBytes < 0L }.forEach {
+            skipped += DuplicateSkippedFile(it, DuplicateSkipReason.INVALID_SIZE)
         }
-        val candidates = eligible.groupBy { entry ->
-            val partition = when (scope) {
-                DeduplicationScope.ALL_FILES -> ""
-                DeduplicationScope.WITHIN_ALBUMS -> albumPath(entry)
-            }
-            partition to entry.sizeBytes
-        }.values.filter { it.size > 1 }
         val total = unique.size
         var completed = 0
         onProgress(DuplicateScanProgress(completed, total))
-        val groups = mutableListOf<DuplicateGroup>()
-        val candidateIds = candidates.asSequence()
-            .flatten()
-            .map { it.contentId }
-            .toSet()
-        // Files whose size is unique have already been ruled out by the exact
-        // duplicate criterion. Count that metadata check without opening them.
-        unique.filter { it.contentId !in candidateIds }.forEach {
+        unique.filter { it.sizeBytes < 0L }.forEach {
             onProgress(DuplicateScanProgress(++completed, total))
         }
-        for (bucket in candidates) {
-            val hashes = linkedMapOf<DuplicateFingerprint, MutableList<MediaEntry>>()
-            for (entry in bucket) {
-                when (val read = fingerprint(entry)) {
-                    is FingerprintRead.Success -> hashes.getOrPut(read.fingerprint) { mutableListOf() }.add(entry)
-                    is FingerprintRead.Failure -> skipped += DuplicateSkippedFile(entry, read.reason)
+        val groups = mutableListOf<DuplicateGroup>()
+        val hashes = linkedMapOf<Pair<String, DuplicateFingerprint>, MutableList<MediaEntry>>()
+        for (entry in eligible) {
+            when (val read = fingerprint(entry)) {
+                is FingerprintRead.Success -> {
+                    val partition = when (scope) {
+                        DeduplicationScope.ALL_FILES -> ""
+                        DeduplicationScope.WITHIN_ALBUMS -> albumPath(entry)
+                    }
+                    // The provider's SIZE column can lag behind a completed copy/move. Keep the
+                    // actual byte count in the snapshot so validation and removal use the same
+                    // verified value that produced the hash.
+                    val snapshotEntry = entry.copy(sizeBytes = read.fingerprint.sizeBytes)
+                    hashes.getOrPut(partition to read.fingerprint) { mutableListOf() }.add(snapshotEntry)
                 }
-                onProgress(DuplicateScanProgress(++completed, total))
+                is FingerprintRead.Failure -> skipped += DuplicateSkippedFile(entry, read.reason)
             }
-            hashes.forEach { (hash, matches) ->
-                if (matches.size > 1) {
-                    val ordered = matches.sortedWith(duplicateKeeperOrder)
-                    groups += DuplicateGroup(ordered.first(), ordered.drop(1), hash)
-                }
+            onProgress(DuplicateScanProgress(++completed, total))
+        }
+        hashes.forEach { (key, matches) ->
+            if (matches.size > 1) {
+                val ordered = matches.sortedWith(duplicateKeeperOrder)
+                groups += DuplicateGroup(ordered.first(), ordered.drop(1), key.second)
             }
         }
         currentCoroutineContext().ensureActive()
@@ -197,12 +191,10 @@ class MediaDeduplication(private val openInputStream: (MediaEntry) -> InputStrea
                         digest.update(buffer, 0, count)
                         bytesRead += count
                     }
-                    if (bytesRead > entry.sizeBytes) return FingerprintRead.Failure(DuplicateSkipReason.CONTENT_CHANGED)
                     yield()
                 }
                 currentCoroutineContext().ensureActive()
-                if (bytesRead != entry.sizeBytes) FingerprintRead.Failure(DuplicateSkipReason.CONTENT_CHANGED)
-                else FingerprintRead.Success(DuplicateFingerprint(bytesRead, digest.digest().toHex()))
+                FingerprintRead.Success(DuplicateFingerprint(bytesRead, digest.digest().toHex()))
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
