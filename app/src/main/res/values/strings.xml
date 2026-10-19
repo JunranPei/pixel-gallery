@@ -100,6 +100,12 @@
     <string name="duplicate_scan_progress">Checked %1$d of %2$d files</string>
     <string name="duplicate_scanning">Checking file contents…</string>
     <string name="duplicate_index_updating">Showing previous results · checking for changes…</string>
+    <string name="duplicate_preparing">Updating the file list…</string>
+    <string name="duplicate_inventory">Checking file information…</string>
+    <string name="duplicate_sampling">Comparing candidate files…</string>
+    <string name="duplicate_check_incomplete">Check incomplete</string>
+    <string name="duplicate_empty_checked">Checked %1$d files</string>
+    <string name="duplicate_empty_partial">Checked %1$d files · %2$d could not be verified</string>
     <string name="duplicate_validating">Rechecking selected copies and retained originals…</string>
     <string name="duplicate_awaiting_permission">Waiting for permission to update the selected files…</string>
     <string name="duplicate_verifying">Rechecking files and moving copies to Recycle Bin…</string>
@@ -107,7 +113,7 @@
     <string name="duplicate_scan_short">Exact contents only · nothing changes until you confirm.</string>
     <string name="duplicate_scan_summary">Files checked: %1$d · Duplicate groups: %2$d</string>
     <string name="duplicate_scan_skipped">Skipped %1$d files that could not be safely checked.</string>
-    <string name="duplicate_none_found">No identical duplicates found in the checked files.</string>
+    <string name="duplicate_none_found">No duplicates found</string>
     <string name="duplicate_group_title">Group %1$d · %2$d identical files</string>
     <string name="duplicate_retained">Retained</string>
     <string name="duplicate_copy">Duplicate copy</string>

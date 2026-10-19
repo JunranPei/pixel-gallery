@@ -2,6 +2,7 @@ package com.pixel.gallery.data.repository
 
 import android.content.Context
 import android.content.ContentValues
+import android.content.ContentUris
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +17,7 @@ import com.pixel.gallery.model.DuplicateValidationResult
 import com.pixel.gallery.model.MediaDeduplication
 import com.pixel.gallery.model.IncrementalDeduplication
 import com.pixel.gallery.model.DuplicateFileState
+import com.pixel.gallery.model.DuplicateScanStage
 import com.pixel.gallery.data.local.PersistentDuplicateIndex
 import android.system.Os
 import android.system.OsConstants
@@ -24,6 +26,7 @@ import kotlinx.coroutines.sync.withLock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
 import java.io.IOException
 import java.io.File
 import javax.inject.Inject
@@ -60,6 +63,7 @@ class DuplicateRepository @Inject constructor(
         // the provider again so a just-created keep-both copy participates in
         // the scan instead of scanning the pre-transfer list supplied by UI.
         scanMutex.withLock {
+            onProgress(DuplicateScanProgress(0, entries.size, DuplicateScanStage.PREPARING))
             // Publish the previous snapshot before provider synchronisation or file-state checks.
             // It is explicitly read-only until the new scan finishes.
             val engine = indexedScanner()
@@ -107,15 +111,50 @@ class DuplicateRepository @Inject constructor(
         seed: List<MediaEntry>,
         scope: DeduplicationScope,
     ): List<MediaEntry> {
-        // The all-files page already supplies the repository's complete active
-        // snapshot. Refreshing it here would also pull unrelated MediaStore rows
-        // into isolated scans (and needlessly hash the whole device). Album
-        // scans are the transfer-sensitive path and are refreshed below.
+        // The all-files page supplies its visible library snapshot. Album scopes refresh
+        // their provider rows directly so a new keep-both copy participates immediately.
         if (scope == DeduplicationScope.ALL_FILES) return seed
-        mediaRepository.syncWhenMediaMutationsIdle(force = true)
-        val current = mediaRepository.currentActiveEntries()
         val folders = seed.mapNotNull { folderOf(it.path) }.toSet()
-        return current.filter { folderOf(it.path) in folders }
+        if (seed.isNotEmpty() && folders.isEmpty()) throw IOException("Could not determine the albums to check")
+        if (folders.isEmpty()) return emptyList()
+        // Query the provider directly. Running the complete gallery/index synchronisation here
+        // delayed progress and made this read depend on the Room snapshot publication path.
+        // A single album needs only its own provider rows, including just-created keep-both copies.
+        val snapshot = seed.associateBy { it.contentId }
+        val current = mutableListOf<MediaEntry>()
+        val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA,
+            MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.DATE_MODIFIED,
+            MediaStore.Images.Media.DATE_TAKEN)
+        for (collection in listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)) {
+            val conditions = mutableListOf<String>()
+            val args = mutableListOf<String>()
+            if (folders.size == 1) {
+                conditions += "${MediaStore.MediaColumns.DATA} LIKE ? ESCAPE '\\'"
+                args += folders.single().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%"
+            }
+            if (Build.VERSION.SDK_INT >= 29) conditions += "${MediaStore.MediaColumns.IS_PENDING} = 0"
+            if (canTrash) conditions += "${MediaStore.MediaColumns.IS_TRASHED} = 0"
+            val cursor = resolver.query(collection, projection, conditions.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
+                args.toTypedArray(), null) ?: throw IOException("Could not refresh the albums to check")
+            cursor.use {
+                while (it.moveToNext()) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val path = it.getString(1) ?: continue
+                    if (folderOf(path) !in folders) continue
+                    val id = it.getLong(0)
+                    val uri = ContentUris.withAppendedId(collection, id).toString()
+                    val previous = snapshot[id]?.takeIf { old -> old.path == path }
+                    current += previous?.copy(uri = uri, sizeBytes = it.getLong(3), dateModifiedMillis = it.getLong(5) * 1000,
+                        isTrashed = false) ?: MediaEntry(id, uri, path, it.getString(2).orEmpty(), 0, 0, 0,
+                        it.getLong(3), it.getLong(4), it.getLong(5) * 1000, sourceDateTakenMillis = it.getLong(6))
+                }
+            }
+        }
+        if (current.isEmpty() && seed.any { isCurrentActiveEntry(it) }) {
+            throw IOException("The album file list could not be refreshed; please retry")
+        }
+        return current
     }
 
     private fun folderOf(path: String): String? =

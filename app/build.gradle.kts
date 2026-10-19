@@ -79,8 +79,8 @@ android {
         minSdk = 26
         targetSdk = 35
         testInstrumentationRunner = "com.pixel.gallery.integration.QuickSortSafetyInstrumentation"
-        versionCode = 2063
-        versionName = "4.3.4.13-auto-multitask"
+        versionCode = 2064
+        versionName = "4.3.4.14-auto-multitask"
     }
 
     signingConfigs {

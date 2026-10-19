@@ -23,6 +23,12 @@
     <string name="duplicate_scan_progress">已检查 %1$d / %2$d 个文件</string>
     <string name="duplicate_scanning">正在检查文件内容…</string>
     <string name="duplicate_index_updating">已显示上次结果 · 正在检查变动…</string>
+    <string name="duplicate_preparing">正在更新文件列表…</string>
+    <string name="duplicate_inventory">正在核对文件信息…</string>
+    <string name="duplicate_sampling">正在比较候选文件…</string>
+    <string name="duplicate_check_incomplete">未能完成检查</string>
+    <string name="duplicate_empty_checked">已检查 %1$d 个文件</string>
+    <string name="duplicate_empty_partial">已检查 %1$d 个文件 · %2$d 个未能核验</string>
     <string name="duplicate_validating">正在重新核对所选副本及保留的原文件…</string>
     <string name="duplicate_awaiting_permission">正在等待系统授权修改所选文件…</string>
     <string name="duplicate_verifying">正在重新核对文件并将副本移入回收站…</string>
@@ -30,7 +36,7 @@
     <string name="duplicate_scan_short">仅匹配内容完全相同的文件 · 确认前不会改动文件。</string>
     <string name="duplicate_scan_summary">已检查 %1$d 个文件 · 找到 %2$d 组重复文件</string>
     <string name="duplicate_scan_skipped">跳过了 %1$d 个无法安全检查的文件。</string>
-    <string name="duplicate_none_found">已检查的文件中未发现内容完全相同的副本。</string>
+    <string name="duplicate_none_found">未发现重复文件</string>
     <string name="duplicate_group_title">第 %1$d 组 · %2$d 个相同文件</string>
     <string name="duplicate_retained">保留</string>
     <string name="duplicate_copy">重复副本</string>

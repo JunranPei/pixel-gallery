@@ -55,6 +55,7 @@ class IncrementalDeduplication(
         scope: DeduplicationScope,
         onProgress: (DuplicateScanProgress) -> Unit = {},
     ): DuplicateScanResult {
+        onProgress(DuplicateScanProgress(0, entries.size, DuplicateScanStage.PREPARING))
         val files = distinctFiles(entries.filterNot { it.isTrashed })
         val saved = store.load(files.map(::indexKey))
         val skipped = linkedMapOf<String, DuplicateSkippedFile>()
@@ -66,7 +67,23 @@ class IncrementalDeduplication(
         var completed = 0
         val readBuffer = ByteArray(SAMPLE_BYTES)
         val total = files.size
-        onProgress(DuplicateScanProgress(0, total))
+        var stage = DuplicateScanStage.INVENTORY
+        var inspected = 0
+        var sampledCount = 0
+        var sampleTotal = 0
+        var lastProgressNanos = System.nanoTime()
+        fun publishProgress(force: Boolean = false) {
+            val now = System.nanoTime()
+            if (force || now - lastProgressNanos >= 100_000_000L) {
+                onProgress(DuplicateScanProgress(when (stage) {
+                    DuplicateScanStage.INVENTORY -> inspected
+                    DuplicateScanStage.SAMPLING -> sampledCount
+                    else -> completed
+                }, if (stage == DuplicateScanStage.SAMPLING) sampleTotal else total, stage, bytesRead))
+                lastProgressNanos = now
+            }
+        }
+        publishProgress(true)
 
         suspend fun flush() {
             if (pending.isNotEmpty()) { store.save(pending.values.toList()); pending.clear() }
@@ -77,9 +94,9 @@ class IncrementalDeduplication(
             // Avoid 150,000 UI state publications and persist cancellation-safe checkpoints.
             if (completed % 128 == 0 || completed == total) {
                 flush()
-                onProgress(DuplicateScanProgress(completed, total))
+                publishProgress(true)
                 yield()
-            }
+            } else publishProgress()
         }
         fun reject(entry: MediaEntry, changed: Boolean) {
             skipped[entry.uri] = DuplicateSkippedFile(entry,
@@ -118,6 +135,7 @@ class IncrementalDeduplication(
                         val prefixLength = minOf(length.toLong(), (SAMPLE_BYTES - count).coerceAtLeast(0)).toInt()
                         if (prefixLength > 0) prefix.update(buffer, 0, prefixLength)
                         count += length; bytesRead += length
+                        publishProgress()
                         yield()
                     }
                 }
@@ -146,6 +164,8 @@ class IncrementalDeduplication(
         for ((index, entry) in files.withIndex()) {
             currentCoroutineContext().ensureActive()
             val state = stateOf(entry)
+            inspected = index + 1
+            publishProgress(index == files.lastIndex)
             if (state?.signature == null) invalid += indexKey(entry)
             val old = saved[indexKey(entry)]?.takeIf {
                 state?.signature != null && it.signature == state.signature && it.size == state.size && it.path == entry.path
@@ -162,23 +182,44 @@ class IncrementalDeduplication(
             if (index % 512 == 0) yield()
         }
         val matches = mutableListOf<Pair<MediaEntry, DuplicateFingerprint>>()
-        for (sameSize in work.groupBy { (if (scope == DeduplicationScope.WITHIN_ALBUMS) albumPath(it.entry) else "") to it.size }.values) {
+        val sizeGroups = work.groupBy { (if (scope == DeduplicationScope.WITHIN_ALBUMS) albumPath(it.entry) else "") to it.size }.values
+        sampleTotal = sizeGroups.filter { it.size > 1 }.sumOf { it.size }
+        stage = DuplicateScanStage.SAMPLING
+        publishProgress(true)
+        val sampledGroups = mutableListOf<List<Work>>()
+        for (sameSize in sizeGroups) {
             if (sameSize.size == 1) {
-                save(sameSize.single()); finishOne(); continue
+                continue
             }
-            val sampled = sameSize.filter { it.sample != null || read(it, full = false) }
+            val sampled = sameSize.filter {
+                val success = it.sample != null || read(it, full = false)
+                sampledCount++
+                publishProgress(sampledCount == sampleTotal)
+                success
+            }
+            sampledGroups += sampled
+        }
+        stage = DuplicateScanStage.COMPARING
+        publishProgress(true)
+        for (sampled in sampledGroups) {
             for (sameSample in sampled.groupBy { it.sample }.values) {
                 if (sameSample.size > 1) {
                     for (item in sameSample) {
                         if (item.hash != null || read(item, full = true)) {
                             matches += item.entry.copy(sizeBytes = item.size) to DuplicateFingerprint(item.size, item.hash!!)
                         }
+                        item.done = true
+                        finishOne()
                     }
+                } else {
+                    sameSample.single().done = true
+                    finishOne()
                 }
             }
-            for (item in sameSize) { if (item.entry.uri !in skipped) save(item); finishOne() }
         }
+        for (item in work) { if (item.entry.uri !in skipped) save(item); if (!item.done) finishOne() }
         flush()
+        publishProgress(true)
         if (scope == DeduplicationScope.ALL_FILES) store.retain(files.mapTo(hashSetOf(), ::indexKey))
         currentCoroutineContext().ensureActive()
         return DuplicateScanResult(groups(matches, scope), skipped.values.toList(), completed,
@@ -186,7 +227,7 @@ class IncrementalDeduplication(
     }
 
     private class Work(val entry: MediaEntry, val state: DuplicateFileState?, var size: Long,
-        var sample: String? = null, var hash: String? = null)
+        var sample: String? = null, var hash: String? = null, var done: Boolean = false)
 
     // MediaStore's external and external_primary URIs can name the same file. Content identity
     // is guarded by the file signature; a provider URI alias must not force a second full read.

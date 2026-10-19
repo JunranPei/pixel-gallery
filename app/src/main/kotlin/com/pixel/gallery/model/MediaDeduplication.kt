@@ -24,7 +24,14 @@ enum class DuplicateSkipReason { UNREADABLE, INVALID_SIZE, CONTENT_CHANGED, KEEP
 
 data class DuplicateSkippedFile(val entry: MediaEntry, val reason: DuplicateSkipReason)
 
-data class DuplicateScanProgress(val completed: Int, val total: Int)
+enum class DuplicateScanStage { PREPARING, INVENTORY, SAMPLING, COMPARING }
+
+data class DuplicateScanProgress(
+    val completed: Int,
+    val total: Int,
+    val stage: DuplicateScanStage = DuplicateScanStage.COMPARING,
+    val bytesRead: Long = 0,
+)
 
 data class DuplicateScanResult(
     val groups: List<DuplicateGroup>,

@@ -184,7 +184,9 @@ class IncrementalDeduplicationTest {
         val scanJob = Job()
         try {
             withContext(scanJob) {
-                engine.scan(entries, DeduplicationScope.ALL_FILES) { if (it.completed >= 128) scanJob.cancel() }
+                engine.scan(entries, DeduplicationScope.ALL_FILES) {
+                    if (it.stage == DuplicateScanStage.COMPARING && it.completed >= 128) scanJob.cancel()
+                }
             }
             fail("Expected cancellation")
         } catch (_: CancellationException) { }
@@ -206,5 +208,33 @@ class IncrementalDeduplicationTest {
         assertEquals(150_000, repeated.indexStats!!.reusedFiles)
         assertEquals(0L, repeated.indexStats!!.bytesRead)
         assertTrue(repeated.groups.isEmpty())
+    }
+
+    @Test fun inventoryProgressAdvancesBeforeContentIsOpened() = runBlocking {
+        val progress = mutableListOf<DuplicateScanProgress>()
+        var stateCalls = 0
+        val files = Files().apply { add(1, "same".toByteArray()); add(2, "same".toByteArray()) }
+        val engine = IncrementalDeduplication(files.store, {
+            stateCalls++
+            DuplicateFileState(4, "stable")
+        }, {
+            assertTrue(stateCalls >= 2)
+            assertTrue(progress.any { it.stage == DuplicateScanStage.INVENTORY && it.completed == 2 })
+            "same".byteInputStream()
+        })
+        val result = engine.scan(listOf(entry(1), entry(2)), DeduplicationScope.WITHIN_ALBUMS, progress::add)
+        assertEquals(1, result.groups.size)
+        assertTrue(progress.any { it.stage == DuplicateScanStage.SAMPLING && it.completed == 2 })
+        assertEquals(2, progress.last().completed)
+        assertEquals(2, progress.last().total)
+        assertTrue(progress.last().bytesRead > 0)
+    }
+
+    @Test fun unreadableCandidateIsReportedInsteadOfBeingCountedAsVerified() = runBlocking {
+        val engine = IncrementalDeduplication(Store(), { DuplicateFileState(4, "stable") }, { null })
+        val result = engine.scan(listOf(entry(1), entry(2)), DeduplicationScope.WITHIN_ALBUMS)
+        assertEquals(2, result.skippedCount)
+        assertTrue(result.groups.isEmpty())
+        assertEquals(0, result.scannedCount - result.skippedCount)
     }
 }

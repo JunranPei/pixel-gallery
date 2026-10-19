@@ -24,6 +24,11 @@ import com.pixel.gallery.data.repository.DuplicateRepository
 import com.pixel.gallery.data.repository.MediaRepository
 import com.pixel.gallery.data.repository.SettingsRepository
 import com.pixel.gallery.model.DeduplicationScope
+import com.pixel.gallery.model.DuplicateScanProgress
+import com.pixel.gallery.model.DuplicateScanStage
+import com.pixel.gallery.model.DuplicateScanResult
+import com.pixel.gallery.model.DuplicateSkippedFile
+import com.pixel.gallery.model.DuplicateSkipReason
 import com.pixel.gallery.ui.deduplication.*
 import com.pixel.gallery.ui.theme.PixelGalleryTheme
 import kotlinx.coroutines.runBlocking
@@ -61,6 +66,7 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
         val repository = DuplicateRepository(context, mediaRepository)
         lateinit var viewModel: DuplicateViewModel
         val showCachedPreview = mutableStateOf(false)
+        val resultOverride = mutableStateOf<DuplicateScanResult?>(null)
         var activity: MainActivity? = null
         try {
             // Identical EXIF and bytes; the original has an older file timestamp, despite sorting last by name.
@@ -105,6 +111,19 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             val refreshed = restarted.scan(listOf(older, newer), DeduplicationScope.WITHIN_ALBUMS) {}
             check(refreshed.groups.single().entries.size == 3)
             check(refreshed.indexStats!!.contentFilesRead == 1)
+            val otherA = fixture("${token}_other", "other-a.jpg", bytesFile, 1_600_000_000_000L)
+            val otherB = fixture("${token}_other", "other-b.jpg", bytesFile, 1_750_000_000_000L)
+            val stages = mutableListOf<DuplicateScanProgress>()
+            val allAlbums = restarted.scan(listOf(older, newer, otherA, otherB), DeduplicationScope.WITHIN_ALBUMS,
+                onProgress = stages::add)
+            check(allAlbums.groups.size == 2 && allAlbums.groups.sumOf { it.entries.size } == 5)
+            check(stages.first().stage == DuplicateScanStage.PREPARING)
+            check(stages.any { it.stage == DuplicateScanStage.INVENTORY && it.completed == 5 })
+            check(stages.last().completed == 5 && stages.last().total == 5)
+            val singleAlbum = restarted.scan(listOf(older, newer), DeduplicationScope.WITHIN_ALBUMS) {}
+            check(singleAlbum.groups.size == 1 && singleAlbum.groups.single().entries.size == 3)
+            check(resolver.delete(Uri.parse(otherA.uri), null, null) == 1)
+            check(resolver.delete(Uri.parse(otherB.uri), null, null) == 1)
             check(resolver.delete(Uri.parse(added.uri), null, null) == 1)
             val removed = restarted.scan(listOf(older, newer, added), DeduplicationScope.ALL_FILES) {}
             check(removed.groups.single().entries.size == 2 && removed.skippedCount == 1)
@@ -120,7 +139,9 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
                 activity!!.setContent {
                     PixelGalleryTheme(darkTheme = dark.value, dynamicColor = false) {
                         val state by viewModel.state.collectAsState()
-                        DuplicateReviewDialog(if (showCachedPreview.value) state.copy(phase = DuplicatePhase.SCANNING) else state,
+                        val display = resultOverride.value?.let { state.copy(phase = DuplicatePhase.REVIEW, result = it) }
+                            ?: if (showCachedPreview.value) state.copy(phase = DuplicatePhase.SCANNING) else state
+                        DuplicateReviewDialog(display,
                             {}, viewModel::toggle, viewModel::confirm)
                     }
                 }
@@ -128,6 +149,23 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             settle(1200)
             find("取消")?.let { tap(bounds(it)) }
             settle(500)
+            instrumentation.runOnMainSync { resultOverride.value = DuplicateScanResult(emptyList(), emptyList(), 2500) }
+            settle(250)
+            check(find(context.getString(R.string.duplicate_none_found)) != null)
+            check(find(context.getString(R.string.duplicate_keeper_rule)) == null)
+            check(find(context.getString(R.string.duplicate_scan_short)) == null)
+            screenshot("empty-result-dark", 0x121212)
+            instrumentation.runOnMainSync { dark.value = false }
+            screenshot("empty-result-light", 0xffffff)
+            instrumentation.runOnMainSync {
+                resultOverride.value = DuplicateScanResult(emptyList(), listOf(DuplicateSkippedFile(older, DuplicateSkipReason.UNREADABLE)), 1)
+            }
+            settle(250)
+            check(find(context.getString(R.string.duplicate_check_incomplete)) != null)
+            check(find(context.getString(R.string.duplicate_none_found)) == null)
+            screenshot("unverified-result-light", 0xffffff)
+            instrumentation.runOnMainSync { resultOverride.value = null; dark.value = true }
+            settle(250)
             instrumentation.runOnMainSync { showCachedPreview.value = true }
             settle(250)
             check(find(context.getString(R.string.duplicate_index_updating)) != null)
@@ -163,6 +201,8 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             check(File(older.path).readBytes().contentEquals(bytesFile.readBytes()))
             screenshot("complete-dark")
             "Persistent index reopened: unchanged files read zero content bytes; cached preview arrives before refresh.\n" +
+                "Album overview checks two folders independently; single album finds all 3 keep-both copies; preparing/inventory/completion progress verified.\n" +
+                "Empty result has a compact summary in light/dark; unreadable files show an incomplete check instead of no duplicates.\n" +
                 "Same-size overwrite with restored mtime invalidates only the changed file; fresh keep-both copy and deletion are reflected.\n" +
                 "Cached preview shows updating state and offers no cleanup button.\n" +
                 "Real identical JPEGs: earlier modified copy retained with equal EXIF capture time; input order has no effect.\n" +
@@ -239,7 +279,11 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             }
         }
     }
-    private fun settle(millis: Long) { SystemClock.sleep(millis); instrumentation.waitForIdleSync() }
+    private fun settle(millis: Long) {
+        SystemClock.sleep(millis)
+        instrumentation.waitForIdleSync()
+        instrumentation.uiAutomation.clearCache()
+    }
     private fun screenshot(name: String, background: Int? = null) {
         settle(250)
         instrumentation.uiAutomation.takeScreenshot().also { bitmap ->

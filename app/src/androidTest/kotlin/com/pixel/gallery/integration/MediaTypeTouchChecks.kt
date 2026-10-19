@@ -81,6 +81,13 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
             click("Albums")
             await("video albums") { find("MT-Videos") != null && find("MT-Mixed") != null }
             check(find("MT-Images") == null) { "Image-only album survived the video filter" }
+            click("More"); click(context.getString(R.string.duplicate_find_each_album))
+            await("overview duplicate results include all media within each album") {
+                find(context.getString(R.string.duplicate_scan_summary, 7, 3)) != null
+            }
+            check(find(context.getString(R.string.duplicate_none_found)) == null)
+            snapshot("overview-duplicate-results")
+            click(context.getString(R.string.duplicate_close))
             click("More"); selected(videos); snapshot("album-grid-menu-videos-light")
             click(images)
             await("image albums") { find("MT-Images") != null && find("MT-Videos") == null }
@@ -88,6 +95,13 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
             await("home follows album-grid choice") { tiles().size == 3 }
             click("Albums"); click("MT-Mixed")
             await("album inherits images") { tiles().size == 2 }
+            click("More"); click(context.getString(R.string.duplicate_find_album))
+            await("single album detects image and video copies") {
+                find(context.getString(R.string.duplicate_scan_summary, 4, 2)) != null
+            }
+            check(find(context.getString(R.string.duplicate_none_found)) == null)
+            snapshot("single-album-duplicate-results")
+            click(context.getString(R.string.duplicate_close))
             click("More"); selected(images); click(all)
             await("local all-media choice") { tiles().size == 4 }
             back(); click("More"); selected(images); back()
@@ -185,6 +199,7 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
             click("More"); selected(images)
             snapshot("cache-updated-after-move")
             "Home and album grid share the filter; album detail inherits once and remains independent.\n" +
+                "Real menu entry points: album overview finds 3 within-album duplicate groups in 7 files; single album finds 2 groups in 4 files.\n" +
                 "Re-entry inherits the parent again; image-only/video-only albums are excluded appropriately.\n" +
                 "Select all selects only the two visible videos; search narrows to one video and viewer paging stays in that result.\n" +
                 "Collapsed/cancelled search has no editable node; swiping either direction opens search within the title bounds and Back closes it.\n" +
