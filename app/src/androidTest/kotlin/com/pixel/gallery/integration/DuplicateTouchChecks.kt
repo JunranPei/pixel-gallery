@@ -60,6 +60,7 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
         val mediaRepository = MediaRepository(context, database.mediaDao(), SettingsRepository(context))
         val repository = DuplicateRepository(context, mediaRepository)
         lateinit var viewModel: DuplicateViewModel
+        val showCachedPreview = mutableStateOf(false)
         var activity: MainActivity? = null
         try {
             // Identical EXIF and bytes; the original has an older file timestamp, despite sorting last by name.
@@ -70,6 +71,43 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             for (input in listOf(listOf(newer, older), listOf(older, newer))) {
                 check(repository.scan(input, DeduplicationScope.ALL_FILES) {}.groups.single().keeper.contentId == older.contentId)
             }
+            // Recreating the repository reopens the on-disk index, rather than an in-memory map.
+            val restarted = DuplicateRepository(context, mediaRepository)
+            var previewSeen = false
+            val warm = restarted.scan(listOf(older, newer), DeduplicationScope.ALL_FILES,
+                onCachedResult = { previewSeen = it.groups.size == 1 }) {}
+            check(previewSeen && warm.indexStats!!.contentFilesRead == 0 && warm.indexStats!!.bytesRead == 0L)
+
+            // Same bytes count and restored modification date still must invalidate the hash.
+            val changedBytes = bytesFile.readBytes().apply { this[lastIndex - 8] = (this[lastIndex - 8].toInt() xor 1).toByte() }
+            resolver.openOutputStream(Uri.parse(newer.uri), "rwt")!!.use { it.write(changedBytes) }
+            check(File(newer.path).setLastModified(newer.dateModifiedMillis))
+            val changed = restarted.scan(listOf(older, newer), DeduplicationScope.ALL_FILES) {}
+            check(changed.groups.isEmpty() && changed.indexStats!!.contentFilesRead == 1)
+            resolver.openOutputStream(Uri.parse(newer.uri), "rwt")!!.use { it.write(bytesFile.readBytes()) }
+            check(File(newer.path).setLastModified(newer.dateModifiedMillis))
+            // The overwrite deliberately bypassed the provider's modification timestamp.
+            // Resynchronise this fixture before testing the conditional trash update below.
+            withTimeout(15_000) {
+                suspendCancellableCoroutine<Uri?> { continuation ->
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(newer.path), arrayOf("image/jpeg")) { _, uri ->
+                        if (continuation.isActive) continuation.resume(uri)
+                    }
+                }
+            }
+            check(resolver.query(Uri.parse(newer.uri), arrayOf(MediaStore.MediaColumns.DATE_MODIFIED), null, null, null)!!.use {
+                it.moveToFirst() && it.getLong(0) * 1000 == newer.dateModifiedMillis
+            }) { "Restored fixture timestamp did not reach MediaStore" }
+            check(restarted.scan(listOf(older, newer), DeduplicationScope.ALL_FILES) {}.groups.size == 1)
+
+            // A keep-both copy created after the seed snapshot must participate in album scans.
+            val added = fixture(token, "keep-both-copy.jpg", bytesFile, 1_750_000_000_000L)
+            val refreshed = restarted.scan(listOf(older, newer), DeduplicationScope.WITHIN_ALBUMS) {}
+            check(refreshed.groups.single().entries.size == 3)
+            check(refreshed.indexStats!!.contentFilesRead == 1)
+            check(resolver.delete(Uri.parse(added.uri), null, null) == 1)
+            val removed = restarted.scan(listOf(older, newer, added), DeduplicationScope.ALL_FILES) {}
+            check(removed.groups.single().entries.size == 2 && removed.skippedCount == 1)
             instrumentation.runOnMainSync {
                 viewModel = DuplicateViewModel(repository)
                 viewModel.start(listOf(newer, older), DeduplicationScope.ALL_FILES, "Duplicate QA")
@@ -82,13 +120,21 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
                 activity!!.setContent {
                     PixelGalleryTheme(darkTheme = dark.value, dynamicColor = false) {
                         val state by viewModel.state.collectAsState()
-                        DuplicateReviewDialog(state, {}, viewModel::toggle, viewModel::confirm)
+                        DuplicateReviewDialog(if (showCachedPreview.value) state.copy(phase = DuplicatePhase.SCANNING) else state,
+                            {}, viewModel::toggle, viewModel::confirm)
                     }
                 }
             }
             settle(1200)
             find("取消")?.let { tap(bounds(it)) }
             settle(500)
+            instrumentation.runOnMainSync { showCachedPreview.value = true }
+            settle(250)
+            check(find(context.getString(R.string.duplicate_index_updating)) != null)
+            check(find(context.getString(R.string.duplicate_move_to_bin)) == null)
+            screenshot("cached-preview-updating-dark", 0x121212)
+            instrumentation.runOnMainSync { showCachedPreview.value = false }
+            settle(200)
             check(find(context.getString(R.string.duplicate_keeper_rule)) != null)
             check(find(context.getString(R.string.duplicate_recommended)) != null)
             check(bounds(findRequired("Z-original-2020.jpg")).top < bounds(findRequired("A-copy-2025.jpg")).top)
@@ -102,17 +148,24 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             settle(350)
             screenshot("newer-copy-selected-dark", 0x121212)
             tap(bounds(findRequired(context.getString(R.string.duplicate_move_to_bin))))
-            settle(300)
-            check(find(context.getString(R.string.duplicate_confirm_title)) != null)
+            await { instrumentation.uiAutomation.clearCache(); find(context.getString(R.string.dialog_duplicate_title)) != null }
             screenshot("confirm-dark")
-            tap(bounds(findRequired(context.getString(R.string.duplicate_move_to_bin))))
-            await { viewModel.state.value.phase in setOf(DuplicatePhase.COMPLETE, DuplicatePhase.ERROR) }
+            tap(bounds(findRequired(context.getString(R.string.dialog_move_to_bin))))
+            try {
+                await { viewModel.state.value.phase in setOf(DuplicatePhase.COMPLETE, DuplicatePhase.ERROR) }
+            } catch (error: IllegalStateException) {
+                screenshot("cleanup-failed")
+                throw IllegalStateException("Cleanup state: ${viewModel.state.value}; ${error.message}", error)
+            }
             check(viewModel.state.value.phase == DuplicatePhase.COMPLETE) { viewModel.state.value.error.orEmpty() }
             check(viewModel.state.value.removedCount == 1)
             check(trashed(newer.uri) && !trashed(older.uri))
             check(File(older.path).readBytes().contentEquals(bytesFile.readBytes()))
             screenshot("complete-dark")
-            "Real identical JPEGs: earlier modified copy retained with equal EXIF capture time; input order has no effect.\n" +
+            "Persistent index reopened: unchanged files read zero content bytes; cached preview arrives before refresh.\n" +
+                "Same-size overwrite with restored mtime invalidates only the changed file; fresh keep-both copy and deletion are reflected.\n" +
+                "Cached preview shows updating state and offers no cleanup button.\n" +
+                "Real identical JPEGs: earlier modified copy retained with equal EXIF capture time; input order has no effect.\n" +
                 "Review shows the keeper rule and earlier original first; select copies selects only the newer copy.\n" +
                 "Dark/light review surfaces verified as #121212/#FFFFFF, including the populated result and bottom bar.\n" +
                 "Real confirmation and recycle-bin update completed: newer copy IS_TRASHED=1, original IS_TRASHED=0 with bytes intact.\n" +

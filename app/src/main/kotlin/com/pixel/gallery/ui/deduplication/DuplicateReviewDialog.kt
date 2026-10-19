@@ -80,6 +80,7 @@ fun DuplicateReviewDialog(
     var showConfirmation by remember(state.phase) { mutableStateOf(false) }
     val context = LocalContext.current
     val groups = state.result?.groups.orEmpty()
+    val cachedPreview = state.phase == DuplicatePhase.SCANNING && state.result != null
     val selectedEntries = groups.flatMap { it.entries }
         .filter { it.contentId in state.selectedIds }
     val selectedBytes = selectedEntries.sumOf { it.sizeBytes }
@@ -182,12 +183,9 @@ fun DuplicateReviewDialog(
                     }
                 },
             ) { padding ->
-            when (state.phase) {
-                DuplicatePhase.IDLE,
-                DuplicatePhase.SCANNING,
-                DuplicatePhase.VALIDATING,
-                DuplicatePhase.AWAITING_PERMISSION,
-                DuplicatePhase.VERIFYING -> {
+            when {
+                !cachedPreview && state.phase in setOf(DuplicatePhase.IDLE, DuplicatePhase.SCANNING,
+                    DuplicatePhase.VALIDATING, DuplicatePhase.AWAITING_PERMISSION, DuplicatePhase.VERIFYING) -> {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -230,7 +228,7 @@ fun DuplicateReviewDialog(
                     }
                 }
 
-                DuplicatePhase.REVIEW -> {
+                state.phase == DuplicatePhase.REVIEW || cachedPreview -> {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
@@ -243,9 +241,15 @@ fun DuplicateReviewDialog(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 Text(state.title, style = MaterialTheme.typography.titleMedium)
+                                if (cachedPreview) {
+                                    Text(stringResource(R.string.duplicate_index_updating), style = MaterialTheme.typography.bodyMedium)
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
                                 Text(stringResource(R.string.duplicate_scan_short), style = MaterialTheme.typography.bodyMedium)
                                 Text(stringResource(R.string.duplicate_keeper_rule), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(stringResource(R.string.duplicate_scan_summary, state.result?.scannedCount ?: 0, groups.size), style = MaterialTheme.typography.bodyMedium)
+                                if (!cachedPreview) {
+                                    Text(stringResource(R.string.duplicate_scan_summary, state.result?.scannedCount ?: 0, groups.size), style = MaterialTheme.typography.bodyMedium)
+                                }
                                 val skipped = state.result?.skippedCount ?: 0
                                 if (skipped > 0) {
                                     Text(
@@ -253,7 +257,7 @@ fun DuplicateReviewDialog(
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                 }
-                                if (groups.isEmpty()) {
+                                if (groups.isEmpty() && !cachedPreview) {
                                     Text(
                                         stringResource(R.string.duplicate_none_found),
                                         style = MaterialTheme.typography.titleMedium,
@@ -267,7 +271,8 @@ fun DuplicateReviewDialog(
                                     index = index,
                                     group = group,
                                     selectedIds = state.selectedIds,
-                                    onToggle = onToggle,
+                                    enabled = !cachedPreview,
+                                    onToggle = { id -> if (!cachedPreview) onToggle(id) },
                                 )
                             }
                         }
@@ -275,8 +280,7 @@ fun DuplicateReviewDialog(
                     }
                 }
 
-                DuplicatePhase.COMPLETE,
-                DuplicatePhase.ERROR -> {
+                state.phase == DuplicatePhase.COMPLETE || state.phase == DuplicatePhase.ERROR -> {
                     LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
                         item {
                             Column(
@@ -363,6 +367,7 @@ private fun DuplicateGroupCard(
     group: com.pixel.gallery.model.DuplicateGroup,
     selectedIds: Set<Long>,
     onToggle: (Long) -> Unit,
+    enabled: Boolean = true,
 ) {
     val entries = group.entries
     val copyIds = entries.drop(1).map(MediaEntry::contentId)
@@ -385,7 +390,7 @@ private fun DuplicateGroupCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                TextButton(onClick = {
+                TextButton(enabled = enabled, onClick = {
                     toggleCopySelection(copyIds, selectedIds, onToggle)
                 }) {
                     Text(
@@ -406,7 +411,7 @@ private fun DuplicateGroupCard(
                     entry = entry,
                     recommended = position == 0,
                     selected = entrySelected,
-                    disabled = !entrySelected && unselected == 1,
+                    disabled = !enabled || (!entrySelected && unselected == 1),
                     onToggle = { onToggle(entry.contentId) },
                 )
                 if (position < entries.lastIndex) Spacer(Modifier.height(8.dp))

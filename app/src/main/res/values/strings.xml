@@ -99,6 +99,7 @@
     <string name="duplicate_move_to_bin">Move selected to recycle bin</string>
     <string name="duplicate_scan_progress">Checked %1$d of %2$d files</string>
     <string name="duplicate_scanning">Checking file contents…</string>
+    <string name="duplicate_index_updating">Showing previous results · checking for changes…</string>
     <string name="duplicate_validating">Rechecking selected copies and retained originals…</string>
     <string name="duplicate_awaiting_permission">Waiting for permission to update the selected files…</string>
     <string name="duplicate_verifying">Rechecking files and moving copies to Recycle Bin…</string>

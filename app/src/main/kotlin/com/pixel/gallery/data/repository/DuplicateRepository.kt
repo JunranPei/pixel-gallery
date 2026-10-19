@@ -14,6 +14,13 @@ import com.pixel.gallery.model.DuplicateScanProgress
 import com.pixel.gallery.model.DuplicateScanResult
 import com.pixel.gallery.model.DuplicateValidationResult
 import com.pixel.gallery.model.MediaDeduplication
+import com.pixel.gallery.model.IncrementalDeduplication
+import com.pixel.gallery.model.DuplicateFileState
+import com.pixel.gallery.data.local.PersistentDuplicateIndex
+import android.system.Os
+import android.system.OsConstants
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,6 +34,8 @@ class DuplicateRepository @Inject constructor(
     private val mediaRepository: MediaRepository,
 ) {
     private val resolver get() = context.contentResolver
+    private val contentIndex by lazy { PersistentDuplicateIndex(context) }
+    private val scanMutex = Mutex()
     val canTrash: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
     val needsWriteAccess: Boolean get() = canTrash && !Environment.isExternalStorageManager()
     val needsOriginalAccess: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
@@ -43,14 +52,55 @@ class DuplicateRepository @Inject constructor(
     suspend fun scan(
         entries: List<MediaEntry>,
         scope: DeduplicationScope,
+        onCachedResult: (DuplicateScanResult) -> Unit = {},
         onProgress: (DuplicateScanProgress) -> Unit,
     ): DuplicateScanResult = withContext(Dispatchers.IO) {
         // A transfer completes its MediaStore mutation before the gallery's
         // observer-driven Room snapshot necessarily reaches this screen. Read
         // the provider again so a just-created keep-both copy participates in
         // the scan instead of scanning the pre-transfer list supplied by UI.
-        val currentEntries = refreshedScanEntries(entries, scope)
-        scanner.scan(currentEntries, scope, onProgress)
+        scanMutex.withLock {
+            // Publish the previous snapshot before provider synchronisation or file-state checks.
+            // It is explicitly read-only until the new scan finishes.
+            val engine = indexedScanner()
+            engine.cached(entries, scope)?.let(onCachedResult)
+            val currentEntries = refreshedScanEntries(entries, scope)
+            engine.scan(currentEntries, scope, onProgress)
+        }
+    }
+
+    private fun indexedScanner(): IncrementalDeduplication {
+        // Provider versions guard against rebuilt libraries and recycled content IDs. Per-file
+        // inode/ctime/mtime nanoseconds also catch direct writes that retain size and old dates.
+        val versions = mutableMapOf<String, String>()
+        return IncrementalDeduplication(contentIndex, stateOf = { entry ->
+            try {
+                val stat = Os.stat(entry.path)
+                if (!OsConstants.S_ISREG(stat.st_mode)) null else {
+                    val uri = Uri.parse(entry.uri)
+                    val volume = if (Build.VERSION.SDK_INT >= 29) MediaStore.getVolumeName(uri) else "external"
+                    val epoch = versions.getOrPut(volume) {
+                        try {
+                            if (Build.VERSION.SDK_INT >= 30) MediaStore.getVersion(context, volume)
+                            else if (Build.VERSION.SDK_INT >= 29) MediaStore.getVersion(context) else "legacy"
+                        } catch (_: Exception) { "unversioned-provider" }
+                    }
+                    // API 26 exposes only second-precision times: filter by actual size there,
+                    // but deliberately do not persist/reuse content hashes across scans.
+                    // Some removable filesystems also expose only coarse ctime. Treat an
+                    // absent subsecond component conservatively instead of trusting old hashes.
+                    val signature = if (Build.VERSION.SDK_INT >= 27 && stat.st_ctim.tv_nsec != 0L) {
+                        "prefix64k-v1|$epoch|${stat.st_dev}|${stat.st_ino}|${stat.st_size}|" +
+                            "${stat.st_mtim.tv_sec}:${stat.st_mtim.tv_nsec}|${stat.st_ctim.tv_sec}:${stat.st_ctim.tv_nsec}"
+                    } else null
+                    DuplicateFileState(stat.st_size, signature)
+                }
+            } catch (_: Exception) { null }
+        }, open = { entry ->
+            if (!isCurrentActiveEntry(entry)) throw IOException("File changed or is no longer available")
+            val uri = Uri.parse(entry.uri)
+            resolver.openInputStream(if (Build.VERSION.SDK_INT >= 29) MediaStore.setRequireOriginal(uri) else uri)
+        })
     }
 
     private suspend fun refreshedScanEntries(

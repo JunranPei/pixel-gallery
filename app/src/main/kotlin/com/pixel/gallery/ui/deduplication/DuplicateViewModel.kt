@@ -71,7 +71,9 @@ class DuplicateViewModel @Inject constructor(private val repository: DuplicateRe
     private fun scan(entries: List<MediaEntry>, scope: DeduplicationScope) {
         job = viewModelScope.launch {
             try {
-                val result = repository.scan(entries.toList(), scope) { progress ->
+                val result = repository.scan(entries.toList(), scope, onCachedResult = { cached ->
+                    _state.update { it.copy(result = cached) }
+                }) { progress ->
                     _state.update { it.copy(progress = progress) }
                 }
                 _state.update { it.copy(

@@ -30,6 +30,7 @@ data class DuplicateScanResult(
     val groups: List<DuplicateGroup>,
     val skipped: List<DuplicateSkippedFile>,
     val scannedCount: Int,
+    val indexStats: DuplicateIndexStats? = null,
 ) {
     val skippedCount: Int get() = skipped.size
 }
@@ -49,7 +50,7 @@ fun duplicateMediaTimestamp(entry: MediaEntry): Long? =
         ?: entry.dateModifiedMillis.takeIf { it > 0 }
         ?: entry.dateAddedSecs.takeIf { it > 0 }?.let { it * 1000L }
 
-private val duplicateKeeperOrder = compareBy<MediaEntry> { duplicateMediaTimestamp(it) ?: Long.MAX_VALUE }
+internal val duplicateKeeperOrder = compareBy<MediaEntry> { duplicateMediaTimestamp(it) ?: Long.MAX_VALUE }
     .thenBy { it.dateModifiedMillis.takeIf { value -> value > 0 } ?: Long.MAX_VALUE }
     .thenBy { it.dateAddedSecs.takeIf { value -> value > 0 } ?: Long.MAX_VALUE }
     .thenBy { it.path }.thenBy { it.contentId }
@@ -232,7 +233,7 @@ private fun normalizedMediaPath(path: String): String {
     return (if (path.startsWith('/') || path.startsWith('\\')) "/" else "") + parts.joinToString("/")
 }
 
-private fun albumPath(entry: MediaEntry): String {
+internal fun albumPath(entry: MediaEntry): String {
     val path = normalizedMediaPath(entry.path)
     val separator = path.lastIndexOf('/')
     // Missing parent information must never merge unrelated unknown folders.
@@ -240,7 +241,7 @@ private fun albumPath(entry: MediaEntry): String {
 }
 
 /** Collapse alias chains before grouping, so a duplicate database row can never delete itself. */
-private fun distinctFiles(entries: List<MediaEntry>): List<MediaEntry> {
+internal fun distinctFiles(entries: List<MediaEntry>): List<MediaEntry> {
     val sorted = entries.sortedWith(compareBy({ it.path }, { it.contentId }))
     val parents = IntArray(sorted.size) { it }
     fun root(index: Int): Int {

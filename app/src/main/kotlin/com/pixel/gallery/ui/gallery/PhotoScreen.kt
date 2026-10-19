@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -234,6 +236,8 @@ fun PhotoScreen(
                                         Text(
                                             java.io.File(albumName).name,
                                             style = EmphasizedTypography.TitleLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                         Text(
                                             pluralStringResource(
@@ -283,6 +287,7 @@ fun PhotoScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
+                                .clipToBounds()
                                 .onSizeChanged { headerWidthPx = it.width.toFloat() }
                                 .draggable(
                                     state = headerDraggableState,
@@ -319,8 +324,14 @@ fun PhotoScreen(
                                     },
                                 ),
                         ) {
-                            headerPage(false, Modifier.offset { IntOffset(titleOffsetPx.roundToInt(), 0) })
-                            headerPage(true, Modifier.offset { IntOffset(searchOffsetPx.roundToInt(), 0) })
+                            // Keep sliding pages inside the title slot. At rest, the inactive
+                            // page must also leave focus and accessibility traversal entirely.
+                            if (!headerTransition.isSearchMode || dragOffsetPx != 0f) {
+                                headerPage(false, Modifier.offset { IntOffset(titleOffsetPx.roundToInt(), 0) })
+                            }
+                            if (headerTransition.isSearchMode || dragOffsetPx != 0f) {
+                                headerPage(true, Modifier.offset { IntOffset(searchOffsetPx.roundToInt(), 0) })
+                            }
                         }
                     },
                     navigationIcon = {

@@ -95,7 +95,26 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
             await("re-entered album inherits parent anew") { tiles().size == 2 }
             click("More"); selected(images); click(videos)
             await("two local videos") { tiles().size == 2 }
+            check(nodes().none { it.isEditable }) { "Collapsed album search remained accessible" }
             snapshot("album-videos-light")
+
+            // The hidden search page must not leak behind navigation, including a
+            // cancelled swipe and the opposite swipe direction from the main test.
+            val collapsedTitle = bounds("MT-Mixed")
+            drag(screenWidth() * .4f, collapsedTitle.centerY().toFloat(), screenWidth() * .43f, collapsedTitle.centerY().toFloat())
+            settle(300)
+            check(nodes().none { it.isEditable }) { "Cancelled swipe left an editable search page" }
+            drag(screenWidth() * .3f, collapsedTitle.centerY().toFloat(), screenWidth() * .75f, collapsedTitle.centerY().toFloat())
+            await("right-swipe album search") { nodes().any { it.isEditable && it.isFocused } }
+            val searchBounds = Rect().also(nodes().first { it.isEditable }::getBoundsInScreen)
+            check(searchBounds.left >= bounds("Back").right && searchBounds.right <= bounds("More").left) {
+                "Album search overlaps navigation or overflow: $searchBounds"
+            }
+            snapshot("album-search-right-open")
+            back() // Hide keyboard.
+            back() // Close search.
+            await("right-swipe search closes") { find("MT-Mixed") != null && nodes().none { it.isEditable } }
+            snapshot("album-search-closed")
 
             // Select all must operate on the filtered pair, excluding both hidden images.
             longPress(tiles().first())
@@ -134,6 +153,7 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
             await("album search retained after viewer") { tiles().size == 1 }
             back() // Exit album search.
             await("local video choice retained") { tiles().size == 2 }
+            check(nodes().none { it.isEditable }) { "Closed search retained its editable node" }
             instrumentation.runOnMainSync { dark.value = true }
             click("More"); selected(videos); snapshot("album-menu-videos-dark")
             back(); back()
@@ -167,6 +187,7 @@ internal class MediaTypeTouchChecks(private val instrumentation: Instrumentation
             "Home and album grid share the filter; album detail inherits once and remains independent.\n" +
                 "Re-entry inherits the parent again; image-only/video-only albums are excluded appropriately.\n" +
                 "Select all selects only the two visible videos; search narrows to one video and viewer paging stays in that result.\n" +
+                "Collapsed/cancelled search has no editable node; swiping either direction opens search within the title bounds and Back closes it.\n" +
                 "Moving a fixture without changing library count invalidates the album cache and updates the visible image count.\n" +
                 "Empty-video state and 150% font scale checked; light/dark menus reuse the Theme mode control. Screenshots: ${output.absolutePath}"
         } finally {
