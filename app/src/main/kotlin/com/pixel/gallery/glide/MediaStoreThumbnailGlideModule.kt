@@ -42,8 +42,7 @@ data class MediaStoreThumbnail(
     val traceViewerLoad: Boolean = false,
     val allowSourceFallback: Boolean = true,
 ) {
-    // These policy flags control how a cache miss is handled, but they do not change
-    // the pixels produced by this model. Keeping them out of model identity lets
+    // Persistence and tracing do not change pixels. Keeping those out of identity lets
     // the viewer's cache-only cover reuse the exact 200 px bitmap that Grid just
     // displayed, without starting another source read or decode.
     override fun equals(other: Any?): Boolean {
@@ -54,7 +53,8 @@ data class MediaStoreThumbnail(
             mimeType == other.mimeType &&
             rotationDegrees == other.rotationDegrees &&
             dateModifiedMillis == other.dateModifiedMillis &&
-            sizeBytes == other.sizeBytes
+            sizeBytes == other.sizeBytes &&
+            allowSourceFallback == other.allowSourceFallback
     }
 
     override fun hashCode(): Int {
@@ -63,6 +63,7 @@ data class MediaStoreThumbnail(
         result = 31 * result + rotationDegrees
         result = 31 * result + dateModifiedMillis.hashCode()
         result = 31 * result + (sizeBytes?.hashCode() ?: 0)
+        result = 31 * result + allowSourceFallback.hashCode()
         return result
     }
 }
@@ -74,7 +75,8 @@ internal class MediaStoreThumbnailLoader(private val context: Context) : ModelLo
         height: Int,
         options: Options
     ): ModelLoader.LoadData<Bitmap> {
-        val cacheKey = ObjectKey("${model.uri}-${model.dateModifiedMillis}-${model.rotationDegrees}-${width}x${height}")
+        val version = if (isVideo(model.mimeType)) "" else "aspect-v2-${model.allowSourceFallback}-"
+        val cacheKey = ObjectKey("$version${model.uri}-${model.dateModifiedMillis}-${model.rotationDegrees}-${width}x${height}")
         return ModelLoader.LoadData(cacheKey, MediaStoreThumbnailFetcher(context, model, width, height))
     }
 
@@ -215,7 +217,8 @@ internal class MediaStoreThumbnailFetcher(
                     persistentDir.mkdirs()
                 }
                 val contentId = model.uri.tryParseId() ?: model.uri.hashCode()
-                val cacheFileName = "${contentId}_${model.dateModifiedMillis}_${model.rotationDegrees}" +
+                val version = if (isVideo(model.mimeType)) "" else "aspect_v2_${model.allowSourceFallback}_"
+                val cacheFileName = "${version}${contentId}_${model.dateModifiedMillis}_${model.rotationDegrees}" +
                     if (isGridView) "_q75.jpg" else ".jpg"
                 persistentFile = File(persistentDir, cacheFileName)
 
@@ -328,6 +331,34 @@ internal class MediaStoreThumbnailFetcher(
                 }
             }
 
+            if (bitmap != null && model.allowSourceFallback && !isVideo(model.mimeType)) {
+                // Providers can return a padded/cropped EXIF thumbnail instead of the original
+                // image's aspect ratio. Re-decode a small original preview rather than crop
+                // dark pixels: actual black borders in the photograph must remain intact.
+                val sourceBounds = readSourceBounds()
+                if (sourceBounds != null && !thumbnailMatchesSourceAspect(
+                        bitmap.width, bitmap.height, sourceBounds.first, sourceBounds.second, model.rotationDegrees,
+                    )) {
+                    val originalThumbnail = bitmap
+                    val corrected = decodeFallbackStream(allowEmbeddedThumbnail = false)
+                    if (corrected == null) {
+                        originalThumbnail.recycle()
+                        metricsFailed("aspect-correction-failed")
+                        callback.onLoadFailed(IOException("Could not decode an aspect-correct thumbnail for ${model.uri}"))
+                        return
+                    }
+                    bitmap = corrected
+                    if (corrected !== originalThumbnail) originalThumbnail.recycle()
+                    if (model.traceViewerLoad) ViewerLoadMetrics.event(
+                        "THUMB_ASPECT_REDECODE",
+                        "source=${sourceBounds.first}x${sourceBounds.second} " +
+                            "rotation=${model.rotationDegrees} corrected=true " +
+                            "result=${bitmap.width}x${bitmap.height}",
+                        imageKey = metricsKey,
+                    )
+                }
+            }
+
             if (bitmap != null) {
                 if (usePersistentCache && persistentFile != null) {
                     val writeToken = if (model.traceViewerLoad) {
@@ -432,18 +463,43 @@ internal class MediaStoreThumbnailFetcher(
         }
     }
 
-    private fun decodeFallbackStream(): Bitmap? {
+    private fun readSourceBounds(): Pair<Int, Int>? {
+        try {
+            context.contentResolver.query(
+                model.uri,
+                arrayOf(MediaStore.MediaColumns.WIDTH, MediaStore.MediaColumns.HEIGHT),
+                null, null, null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val width = cursor.getInt(0)
+                    val height = cursor.getInt(1)
+                    if (width > 0 && height > 0) return width to height
+                }
+            }
+        } catch (_: Exception) {
+            // Some providers omit dimensions even when the original stream is readable.
+        }
+        return try {
+            context.contentResolver.openInputStream(model.uri)?.use { stream ->
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeStream(stream, null, bounds)
+                if (bounds.outWidth > 0 && bounds.outHeight > 0) bounds.outWidth to bounds.outHeight else null
+            }
+        } catch (_: Exception) { null }
+    }
+
+    private fun decodeFallbackStream(allowEmbeddedThumbnail: Boolean = true): Bitmap? {
         val resolver = context.contentResolver
         val metricsKey = "${model.uri}:${model.dateModifiedMillis}"
         
         // 1. Try extracting EXIF thumbnail directly (extremely fast and low-power)
-        val exifToken = if (model.traceViewerLoad) {
+        val exifToken = if (allowEmbeddedThumbnail && model.traceViewerLoad) {
             ViewerLoadMetrics.workStarted("EXIF_THUMBNAIL_READ", metricsKey)
         } else {
             null
         }
         try {
-            resolver.openInputStream(model.uri)?.use { stream ->
+            if (allowEmbeddedThumbnail) resolver.openInputStream(model.uri)?.use { stream ->
                 val exifInterface = ExifInterface(stream)
                 if (exifInterface.hasThumbnail()) {
                     val thumbnailBytes = exifInterface.thumbnail
@@ -493,17 +549,9 @@ internal class MediaStoreThumbnailFetcher(
 
                 val srcWidth = options.outWidth
                 val srcHeight = options.outHeight
-                var inSampleSize = 1
                 val targetWidth = if (width > 0) minOf(width, 512) else 512
                 val targetHeight = if (height > 0) minOf(height, 512) else 512
-
-                if (srcWidth > targetWidth || srcHeight > targetHeight) {
-                    val halfWidth = srcWidth / 2
-                    val halfHeight = srcHeight / 2
-                    while (halfWidth / inSampleSize >= targetWidth && halfHeight / inSampleSize >= targetHeight) {
-                        inSampleSize *= 2
-                    }
-                }
+                val inSampleSize = thumbnailFitSampleSize(srcWidth, srcHeight, targetWidth, targetHeight)
 
                 val decodeOptions = BitmapFactory.Options().apply {
                     this.inSampleSize = inSampleSize

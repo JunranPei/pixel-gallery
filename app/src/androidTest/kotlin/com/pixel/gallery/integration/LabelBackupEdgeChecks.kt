@@ -270,7 +270,7 @@ internal class LabelBackupEdgeChecks(private val context: Context, private val f
                 } finally { settings.removeExcludedFolder(entry.path.substringBeforeLast('/') + "/") }
             }
             case("D06 non-file document streams and injected read write permission failures") {
-                val root = "content://com.pixel.gallery.labelbackup.edge.test.documents/"
+                val root = "content://${context.packageName}.test.backupfault/"
                 val preview = backup.preview(Uri.parse(root + "valid-stream")) { _, _ -> }
                 check(preview.backup.media.isEmpty() && preview.backup.labels.isEmpty())
                 expectFailure { backup.preview(Uri.parse(root + "read-failure")) { _, _ -> } }

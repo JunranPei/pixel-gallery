@@ -220,7 +220,7 @@ internal class TransferEdgeChecks(private val context: Context, private val filt
                 check(File(b.path).exists() && hash(File(b.path))==before) { "Cancelled $mode started second item" }
                 check(!File(dest.path,File(b.path).name).exists())
             }
-            val authority="com.pixel.gallery.transfer.edge.test.documents"
+            val authority="${context.packageName}.test.transferfault"
             fun saf(name: String,fault: String): TransferDestination {
                 val dest=destination(name)
                 resolver.call(Uri.parse("content://$authority"),"configure",null,Bundle().apply { putString("root",dest.path);putString("fault",fault) })

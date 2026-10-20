@@ -54,6 +54,9 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var transferEdgesSuite = false
     private var transferUiEdgesSuite = false
     private var videoFirstAttemptSuite = false
+    private var viewerPreviewGeometrySuite = false
+    private var thumbnailAspectSuite = false
+    private var geometryRun = "baseline"
     private var labelBackupEdgeFilter: String? = null
     private var labelBackupCleanupToken: String? = null
     override fun onCreate(arguments: Bundle?) {
@@ -76,6 +79,9 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         transferEdgesSuite = arguments?.getString("suite") == "transfer-edges"
         transferUiEdgesSuite = arguments?.getString("suite") == "transfer-ui-edges"
         videoFirstAttemptSuite = arguments?.getString("suite") == "video-first-attempt"
+        viewerPreviewGeometrySuite = arguments?.getString("suite") == "viewer-preview-geometry"
+        thumbnailAspectSuite = arguments?.getString("suite") == "thumbnail-aspect"
+        geometryRun = arguments?.getString("geometryRun") ?: "baseline"
         labelBackupEdgeFilter = arguments?.getString("edgeFilter")
         labelBackupCleanupToken = arguments?.getString("edgeCleanupToken")
         super.onCreate(arguments)
@@ -86,6 +92,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                thumbnailAspectSuite -> ThumbnailAspectDeviceChecks(targetContext).exercise()
+                viewerPreviewGeometrySuite -> ViewerPreviewGeometryChecks(this, geometryRun).exercise()
                 videoFirstAttemptSuite -> QuickSortVideoFirstAttemptChecks(targetContext, labelBackupEdgeFilter).exercise()
                 transferUiEdgesSuite -> TransferUiEdgeChecks(this).exercise()
                 transferEdgesSuite -> TransferEdgeChecks(targetContext, labelBackupEdgeFilter).exercise()
