@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Palette
@@ -15,7 +14,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -53,56 +51,45 @@ fun ThemeSettingsScreen(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.padding(innerPadding),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = 20.dp,
-                top = 12.dp,
-                end = 20.dp,
-                bottom = 32.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = SettingsLayout.ContentPadding,
+            verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing),
         ) {
             item {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 14.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Outlined.Palette,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 12.dp).size(32.dp),
-                            )
-                            Column {
-                                Text("Theme mode", style = EmphasizedTypography.LabelLarge.copy(fontWeight = FontWeight.Bold))
+                SettingsGroup(itemCount = 2) { index ->
+                    when (index) {
+                        0 -> {
+                            Column(
+                                modifier = Modifier.padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 14.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Palette,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 12.dp).size(32.dp),
+                                    )
+                                    Column {
+                                        Text("Theme mode", style = EmphasizedTypography.LabelLarge.copy(fontWeight = FontWeight.Bold))
+                                    }
+                                }
+                                SettingsOptionControl(
+                                    options = listOf(ThemeMode.SYSTEM to "System", ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark"),
+                                    selectedMode = themeMode,
+                                    onSelected = viewModel::setThemeMode,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
                             }
                         }
-                        SettingsOptionControl(
-                            options = listOf(ThemeMode.SYSTEM to "System", ThemeMode.LIGHT to "Light", ThemeMode.DARK to "Dark"),
-                            selectedMode = themeMode,
-                            onSelected = viewModel::setThemeMode,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
+                        1 -> {
+                            SettingsToggleItem(
+                                title = "Material You",
+                                description = "Use system dynamic colors",
+                                icon = Icons.Outlined.Palette,
+                                checked = materialYou,
+                                onCheckedChange = viewModel::setMaterialYou,
+                            )
+                        }
                     }
-                }
-            }
-            item {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    SettingsToggleItem(
-                        title = "Material You",
-                        description = "Use system dynamic colors",
-                        icon = Icons.Outlined.Palette,
-                        checked = materialYou,
-                        onCheckedChange = viewModel::setMaterialYou,
-                    )
                 }
             }
         }

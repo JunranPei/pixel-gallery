@@ -1,8 +1,6 @@
 package com.pixel.gallery.ui.components
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -10,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -113,45 +110,12 @@ fun SortDialog(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    criteria.forEach { criterion ->
-                        val isSelected = selectedCriterion == criterion.id
-
-                        Surface(
-                            onClick = { selectedCriterion = criterion.id },
-                            shape = CircleShape, // Always use CircleShape (fully rounded / large corners) as requested
-                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.padding(horizontal = 4.dp) // Layout naturally and shift size dynamically
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Slide checkmark icon in when selected, matching the bottom tab transition style
-                                AnimatedVisibility(visible = isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Text(
-                                    text = criterion.label,
-                                    style = EmphasizedTypography.LabelLarge, // Match premium settings font
-                                    modifier = Modifier.padding(start = if (isSelected) 6.dp else 0.dp),
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
+                SettingsOptionControl(
+                    options = criteria.map { it.id to it.label },
+                    selectedMode = selectedCriterion,
+                    onSelected = { selectedCriterion = it },
+                    unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -164,49 +128,15 @@ fun SortDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 val currentCriterionObj = criteria.find { it.id == selectedCriterion } ?: criteria.first()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val directions = listOf(
+                SettingsOptionControl(
+                    options = listOf(
                         "ASC" to currentCriterionObj.ascLabel,
-                        "DESC" to currentCriterionObj.descLabel
-                    )
-                    directions.forEach { (dirCode, dirLabel) ->
-                        val isSelected = selectedDirection == dirCode
-
-                        Surface(
-                            onClick = { selectedDirection = dirCode },
-                            shape = CircleShape, // Always use CircleShape (fully rounded / large corners) as requested
-                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.padding(horizontal = 4.dp) // Layout naturally and shift size dynamically
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Slide checkmark icon in when selected, matching the bottom tab transition style
-                                AnimatedVisibility(visible = isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Text(
-                                    text = dirLabel,
-                                    style = EmphasizedTypography.LabelLarge, // Match premium settings font
-                                    modifier = Modifier.padding(start = if (isSelected) 6.dp else 0.dp),
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
+                        "DESC" to currentCriterionObj.descLabel,
+                    ),
+                    selectedMode = selectedDirection,
+                    onSelected = { selectedDirection = it },
+                    unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
 
                 Spacer(modifier = Modifier.height(24.dp))
 

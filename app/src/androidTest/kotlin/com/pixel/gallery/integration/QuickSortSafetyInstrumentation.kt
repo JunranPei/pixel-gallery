@@ -44,6 +44,18 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var uiSuite = false
     private var duplicateSuite = false
     private var undoHandednessSuite = false
+    private var labelBackupSuite = false
+    private var quickSortHeaderSuite = false
+    private var labelDesignSuite = false
+    private var settingsSelectionSuite = false
+    private var albumRegressionSuite = false
+    private var labelBackupEdgesSuite = false
+    private var labelBackupUiSuite = false
+    private var transferEdgesSuite = false
+    private var transferUiEdgesSuite = false
+    private var videoFirstAttemptSuite = false
+    private var labelBackupEdgeFilter: String? = null
+    private var labelBackupCleanupToken: String? = null
     override fun onCreate(arguments: Bundle?) {
         mediaTypeSuite = arguments?.getString("suite") == "media-types"
         mediaPerformanceSuite = arguments?.getString("suite") == "media-performance"
@@ -54,6 +66,18 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         uiSuite = arguments?.getString("suite") == "redesign"
         duplicateSuite = arguments?.getString("suite") == "duplicates"
         undoHandednessSuite = arguments?.getString("suite") == "undo-handedness"
+        labelBackupSuite = arguments?.getString("suite") == "label-backup"
+        quickSortHeaderSuite = arguments?.getString("suite") == "quick-sort-header"
+        labelDesignSuite = arguments?.getString("suite") == "label-designs"
+        settingsSelectionSuite = arguments?.getString("suite") == "settings-selection"
+        albumRegressionSuite = arguments?.getString("suite") == "album-regressions"
+        labelBackupEdgesSuite = arguments?.getString("suite") == "label-backup-edges"
+        labelBackupUiSuite = arguments?.getString("suite") == "label-backup-ui"
+        transferEdgesSuite = arguments?.getString("suite") == "transfer-edges"
+        transferUiEdgesSuite = arguments?.getString("suite") == "transfer-ui-edges"
+        videoFirstAttemptSuite = arguments?.getString("suite") == "video-first-attempt"
+        labelBackupEdgeFilter = arguments?.getString("edgeFilter")
+        labelBackupCleanupToken = arguments?.getString("edgeCleanupToken")
         super.onCreate(arguments)
         start()
     }
@@ -62,6 +86,17 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                videoFirstAttemptSuite -> QuickSortVideoFirstAttemptChecks(targetContext, labelBackupEdgeFilter).exercise()
+                transferUiEdgesSuite -> TransferUiEdgeChecks(this).exercise()
+                transferEdgesSuite -> TransferEdgeChecks(targetContext, labelBackupEdgeFilter).exercise()
+                labelBackupCleanupToken != null -> cleanupAbortedLabelBackupTest(targetContext, labelBackupCleanupToken!!)
+                labelBackupUiSuite -> LabelBackupUiChecks(this).exercise()
+                labelBackupEdgesSuite -> LabelBackupEdgeChecks(targetContext, labelBackupEdgeFilter).exercise()
+                albumRegressionSuite -> AlbumRegressionChecks(this).exercise()
+                labelBackupSuite -> LabelBackupChecks(targetContext).exercise()
+                quickSortHeaderSuite -> RedesignTouchChecks(this).exercise(quickSortOnly = true)
+                labelDesignSuite -> LabelBackupDesignPreviews(this).exercise()
+                settingsSelectionSuite -> SettingsSelectionChecks(this).exercise()
                 mediaMemorySuite -> MediaBrowseMemoryChecks(this).exercise()
                 mediaPerformanceSuite -> MediaBrowsePerformanceChecks(this).exercise()
                 mediaTypeSuite -> MediaTypeTouchChecks(this).exercise()

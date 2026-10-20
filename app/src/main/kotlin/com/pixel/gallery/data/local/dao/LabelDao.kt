@@ -16,6 +16,9 @@ interface LabelDao {
     @Query("SELECT * FROM media_labels")
     fun observeMemberships(): Flow<List<MediaLabelEntry>>
 
+    @Query("SELECT * FROM media_labels")
+    suspend fun getMemberships(): List<MediaLabelEntry>
+
     @Query("SELECT * FROM labels ORDER BY sortOrder, id")
     suspend fun getLabels(): List<LabelEntry>
 

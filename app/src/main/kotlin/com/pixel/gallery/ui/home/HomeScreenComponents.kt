@@ -88,6 +88,7 @@ fun PhotosScreen(
     emptyMessage: String? = null,
     quickSort: QuickSortUiConfig? = null,
     positionLabels: List<String?>? = null,
+    selectionMode: Boolean = selectedIds.isNotEmpty(),
 ) {
     var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
@@ -231,7 +232,7 @@ fun PhotosScreen(
                         }
                         val selectableHeaderPhotos = headerPhotos.filterNot { it in reservedIds }
                         val isHeaderSelected = selectableHeaderPhotos.isNotEmpty() && selectableHeaderPhotos.all { selectedIds.contains(it) }
-                        val isSelectionMode = selectedIds.isNotEmpty() || quickSort != null
+                        val isSelectionMode = selectionMode || quickSort != null
                         val onHeaderClick = remember(isHeaderSelected, selectedIds, selectableHeaderPhotos, quickSortBusy, reservedIds) {
                             {
                                 if (!quickSortBusy) {
@@ -254,7 +255,7 @@ fun PhotosScreen(
                     is GridItem.Photo -> {
                         val media = item.entry
                         val isSelected = selectedIds.contains(media.contentId)
-                        val isSelectionMode = selectedIds.isNotEmpty() || quickSort != null
+                        val isSelectionMode = selectionMode || quickSort != null
                         val isReserved = media.contentId in reservedIds
                         val onPhotoClick: () -> Unit = {
                             if (!isReserved && !quickSortBusy) {

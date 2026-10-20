@@ -138,6 +138,7 @@ fun PhotoScreen(
     onToggleQuickSort: () -> Unit = {},
     initialMediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     isForeground: Boolean = true,
+    selectionMode: Boolean = selectedIds.isNotEmpty(),
     viewModel: PhotosViewModel = hiltViewModel()
 ) {
     val browsingIndex by viewModel.browsingIndex.collectAsState()
@@ -214,7 +215,7 @@ fun PhotoScreen(
         Scaffold(
             contentWindowInsets = WindowInsets(0),
         topBar = {
-            if (selectedIds.isEmpty()) {
+            if (!selectionMode) {
                 TopAppBar(
                     title = {
                         val dragOffsetPx = headerTransition.dragOffsetPx
@@ -420,6 +421,7 @@ fun PhotoScreen(
                     onNavigateToViewer(id, mediaType, if (normalizedSearchQuery.isEmpty()) "" else albumResult.query)
                 },
                 selectedIds = selectedIds,
+                selectionMode = selectionMode,
                 onSelectionChange = onSelectionChange,
                 onToggleSelection = onToggleSelection,
                 columns = gridColumns,

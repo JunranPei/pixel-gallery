@@ -53,6 +53,10 @@ import io.github.indexedraw.IndexedRawStore
 import io.github.indexedtiff.IndexedTiffStore
 import io.github.indexedwebp.IndexedWebpStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -603,6 +607,7 @@ class MediaRepository @Inject constructor(
     ): TransferSummary = withMediaMutation {
             withContext(Dispatchers.IO) {
             replacementRecoveryComplete.await()
+            currentCoroutineContext().ensureActive()
             val destinationDir = File(destination.path)
         if (
             destination.documentUri == null &&
@@ -620,7 +625,9 @@ class MediaRepository @Inject constructor(
         var skipped = 0
         val failures = mutableListOf<TransferItemFailure>()
 
+        try {
         entries.forEachIndexed { index, entry ->
+            currentCoroutineContext().ensureActive()
             val sourceFile = resolveTransferSource(entry)
             onProgress(
                 TransferProgress(
@@ -630,6 +637,7 @@ class MediaRepository @Inject constructor(
                     currentName = sourceFile?.name.orEmpty()
                 )
             )
+            currentCoroutineContext().ensureActive()
 
             if (sourceFile == null) {
                 failures += TransferItemFailure(entry, "Source file no longer exists")
@@ -645,60 +653,29 @@ class MediaRepository @Inject constructor(
             }
 
             try {
-                destination.documentUri?.let { documentUri ->
-                    when (
-                        transferEntryToSaf(
-                            entry = entry,
-                            sourceFile = sourceFile,
-                            destination = destination,
-                            parentUri = Uri.parse(documentUri),
-                            mode = mode,
-                            conflictPolicy = conflictPolicy
-                        )
-                    ) {
-                        TransferOutcome.COMPLETED -> succeeded++
-                        TransferOutcome.SKIPPED -> skipped++
-                    }
-                    return@forEachIndexed
+                // Complete or roll back an item that has already started, including
+                // label/index updates. Cancellation stops the next item at the boundary.
+                when (withContext(NonCancellable) {
+                    transferResolvedEntry(entry, sourceFile, destination, mode, conflictPolicy)
+                }) {
+                    TransferOutcome.COMPLETED -> succeeded++
+                    TransferOutcome.SKIPPED -> skipped++
                 }
-
-                val directTarget = File(destinationDir, sourceFile.name)
-                if (directTarget.exists() && conflictPolicy == ConflictPolicy.SKIP) {
-                    skipped++
-                    return@forEachIndexed
-                }
-                if (directTarget.exists() && conflictPolicy == ConflictPolicy.REPLACE) {
-                    if (directTarget.canonicalPath == sourceFile.canonicalPath) {
-                        skipped++
-                        return@forEachIndexed
-                    }
-                    replaceEntry(entry, sourceFile, directTarget, mode)
-                    succeeded++
-                    return@forEachIndexed
-                }
-
-                val targetFile = if (conflictPolicy == ConflictPolicy.KEEP_BOTH) {
-                    getAvailableTarget(destinationDir, sourceFile.name)
-                } else {
-                    directTarget
-                }
-                when (mode) {
-                    TransferMode.COPY -> copyEntry(entry, sourceFile, targetFile)
-                    TransferMode.MOVE -> moveEntry(entry, sourceFile, targetFile)
-                }
-                succeeded++
             } catch (error: Exception) {
+                if (error is CancellationException) throw error
                 failures += TransferItemFailure(entry, error.message ?: error.javaClass.simpleName)
             }
         }
-
+        } finally {
         if (succeeded > 0) {
             // Do not report 100% until the final MediaStore state and Room snapshot agree.
             // Force this pass because observer-driven syncs may have recorded an
             // intermediate MediaStore generation while the batch was still running.
-            runCatching { syncWithMediaStore(force = true) }
+            runCatching { withContext(NonCancellable) { syncWithMediaStore(force = true) } }
                 .onFailure { android.util.Log.e("MediaRepository", "Transfer succeeded but MediaStore sync failed", it) }
         }
+        }
+        currentCoroutineContext().ensureActive()
 
         onProgress(
             TransferProgress(
@@ -711,6 +688,33 @@ class MediaRepository @Inject constructor(
 
             TransferSummary(mode, succeeded, skipped, failures)
             }
+    }
+
+    private suspend fun transferResolvedEntry(
+        entry: MediaEntry,
+        sourceFile: File,
+        destination: TransferDestination,
+        mode: TransferMode,
+        conflictPolicy: ConflictPolicy
+    ): TransferOutcome {
+        destination.documentUri?.let { uri ->
+            return transferEntryToSaf(entry, sourceFile, destination, Uri.parse(uri), mode, conflictPolicy)
+        }
+        val directory = File(destination.path)
+        val directTarget = File(directory, sourceFile.name)
+        if (directTarget.exists() && conflictPolicy == ConflictPolicy.SKIP) return TransferOutcome.SKIPPED
+        if (directTarget.exists() && conflictPolicy == ConflictPolicy.REPLACE) {
+            if (!directTarget.isFile) throw IOException("Destination is not a regular file; existing folder was kept")
+            if (directTarget.canonicalPath == sourceFile.canonicalPath) return TransferOutcome.SKIPPED
+            replaceEntry(entry, sourceFile, directTarget, mode)
+            return TransferOutcome.COMPLETED
+        }
+        val target = if (conflictPolicy == ConflictPolicy.KEEP_BOTH) getAvailableTarget(directory, sourceFile.name) else directTarget
+        when (mode) {
+            TransferMode.COPY -> copyEntry(entry, sourceFile, target)
+            TransferMode.MOVE -> moveEntry(entry, sourceFile, target)
+        }
+        return TransferOutcome.COMPLETED
     }
 
     fun isMediaMutationInProgress(): Boolean = mediaMutationInProgress
@@ -1055,6 +1059,7 @@ class MediaRepository @Inject constructor(
                         target.exists() && !backup.exists() && !temporary.exists()
                     }
                     ReplacementRecoveryAction.ROLLBACK_TO_BACKUP -> {
+                        if (!backup.isFile) throw IOException("Replacement backup is unavailable; remaining files were kept")
                         if (target.exists()) target.delete()
                         if (!target.exists() && backup.exists()) backup.renameTo(target)
                         if (temporary.exists()) temporary.delete()
@@ -1166,8 +1171,17 @@ class MediaRepository @Inject constructor(
                 fingerprint.modifiedMillis, fingerprint.bytes, fingerprint.sha256)
             onCheckpoint(checkpoint)
 
-            // Preserve the existing MediaStore row (including DATE_ADDED) whenever possible.
-            if (sameVolume && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // MediaProvider rebuilds names using the indexed MIME, even for a path-only
+            // update. A valid MOV may be indexed as video/mp4 and acquire a .mp4 suffix.
+            // Use the verified file path for those names, including conflicts and undo.
+            val providerMime = runCatching { context.contentResolver.getType(Uri.parse(entry.uri)) }
+                .getOrNull() ?: entry.sourceMimeType
+            val extension = target.extension.lowercase(java.util.Locale.ROOT)
+            val mimeMap = android.webkit.MimeTypeMap.getSingleton()
+            val providerKeepsName = mimeMap.getMimeTypeFromExtension(extension) == providerMime ||
+                mimeMap.getExtensionFromMimeType(providerMime) == extension
+            // Preserve the existing MediaStore row (including DATE_ADDED) when its name is stable.
+            if (sameVolume && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && providerKeepsName) {
                 val relative = StorageUtils.PathSegments(context, target.path).relativeDir
                     ?: throw IOException("Could not resolve destination album")
                 if (target.exists()) throw IOException("Destination changed; source was kept")

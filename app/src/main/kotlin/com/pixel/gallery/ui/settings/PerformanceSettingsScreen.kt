@@ -5,7 +5,6 @@ import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -73,54 +72,50 @@ fun PerformanceSettingsScreen(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = SettingsLayout.ContentPadding,
+            verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing),
         ) {
             item {
-                SettingsSurface {
-                    SettingsSliderItem(
-                        title = "Image Decoding Threads: $glideThreadCount",
-                        description = "Requires app restart.",
-                        icon = Icons.Outlined.Speed,
-                        value = glideThreadCount.toFloat(),
-                        valueRange = 1f..8f,
-                        steps = 6,
-                        onValueChangeFinished = { viewModel.setGlideThreadCount(it.toInt()) },
-                    )
+                SettingsGroup(itemCount = 3) { index ->
+                    when (index) {
+                        0 -> {
+                            SettingsSliderItem(
+                                title = "Image Decoding Threads: $glideThreadCount",
+                                description = "Requires app restart.",
+                                icon = Icons.Outlined.Speed,
+                                value = glideThreadCount.toFloat(),
+                                valueRange = 1f..8f,
+                                steps = 6,
+                                onValueChangeFinished = { viewModel.setGlideThreadCount(it.toInt()) },
+                            )
+                        }
+                        1 -> {
+                            SettingsSliderItem(
+                                title = "Flowing Cache Limit: $glideCacheSize MB",
+                                description = "Requires app restart.",
+                                icon = Icons.Outlined.Storage,
+                                value = glideCacheSize.toFloat(),
+                                valueRange = 100f..2000f,
+                                steps = 18,
+                                onValueChangeFinished = { viewModel.setGlideCacheSize(it.toInt()) },
+                            )
+                        }
+                        2 -> {
+                            SettingsSliderItem(
+                                title = "Persistent Grid Limit: $glidePersistentGridCacheSize MB",
+                                description = "Thumbnails for files over 5 MB.",
+                                icon = Icons.Outlined.Storage,
+                                value = glidePersistentGridCacheSize.toFloat(),
+                                valueRange = 50f..2000f,
+                                steps = 38,
+                                onValueChangeFinished = { viewModel.setGlidePersistentGridCacheSize(it.toInt()) },
+                            )
+                        }
+                    }
                 }
             }
             item {
-                SettingsSurface {
-                    SettingsSliderItem(
-                        title = "Flowing Cache Limit: $glideCacheSize MB",
-                        description = "Requires app restart.",
-                        icon = Icons.Outlined.Storage,
-                        value = glideCacheSize.toFloat(),
-                        valueRange = 100f..2000f,
-                        steps = 18,
-                        onValueChangeFinished = { viewModel.setGlideCacheSize(it.toInt()) },
-                    )
-                }
-            }
-            item {
-                SettingsSurface {
-                    SettingsSliderItem(
-                        title = "Persistent Grid Limit: $glidePersistentGridCacheSize MB",
-                        description = "Thumbnails for files over 5 MB.",
-                        icon = Icons.Outlined.Storage,
-                        value = glidePersistentGridCacheSize.toFloat(),
-                        valueRange = 50f..2000f,
-                        steps = 38,
-                        onValueChangeFinished = { viewModel.setGlidePersistentGridCacheSize(it.toInt()) },
-                    )
-                }
-            }
-            item {
-                SettingsSurface(
-                    modifier = Modifier.padding(top = 24.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(24.dp),
-                ) {
+                SettingsGroup(itemCount = 1, tone = SettingsBlockTone.Emphasized) {
                     SettingsClickItem(
                         title = "Clear Cache",
                         icon = Icons.Outlined.DeleteSweep,

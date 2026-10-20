@@ -15,17 +15,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+/** Shared Theme mode control for any number of mutually exclusive options.
+ * Selection changes both shape (rounded rectangle to capsule) and color, with a checkmark.
+ */
 @Composable
-internal fun <T> SettingsOptionControl(
+fun <T> SettingsOptionControl(
     options: List<Pair<T, String>>,
     selectedMode: T,
     onSelected: (T) -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    enabled: Boolean = true,
+    unselectedContainerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
 ) {
     Row(
         modifier = modifier.fillMaxWidth().selectableGroup(),
@@ -35,7 +41,7 @@ internal fun <T> SettingsOptionControl(
             val selected = selectedMode == mode
             val shape = if (selected) CircleShape else RoundedCornerShape(if (compact) 8.dp else 10.dp)
             val containerColor by animateColorAsState(
-                targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                targetValue = if (selected) MaterialTheme.colorScheme.primary else unselectedContainerColor,
                 label = "ThemeModeButtonColor",
             )
             val contentColor by animateColorAsState(
@@ -48,7 +54,7 @@ internal fun <T> SettingsOptionControl(
                     .height(if (compact) 32.dp else 48.dp)
                     .clip(shape)
                     .background(containerColor, shape)
-                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onSelected(mode) }),
+                    .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = { onSelected(mode) }),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(

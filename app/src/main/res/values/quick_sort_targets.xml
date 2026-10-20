@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="qs_targets_search">Search albums</string>
+    <string name="qs_targets_title">Choose albums</string>
+    <string name="selection_count_caption">selected</string>
     <string name="qs_targets_clear_search">Clear search</string>
     <string name="qs_targets_selected_count">%1$d selected</string>
+    <string name="qs_targets_clear_selection">Clear</string>
     <string name="qs_targets_new_album">New album</string>
     <string name="qs_targets_empty">No albums yet</string>
     <string name="qs_targets_no_results">No matching albums</string>

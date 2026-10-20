@@ -2,15 +2,16 @@ package com.pixel.gallery.ui.settings
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Tab
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.R
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -19,7 +20,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.clickable
 import com.pixel.gallery.BuildConfig
 
@@ -27,10 +27,10 @@ import com.pixel.gallery.BuildConfig
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onNavigateToThemeSettings: () -> Unit,
     onNavigateToDisplaySettings: () -> Unit,
     onNavigateToLicenses: () -> Unit,
     onNavigateToPerformanceSettings: () -> Unit,
+    onNavigateToLibrarySettings: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -53,43 +53,38 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = SettingsLayout.ContentPadding,
+            verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing),
         ) {
             item {
-                SettingsSurface(shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp)) {
-                    SettingsClickItem(
-                        title = "Themes",
-                        icon = Icons.Outlined.Palette,
-                        onClick = onNavigateToThemeSettings,
-                    )
+                SettingsGroup(itemCount = 3) { index ->
+                    when (index) {
+                        0 -> {
+                            SettingsClickItem(
+                                title = "Display",
+                                icon = Icons.Outlined.Tab,
+                                onClick = onNavigateToDisplaySettings,
+                            )
+                        }
+                        1 -> {
+                            SettingsClickItem(
+                                title = stringResource(R.string.library_settings_title),
+                                icon = Icons.Outlined.PhotoLibrary,
+                                onClick = onNavigateToLibrarySettings,
+                            )
+                        }
+                        2 -> {
+                            SettingsClickItem(
+                                title = "Performance & Caching",
+                                icon = Icons.Outlined.Speed,
+                                onClick = onNavigateToPerformanceSettings,
+                            )
+                        }
+                    }
                 }
             }
             item {
-                SettingsSurface {
-                    SettingsClickItem(
-                        title = "Display",
-                        icon = Icons.Outlined.Tab,
-                        onClick = onNavigateToDisplaySettings,
-                    )
-                }
-            }
-            item {
-                SettingsSurface(shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp)) {
-                    SettingsClickItem(
-                        title = "Performance & Caching",
-                        icon = Icons.Outlined.Speed,
-                        onClick = onNavigateToPerformanceSettings,
-                    )
-                }
-            }
-
-            item {
-                SettingsSurface(
-                    modifier = Modifier.padding(top = 24.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(24.dp),
-                ) {
+                SettingsGroup(itemCount = 1, tone = SettingsBlockTone.Emphasized) {
                     SettingsClickItem(
                         title = "About",
                         description = "Pixel Gallery v${BuildConfig.VERSION_NAME}",
@@ -100,21 +95,6 @@ fun SettingsScreen(
             }
         }
     }
-}
-
-@Composable
-fun SettingsSurface(
-    modifier: Modifier = Modifier,
-    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceContainer,
-    shape: Shape = RoundedCornerShape(6.dp),
-    content: @Composable () -> Unit,
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = color,
-        shape = shape,
-        content = content,
-    )
 }
 
 @Composable

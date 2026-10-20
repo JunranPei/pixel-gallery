@@ -52,6 +52,7 @@ import com.pixel.gallery.ui.components.HomeOverflowMenu
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
 import com.pixel.gallery.ui.settings.ThemeSettingsScreen
 import com.pixel.gallery.ui.settings.DisplaySettingsScreen
+import com.pixel.gallery.ui.settings.LibrarySettingsScreen
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
@@ -261,6 +262,7 @@ sealed class Screen : Parcelable {
     @Parcelize object PerformanceSettings : Screen()
     @Parcelize object ThemeSettings : Screen()
     @Parcelize object DisplaySettings : Screen()
+    @Parcelize object LibrarySettings : Screen()
     @Parcelize data class TransferDestination(
         val entryIds: LongArray,
         val origin: TransferOrigin
@@ -301,6 +303,7 @@ fun MainScaffold(
         observedLabelSaveGeneration = labelSaveGeneration
     }
     var quickSortEnabled by rememberSaveable { mutableStateOf(false) }
+    var quickSortOwner by rememberSaveable { mutableStateOf<Screen?>(null) }
     val quickSortSessionId = remember(quickSortEnabled) {
         if (quickSortEnabled) java.util.UUID.randomUUID().toString() else null
     }
@@ -432,6 +435,8 @@ fun MainScaffold(
     }
 
     val currentScreen = navigationStack.last()
+    // A viewer belongs to its underlying grid; another album or Home starts a different scope.
+    val quickSortScope = navigationStack.lastOrNull { it !is Screen.Viewer }
     val activeLabelId = when (val labelSource = navigationStack.lastOrNull { it !is Screen.TransferDestination }) {
         is Screen.Label -> labelSource.labelId
         is Screen.Viewer -> labelSource.labelId
@@ -586,6 +591,9 @@ fun MainScaffold(
     }
 
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var retainEmptyAlbumSelection by remember { mutableStateOf(false) }
+    val selectionMode = selectedIds.isNotEmpty() ||
+        (currentScreen is Screen.Photo && retainEmptyAlbumSelection)
     LaunchedEffect(quickQueue.reservedIds) { selectedIds = selectedIds - quickQueue.reservedIds }
     val openLabelEditor: (Set<Long>) -> Unit = { ids ->
         labelsViewModel.clearError()
@@ -604,6 +612,7 @@ fun MainScaffold(
     val toggleQuickSort: () -> Unit = {
         quickSortEnabled = !quickSortEnabled
         if (quickSortEnabled) {
+            quickSortOwner = quickSortScope
             photosViewModel.setQuickSortDockTop(false)
             showQuickTargets = true
         } else {
@@ -616,7 +625,7 @@ fun MainScaffold(
         val currentAlbums = transferTargets.associateBy { it.stableKey }
         quickPreferences.targets.map { currentAlbums[it.stableKey] ?: it }
     }
-    val quickSortConfig = if (quickSortEnabled) QuickSortUiConfig(
+    val quickSortConfig = if (quickSortEnabled && quickSortOwner == quickSortScope) QuickSortUiConfig(
         targets = quickSortTargets,
         dockTop = false,
         onDockTopChange = {},
@@ -647,6 +656,7 @@ fun MainScaffold(
         },
         onExit = {
             selectedIds = emptySet()
+            retainEmptyAlbumSelection = false
             quickSortEnabled = false
             showQuickTargets = false
             quickTargetsPanelHeight = 0.dp
@@ -673,6 +683,7 @@ fun MainScaffold(
     }
 
     val toggleSelection = { id: Long ->
+        retainEmptyAlbumSelection = false
         selectedIds = if (selectedIds.contains(id)) {
             selectedIds - id
         } else {
@@ -681,6 +692,7 @@ fun MainScaffold(
     }
 
     val updateSelection = { ids: Set<Long> ->
+        retainEmptyAlbumSelection = false
         selectedIds = ids - quickQueue.reservedIds
     }
 
@@ -694,10 +706,11 @@ fun MainScaffold(
     BackHandler(
         enabled = navigationStack.size > 1 ||
             quickSortEnabled ||
-            selectedIds.isNotEmpty() ||
+            selectionMode ||
             (currentScreen == Screen.Home && isHomeSearchMode)
     ) {
-        if (selectedIds.isNotEmpty()) {
+        if (selectionMode) {
+            retainEmptyAlbumSelection = false
             selectedIds = emptySet()
         } else if (quickSortEnabled && currentScreen !is Screen.Viewer) {
             quickSortEnabled = false
@@ -721,9 +734,12 @@ fun MainScaffold(
         }
         if (currentScreen !is Screen.TransferDestination) {
             selectedIds = emptySet()
+            retainEmptyAlbumSelection = false
         }
-        if (currentScreen !is Screen.Viewer && currentScreen !is Screen.Photo && currentScreen !is Screen.Label && currentScreen != Screen.Home) {
+        if (quickSortOwner != quickSortScope ||
+            (currentScreen !is Screen.Viewer && currentScreen !is Screen.Photo && currentScreen !is Screen.Label && currentScreen != Screen.Home)) {
             quickSortEnabled = false
+            quickSortOwner = null
             showQuickTargets = false
             quickTargetsPanelHeight = 0.dp
         }
@@ -795,12 +811,12 @@ fun MainScaffold(
                 ),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (selectedIds.isNotEmpty() && currentScreen !is Screen.TransferDestination) {
+            if (selectionMode && currentScreen !is Screen.TransferDestination) {
                 // Contextual Top Bar for Selection
                 TopAppBar(
-                    title = { Text("${selectedIds.size} selected") },
+                    title = { com.pixel.gallery.ui.components.SelectedCountBadge(selectedIds.size) },
                     navigationIcon = {
-                        IconButton(onClick = { selectedIds = emptySet() }) {
+                        IconButton(onClick = { selectedIds = emptySet(); retainEmptyAlbumSelection = false }) {
                             Icon(Icons.Default.Close, contentDescription = "Clear selection")
                         }
                     },
@@ -822,6 +838,7 @@ fun MainScaffold(
                                         albumIds = currentAlbumIds,
                                         reservedIds = quickQueue.reservedIds,
                                     )
+                                    retainEmptyAlbumSelection = selectedIds.isEmpty()
                                 },
                             ) {
                                 Icon(
@@ -879,7 +896,7 @@ fun MainScaffold(
                                 }
                             }
                         } else {
-                            IconButton(onClick = {
+                            IconButton(enabled = selectedEntries.isNotEmpty(), onClick = {
                                 val uris = selectedEntries.map {
                                     FileProvider.getUriForFile(context, context.packageName + ".fileprovider", java.io.File(it.path))
                                 }
@@ -893,7 +910,7 @@ fun MainScaffold(
                                 Icon(Icons.Default.Share, contentDescription = "Share")
                             }
 
-                            IconButton(onClick = {
+                            IconButton(enabled = selectedEntries.isNotEmpty(), onClick = {
                                 photosViewModel.clearTransferState()
                                 navigationStack = navigationStack + Screen.TransferDestination(
                                     selectedEntries.map { it.contentId }.toLongArray(),
@@ -906,14 +923,14 @@ fun MainScaffold(
                                 )
                             }
 
-                            IconButton(onClick = {
+                            IconButton(enabled = selectedEntries.isNotEmpty(), onClick = {
                                 isDeletePermanentlyConfirm = false
                                 showDeleteConfirmDialog = true
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete")
                             }
                             Box {
-                                IconButton(onClick = { showSelectionMenu = true }) {
+                                IconButton(enabled = selectedEntries.isNotEmpty(), onClick = { showSelectionMenu = true }) {
                                     Icon(Icons.Default.MoreVert, contentDescription = "More")
                                 }
                                 DropdownMenu(
@@ -1314,10 +1331,10 @@ fun MainScaffold(
                 }
                 Screen.Settings -> SettingsScreen(
                     onBack = navigateBack,
-                    onNavigateToThemeSettings = { navigationStack = navigationStack + Screen.ThemeSettings },
                     onNavigateToDisplaySettings = { navigationStack = navigationStack + Screen.DisplaySettings },
                     onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
-                    onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings }
+                    onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings },
+                    onNavigateToLibrarySettings = { navigationStack = navigationStack + Screen.LibrarySettings },
                 )
                 Screen.PerformanceSettings -> PerformanceSettingsScreen(
                     onBack = navigateBack
@@ -1327,8 +1344,10 @@ fun MainScaffold(
                 )
                 Screen.DisplaySettings -> DisplaySettingsScreen(
                     onBack = navigateBack,
-                    onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders },
+                    onNavigateToThemeSettings = { navigationStack = navigationStack + Screen.ThemeSettings },
                 )
+                Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
+                    onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders })
                 Screen.Labels -> LabelsScreen(
                     columns = albumGridColumns,
                     onColumnsChange = photosViewModel::setAlbumGridColumns,
@@ -1439,6 +1458,7 @@ fun MainScaffold(
                         onAlbumPhotosChanged = { photos ->
                             albumPhotoLists[albumName] = photos
                         },
+                        selectionMode = selectionMode,
                         onDeduplicate = { photos ->
                             duplicateViewModel.start(
                                 photos,
@@ -1737,7 +1757,7 @@ fun MainScaffold(
             isSaving = labelsSaving, errorMessage = labelsError,
         )
     }
-    if (showQuickTargets) {
+    if (showQuickTargets && quickSortEnabled && quickSortOwner == quickSortScope) {
         QuickSortTargetsSheet(
             albumUses = quickQueue.albumUses,
             availableTargets = transferTargets.filter { it.documentUri == null },

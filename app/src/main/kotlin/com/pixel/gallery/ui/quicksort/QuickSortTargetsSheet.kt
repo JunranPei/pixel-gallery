@@ -42,6 +42,7 @@ import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.QuickSortAlbumUse
 import com.pixel.gallery.model.frequentQuickSortAlbums
 import com.pixel.gallery.ui.components.rememberVerticalRevealState
+import com.pixel.gallery.ui.components.SettingsOptionControl
 import com.pixel.gallery.ui.components.verticalRevealDrag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -118,7 +119,7 @@ fun QuickSortTargetsSheet(
             matchesTransferDestinationQuery(it, search) }
     }
     val selectionIndices = remember(draft) { draft.mapIndexed { index, target -> target.stableKey to index }.toMap() }
-    var expanded by rememberSaveable { mutableStateOf(true) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
     val panel = rememberVerticalRevealState(expanded) { expanded = it }
     val flingThreshold = with(density) { 600.dp.toPx() }
 
@@ -173,17 +174,19 @@ fun QuickSortTargetsSheet(
                     }
                     Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(R.string.qs_manage_albums), style = MaterialTheme.typography.titleLarge,
+                        Text(stringResource(R.string.qs_targets_title), style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-                            Text(stringResource(R.string.qs_targets_selected_count, draft.size),
-                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-                        }
-                        FilledTonalButton(onClick = { expanded = !expanded }, enabled = !isCreating,
-                            contentPadding = PaddingValues(horizontal = 12.dp)) {
-                            Text(stringResource(if (expanded) R.string.qs_done else R.string.qs_targets_expand))
-                        }
+                        InputChip(selected = true,
+                            onClick = { draft = emptyList(); onTargetsChange(emptyList()) },
+                            enabled = draft.isNotEmpty() && !isCreating,
+                            label = { Text(stringResource(R.string.qs_targets_selected_count, draft.size), maxLines = 1) },
+                            trailingIcon = { Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_selection), Modifier.size(18.dp)) },
+                            shape = CircleShape,
+                            colors = InputChipDefaults.inputChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                selectedTrailingIconColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                            border = null)
                     }
                 }
                 // Keep the grid mounted through the entire drag, including a return from collapsed.
@@ -208,14 +211,17 @@ fun QuickSortTargetsSheet(
                             Icon(Icons.Outlined.CreateNewFolder, stringResource(R.string.qs_targets_new_album))
                         }
                     }
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("frequent" to R.string.qs_targets_frequent, "all" to R.string.qs_targets_all,
-                            "selected" to R.string.qs_targets_selected).forEach { (tab, label) ->
-                            FilterChip(selected = activeTab == tab, onClick = { activeTab = tab }, enabled = !isCreating,
-                                label = { Text(stringResource(label), modifier = Modifier.fillMaxWidth(),
-                                    textAlign = TextAlign.Center, maxLines = 1) }, modifier = Modifier.weight(1f), shape = CircleShape)
-                        }
-                    }
+                    SettingsOptionControl(
+                        options = listOf(
+                            "frequent" to stringResource(R.string.qs_targets_frequent),
+                            "all" to stringResource(R.string.qs_targets_all),
+                            "selected" to stringResource(R.string.qs_targets_selected),
+                        ),
+                        selectedMode = activeTab,
+                        onSelected = { activeTab = it },
+                        enabled = !isCreating,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
                     if (filtered.isEmpty()) {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             Text(stringResource(when {

@@ -22,6 +22,11 @@ import com.pixel.gallery.model.*
 import com.pixel.gallery.ui.deduplication.*
 import com.pixel.gallery.ui.gallery.PhotoScreen
 import com.pixel.gallery.ui.quicksort.QuickSortTargetsSheet
+import com.pixel.gallery.ui.settings.LibrarySettingsScreen
+import com.pixel.gallery.ui.settings.DisplaySettingsScreen
+import com.pixel.gallery.ui.settings.ThemeSettingsScreen
+import com.pixel.gallery.ui.components.SortDialog
+import com.pixel.gallery.ui.components.SortCriterion
 import com.pixel.gallery.ui.theme.PixelGalleryTheme
 import com.pixel.gallery.ui.viewer.ViewerScreen
 import com.pixel.gallery.ui.viewer.ViewerTransformStateStore
@@ -41,8 +46,9 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
     private var downTime = 0L
     private val output = File(instrumentation.targetContext.cacheDir, "redesign-qa").apply { mkdirs() }
     private val report = mutableListOf<String>()
+    private var sortConfirmed: Pair<String, String>? = null
 
-    fun exercise(): String {
+    fun exercise(quickSortOnly: Boolean = false): String {
         val fixture = File(output, "viewer-fixture.jpg")
         Bitmap.createBitmap(160, 240, Bitmap.Config.ARGB_8888).apply {
             eraseColor(0xff668899.toInt())
@@ -71,6 +77,20 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
                             2 -> PhotoScreen(albumName = "/Pictures/UiFixture", onBack = {}, onNavigateToViewer = { _, _, _ -> })
                             3 -> ViewerScreen(initialId = media.contentId, photos = listOf(media),
                                 transformStateStore = remember { ViewerTransformStateStore() }, onBack = {})
+                            4 -> LibrarySettingsScreen(onBack = {}, onNavigateToExcludedFolders = {})
+                            5 -> DisplaySettingsScreen(onBack = {}, onNavigateToThemeSettings = {})
+                            6 -> ThemeSettingsScreen(onBack = {})
+                            7, 8 -> SortDialog(visible = true, onDismissRequest = {},
+                                title = if (mode.intValue == 7) "Sort Photos" else "Sort Albums",
+                                criteria = if (mode.intValue == 7) listOf(
+                                    SortCriterion("DATE", "Date", "Oldest first", "Newest first"),
+                                    SortCriterion("NAME", "Name", "A to Z", "Z to A"),
+                                    SortCriterion("SIZE", "Size", "Smallest first", "Largest first")) else listOf(
+                                    SortCriterion("NAME", "Name", "A to Z", "Z to A"),
+                                    SortCriterion("COUNT", "Count", "Least first", "Most first"),
+                                    SortCriterion("DATE", "Date", "Oldest first", "Newest first")),
+                                initialCriterion = if (mode.intValue == 7) "DATE" else "NAME", initialDirection = "DESC",
+                                onConfirm = { criterion, direction -> sortConfirmed = criterion to direction })
                         }
                     }
                 }
@@ -94,10 +114,22 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
             }
             SystemClock.sleep(150)
         }
-        check(panelHeight > 100 * density) { "Chooser was not expanded" }
+        check(panelHeight < 120 * density) { "Chooser did not start collapsed" }
+        check(findText("Album 01") == null) { "Album grid was expanded on entry" }
+        check(findText("Expand") == null && findText("Done") == null) { "Expand/Done is still visible" }
+        snapshot("quicksort-collapsed")
+        val expandX = root.center.x
+        val expandY = root.bottom - panelHeight + 10 * density
+        event(MotionEvent.ACTION_DOWN, expandX, expandY)
+        for (step in 1..20) { event(MotionEvent.ACTION_MOVE, expandX, expandY - step * 25 * density); settle(18) }
+        event(MotionEvent.ACTION_UP, expandX, expandY - 500 * density)
+        settle(400)
+        check(panelHeight > 200 * density) { "Upward swipe did not expand chooser" }
         snapshot("quicksort-light")
         // All albums appear in inventory order without a separate Frequent section.
-        check(countText("Frequent") + countText("常用") == 1) { "All tab contains a duplicate Frequent section" }
+        instrumentation.uiAutomation.clearCache()
+        val frequentCount = countText("Frequent") + countText("常用")
+        check(frequentCount == 1) { "Expected one visible Frequent label, found $frequentCount" }
         val row = (1..4).map { boundsFor("Album %02d".format(it)) }
         check(row.maxOf { it.top } - row.minOf { it.top } <= 3) { "Albums are not in one four-column row: $row" }
         check(row.map { it.left }.distinct().size == 4) { "Four album columns missing: $row" }
@@ -120,6 +152,67 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         check(findText("Successful batches in the last 30 days") == null && findText("按近 30 天成功批次排序") == null)
         snapshot("quicksort-frequent")
         report += "Frequent tab shows the album with a successful fixture batch and excludes unused albums."
+        val newAlbum = boundsForTextEither("New album", "新建相册")
+        tap(newAlbum.centerX().toFloat(), newAlbum.centerY().toFloat())
+        settle(250)
+        check(findText("Album name") != null || findText("相册名称") != null) { "New album action was lost" }
+        val cancelCreate = boundsForTextEither("Cancel", "取消")
+        tap(cancelCreate.centerX().toFloat(), cancelCreate.centerY().toFloat())
+        settle(250)
+        val clear = boundsForTextEither("3 selected", "已选 3 个")
+        tap(clear.centerX().toFloat(), clear.centerY().toFloat())
+        settle(250)
+        check(selected.value.isEmpty()) { "Count-chip clear did not clear all album targets" }
+        check(findText("0 selected") != null || findText("已选 0 个") != null)
+        snapshot("quicksort-cleared")
+        report += "Default stays collapsed; swipe opens chooser; full short title and clear chip share one header row; New album is retained and opens its dialog; clear applies immediately."
+        if (quickSortOnly) {
+            instrumentation.runOnMainSync { dark.value = true }
+            settle(250)
+            snapshot("quicksort-dark")
+            instrumentation.runOnMainSync { dark.value = false; mode.intValue = 4 }
+            settle(500)
+            snapshot("library-settings")
+            val backupEntry = boundsForTextEither("Label backup", "标签备份")
+            tap(backupEntry.centerX().toFloat(), backupEntry.centerY().toFloat())
+            settle(300)
+            check(findText("Export labels") != null || findText("导出标签") != null)
+            check(findText("Import labels") != null || findText("导入标签") != null)
+            snapshot("label-backup-settings")
+            val cancelBackup = boundsForTextEither("Cancel", "取消")
+            tap(cancelBackup.centerX().toFloat(), cancelBackup.centerY().toFloat())
+            settle(200)
+            instrumentation.runOnMainSync { mode.intValue = 5 }
+            settle(400)
+            snapshot("hand-preference-settings")
+            instrumentation.runOnMainSync { mode.intValue = 6 }
+            settle(400)
+            snapshot("theme-mode-reference")
+            instrumentation.runOnMainSync { mode.intValue = 7 }
+            settle(350)
+            snapshot("sort-photos-date")
+            val byName = boundsFor("Name")
+            tap(byName.centerX().toFloat(), byName.centerY().toFloat())
+            settle(250)
+            val ascending = boundsFor("A to Z")
+            tap(ascending.centerX().toFloat(), ascending.centerY().toFloat())
+            settle(250)
+            snapshot("sort-photos-name")
+            val confirm = boundsFor("Confirm")
+            tap(confirm.centerX().toFloat(), confirm.centerY().toFloat())
+            settle(180)
+            check(sortConfirmed == ("NAME" to "ASC")) { "Sort Photos selection changed its callback behavior" }
+            instrumentation.runOnMainSync { mode.intValue = 8 }
+            settle(350)
+            val byCount = boundsFor("Count")
+            tap(byCount.centerX().toFloat(), byCount.centerY().toFloat())
+            settle(250)
+            snapshot("sort-albums-count")
+            check(findText("Most first") != null && findText("Least first") != null)
+            report += "Theme mode, Quick Sort tabs, Sort Photos and Sort Albums use the same shape-switching control; criterion/direction callbacks remain NAME/ASC after changing both options."
+            instrumentation.runOnMainSync { activity.finish() }
+            return report.joinToString("\n") + "\nScreenshots: ${output.absolutePath}"
+        }
         instrumentation.runOnMainSync { dark.value = true; mode.intValue = 1 }
         settle(500)
         val darkDuplicate = snapshot("duplicates-dark")
@@ -169,15 +262,22 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         return report.joinToString("\n") + "\nScreenshots: ${output.absolutePath}"
     }
 
-    private fun findText(text: String, node: AccessibilityNodeInfo? = instrumentation.uiAutomation.rootInActiveWindow): AccessibilityNodeInfo? {
+    private fun findText(text: String): AccessibilityNodeInfo? {
+        instrumentation.uiAutomation.clearCache()
+        return findTextIn(text, instrumentation.uiAutomation.rootInActiveWindow)
+    }
+
+    private fun findTextIn(text: String, node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (node == null) return null
         if (node.text?.toString()?.contains(text) == true || node.contentDescription?.toString()?.contains(text) == true) return node
-        for (index in 0 until node.childCount) findText(text, node.getChild(index))?.let { return it }
+        for (index in 0 until node.childCount) findTextIn(text, node.getChild(index))?.let { return it }
         return null
     }
     private fun countText(text: String, node: AccessibilityNodeInfo? = instrumentation.uiAutomation.rootInActiveWindow): Int {
         if (node == null) return 0
-        return (if (node.text?.toString() == text) 1 else 0) + (0 until node.childCount).sumOf { countText(text, node.getChild(it)) }
+        // Selectable controls expose a merged label as well as its text descendant.
+        if (node.text?.toString() == text) return 1
+        return (0 until node.childCount).sumOf { countText(text, node.getChild(it)) }
     }
     private fun boundsFor(text: String): Rect = Rect().also { bounds ->
         // Animated layout changes can leave UiAutomation's node bounds cached between MOVE events.
