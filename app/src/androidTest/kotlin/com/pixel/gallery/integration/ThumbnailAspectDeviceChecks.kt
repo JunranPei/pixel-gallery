@@ -15,9 +15,10 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Actual provider thumbnails, source decodes and persistent-cache reads; user originals are read only. */
-internal class ThumbnailAspectDeviceChecks(private val context: Context) {
+internal class ThumbnailAspectDeviceChecks(private val context: Context, run: String = "regression") {
     private val output = File(context.getExternalFilesDir(null), "thumbnail-aspect-checks").apply { mkdirs() }
     private var checks = 0
+    private val measurements = File(output, "loads-$run.jsonl").apply { writeText("") }
 
     fun exercise(): String {
         val sampleRoots = listOf("PreviewSizeQA_20261020", "ThumbnailAspectFix20261020")
@@ -39,15 +40,16 @@ internal class ThumbnailAspectDeviceChecks(private val context: Context) {
                 val model = MediaStoreThumbnail(uri, cursor.getString(6), rotation, cursor.getLong(5)*1000L,
                     sizeBytes = 8L*1024*1024, allowPersistentCache = false, traceViewerLoad = true)
                 models += model; names += name
-                for (size in listOf(200, 512)) {
-                    val bitmap = load(model, size)
+                for ((size, minimum) in listOf(200 to 0, 512 to 0, 512 to 512)) {
+                    val bitmap = load(model.copy(minimumLongEdgePixels = minimum), size)
+                    if (minimum > 0) check(maxOf(bitmap.width, bitmap.height) >= minOf(minimum, maxOf(width, height)))
                     val orientedWidth = if (rotation % 180 == 90) height else width
                     val orientedHeight = if (rotation % 180 == 90) width else height
                     val error = if (orientedWidth >= orientedHeight)
                         abs(bitmap.height - bitmap.width.toDouble()*orientedHeight/orientedWidth)
                     else abs(bitmap.width - bitmap.height.toDouble()*orientedWidth/orientedHeight)
                     check(error <= 1.5) { "$name $size: ${bitmap.width}x${bitmap.height} vs $orientedWidth x $orientedHeight" }
-                    File(output, "$name-$size.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG,100,it)) }
+                    File(output, "$name-$size-min$minimum.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG,100,it)) }
                     if (name.startsWith("black-border")) {
                         check(bitmap.getPixel(0,0) and 0x00ffffff == 0) { "Actual black border was removed: $name" }
                         val p = bitmap.getPixel(bitmap.width/2, bitmap.height/2) and 0x00ffffff
@@ -79,10 +81,17 @@ internal class ThumbnailAspectDeviceChecks(private val context: Context) {
             override fun onLoadFailed(error: Exception) { failed=true }
         })
         check(failed); checks++
-        return "$checks checks passed: 7 original-byte samples + 9 landscape/portrait/square/tiny/panorama/real-black-border rotation fixtures at 200 and 512; old persistent cache ignored, corrected cache reused, absent source fails cleanly. PNGs: $output"
+        return "$checks checks passed: 7 original-byte samples + 9 landscape/portrait/square/tiny/panorama/real-black-border rotation fixtures at 200, legacy 512 and strict minimum 512; old persistent cache ignored, corrected cache reused, absent source fails cleanly. PNGs: $output"
     }
 
     private fun load(model: MediaStoreThumbnail, size: Int): Bitmap {
+        fun io(): Map<String, Long> = try {
+            File("/proc/self/task/${android.os.Process.myTid()}/io").readLines().associate {
+                it.substringBefore(':') to it.substringAfter(':').trim().toLong()
+            }
+        } catch (_: Exception) { emptyMap() }
+        val before = io()
+        val started = System.nanoTime()
         var result: Bitmap? = null
         var failure: Exception? = null
         val fetcher = MediaStoreThumbnailFetcher(context,model,size,size)
@@ -91,6 +100,13 @@ internal class ThumbnailAspectDeviceChecks(private val context: Context) {
             override fun onLoadFailed(error: Exception) { failure=error }
         })
         fetcher.cleanup()
+        val elapsed = (System.nanoTime() - started) / 1_000_000.0
+        val after = io()
+        measurements.appendText(org.json.JSONObject().put("uri", model.uri).put("requested", size)
+            .put("minimum", model.minimumLongEdgePixels).put("elapsedMs", elapsed)
+            .put("bitmap", result?.let { "${it.width}x${it.height}" }).put("failure", failure?.toString())
+            .put("rchar", if (before.containsKey("rchar")) after.getValue("rchar") - before.getValue("rchar") else -1)
+            .put("syscr", if (before.containsKey("syscr")) after.getValue("syscr") - before.getValue("syscr") else -1).toString() + "\n")
         failure?.let { throw it }
         return checkNotNull(result)
     }

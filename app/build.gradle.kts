@@ -15,6 +15,11 @@ val keystoreProperties = Properties()
 // by a build-wide experiment flag.
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
+// Isolated trace experiment; production builds retain the current decoder.
+val jpegDcPreviewEnabled = !officialRelease && viewerTestVariant == "trace" &&
+    providers.gradleProperty("jpegDcPreview").orNull.toBoolean()
+val jpegFitPreviewEnabled = !officialRelease && viewerTestVariant == "trace" &&
+    providers.gradleProperty("jpegFitPreview").orNull.toBoolean()
 val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
         viewerTestVariant == "compressed" ||
@@ -71,6 +76,8 @@ android {
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
+        buildConfigField("boolean", "JPEG_DC_PREVIEW_ENABLED", jpegDcPreviewEnabled.toString())
+        buildConfigField("boolean", "JPEG_FIT_PREVIEW_ENABLED", jpegFitPreviewEnabled.toString())
         buildConfigField(
             "boolean",
             "INDEXED_IMAGE_DIAGNOSTICS_ENABLED",

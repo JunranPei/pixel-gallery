@@ -6,6 +6,43 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThumbnailGeometryTest {
+    @Test fun sampledAllocationRoundsUpWithoutOverflowOrEnlargingSmallOriginals() {
+        assertEquals(817, thumbnailSampledDimension(13071, 16))
+        assertEquals(802, thumbnailSampledDimension(12829, 16))
+        assertEquals(801, thumbnailSampledDimension(1601, 2))
+        assertEquals(601, thumbnailSampledDimension(1201, 2))
+        assertEquals(80, thumbnailSampledDimension(80, 1))
+        assertEquals(1, thumbnailSampledDimension(1, 64))
+        assertEquals(1073741824, thumbnailSampledDimension(Int.MAX_VALUE, 2))
+    }
+    @Test fun viewerRejectsTinyButCorrectlyProportionedPreviews() {
+        assertFalse(thumbnailMeetsMinimumLongEdge(145, 160, 17008, 18826, 512))
+        assertFalse(thumbnailMeetsMinimumLongEdge(160, 157, 13071, 12829, 512))
+        assertFalse(thumbnailMeetsMinimumLongEdge(511, 255, 4000, 2000, 512))
+        assertTrue(thumbnailMeetsMinimumLongEdge(512, 256, 4000, 2000, 512))
+        assertTrue(thumbnailMeetsMinimumLongEdge(554, 438, 9419, 7462, 512))
+    }
+
+    @Test fun viewerCapsRequiredResolutionAtTheOriginalWithoutUpscaling() {
+        assertTrue(thumbnailMeetsMinimumLongEdge(80, 60, 80, 60, 512))
+        assertFalse(thumbnailMeetsMinimumLongEdge(40, 30, 80, 60, 512))
+        assertTrue(thumbnailMeetsMinimumLongEdge(128, 256, 128, 256, 512))
+    }
+
+    @Test fun minimumResolutionUsesTheLongEdgeForPanoramasAndRotatedImages() {
+        assertTrue(thumbnailMeetsMinimumLongEdge(512, 6, 40000, 400, 512))
+        assertTrue(thumbnailMeetsMinimumLongEdge(6, 512, 400, 40000, 512))
+        assertTrue(thumbnailMeetsMinimumLongEdge(341, 512, 7952, 5304, 512))
+    }
+
+    @Test fun minimumResolutionDoesNotInferSmallOriginalsFromPartialMetadata() {
+        assertFalse(thumbnailMeetsMinimumLongEdge(160, 120, 0, 120, 512))
+        assertFalse(thumbnailMeetsMinimumLongEdge(160, 120, 0, 0, 512))
+        assertFalse(thumbnailMeetsMinimumLongEdge(0, 512, 4000, 3000, 512))
+        assertTrue(thumbnailMeetsMinimumLongEdge(512, 384, 0, 0, 512))
+        assertTrue(thumbnailMeetsMinimumLongEdge(160, 120, 4000, 3000, 0))
+    }
+
     @Test fun rejectsPaddedCanonAndSonyPortraitPreviews() {
         assertFalse(thumbnailMatchesSourceAspect(120, 160, 5808, 3872, 270))
         assertFalse(thumbnailMatchesSourceAspect(120, 160, 7952, 5304, 270))

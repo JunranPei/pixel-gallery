@@ -21,6 +21,7 @@
 #include "jpeglib.h"
 #include "jdhuff.h"		/* Declarations shared with jdphuff.c */
 #include "jpegcomp.h"
+#include <stdint.h>
 
 
 /*
@@ -827,6 +828,8 @@ jinit_huff_decoder (j_decompress_ptr cinfo)
     entropy->dc_derived_tbls[i] = entropy->ac_derived_tbls[i] = NULL;
   }
 }
+
+#include "jdpreview_entropy.inc"
 
 #ifdef ANDROID
 

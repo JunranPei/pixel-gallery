@@ -28,12 +28,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.engine.GlideException
+import com.bumptech.glide.request.RequestListener
+import com.bumptech.glide.request.target.Target
 import com.bumptech.glide.Priority
 import com.bumptech.glide.load.DecodeFormat
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.load.resource.bitmap.DownsampleStrategy
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.signature.ObjectKey
+import com.pixel.gallery.glide.MediaStoreThumbnail
+import com.pixel.gallery.glide.NativeJpegFit
 import com.davemorrissey.labs.subscaleview.DecoderFactory
 import com.davemorrissey.labs.subscaleview.ImageDecoder
 import com.davemorrissey.labs.subscaleview.ImageRegionDecoder
@@ -63,6 +69,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 private const val VISIBLE_TILE_TASK_PRIORITY = 0
 private const val CACHE_WRITE_TASK_PRIORITY = 1
+private const val INTERMEDIATE_PREVIEW_LONG_EDGE = 512
 private val tileTaskSequence = AtomicLong()
 
 private class PrioritizedTileTask(
@@ -865,11 +872,25 @@ internal fun SimpleSubsamplingImageView(
             // forces DATA caching, then gives its private cache file to the region decoder.
             // Keep format-specific models unchanged, but use that same route for platform
             // JPEG/PNG decoding instead of decoding every tile from shared external storage.
-            val requestModel = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+            val originalRequestModel = if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
                 uri.takeIf { it.isNotBlank() }?.let(Uri::parse) ?: imagePath
             } else {
                 previewModel ?: imagePath
             }
+            val sourceThumbnail = intermediatePreviewModel as? MediaStoreThumbnail
+            val orientedW = if (orientationDegrees == 90 || orientationDegrees == 270) sourceHeight else sourceWidth
+            val orientedH = if (orientationDegrees == 90 || orientationDegrees == 270) sourceWidth else sourceHeight
+            val viewportW = imageView.width.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels
+            val viewportH = imageView.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
+            // Eligibility follows the actual fit ratio, never a filename, device,
+            // file size, or specific chroma layout. The decoder rechecks its header.
+            val nativeFitModel = if (com.pixel.gallery.BuildConfig.JPEG_FIT_PREVIEW_ENABLED &&
+                regionDecoderKind == ViewerRegionDecoderKind.PLATFORM && !enableUltraHdr &&
+                sourceThumbnail?.mimeType == "image/jpeg" && orientedW > 0 && orientedH > 0 &&
+                minOf(viewportW.toDouble() / orientedW, viewportH.toDouble() / orientedH) < 1.0) {
+                NativeJpegFit(sourceThumbnail.uri, orientationDegrees, dateModifiedMillis)
+            } else null
+            val requestModel = nativeFitModel ?: originalRequestModel
             val metricsToken = previewRequestGuard.begin(
                 imageView = imageView,
                 key = transformStateKey,
@@ -893,7 +914,7 @@ internal fun SimpleSubsamplingImageView(
                     .withViewerTaskCompression()
                     .format(DecodeFormat.PREFER_ARGB_8888)
                     .diskCacheStrategy(
-                        if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                        if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM && nativeFitModel == null) {
                             DiskCacheStrategy.ALL
                         } else {
                             DiskCacheStrategy.RESOURCE
@@ -982,6 +1003,9 @@ internal fun SimpleSubsamplingImageView(
                                                 )
                                             }
                                             imageView.alpha = 1f
+                                            ViewerLoadMetrics.event("FIT_PREVIEW_PREDRAW",
+                                                "source=${dataSource.name} ${drawableMetrics(imageView.drawable ?: resource)}",
+                                                imageKey = transformStateKey)
                                         }
                                         return true
                                     }
@@ -1029,8 +1053,10 @@ internal fun SimpleSubsamplingImageView(
                             // Match Simple Gallery's local-photo path exactly. Going through the
                             // MediaStore URI selects Glide's QMediaStore loader even though SSIV
                             // already proved that the original file is directly readable.
-                            .load(requestModel)
-                            .apply(requestOptions)
+                            .load(originalRequestModel)
+                            .apply(if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
+                                requestOptions.clone().diskCacheStrategy(DiskCacheStrategy.ALL)
+                            } else requestOptions)
                             .listener(previewListener())
 
                         val sourceRequest = if (useIntermediatePreview) {
@@ -1040,7 +1066,7 @@ internal fun SimpleSubsamplingImageView(
                                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                 .downsample(DownsampleStrategy.FIT_CENTER)
                                 .priority(Priority.IMMEDIATE)
-                                .override(512)
+                                .override(INTERMEDIATE_PREVIEW_LONG_EDGE)
                                 .let { opts ->
                                     if (dateModifiedMillis > 0L) {
                                         opts.signature(ObjectKey(dateModifiedMillis))
@@ -1048,16 +1074,50 @@ internal fun SimpleSubsamplingImageView(
                                         opts
                                     }
                                 }
+                            // A system thumbnail size hint can return a 160 px EXIF preview.
+                            // Require original-derived detail for this viewer-only bridge;
+                            // the Grid/200 px cover keeps its existing cache identity and policy.
+                            val thumbnailModel = (intermediatePreviewModel as? MediaStoreThumbnail)
+                                ?.copy(minimumLongEdgePixels = INTERMEDIATE_PREVIEW_LONG_EDGE)
+                                ?: intermediatePreviewModel ?: requestModel
                             fullPreviewRequest.thumbnail(
                                 requestManager
                                     .asDrawable()
-                                    .load(intermediatePreviewModel ?: requestModel)
+                                    .load(thumbnailModel)
                                     .apply(thumbnailOptions)
+                                    .listener(object : RequestListener<Drawable> {
+                                        override fun onLoadFailed(e: GlideException?, model: Any?, target: Target<Drawable>, isFirstResource: Boolean) = false
+                                        override fun onResourceReady(resource: Drawable, model: Any, target: Target<Drawable>, dataSource: DataSource, isFirstResource: Boolean): Boolean {
+                                            ViewerLoadMetrics.event(
+                                                "INTERMEDIATE_PREVIEW_READY",
+                                                "source=${dataSource.name} ${drawableMetrics(resource)}",
+                                                imageKey = transformStateKey,
+                                            )
+                                            return false
+                                        }
+                                    })
                             )
                         } else {
                             fullPreviewRequest
                         }
-                        sourceRequest.into(imageView)
+                        if (nativeFitModel != null) {
+                            val listener = previewListener()
+                            // An unsupported/invalid native input uses the exact
+                            // existing Glide request, including its 512 bridge.
+                            // Do not start both entropy decoders concurrently.
+                            requestManager.load(nativeFitModel)
+                                .apply(requestOptions)
+                                .listener(object : RequestListener<Drawable> {
+                                    override fun onLoadFailed(e: GlideException?, model: Any?, target: Target<Drawable>, isFirstResource: Boolean): Boolean {
+                                        ViewerLoadMetrics.event("NATIVE_FIT_FALLBACK", "standard-source-request", imageKey = transformStateKey)
+                                        return false
+                                    }
+                                    override fun onResourceReady(resource: Drawable, model: Any, target: Target<Drawable>, dataSource: DataSource, isFirstResource: Boolean) =
+                                        listener.onResourceReady(resource, model, target, dataSource, isFirstResource)
+                                })
+                                .error(sourceRequest)
+                                .into(imageView)
+                        } else sourceRequest.into(imageView)
                     }
                 }
 

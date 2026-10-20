@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit
 /** Observes the existing viewer without changing resources, transforms, or loading policy. */
 internal class ViewerPreviewGeometryChecks(private val instrumentation: Instrumentation, private val run: String = "baseline") {
     private val context = instrumentation.targetContext
-    private val album = "PreviewSizeQA_20261020"
+    private val album = if (run.startsWith("nativefit")) "NativeFitQA_20261021" else "PreviewSizeQA_20261020"
     private val output = File(context.getExternalFilesDir(null), if (run == "baseline") "preview-geometry" else "preview-geometry-$run").apply { mkdirs() }
     private val writer = Executors.newSingleThreadExecutor()
     private val seen = mutableSetOf<String>()
@@ -46,7 +46,7 @@ internal class ViewerPreviewGeometryChecks(private val instrumentation: Instrume
 
     fun exercise(): String = runBlocking {
         val files = File("/sdcard/Pictures/$album").listFiles()!!.filter { it.isFile }.sortedBy { it.name }
-        check(files.size == 7) { "Expected seven unchanged user-photo copies" }
+        check(files.size == 7) { "Expected seven test files in $album" }
         val scan = CountDownLatch(files.size)
         MediaScannerConnection.scanFile(context, files.map { it.absolutePath }.toTypedArray(), null) { _, _ -> scan.countDown() }
         check(scan.await(45, TimeUnit.SECONDS))
@@ -125,7 +125,7 @@ internal class ViewerPreviewGeometryChecks(private val instrumentation: Instrume
                     for (size in listOf(200, 512)) save(resolver.loadThumbnail(uri, Size(size, size), null), "$name-system-$size.png")
                 }
             }
-            return@runBlocking "Seven original-byte copies opened from the real album grid twice; native drawable geometry, small preview pixels, final screenshots and system thumbnails saved to $output. Observer did not alter rendering."
+            return@runBlocking "Seven files in $album opened from the real album grid twice; native drawable geometry, small preview pixels, final screenshots and system thumbnails saved to $output. Observer did not alter rendering."
         } finally {
             instrumentation.runOnMainSync { activity.window.decorView.viewTreeObserver.removeOnPreDrawListener(observer) }
             writer.shutdown()

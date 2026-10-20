@@ -31,6 +31,8 @@ import java.io.FileOutputStream
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
+import android.os.CancellationSignal
 
 data class MediaStoreThumbnail(
     val uri: Uri,
@@ -41,6 +43,7 @@ data class MediaStoreThumbnail(
     val allowPersistentCache: Boolean = true,
     val traceViewerLoad: Boolean = false,
     val allowSourceFallback: Boolean = true,
+    val minimumLongEdgePixels: Int = 0,
 ) {
     // Persistence and tracing do not change pixels. Keeping those out of identity lets
     // the viewer's cache-only cover reuse the exact 200 px bitmap that Grid just
@@ -54,7 +57,8 @@ data class MediaStoreThumbnail(
             rotationDegrees == other.rotationDegrees &&
             dateModifiedMillis == other.dateModifiedMillis &&
             sizeBytes == other.sizeBytes &&
-            allowSourceFallback == other.allowSourceFallback
+            allowSourceFallback == other.allowSourceFallback &&
+            minimumLongEdgePixels == other.minimumLongEdgePixels
     }
 
     override fun hashCode(): Int {
@@ -64,6 +68,7 @@ data class MediaStoreThumbnail(
         result = 31 * result + dateModifiedMillis.hashCode()
         result = 31 * result + (sizeBytes?.hashCode() ?: 0)
         result = 31 * result + allowSourceFallback.hashCode()
+        result = 31 * result + minimumLongEdgePixels
         return result
     }
 }
@@ -75,7 +80,9 @@ internal class MediaStoreThumbnailLoader(private val context: Context) : ModelLo
         height: Int,
         options: Options
     ): ModelLoader.LoadData<Bitmap> {
-        val version = if (isVideo(model.mimeType)) "" else "aspect-v2-${model.allowSourceFallback}-"
+        val decoderVersion = if (com.pixel.gallery.BuildConfig.JPEG_DC_PREVIEW_ENABLED && model.minimumLongEdgePixels > 0) "dc-v1-" else ""
+        val minimumVersion = if (model.minimumLongEdgePixels > 0) "${decoderVersion}min${model.minimumLongEdgePixels}-" else ""
+        val version = if (isVideo(model.mimeType)) "" else "aspect-v2-${model.allowSourceFallback}-$minimumVersion"
         val cacheKey = ObjectKey("$version${model.uri}-${model.dateModifiedMillis}-${model.rotationDegrees}-${width}x${height}")
         return ModelLoader.LoadData(cacheKey, MediaStoreThumbnailFetcher(context, model, width, height))
     }
@@ -98,8 +105,29 @@ internal class MediaStoreThumbnailFetcher(
     private val height: Int
 ) : DataFetcher<Bitmap> {
     private val activeMetricsToken = AtomicReference<ViewerLoadMetrics.WorkToken?>()
+    private val cancelled = AtomicBoolean()
+    private val cancellationSignal = CancellationSignal()
+    private val activeSourceStream = AtomicReference<ThumbnailSourceStream?>()
+
+    private fun closeSourceStream() {
+        try { activeSourceStream.getAndSet(null)?.close() } catch (_: IOException) { }
+    }
+
+    private inline fun <T> withSourceStream(block: (ThumbnailSourceStream) -> T): T? {
+        if (cancelled.get()) return null
+        val source = context.contentResolver.openInputStream(model.uri) ?: return null
+        val stream = ThumbnailSourceStream(source, cancelled::get)
+        activeSourceStream.set(stream)
+        return try {
+            if (cancelled.get()) null else stream.use(block)
+        } finally {
+            activeSourceStream.compareAndSet(stream, null)
+            stream.close()
+        }
+    }
 
     override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in Bitmap>) {
+        if (cancelled.get()) return
         val metricsKey = "${model.uri}:${model.dateModifiedMillis}"
         val metricsToken = if (model.traceViewerLoad) {
             ViewerLoadMetrics.workStarted(
@@ -141,10 +169,9 @@ internal class MediaStoreThumbnailFetcher(
         }
 
         try {
-            // Force the execution of thumbnail loading/decoding to the lowest priority.
-            // This binds the thread to run ONLY on the CPU's LITTLE (efficiency) cores, preventing big cores from waking up.
+            // Keep thumbnail work at background priority; this does not pin it to specific CPU cores.
             try {
-                Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
+                if (model.minimumLongEdgePixels <= 0) Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
             } catch (e: Exception) {
                 // ignore
             }
@@ -163,7 +190,8 @@ internal class MediaStoreThumbnailFetcher(
                     "MEDIASTORE_THUMB_POLICY",
                     "requested=${width}x$height large=$isLargeFile grid=$isGridView " +
                         "highRes=$isHighResRequest allowPersistent=${model.allowPersistentCache} " +
-                        "persistent=$usePersistentCache",
+                        "persistent=$usePersistentCache minimumLongEdge=${model.minimumLongEdgePixels} " +
+                        "threadPriority=${Process.getThreadPriority(Process.myTid())}",
                     imageKey = metricsKey,
                 )
             }
@@ -217,7 +245,9 @@ internal class MediaStoreThumbnailFetcher(
                     persistentDir.mkdirs()
                 }
                 val contentId = model.uri.tryParseId() ?: model.uri.hashCode()
-                val version = if (isVideo(model.mimeType)) "" else "aspect_v2_${model.allowSourceFallback}_"
+                val decoderVersion = if (com.pixel.gallery.BuildConfig.JPEG_DC_PREVIEW_ENABLED && model.minimumLongEdgePixels > 0) "dc_v1_" else ""
+                val minimumVersion = if (model.minimumLongEdgePixels > 0) "${decoderVersion}min${model.minimumLongEdgePixels}_${width}x${height}_" else ""
+                val version = if (isVideo(model.mimeType)) "" else "aspect_v2_${model.allowSourceFallback}_$minimumVersion"
                 val cacheFileName = "${version}${contentId}_${model.dateModifiedMillis}_${model.rotationDegrees}" +
                     if (isGridView) "_q75.jpg" else ".jpg"
                 persistentFile = File(persistentDir, cacheFileName)
@@ -230,7 +260,14 @@ internal class MediaStoreThumbnailFetcher(
                             inPreferredConfig = Bitmap.Config.RGB_565
                         }
                         val cachedBitmap = BitmapFactory.decodeFile(persistentFile.absolutePath, options)
-                        if (cachedBitmap != null) {
+                        val sourceBounds = if (model.minimumLongEdgePixels > 0 && !isVideo(model.mimeType)) readSourceBounds() else null
+                        val cachedSizeAccepted = cachedBitmap != null && thumbnailMeetsMinimumLongEdge(
+                            cachedBitmap.width, cachedBitmap.height,
+                            sourceBounds?.first ?: 0, sourceBounds?.second ?: 0,
+                            model.minimumLongEdgePixels,
+                        )
+                        if (cachedBitmap != null && cachedSizeAccepted) {
+                            if (cancelled.get()) { cachedBitmap.recycle(); return }
                             metricsReady(
                                 "PERSISTENT_JPEG",
                                 cachedBitmap,
@@ -240,6 +277,7 @@ internal class MediaStoreThumbnailFetcher(
                             callback.onDataReady(cachedBitmap)
                             return
                         }
+                        cachedBitmap?.recycle()
                     } catch (e: Exception) {
                         if (model.traceViewerLoad) {
                             ViewerLoadMetrics.event(
@@ -261,7 +299,7 @@ internal class MediaStoreThumbnailFetcher(
                 val loadThumbnailStartedAt =
                     if (model.traceViewerLoad) SystemClock.elapsedRealtimeNanos() else 0L
                 try {
-                    bitmap = resolver.loadThumbnail(model.uri, targetSize, null)
+                    bitmap = resolver.loadThumbnail(model.uri, targetSize, cancellationSignal)
                 } catch (e: Exception) {
                     if (model.traceViewerLoad) {
                         ViewerLoadMetrics.event(
@@ -316,6 +354,7 @@ internal class MediaStoreThumbnailFetcher(
             }
 
             // Tiny decorative covers can decline expensive original/video decoding.
+            if (cancelled.get()) { bitmap?.recycle(); return }
             if (bitmap == null && model.allowSourceFallback) {
                 if (model.traceViewerLoad) {
                     ViewerLoadMetrics.event(
@@ -331,34 +370,54 @@ internal class MediaStoreThumbnailFetcher(
                 }
             }
 
-            if (bitmap != null && model.allowSourceFallback && !isVideo(model.mimeType)) {
+            if (bitmap != null && !isVideo(model.mimeType) &&
+                (model.allowSourceFallback || model.minimumLongEdgePixels > 0)) {
                 // Providers can return a padded/cropped EXIF thumbnail instead of the original
                 // image's aspect ratio. Re-decode a small original preview rather than crop
                 // dark pixels: actual black borders in the photograph must remain intact.
                 val sourceBounds = readSourceBounds()
-                if (sourceBounds != null && !thumbnailMatchesSourceAspect(
+                val aspectMismatch = sourceBounds != null && !thumbnailMatchesSourceAspect(
                         bitmap.width, bitmap.height, sourceBounds.first, sourceBounds.second, model.rotationDegrees,
-                    )) {
+                    )
+                val resolutionMismatch = !thumbnailMeetsMinimumLongEdge(
+                    bitmap.width, bitmap.height, sourceBounds?.first ?: 0, sourceBounds?.second ?: 0,
+                    model.minimumLongEdgePixels,
+                )
+                if (aspectMismatch || resolutionMismatch) {
                     val originalThumbnail = bitmap
-                    val corrected = decodeFallbackStream(allowEmbeddedThumbnail = false)
-                    if (corrected == null) {
+                    if (!model.allowSourceFallback) {
                         originalThumbnail.recycle()
-                        metricsFailed("aspect-correction-failed")
-                        callback.onLoadFailed(IOException("Could not decode an aspect-correct thumbnail for ${model.uri}"))
+                        metricsFailed("thumbnail-below-minimum-without-source-fallback")
+                        callback.onLoadFailed(IOException("Thumbnail is below the requested minimum resolution for ${model.uri}"))
+                        return
+                    }
+                    val corrected = decodeFallbackStream(allowEmbeddedThumbnail = false, knownSourceBounds = sourceBounds)
+                    if (cancelled.get()) { corrected?.recycle(); originalThumbnail.recycle(); return }
+                    if (corrected == null || !thumbnailMeetsMinimumLongEdge(
+                            corrected.width, corrected.height, sourceBounds?.first ?: 0, sourceBounds?.second ?: 0,
+                            model.minimumLongEdgePixels,
+                        ) || (sourceBounds != null && !thumbnailMatchesSourceAspect(
+                            corrected.width, corrected.height, sourceBounds.first, sourceBounds.second, model.rotationDegrees,
+                        ))) {
+                        corrected?.takeIf { it !== originalThumbnail }?.recycle()
+                        originalThumbnail.recycle()
+                        metricsFailed("thumbnail-quality-correction-failed")
+                        callback.onLoadFailed(IOException("Could not decode a sufficiently detailed, aspect-correct thumbnail for ${model.uri}"))
                         return
                     }
                     bitmap = corrected
                     if (corrected !== originalThumbnail) originalThumbnail.recycle()
                     if (model.traceViewerLoad) ViewerLoadMetrics.event(
-                        "THUMB_ASPECT_REDECODE",
-                        "source=${sourceBounds.first}x${sourceBounds.second} " +
-                            "rotation=${model.rotationDegrees} corrected=true " +
+                        if (aspectMismatch) "THUMB_ASPECT_REDECODE" else "THUMB_RESOLUTION_REDECODE",
+                        "source=${sourceBounds?.first ?: 0}x${sourceBounds?.second ?: 0} " +
+                            "rotation=${model.rotationDegrees} corrected=true minimumLongEdge=${model.minimumLongEdgePixels} " +
                             "result=${bitmap.width}x${bitmap.height}",
                         imageKey = metricsKey,
                     )
                 }
             }
 
+            if (cancelled.get()) { bitmap?.recycle(); return }
             if (bitmap != null) {
                 if (usePersistentCache && persistentFile != null) {
                     val writeToken = if (model.traceViewerLoad) {
@@ -413,8 +472,10 @@ internal class MediaStoreThumbnailFetcher(
                 callback.onLoadFailed(IOException("Failed to load or decode thumbnail for uri=${model.uri}"))
             }
         } catch (e: Exception) {
-            metricsFailed(e.javaClass.simpleName)
-            callback.onLoadFailed(e)
+            if (!cancelled.get()) {
+                metricsFailed(e.javaClass.simpleName)
+                callback.onLoadFailed(e)
+            }
         } finally {
             try {
                 Process.setThreadPriority(originalPriority)
@@ -480,7 +541,7 @@ internal class MediaStoreThumbnailFetcher(
             // Some providers omit dimensions even when the original stream is readable.
         }
         return try {
-            context.contentResolver.openInputStream(model.uri)?.use { stream ->
+            withSourceStream { stream ->
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeStream(stream, null, bounds)
                 if (bounds.outWidth > 0 && bounds.outHeight > 0) bounds.outWidth to bounds.outHeight else null
@@ -488,7 +549,8 @@ internal class MediaStoreThumbnailFetcher(
         } catch (_: Exception) { null }
     }
 
-    private fun decodeFallbackStream(allowEmbeddedThumbnail: Boolean = true): Bitmap? {
+    private fun decodeFallbackStream(allowEmbeddedThumbnail: Boolean = true, knownSourceBounds: Pair<Int, Int>? = null): Bitmap? {
+        if (cancelled.get()) return null
         val resolver = context.contentResolver
         val metricsKey = "${model.uri}:${model.dateModifiedMillis}"
         
@@ -499,14 +561,15 @@ internal class MediaStoreThumbnailFetcher(
             null
         }
         try {
-            if (allowEmbeddedThumbnail) resolver.openInputStream(model.uri)?.use { stream ->
+            if (allowEmbeddedThumbnail) withSourceStream { stream ->
                 val exifInterface = ExifInterface(stream)
                 if (exifInterface.hasThumbnail()) {
                     val thumbnailBytes = exifInterface.thumbnail
                     if (thumbnailBytes != null) {
                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeByteArray(thumbnailBytes, 0, thumbnailBytes.size, bounds)
-                        if (bounds.outWidth >= 200 && bounds.outHeight >= 200) {
+                        if (bounds.outWidth >= 200 && bounds.outHeight >= 200 &&
+                            thumbnailMeetsMinimumLongEdge(bounds.outWidth, bounds.outHeight, 0, 0, model.minimumLongEdgePixels)) {
                             val options = BitmapFactory.Options().apply {
                                 inPreferredConfig = Bitmap.Config.RGB_565
                             }
@@ -540,92 +603,122 @@ internal class MediaStoreThumbnailFetcher(
         } else {
             null
         }
+        var borrowedBitmap: Bitmap? = null
+        var decodedBitmap: Bitmap? = null
         return try {
-            resolver.openInputStream(model.uri)?.use { stream ->
-                val options = BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
+            val sourceBounds = knownSourceBounds ?: withSourceStream { stream ->
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeStream(stream, null, bounds)
+                bounds.outWidth to bounds.outHeight
+            } ?: return null
+            val (srcWidth, srcHeight) = sourceBounds
+            if (srcWidth <= 0 || srcHeight <= 0 || cancelled.get()) return null
+            if (com.pixel.gallery.BuildConfig.JPEG_DC_PREVIEW_ENABLED &&
+                model.minimumLongEdgePixels > 0 && maxOf(srcWidth, srcHeight) >= 8192) {
+                val native = io.github.indexedjpeg.DcJpegPreview.decode(
+                    resolver, model.uri, model.minimumLongEdgePixels, cancelled,
+                )
+                if (cancelled.get()) { native?.recycle(); return null }
+                if (native != null) {
+                    streamToken?.let {
+                        ViewerLoadMetrics.workReady(it, source = "NATIVE_DC_PREVIEW",
+                            detail = "source=${srcWidth}x${srcHeight} bitmap=${native.width}x${native.height} turbo=3.1.3 fusedAc=12")
+                    }
+                    return applyExifOrientation(context, native, model.rotationDegrees, false).also {
+                        if (it !== native && !native.isRecycled) com.bumptech.glide.Glide.get(context).bitmapPool.put(native)
+                    }
                 }
-                BitmapFactory.decodeStream(stream, null, options)
+                if (model.traceViewerLoad) ViewerLoadMetrics.event(
+                    "NATIVE_DC_PREVIEW_FALLBACK", "unsupported-or-invalid", imageKey = metricsKey,
+                )
+            }
+            val targetWidth = if (width > 0) minOf(width, 512) else 512
+            val targetHeight = if (height > 0) minOf(height, 512) else 512
+            val sample = thumbnailFitSampleSize(srcWidth, srcHeight, targetWidth, targetHeight)
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
+                inTempStorage = ByteArray(16 * 1024)
+            }
+            try {
+                borrowedBitmap = com.bumptech.glide.Glide.get(context).bitmapPool.getDirty(
+                    thumbnailSampledDimension(srcWidth, sample),
+                    thumbnailSampledDimension(srcHeight, sample), Bitmap.Config.RGB_565,
+                )
+                options.inBitmap = borrowedBitmap
+                options.inMutable = true
+            } catch (_: Exception) { }
 
-                val srcWidth = options.outWidth
-                val srcHeight = options.outHeight
-                val targetWidth = if (width > 0) minOf(width, 512) else 512
-                val targetHeight = if (height > 0) minOf(height, 512) else 512
-                val inSampleSize = thumbnailFitSampleSize(srcWidth, srcHeight, targetWidth, targetHeight)
-
-                val decodeOptions = BitmapFactory.Options().apply {
-                    this.inSampleSize = inSampleSize
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                    inTempStorage = ByteArray(16 * 1024)
-                }
-
-                // Try to reuse memory space from Glide's LruBitmapPool to minimize memory allocations and GC spikes
+            var retried = false
+            fun decode(): Bitmap? = withSourceStream { stream ->
                 try {
-                    val targetWidthCalculated = srcWidth / inSampleSize
-                    val targetHeightCalculated = srcHeight / inSampleSize
-                    if (targetWidthCalculated > 0 && targetHeightCalculated > 0) {
-                        val bitmapPool = com.bumptech.glide.Glide.get(context).bitmapPool
-                        val reusableBitmap = bitmapPool.getDirty(targetWidthCalculated, targetHeightCalculated, Bitmap.Config.RGB_565)
-                        decodeOptions.inBitmap = reusableBitmap
-                        decodeOptions.inMutable = true
-                    }
-                } catch (e: Exception) {
-                    // ignore pool acquisition errors
-                }
-
-                try {
-                    resolver.openInputStream(model.uri)?.use { fallbackStream ->
-                        val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
-                        if (decoded != null) {
-                            streamToken?.let {
-                                ViewerLoadMetrics.workReady(
-                                    it,
-                                    source = "STREAM_DECODE",
-                                    detail = "source=${srcWidth}x$srcHeight sample=$inSampleSize " +
-                                        "bitmap=${decoded.width}x${decoded.height} inBitmap=${decodeOptions.inBitmap != null}",
-                                )
-                            }
-                            applyExifOrientation(context, decoded, model.rotationDegrees, false)
-                        } else {
-                            streamToken?.let { ViewerLoadMetrics.workFailed(it, "decode-null") }
-                            null
-                        }
-                    }
-                } catch (e: IllegalArgumentException) {
-                    // Fallback: Clear inBitmap and retry if reuse failed (e.g. incompatible dimensions on older devices)
-                    decodeOptions.inBitmap = null
-                    resolver.openInputStream(model.uri)?.use { fallbackStream ->
-                        val decoded = BitmapFactory.decodeStream(fallbackStream, null, decodeOptions)
-                        if (decoded != null) {
-                            streamToken?.let {
-                                ViewerLoadMetrics.workReady(
-                                    it,
-                                    source = "STREAM_DECODE_RETRY",
-                                    detail = "source=${srcWidth}x$srcHeight sample=$inSampleSize " +
-                                        "bitmap=${decoded.width}x${decoded.height}",
-                                )
-                            }
-                            applyExifOrientation(context, decoded, model.rotationDegrees, false)
-                        } else {
-                            streamToken?.let { ViewerLoadMetrics.workFailed(it, "retry-decode-null") }
-                            null
-                        }
-                    }
+                    BitmapFactory.decodeStream(stream, null, options)
+                } finally {
+                    if (model.traceViewerLoad) ViewerLoadMetrics.event(
+                        "THUMB_SOURCE_IO",
+                        "bytes=${stream.sourceBytesRead} reads=${stream.sourceReadCalls} " +
+                            "buffer=65536 cancelled=${cancelled.get()} retry=$retried",
+                        imageKey = metricsKey,
+                    )
                 }
             }
-        } catch (e: Exception) {
-            streamToken?.let { ViewerLoadMetrics.workFailed(it, e.javaClass.simpleName) }
+            decodedBitmap = try { decode() } catch (error: IllegalArgumentException) {
+                if (cancelled.get()) return null
+                if (model.traceViewerLoad) ViewerLoadMetrics.event(
+                    "THUMB_REUSE_RETRY",
+                    "error=${error.message} allocation=${borrowedBitmap?.allocationByteCount ?: 0} " +
+                        "source=${srcWidth}x${srcHeight} sample=$sample",
+                    imageKey = metricsKey,
+                )
+                options.inBitmap = null
+                retried = true
+                decode()
+            }
+            val decoded = decodedBitmap
+            if (cancelled.get()) {
+                decoded?.recycle()
+                null
+            } else if (decoded != null) {
+                streamToken?.let {
+                    ViewerLoadMetrics.workReady(
+                        it, source = if (retried) "STREAM_DECODE_RETRY" else "STREAM_DECODE",
+                        detail = "source=${srcWidth}x${srcHeight} sample=$sample " +
+                            "bitmap=${decoded.width}x${decoded.height} inBitmap=${options.inBitmap != null}",
+                    )
+                }
+                applyExifOrientation(context, decoded, model.rotationDegrees, false).also { oriented ->
+                    if (oriented !== decoded && !decoded.isRecycled) com.bumptech.glide.Glide.get(context).bitmapPool.put(decoded)
+                }
+            } else {
+                streamToken?.let { ViewerLoadMetrics.workFailed(it, "decode-null") }
+                null
+            }
+        } catch (error: Exception) {
+            streamToken?.let {
+                if (!cancelled.get()) ViewerLoadMetrics.workFailed(it, error.javaClass.simpleName)
+            }
             null
+        } finally {
+            // Cancellation can make the native decoder reject inBitmap before returning.
+            // Cover early returns from that retry guard as well as normal read failures.
+            if (cancelled.get()) streamToken?.let { ViewerLoadMetrics.workCleared(it, "cancelled") }
+            borrowedBitmap?.let { borrowed ->
+                if (borrowed !== decodedBitmap && !borrowed.isRecycled) com.bumptech.glide.Glide.get(context).bitmapPool.put(borrowed)
+            }
         }
     }
 
     override fun cleanup() {
+        closeSourceStream()
         activeMetricsToken.getAndSet(null)?.let {
             ViewerLoadMetrics.workCleared(it, "datafetcher-cleanup")
         }
     }
 
     override fun cancel() {
+        cancelled.set(true)
+        cancellationSignal.cancel()
+        closeSourceStream()
         activeMetricsToken.getAndSet(null)?.let {
             ViewerLoadMetrics.workCleared(it, "datafetcher-cancel")
         }

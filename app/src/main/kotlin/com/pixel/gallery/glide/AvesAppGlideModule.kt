@@ -100,6 +100,7 @@ class AvesAppGlideModule : AppGlideModule() {
 
         registry.append(MediaStoreThumbnail::class.java, Bitmap::class.java, MediaStoreThumbnailLoader.Factory(context))
         registry.append(FastScreenPreview::class.java, Bitmap::class.java, FastScreenPreviewLoader.Factory(context))
+        registry.append(NativeJpegFit::class.java, Bitmap::class.java, NativeJpegFitLoader.Factory(context))
     }
 
     override fun isManifestParsingEnabled(): Boolean = false
