@@ -407,6 +407,11 @@ internal fun ViewerScreen(
         photos.getOrNull(pagerState.currentPage)
     }
 
+    DisposableEffect(Unit) {
+        val taskWindow = ViewerGlideTaskCompression.enter()
+        onDispose { taskWindow.close() }
+    }
+
     DisposableEffect(entryId) {
         val activity = context as? Activity
         ViewerLoadMetrics.event(

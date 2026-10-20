@@ -15,11 +15,11 @@ val keystoreProperties = Properties()
 // by a build-wide experiment flag.
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
-// Isolated trace experiment; production builds retain the current decoder.
+// Legacy DC-only experiment stays isolated; ship the validated adaptive fit path.
 val jpegDcPreviewEnabled = !officialRelease && viewerTestVariant == "trace" &&
     providers.gradleProperty("jpegDcPreview").orNull.toBoolean()
-val jpegFitPreviewEnabled = !officialRelease && viewerTestVariant == "trace" &&
-    providers.gradleProperty("jpegFitPreview").orNull.toBoolean()
+val jpegFitPreviewEnabled = providers.gradleProperty("jpegFitPreview").orNull
+    ?.toBooleanStrictOrNull() ?: true
 val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
         viewerTestVariant == "compressed" ||
@@ -86,8 +86,8 @@ android {
         minSdk = 26
         targetSdk = 35
         testInstrumentationRunner = "com.pixel.gallery.integration.QuickSortSafetyInstrumentation"
-        versionCode = 2064
-        versionName = "4.3.4.14-auto-multitask"
+        versionCode = 2065
+        versionName = "4.3.4.15-auto-multitask"
     }
 
     signingConfigs {

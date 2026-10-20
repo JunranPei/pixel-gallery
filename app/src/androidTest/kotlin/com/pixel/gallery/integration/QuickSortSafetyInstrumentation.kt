@@ -58,6 +58,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var thumbnailAspectSuite = false
     private var thumbnailQualitySuite = false
     private var nativeFitSuite = false
+    private var viewerCompressionSuite = false
     private var geometryRun = "baseline"
     private var labelBackupEdgeFilter: String? = null
     private var labelBackupCleanupToken: String? = null
@@ -85,6 +86,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         thumbnailAspectSuite = arguments?.getString("suite") == "thumbnail-aspect"
         thumbnailQualitySuite = arguments?.getString("suite") == "thumbnail-quality"
         nativeFitSuite = arguments?.getString("suite") == "native-fit"
+        viewerCompressionSuite = arguments?.getString("suite") == "viewer-compression"
         geometryRun = arguments?.getString("geometryRun") ?: "baseline"
         labelBackupEdgeFilter = arguments?.getString("edgeFilter")
         labelBackupCleanupToken = arguments?.getString("edgeCleanupToken")
@@ -96,6 +98,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                viewerCompressionSuite -> ViewerCompressionDeviceChecks(targetContext).exercise()
                 nativeFitSuite -> NativeFitDeviceChecks(targetContext).exercise()
                 thumbnailQualitySuite -> ThumbnailQualityDeviceChecks(targetContext).exercise()
                 thumbnailAspectSuite -> ThumbnailAspectDeviceChecks(targetContext, geometryRun).exercise()

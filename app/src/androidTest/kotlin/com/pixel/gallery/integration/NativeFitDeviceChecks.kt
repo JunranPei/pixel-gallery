@@ -51,7 +51,13 @@ internal class NativeFitDeviceChecks(private val context: Context) {
             kotlin.math.abs(Color.blue(expected) - Color.blue(actual)) <= 4) { "Orientation/color mismatch: $expected vs $actual" }
     }
 
-    fun exercise(): String {
+    fun exercise(): String = checkNotNull(context.contentResolver.acquireContentProviderClient(base)).use {
+        // The generated pipe writer lives in the test provider process. Keep its
+        // client relationship for the entire read, including asynchronous writes.
+        exerciseWithProvider()
+    }
+
+    private fun exerciseWithProvider(): String {
         check(com.pixel.gallery.BuildConfig.JPEG_FIT_PREVIEW_ENABLED)
         val glide = Glide.with(context)
         for (orientation in 1..8) {
