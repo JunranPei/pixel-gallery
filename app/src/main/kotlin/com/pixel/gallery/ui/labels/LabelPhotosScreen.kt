@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Label
@@ -22,7 +21,7 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.gallery.AlbumSearchTitle
 import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
-import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.GalleryOverflowButton
 import com.pixel.gallery.ui.components.GalleryMenuRow
 import com.pixel.gallery.ui.components.MediaTypeMenuSection
 import com.pixel.gallery.model.MediaTypeFilter
@@ -84,9 +83,7 @@ fun LabelPhotosScreen(
             },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.labels_back)) } },
             actions = {
-                Box {
-                    IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, null) }
-                    GalleryOverflowMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    GalleryOverflowButton(expanded = showMenu, onExpandedChange = { showMenu = it }) {
                         MediaTypeMenuSection(mediaType) { type -> mediaType = type; showMenu = false }
                         GalleryMenuRow("Sort Photos", Icons.Default.Sort, accented = true, onClick = { showMenu = false; onSortPhotos() })
                         GalleryMenuRow("Edit label", Icons.Outlined.Label, accented = true, onClick = { showMenu = false; onEditLabel() })
@@ -101,7 +98,6 @@ fun LabelPhotosScreen(
                             onClick = { showMenu = false; onToggleQuickSort() },
                         )
                     }
-                }
             })
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).galleryContentEdge()) {

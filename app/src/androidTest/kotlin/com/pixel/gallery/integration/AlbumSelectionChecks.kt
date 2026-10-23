@@ -66,6 +66,11 @@ internal class AlbumSelectionChecks(private val instrumentation: Instrumentation
             if (find("Background support") != null) click("Cancel")
             await(names[0]); await(names[1])
             snapshot("albums-normal")
+            click(names[0]); await("More")
+            val albumMenuBounds = bounds("More")
+            click("More"); await("Sort Photos"); back()
+            snapshot("album-media-toolbar")
+            back(); await("Pixel Gallery")
             longPress(names[0])
             await("1 selected")
             listOf("Rename album", "Hide Album", "Exclude Album", "Clear selection").forEach(::await)
@@ -85,6 +90,14 @@ internal class AlbumSelectionChecks(private val instrumentation: Instrumentation
                 check(labelModel.labelEntries.value.any { it.name == name })
             }
             click("Labels"); await(names[0]); await(names[1])
+            val labelsMenuBounds = bounds("More")
+            check(labelsMenuBounds == albumMenuBounds) { "Labels toolbar differs: $labelsMenuBounds vs $albumMenuBounds" }
+            click(names[0]); await("More")
+            val labelMenuBounds = bounds("More")
+            check(labelMenuBounds == albumMenuBounds) { "Label media toolbar differs: $labelMenuBounds vs $albumMenuBounds" }
+            click("More"); await("Sort Photos"); back()
+            snapshot("label-media-toolbar")
+            back(); await(names[0])
             snapshot("labels-normal")
             longPress(names[0]); await("1 selected"); await("Rename label"); await("Delete")
             check(find("Select all") == null && find("Hide Album") == null)
@@ -99,7 +112,7 @@ internal class AlbumSelectionChecks(private val instrumentation: Instrumentation
             check(fixtures.all { uri -> context.contentResolver.openInputStream(uri)!!.use { it.read() >= 0 } })
             await("Favourites"); longPress("Favourites"); check(find("Clear selection") == null)
             snapshot("labels-system-protected")
-            return@runBlocking "PASS: real album and label long presses select; single selection has rename; multiple selection hides rename; filesystem albums retain hide/exclude, labels retain delete; Back and last-item deselect exit; no select-all or old menu; rename/delete cancel preserves selection; confirmed batch delete removes both fixture labels and preserves media; Favourites protected. Screenshots: $output"
+            return@runBlocking "PASS: album media, Labels and label media More buttons have identical bounds $albumMenuBounds and open their menus. Real album and label long presses select; single selection has rename; multiple selection hides rename; filesystem albums retain hide/exclude, labels retain delete; Back and last-item deselect exit; no select-all or old menu; rename/delete cancel preserves selection; confirmed batch delete removes both fixture labels and preserves media; Favourites protected. Screenshots: $output"
         } finally {
             if (modelsReady) {
                 val remaining = labelModel.labelEntries.value.filter { it.name in names }.map { it.id }.toSet()
@@ -123,6 +136,10 @@ internal class AlbumSelectionChecks(private val instrumentation: Instrumentation
         return result
     }
     private fun find(name: String) = nodes().firstOrNull { it.text?.toString() == name || it.contentDescription?.toString() == name }
+    private fun bounds(name: String): Rect {
+        await(name)
+        return Rect().also(find(name)!!::getBoundsInScreen)
+    }
     private fun await(name: String) {
         repeat(60) { if (find(name) != null) return; settle(150) }
         snapshot("failed"); error("Missing $name: ${nodes().map { "${it.text}:${it.contentDescription}" }}")

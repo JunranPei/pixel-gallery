@@ -12,7 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Label
@@ -32,7 +31,7 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.home.AlbumGrid
-import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.GalleryOverflowButton
 import com.pixel.gallery.ui.components.GalleryMenuRow
 import com.pixel.gallery.model.AlbumSortOrder
 import androidx.compose.ui.text.style.TextOverflow
@@ -133,10 +132,7 @@ fun LabelsScreen(
                     }
                 },
                 actions = {
-                    Row {
-                        Box {
-                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "More") }
-                            GalleryOverflowMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            GalleryOverflowButton(expanded = showMenu, onExpandedChange = { showMenu = it }) {
                                 GalleryMenuRow("Sort Labels", Icons.Default.Sort, accented = true, onClick = {
                                     showMenu = false
                                     showSortDialog = true
@@ -145,8 +141,6 @@ fun LabelsScreen(
                                     editingLabel = null; showNameDialog = true; showMenu = false
                                 })
                             }
-                        }
-                    }
                 }
             )
             }

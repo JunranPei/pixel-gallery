@@ -5,7 +5,6 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.FileCopy
@@ -48,7 +47,7 @@ import kotlin.coroutines.coroutineContext
 import com.pixel.gallery.ui.viewmodel.MediaBrowseScope
 import com.pixel.gallery.ui.viewmodel.MediaBrowseResult
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
-import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.GalleryOverflowButton
 import com.pixel.gallery.ui.components.MediaTypeMenuSection
 import com.pixel.gallery.model.MediaTypeFilter
 import com.pixel.gallery.ui.components.GalleryMenuRow
@@ -201,12 +200,9 @@ fun PhotoScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More")
-                        }
-                        GalleryOverflowMenu(
+                        GalleryOverflowButton(
                             expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
+                            onExpandedChange = { showMenu = it },
                         ) {
                             MediaTypeMenuSection(mediaType) { type ->
                                 showMenu = false
