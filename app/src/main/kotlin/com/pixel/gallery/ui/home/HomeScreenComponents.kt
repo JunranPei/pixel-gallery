@@ -708,6 +708,7 @@ fun AlbumCoverCard(
     onClick: () -> Unit,
     columns: Int = 2,
     enabled: Boolean = true,
+    selected: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     coverMimeType: String? = null,
     coverSizeBytes: Long? = null,
@@ -803,6 +804,20 @@ fun AlbumCoverCard(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(if (columns <= 2) 56.dp else 36.dp)
                 )
+            }
+            if (selected) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = "Selected",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(2.dp),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(spacerHeight))

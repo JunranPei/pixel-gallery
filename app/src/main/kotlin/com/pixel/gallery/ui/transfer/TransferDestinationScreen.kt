@@ -104,6 +104,10 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.utils.StorageUtils
+import com.pixel.gallery.ui.components.GalleryScrollbar
+import com.pixel.gallery.ui.components.SelectionBottomSheet
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import com.pixel.gallery.ui.utils.pinchToZoomColumns
 import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -114,6 +118,8 @@ fun TransferDestinationScreen(
     entries: List<MediaEntry>,
     onBack: () -> Unit,
     onFinished: (TransferSummary) -> Unit,
+    columns: Int = 3,
+    onColumnsChange: (Int) -> Unit = {},
     viewModel: PhotosViewModel = hiltViewModel(),
     quickSortViewModel: QuickSortViewModel = hiltViewModel()
 ) {
@@ -243,21 +249,11 @@ fun TransferDestinationScreen(
         }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.transfer_title), style = EmphasizedTypography.TitleLarge) },
-                navigationIcon = {
-                    IconButton(onClick = onBack, enabled = !transferState.isRunning) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.transfer_back))
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-            )
-        },
-    ) { innerPadding ->
+    SelectionBottomSheet(
+        title = stringResource(R.string.transfer_title),
+        onDismiss = { if (!transferState.isRunning) onBack() },
+        confirmDismiss = { !transferState.isRunning },
+    ) {
         TransferDestinationContent(
             destinations = filteredDestinations,
             albumUses = quickQueue.albumUses,
@@ -276,7 +272,9 @@ fun TransferDestinationScreen(
             onCopy = { reviewTransfer(TransferMode.COPY) },
             onMove = { reviewTransfer(TransferMode.MOVE) },
             handedness = handedness,
-            modifier = Modifier.padding(innerPadding),
+            columns = columns,
+            onColumnsChange = onColumnsChange,
+            modifier = Modifier.fillMaxSize(),
         )
     }
 
@@ -588,11 +586,15 @@ fun TransferDestinationContent(
     onOtherFolders: () -> Unit,
     onCopy: () -> Unit,
     onMove: () -> Unit,
+    columns: Int = 3,
+    onColumnsChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
     handedness: Handedness = Handedness.RIGHT,
 ) {
     val frequent = if (query.isBlank()) frequentQuickSortAlbums(destinations, albumUses, System.currentTimeMillis()) else emptyList()
     val duplicateNames = destinations.groupBy { it.displayName.lowercase() }.filterValues { it.size > 1 }.keys
+    val gridState = rememberLazyGridState()
+    val gridColumns = columns.coerceIn(2, 6)
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -616,7 +618,13 @@ fun TransferDestinationContent(
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(4), modifier = Modifier.fillMaxSize(),
+                columns = GridCells.Fixed(gridColumns), state = gridState,
+                modifier = Modifier.fillMaxSize().pinchToZoomColumns(
+                    currentColumns = gridColumns,
+                    onColumnsChange = onColumnsChange,
+                    minColumns = 2,
+                    maxColumns = 6,
+                ),
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 180.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -646,6 +654,11 @@ fun TransferDestinationContent(
                     }
                 }
             }
+            GalleryScrollbar(
+                lazyGridState = gridState,
+                layoutModifier = Modifier.align(Alignment.CenterEnd),
+                onDragStateChanged = {},
+            )
             if (isRunning) {
                 Surface(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.extraLarge) {

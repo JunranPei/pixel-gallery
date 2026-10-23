@@ -41,6 +41,8 @@ class SettingsRepository @Inject constructor(
     private val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
     private val PHOTO_SORT_ORDER = stringPreferencesKey("photo_sort_order")
     private val ALBUM_SORT_ORDER = stringPreferencesKey("album_sort_order")
+    private val LABEL_SORT_ORDER = stringPreferencesKey("label_sort_order")
+    private val RECENT_LABEL_IDS = stringPreferencesKey("recent_label_ids")
     private val GLIDE_THREAD_COUNT = intPreferencesKey("glide_thread_count")
     private val GLIDE_CACHE_SIZE = intPreferencesKey("glide_cache_size")
     private val QUICK_SORT_TARGETS = stringPreferencesKey("quick_sort_targets")
@@ -173,6 +175,29 @@ class SettingsRepository @Inject constructor(
     suspend fun setAlbumSortOrder(value: String) {
         context.dataStore.edit { preferences ->
             preferences[ALBUM_SORT_ORDER] = value
+        }
+    }
+
+    val labelSortOrder: Flow<String> = context.dataStore.data
+        .map { preferences -> preferences[LABEL_SORT_ORDER] ?: "CUSTOM" }
+
+    suspend fun setLabelSortOrder(value: String) {
+        context.dataStore.edit { preferences -> preferences[LABEL_SORT_ORDER] = value }
+    }
+
+    val recentLabelIds: Flow<List<Long>> = context.dataStore.data.map { preferences ->
+        runCatching {
+            Gson().fromJson(preferences[RECENT_LABEL_IDS] ?: "[]", Array<Long>::class.java).orEmpty().toList()
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun recordRecentLabelIds(ids: Collection<Long>) {
+        if (ids.isEmpty()) return
+        context.dataStore.edit { preferences ->
+            val current = runCatching {
+                Gson().fromJson(preferences[RECENT_LABEL_IDS] ?: "[]", Array<Long>::class.java).orEmpty().toList()
+            }.getOrDefault(emptyList())
+            preferences[RECENT_LABEL_IDS] = Gson().toJson((ids.toList() + current).distinct().take(20))
         }
     }
 

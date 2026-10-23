@@ -38,9 +38,14 @@ class LabelRepository @Inject constructor(
 
     suspend fun deleteLabel(id: Long) = dao.deleteLabel(id)
 
-    suspend fun applyEdits(contentIds: Set<Long>, request: LabelEditRequest) = database.withTransaction {
-        if (contentIds.isEmpty()) return@withTransaction
+    suspend fun reorderLabels(orderedIds: List<Long>) = database.withTransaction {
+        orderedIds.distinct().forEachIndexed { index, id -> dao.updateSortOrder(id, index + 1) }
+    }
+
+    suspend fun applyEdits(contentIds: Set<Long>, request: LabelEditRequest): Set<Long> = database.withTransaction {
+        if (contentIds.isEmpty()) return@withTransaction emptySet()
         val current = dao.getLabels().toMutableList()
+        val touched = request.changes.keys.toMutableSet()
         // Validate before mutating, including labels removed while the sheet was open.
         if (request.changes.keys.any { id -> current.none { it.id == id } }) {
             throw LabelUnavailableException()
@@ -53,11 +58,13 @@ class LabelRepository @Inject constructor(
         }
         request.newLabelNames.forEach { name ->
             val id = insertLabel(name, current)
+            touched += id
             current += LabelEntry(id, name.trim(), normalizeLabelName(name))
             contentIds.chunked(500).forEach { chunk ->
                 dao.addMemberships(chunk.map { MediaLabelEntry(id, it) })
             }
         }
+        touched
     }
 
     private suspend fun insertLabel(name: String, current: List<LabelEntry>): Long {

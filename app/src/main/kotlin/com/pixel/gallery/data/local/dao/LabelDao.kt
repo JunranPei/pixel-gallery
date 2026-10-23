@@ -31,6 +31,9 @@ interface LabelDao {
     @Query("DELETE FROM labels WHERE id = :id AND systemKind IS NULL")
     suspend fun deleteLabel(id: Long)
 
+    @Query("UPDATE labels SET sortOrder = :sortOrder WHERE id = :id AND systemKind IS NULL")
+    suspend fun updateSortOrder(id: Long, sortOrder: Int)
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addMemberships(entries: List<MediaLabelEntry>)
 

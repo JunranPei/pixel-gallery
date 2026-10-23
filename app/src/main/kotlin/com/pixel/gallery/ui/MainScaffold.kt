@@ -285,6 +285,12 @@ fun MainScaffold(
     val labelEntries by labelsViewModel.labelEntries.collectAsState()
     val labelSummaries by labelsViewModel.labels.collectAsState()
     val labelMemberships by labelsViewModel.memberships.collectAsState()
+    val recentLabelIds by labelsViewModel.recentLabelIds.collectAsState()
+    val editorLabelEntries = remember(labelEntries, labelSummaries) {
+        val byId = labelEntries.associateBy { it.id }
+        val orderedIds = labelSummaries.map { it.label.id }
+        orderedIds.mapNotNull(byId::get) + labelEntries.filterNot { it.id in orderedIds }
+    }
     val labelsSaving by labelsViewModel.isSaving.collectAsState()
     val labelsError by labelsViewModel.errorMessage.collectAsState()
     val labelSaveGeneration by labelsViewModel.editorSaveGeneration.collectAsState()
@@ -453,6 +459,9 @@ fun MainScaffold(
     val labelNamesByMedia = remember(labelEntries, labelMemberships, favouriteLabelName) {
         val names = labelEntries.associate { it.id to if (it.isSystem) favouriteLabelName else it.name }
         labelMemberships.groupBy { it.contentId }.mapValues { (_, links) -> links.mapNotNull { names[it.labelId] } }
+    }
+    val labelIdsByMedia = remember(labelMemberships) {
+        labelMemberships.groupBy { it.contentId }.mapValues { (_, links) -> links.map { it.labelId } }
     }
 
     LaunchedEffect(allPhotos) {
@@ -900,6 +909,17 @@ fun MainScaffold(
                                             contentDescription = "Move out of Locked Folder"
                                         )
                                     }
+                                }
+                            } else if (currentScreen is Screen.Label) {
+                                IconButton(
+                                    enabled = selectedIds.isNotEmpty() && !labelsSaving,
+                                    onClick = {
+                                        labelsViewModel.removeMediaFromLabel(currentScreen.labelId, selectedIds) {
+                                            selectedIds = emptySet()
+                                        }
+                                    },
+                                ) {
+                                    Icon(Icons.Outlined.Label, contentDescription = "Remove from label")
                                 }
                             } else {
                                 IconButton(enabled = selectedEntries.isNotEmpty(), onClick = {
@@ -1367,6 +1387,10 @@ fun MainScaffold(
                     errorMessage = labelsError,
                     onClearError = labelsViewModel::clearError,
                     isSaving = labelsSaving,
+                    sortMode = labelsViewModel.sortMode.collectAsState().value,
+                    onSortModeChange = labelsViewModel::setSortMode,
+                    onMoveLabel = labelsViewModel::moveLabel,
+                    onOpenSettings = { editingLabelIds = emptySet() },
                 )
                 is Screen.Label -> {
                     val labelId = baseScreen.labelId
@@ -1379,6 +1403,11 @@ fun MainScaffold(
                         onSelectionChange = updateSelection, onToggleSelection = toggleSelection,
                         onColumnsChange = photosViewModel::setGridColumns,
                         quickSort = quickSortConfig, onToggleQuickSort = toggleQuickSort,
+                        onSortPhotos = { showPhotoSortDialog = true },
+                        onRemoveFromLabel = { ids ->
+                            labelsViewModel.removeMediaFromLabel(labelId, ids) { selectedIds = emptySet() }
+                        },
+                        onEditLabel = { navigationStack = navigationStack.dropLast(1) + Screen.Labels },
                     )
                 }
                 Screen.Favourites -> FavouritesScreen(
@@ -1400,6 +1429,11 @@ fun MainScaffold(
                 )
                 Screen.Trash -> TrashScreen(
                     onBack = navigateBack,
+                    onEmptyBin = {
+                        selectedIds = trash.map { it.contentId }.toSet()
+                        isDeletePermanentlyConfirm = true
+                        showDeleteConfirmDialog = true
+                    },
                     onNavigateToViewer = { id ->
                         ViewerLoadMetrics.entryRequested(
                             context.applicationContext,
@@ -1633,6 +1667,10 @@ fun MainScaffold(
                     ViewerScreen(
                         onEditLabels = openLabelEditor,
                         labelsForMedia = { labelNamesByMedia[it].orEmpty() },
+                        labelIdsForMedia = { labelIdsByMedia[it].orEmpty() },
+                        onOpenLabel = { labelId ->
+                            navigationStack = navigationStack.dropLast(1) + Screen.Label(labelId)
+                        },
                         allowLabels = viewer.source !in setOf(Screen.ViewerSource.Trash, Screen.ViewerSource.Vault, Screen.ViewerSource.External),
                         reservedIds = quickQueue.reservedIds,
                         initialId = viewer.initialId,
@@ -1650,7 +1688,13 @@ fun MainScaffold(
                                 longArrayOf(media.contentId),
                                 Screen.TransferOrigin.Viewer
                             )
-                        }
+                        },
+                        allowUnlockFromVault = viewer.source == Screen.ViewerSource.Vault,
+                        onUnlockFromVault = { media ->
+                            photosViewModel.restoreFromVault(media.contentId) { restored ->
+                                if (restored) navigationStack = navigationStack.dropLast(1)
+                            }
+                        },
                     )
                 } else {
                     Box(
@@ -1673,6 +1717,8 @@ fun MainScaffold(
                         photosViewModel.clearTransferState()
                         navigationStack = navigationStack.dropLast(1)
                     },
+                    columns = gridColumns,
+                    onColumnsChange = photosViewModel::setGridColumns,
                     onFinished = { summary ->
                         val action = if (summary.mode == TransferMode.MOVE) "Moved" else "Copied"
                         val message = buildString {
@@ -1758,9 +1804,12 @@ fun MainScaffold(
 
     if (editingLabelIds.isNotEmpty()) {
         LabelEditorSheet(
-            labels = labelEntries, memberships = labelMemberships, selectedIds = editingLabelIds,
+            labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = editingLabelIds, recentLabelIds = recentLabelIds,
+            columns = albumGridColumns,
+            onColumnsChange = photosViewModel::setAlbumGridColumns,
             onDismiss = { editingLabelIds = emptySet(); labelsViewModel.clearError() },
             onApply = { edits -> labelsViewModel.applyEdits(editingLabelIds, edits) { editingLabelIds = emptySet() } },
+            onReorderLabels = labelsViewModel::reorderLabels,
             isSaving = labelsSaving, errorMessage = labelsError,
         )
     }

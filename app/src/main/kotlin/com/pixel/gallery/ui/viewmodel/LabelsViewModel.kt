@@ -14,6 +14,7 @@ import com.pixel.gallery.data.repository.LabelMediaUnavailableException
 import com.pixel.gallery.data.repository.MediaRepository
 import com.pixel.gallery.data.repository.SettingsRepository
 import com.pixel.gallery.model.LabelEditRequest
+import com.pixel.gallery.model.LabelSummary
 import com.pixel.gallery.model.buildLabelSummaries
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -24,16 +25,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class LabelSortMode { CUSTOM, NAME_ASC, NAME_DESC, COUNT_ASC, COUNT_DESC }
+
 @HiltViewModel
 class LabelsViewModel @Inject constructor(
     private val repository: LabelRepository,
     private val mediaRepository: MediaRepository,
-    settingsRepository: SettingsRepository,
+    private val settingsRepository: SettingsRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
     val labelEntries = repository.labels.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -54,8 +58,28 @@ class LabelsViewModel @Inject constructor(
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val labels = combine(labelEntries, memberships, visibleMedia) { entries, links, media ->
+    private val labelSortMode = settingsRepository.labelSortOrder
+        .map { runCatching { LabelSortMode.valueOf(it) }.getOrDefault(LabelSortMode.CUSTOM) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, LabelSortMode.CUSTOM)
+
+    val sortMode = labelSortMode
+    val recentLabelIds = settingsRepository.recentLabelIds
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val labels = combine(labelEntries, memberships, visibleMedia, labelSortMode) { entries, links, media, sort ->
+        val summaries =
         buildLabelSummaries(entries, links, media)
+        when (sort) {
+            LabelSortMode.CUSTOM -> summaries
+            LabelSortMode.NAME_ASC -> summaries.sortedWith(compareBy({ it.label.isSystem.not() }, { it.label.name.lowercase() }, { it.label.id }))
+            LabelSortMode.NAME_DESC -> summaries.sortedWith(
+                compareBy<LabelSummary>({ it.label.isSystem.not() })
+                    .thenByDescending { it.label.name.lowercase() }
+                    .thenBy { it.label.id }
+            )
+            LabelSortMode.COUNT_ASC -> summaries.sortedWith(compareBy({ it.label.isSystem.not() }, { it.count }, { it.label.name.lowercase() }))
+            LabelSortMode.COUNT_DESC -> summaries.sortedWith(compareBy({ it.label.isSystem.not() }, { -it.count }, { it.label.name.lowercase() }))
+        }
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -77,11 +101,27 @@ class LabelsViewModel @Inject constructor(
     fun createLabel(name: String) = mutate { repository.createLabel(name) }
     fun renameLabel(id: Long, name: String) = mutate { repository.renameLabel(id, name) }
     fun deleteLabel(id: Long) = mutate { repository.deleteLabel(id) }
+    fun setSortMode(mode: LabelSortMode) = viewModelScope.launch { settingsRepository.setLabelSortOrder(mode.name) }
+    fun moveLabel(id: Long, delta: Int) = mutate {
+        val ordered = labelEntries.value.filterNot { it.isSystem }.map { it.id }.toMutableList()
+        val index = ordered.indexOf(id)
+        val target = index + delta
+        if (index < 0 || target !in ordered.indices) return@mutate
+        ordered[index] = ordered[target]
+        ordered[target] = id
+        repository.reorderLabels(ordered)
+    }
+    fun reorderLabels(orderedIds: List<Long>) = mutate { repository.reorderLabels(orderedIds) }
+    fun removeMediaFromLabel(labelId: Long, contentIds: Set<Long>, onSaved: () -> Unit = {}) = mutate {
+        if (contentIds.isNotEmpty()) repository.applyEdits(contentIds, LabelEditRequest(changes = mapOf(labelId to false)))
+        onSaved()
+    }
 
     fun applyEdits(selectedIds: Set<Long>, request: LabelEditRequest, onSaved: () -> Unit) = mutate {
-        mediaRepository.withValidLabelMedia(selectedIds) {
+        val touched = mediaRepository.withValidLabelMedia(selectedIds) {
             repository.applyEdits(selectedIds, request)
         }
+        settingsRepository.recordRecentLabelIds(touched)
         _editorSaveGeneration.value += 1L
         onSaved()
     }

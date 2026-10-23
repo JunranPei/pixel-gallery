@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
@@ -354,10 +355,14 @@ internal fun ViewerScreen(
     onBack: () -> Unit,
     allowTransfer: Boolean = true,
     onRequestTransfer: (MediaEntry) -> Unit = {},
+    onUnlockFromVault: (MediaEntry) -> Unit = {},
+    allowUnlockFromVault: Boolean = false,
     enableUltraHdr: Boolean = false,
     viewModel: PhotosViewModel = hiltViewModel(),
     onEditLabels: (Set<Long>) -> Unit = {},
     labelsForMedia: (Long) -> List<String> = { emptyList() },
+    labelIdsForMedia: (Long) -> List<Long> = { emptyList() },
+    onOpenLabel: (Long) -> Unit = {},
     allowLabels: Boolean = true,
     reservedIds: Set<Long> = emptySet()
 ) {
@@ -1582,11 +1587,19 @@ internal fun ViewerScreen(
                                 currentMedia?.let { onEditLabels(setOf(it.contentId)) }
                             }
                         }
-                        ViewerSecondaryAction(Icons.Outlined.Lock, "Lock", enabled = !isCurrentReserved) {
+                        ViewerSecondaryAction(
+                            if (allowUnlockFromVault) Icons.Outlined.LockOpen else Icons.Outlined.Lock,
+                            stringResource(if (allowUnlockFromVault) R.string.unlock else R.string.lock),
+                            enabled = !isCurrentReserved,
+                        ) {
                             expandedBottomActions = false
                             currentMedia?.let { media ->
-                                viewModel.moveToVault(media)
-                                onBack()
+                                if (allowUnlockFromVault) {
+                                    onUnlockFromVault(media)
+                                } else {
+                                    viewModel.moveToVault(media)
+                                    onBack()
+                                }
                             }
                         }
                         ViewerSecondaryAction(Icons.Outlined.Wallpaper, "Wallpaper") {
@@ -1632,8 +1645,10 @@ internal fun ViewerScreen(
                 viewModel = viewModel,
                 onDismiss = { showInfo = false },
                 labels = currentLabels,
+                labelIds = currentMedia.contentId.let(labelIdsForMedia),
                 allowLabels = allowLabels,
                 canEditLabels = !isCurrentReserved,
+                onOpenLabel = onOpenLabel,
                 onEditLabels = {
                     showInfo = false
                     onEditLabels(setOf(currentMedia.contentId))
@@ -1832,9 +1847,11 @@ fun InfoBottomSheet(
     viewModel: PhotosViewModel,
     onDismiss: () -> Unit,
     labels: List<String> = emptyList(),
+    labelIds: List<Long> = emptyList(),
     allowLabels: Boolean = false,
     canEditLabels: Boolean = true,
-    onEditLabels: () -> Unit = {}
+    onEditLabels: () -> Unit = {},
+    onOpenLabel: (Long) -> Unit = {},
 ) {
     val metadata = remember(media.path) { viewModel.getMediaMetadata(media.path) }
     val coords = remember(media.path) { viewModel.getCoordinates(media.path) }
@@ -1874,23 +1891,24 @@ fun InfoBottomSheet(
 
             if (allowLabels) {
                 Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        stringResource(R.string.labels_title),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    TextButton(onClick = onEditLabels, enabled = canEditLabels) {
-                        Icon(Icons.Outlined.Label, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.label_edit))
-                    }
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    labels.forEach { name ->
+                InfoRow(
+                    icon = Icons.Outlined.Label,
+                    title = stringResource(R.string.labels_title),
+                    subtitle = when (labels.size) {
+                        0 -> stringResource(R.string.labels_empty)
+                        1 -> labels.first()
+                        else -> stringResource(R.string.labels_attached_count, labels.size)
+                    },
+                )
+                if (labels.isNotEmpty()) FlowRow(
+                    modifier = Modifier.padding(start = 40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    labels.forEachIndexed { index, name ->
                         SuggestionChip(
-                            onClick = onEditLabels,
+                            onClick = {
+                                labelIds.getOrNull(index)?.let(onOpenLabel)
+                            },
                             enabled = canEditLabels,
                             label = { Text(name) }
                         )
@@ -1942,7 +1960,14 @@ fun InfoBottomSheet(
 }
 
 @Composable
-fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String) {
+fun InfoRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    trailing: (@Composable () -> Unit)? = null,
+    onTrailingClick: (() -> Unit)? = null,
+    trailingEnabled: Boolean = true,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1951,9 +1976,16 @@ fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String
     ) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (trailing != null) {
+            if (onTrailingClick != null) {
+                TextButton(onClick = onTrailingClick, enabled = trailingEnabled) { trailing() }
+            } else {
+                trailing()
+            }
         }
     }
 }

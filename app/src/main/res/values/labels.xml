@@ -2,6 +2,7 @@
 <resources>
     <string name="labels_title">Labels</string>
     <string name="label_edit">Edit labels</string>
+    <string name="labels_add">Add labels</string>
     <string name="labels_favourites">Favourites</string>
     <string name="labels_empty">No labels yet</string>
     <string name="labels_new">New label</string>
@@ -20,6 +21,13 @@
     <string name="labels_done">Done</string>
     <string name="labels_count">%1$d items</string>
     <string name="labels_selection_count">%1$d selected</string>
+    <string name="labels_sort_custom">Custom</string>
+    <string name="labels_sort_name">A–Z</string>
+    <string name="labels_sort_recent">Recent</string>
+    <string name="labels_selected">Selected</string>
+    <string name="labels_recently_used">Recently used</string>
+    <string name="labels_all">All labels</string>
+    <string name="labels_attached_count">%1$d labels</string>
     <string name="labels_mixed">Some selected files</string>
     <string name="labels_pending">New label</string>
     <string name="labels_invalid_name">Use 1–60 characters without line breaks.</string>

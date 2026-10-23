@@ -5,9 +5,14 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -19,6 +24,9 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.components.GalleryOverflowMenu
 import com.pixel.gallery.ui.components.GalleryMenuRow
+import com.pixel.gallery.ui.components.MediaTypeMenuSection
+import com.pixel.gallery.model.MediaTypeFilter
+import com.pixel.gallery.ui.gallery.filterAlbumGridItems
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,16 +36,43 @@ fun LabelPhotosScreen(
     onSelectionChange: (Set<Long>) -> Unit, onToggleSelection: (Long) -> Unit,
     onColumnsChange: (Int) -> Unit, quickSort: QuickSortUiConfig?,
     onToggleQuickSort: () -> Unit,
+    onSortPhotos: () -> Unit = {},
+    onRemoveFromLabel: (Set<Long>) -> Unit = {},
+    onEditLabel: () -> Unit = {},
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var searchMode by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable(label?.id) { mutableStateOf("") }
+    var mediaType by rememberSaveable(label?.id) { mutableStateOf(MediaTypeFilter.ALL) }
+    val displayedItems = remember(items, searchQuery, mediaType) {
+        filterAlbumGridItems(items, searchQuery, mediaType)
+    }
     Scaffold(contentWindowInsets = WindowInsets(0), topBar = {
         if (selectedIds.isEmpty()) TopAppBar(
-            title = { Text(label?.let { labelDisplayName(it) } ?: stringResource(R.string.labels_title), style = EmphasizedTypography.TitleLarge) },
+            title = {
+                if (searchMode) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        placeholder = { Text("Search files") },
+                        trailingIcon = { IconButton(onClick = { searchMode = false; searchQuery = "" }) { Icon(Icons.Default.Close, "Close") } },
+                    )
+                } else Text(label?.let { labelDisplayName(it) } ?: stringResource(R.string.labels_title), style = EmphasizedTypography.TitleLarge)
+            },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.labels_back)) } },
             actions = {
+                IconButton(onClick = { searchMode = true }) { Icon(Icons.Default.Search, "Search") }
                 Box {
                     IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, null) }
                     GalleryOverflowMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        MediaTypeMenuSection(mediaType) { type -> mediaType = type; showMenu = false }
+                        GalleryMenuRow("Sort Photos", Icons.Default.Sort, accented = true, onClick = { showMenu = false; onSortPhotos() })
+                        GalleryMenuRow("Edit label", Icons.Outlined.Label, accented = true, onClick = { showMenu = false; onEditLabel() })
+                        if (selectedIds.isNotEmpty()) GalleryMenuRow(
+                            "Remove selected from label", Icons.Outlined.Label, accented = true,
+                            onClick = { showMenu = false; onRemoveFromLabel(selectedIds) },
+                        )
                         if (quickSort == null) GalleryMenuRow(
                             label = stringResource(R.string.qs_start),
                             icon = Icons.Outlined.DriveFileMove,
@@ -49,11 +84,11 @@ fun LabelPhotosScreen(
             })
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            PhotosScreen(items = items, onNavigateToViewer = onNavigateToViewer, selectedIds = selectedIds,
+            PhotosScreen(items = displayedItems, onNavigateToViewer = onNavigateToViewer, selectedIds = selectedIds,
                 onSelectionChange = onSelectionChange, onToggleSelection = onToggleSelection,
                 columns = columns, onColumnsChange = onColumnsChange, state = gridState,
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
-                emptyMessage = stringResource(R.string.labels_empty_contents), quickSort = quickSort)
+                emptyMessage = if (searchQuery.isNotBlank()) "No matching files" else stringResource(R.string.labels_empty_contents), quickSort = quickSort)
         }
     }
 }

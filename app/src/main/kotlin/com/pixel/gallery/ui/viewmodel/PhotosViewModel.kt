@@ -471,11 +471,15 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    fun restoreFromVault(id: Long) {
+    fun restoreFromVault(id: Long, onComplete: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
-            if (repository.restoreFromVault(id)) {
+            val restored = runCatching { repository.restoreFromVault(id) }
+                .onFailure { android.util.Log.e("PhotosViewModel", "Could not restore locked media", it) }
+                .getOrDefault(false)
+            if (restored) {
                 refresh()
             }
+            onComplete(restored)
         }
     }
 
