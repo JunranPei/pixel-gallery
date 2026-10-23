@@ -20,6 +20,8 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.local.entity.VaultEntry
 import com.google.gson.Gson
 import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.renamedAlbumDirectory
+import com.pixel.gallery.model.remapAlbumPath
 import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.isSameTransferDirectory
 import com.pixel.gallery.model.TransferItemFailure
@@ -219,6 +221,64 @@ class MediaRepository @Inject constructor(
 
     suspend fun removeFavourite(id: Long) = withValidLabelMedia(setOf(id)) {
         mediaDao.removeFavourite(id)
+    }
+
+    suspend fun renameAlbum(path: String, name: String) {
+        replacementRecoveryComplete.await()
+        withMediaMutation {
+            withContext(Dispatchers.IO + NonCancellable) {
+                syncMutex.withLock {
+                    val source = File(path)
+                    require(source.isDirectory) { "This album folder is no longer available" }
+                    val target = renamedAlbumDirectory(source, name)
+                    if (source == target) return@withLock
+                    val volume = StorageUtils.getVolumePath(context, source.absolutePath)
+                    require(volume != null && source.canonicalPath != File(volume).canonicalPath) {
+                        "Storage roots cannot be renamed"
+                    }
+                    val entries = (mediaDao.getAllEntriesPaged() + mediaDao.getTrashPaged()).filter {
+                        it.path.startsWith("${source.absolutePath}/")
+                    }
+                    if (!source.renameTo(target)) throw IOException("Could not rename this album folder")
+                    val indexed = mutableListOf<Pair<MediaEntry, MediaEntry>>()
+                    try {
+                        for (entry in entries) {
+                            val newPath = remapAlbumPath(entry.path, source.absolutePath, target.absolutePath)
+                            val uri = scanFile(File(newPath), entry.sourceMimeType)
+                                ?: throw IOException("Could not update the renamed album in the media library")
+                            val id = uri.lastPathSegment?.toLongOrNull()
+                                ?: throw IOException("Could not read the renamed media identity")
+                            indexed += entry to entry.copy(contentId = id, uri = uri.toString(), path = newPath)
+                        }
+                        for ((old, updated) in indexed) {
+                            mediaDao.remapMediaLabels(old.contentId, updated.contentId)
+                            relocatePersistentIndexes(old.path, updated.path)
+                        }
+                        mediaDao.reconcileMedia(indexed.map { it.second }, indexed.filter { it.first.contentId != it.second.contentId }.map { it.first.contentId })
+                        settingsRepository.remapAlbumPaths(source.absolutePath, target.absolutePath)
+                    } catch (error: Exception) {
+                        if (target.renameTo(source)) {
+                            for (entry in entries) {
+                                val restoredUri = scanFile(File(entry.path), entry.sourceMimeType) ?: continue
+                                val restoredId = restoredUri.lastPathSegment?.toLongOrNull() ?: continue
+                                val moved = indexed.find { it.first.contentId == entry.contentId }?.second
+                                mediaDao.remapMediaLabels(entry.contentId, restoredId)
+                                mediaDao.remapMediaLabels(moved?.contentId ?: entry.contentId, restoredId)
+                                moved?.let { relocatePersistentIndexes(it.path, entry.path) }
+                                mediaDao.reconcileMedia(listOf(entry.copy(contentId = restoredId, uri = restoredUri.toString())),
+                                    listOfNotNull(entry.contentId, moved?.contentId).distinct().filter { it != restoredId })
+                            }
+                            settingsRepository.remapAlbumPaths(target.absolutePath, source.absolutePath)
+                        }
+                        throw error
+                    }
+                    // Scan the directory too, including nested and non-image files.
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
+                    entries.forEach { scanFile(File(it.path), it.sourceMimeType) }
+                }
+                syncWithMediaStore(force = true)
+            }
+        }
     }
 
     /** Serialize label writes with moves and reject stale IDs held by another window. */

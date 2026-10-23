@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="labels_delete_selected_title">Delete %1$d labels?</string>
+    <string name="album_rename">Rename album</string>
+    <string name="album_name">Album name</string>
+    <string name="album_invalid_name">Enter a valid folder name without slashes or a leading dot (up to 255 bytes).</string>
     <string name="app_name">Pixel Gallery</string>
     
     <!-- Navigation -->
@@ -131,4 +135,5 @@
     <string name="duplicate_restore_hint">You can restore these files from the recycle bin.</string>
     <string name="duplicate_confirm_title">Move the selected copies to the recycle bin?</string>
     <string name="duplicate_confirm_message">Selected copies: %1$d\nScope: %2$s\n\nThe original labelled Retained in each group will be kept. The files will be checked again before cleanup. Copies that are no longer safe to remove will be skipped.</string>
+    <string name="display_show_full_album_names">Show full album names</string>
 </resources>

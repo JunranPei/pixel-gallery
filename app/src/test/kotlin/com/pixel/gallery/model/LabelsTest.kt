@@ -67,6 +67,7 @@ class LabelsTest {
 
         assertEquals(3, summary.count)
         assertEquals(newest, summary.cover)
+        assertEquals(300L, summary.lastModified)
 
         // Hiding/excluding/trashing a member removes it from this already-filtered input.
         val afterHidden = buildLabelSummaries(
@@ -76,6 +77,34 @@ class LabelsTest {
         ).single()
         assertEquals(2, afterHidden.count)
         assertEquals(middle, afterHidden.cover)
+    }
+
+    @Test
+    fun `label summaries use latest member time and shared sorter supports date direction`() {
+        val first = media(10, 100).copy(sourceDateTakenMillis = 200L, dateModifiedMillis = 900L)
+        val second = media(20, 300).copy(sourceDateTakenMillis = 600L, dateModifiedMillis = 100L)
+        val summaries = buildLabelSummaries(
+            listOf(
+                LabelEntry(2, "Older", "older"),
+                LabelEntry(3, "Newer", "newer"),
+                LabelEntry(4, "Empty", "empty"),
+            ),
+            listOf(MediaLabelEntry(2, 10), MediaLabelEntry(3, 20)),
+            listOf(first, second),
+        ).associateBy { it.label.id }
+
+        assertEquals(200L, summaries.getValue(2).lastModified)
+        assertEquals(600L, summaries.getValue(3).lastModified)
+        assertEquals(0L, summaries.getValue(4).lastModified)
+        assertEquals(listOf(3L, 2L, 4L), AlbumSorter.shared.sortLabels(summaries.values.toList(), AlbumSortOrder.DATE_DESC).map { it.label.id })
+        assertEquals(listOf(4L, 2L, 3L), AlbumSorter.shared.sortLabels(summaries.values.toList(), AlbumSortOrder.DATE_ASC).map { it.label.id })
+    }
+
+    @Test
+    fun `album sorter maps shared criteria and migrates old custom preference to name`() {
+        assertEquals(AlbumSortOrder.DATE_DESC, AlbumSortOrder.fromSelection("DATE", "DESC"))
+        assertEquals(AlbumSortOrder.COUNT_ASC, AlbumSortOrder.fromSelection("COUNT", "ASC"))
+        assertEquals(AlbumSortOrder.NAME_ASC, AlbumSortOrder.fromStored("CUSTOM"))
     }
 
     @Test

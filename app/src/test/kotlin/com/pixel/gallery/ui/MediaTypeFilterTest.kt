@@ -3,7 +3,7 @@ package com.pixel.gallery.ui
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.MediaTypeFilter
 import com.pixel.gallery.ui.gallery.filterAlbumGridItems
-import com.pixel.gallery.ui.viewmodel.AlbumSortOrder
+import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.viewmodel.buildMediaAlbums
 import org.junit.Assert.*

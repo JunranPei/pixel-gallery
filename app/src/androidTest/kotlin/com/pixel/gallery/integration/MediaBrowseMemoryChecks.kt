@@ -4,7 +4,7 @@ import android.app.Instrumentation
 import android.os.SystemClock
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.MediaTypeFilter
-import com.pixel.gallery.ui.viewmodel.AlbumSortOrder
+import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.ui.viewmodel.MediaBrowseIndex
 import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
 import java.io.File

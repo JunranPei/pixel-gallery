@@ -13,6 +13,7 @@ import com.pixel.gallery.model.ThemeMode
 import com.pixel.gallery.model.Handedness
 import com.pixel.gallery.model.QuickSortPreferences
 import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.remapAlbumPath
 import com.google.gson.Gson
 
 import androidx.datastore.preferences.SharedPreferencesMigration
@@ -32,6 +33,7 @@ class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private val STARTUP_AT_ALBUMS = booleanPreferencesKey("flutter.albums")
+    private val SHOW_FULL_ALBUM_NAMES = booleanPreferencesKey("show_full_album_names")
     private val MATERIAL_YOU = booleanPreferencesKey("flutter.material_you")
     private val THEME_MODE = stringPreferencesKey("theme_mode")
     private val HANDEDNESS = stringPreferencesKey("handedness")
@@ -67,8 +69,34 @@ class SettingsRepository @Inject constructor(
         context.dataStore.edit { it[QUICK_SORT_DOCK_TOP] = top }
     }
 
+    suspend fun remapAlbumPaths(source: String, target: String) {
+        context.dataStore.edit { preferences ->
+            listOf(EXCLUDED_FOLDERS, HIDDEN_FOLDERS).forEach { key ->
+                preferences[key]?.let { paths ->
+                    preferences[key] = paths.map { remapAlbumPath(it, source, target) }.toSet()
+                }
+            }
+            val targets = Gson().fromJson(preferences[QUICK_SORT_TARGETS] ?: "[]", Array<TransferDestination>::class.java).orEmpty()
+            preferences[QUICK_SORT_TARGETS] = Gson().toJson(targets.map { destination ->
+                val path = remapAlbumPath(destination.path, source, target)
+                if (path == destination.path) destination else destination.copy(
+                    path = path,
+                    stableKey = remapAlbumPath(destination.stableKey, source, target),
+                    displayName = java.io.File(path).name,
+                )
+            })
+        }
+    }
+
     val startupAtAlbums: Flow<Boolean> = context.dataStore.data
         .map { preferences -> preferences[STARTUP_AT_ALBUMS] ?: false }
+
+    val showFullAlbumNames: Flow<Boolean> = context.dataStore.data
+        .map { preferences -> preferences[SHOW_FULL_ALBUM_NAMES] ?: true }
+
+    suspend fun setShowFullAlbumNames(value: Boolean) {
+        context.dataStore.edit { it[SHOW_FULL_ALBUM_NAMES] = value }
+    }
 
     val materialYou: Flow<Boolean> = context.dataStore.data
         .map { preferences -> preferences[MATERIAL_YOU] ?: true }
@@ -179,7 +207,7 @@ class SettingsRepository @Inject constructor(
     }
 
     val labelSortOrder: Flow<String> = context.dataStore.data
-        .map { preferences -> preferences[LABEL_SORT_ORDER] ?: "CUSTOM" }
+        .map { preferences -> preferences[LABEL_SORT_ORDER] ?: "NAME_ASC" }
 
     suspend fun setLabelSortOrder(value: String) {
         context.dataStore.edit { preferences -> preferences[LABEL_SORT_ORDER] = value }

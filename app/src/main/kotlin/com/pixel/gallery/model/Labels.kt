@@ -6,7 +6,12 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import java.text.Normalizer
 import java.util.Locale
 
-data class LabelSummary(val label: LabelEntry, val count: Int, val cover: MediaEntry? = null)
+data class LabelSummary(
+    val label: LabelEntry,
+    val count: Int,
+    val cover: MediaEntry? = null,
+    val lastModified: Long = 0L,
+)
 
 /** Counts and covers use the same already-filtered collection as the normal grid. */
 fun buildLabelSummaries(
@@ -21,7 +26,12 @@ fun buildLabelSummaries(
     val coverOrder = compareBy<MediaEntry> { it.bestTimestamp }.thenBy { it.contentId }
     return labels.map { label ->
         val members = membersByLabel[label.id].orEmpty().mapNotNull { mediaById[it.contentId] }
-        LabelSummary(label, members.size, members.maxWithOrNull(coverOrder))
+        LabelSummary(
+            label = label,
+            count = members.size,
+            cover = members.maxWithOrNull(coverOrder),
+            lastModified = members.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L,
+        )
     }
 }
 

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.*
@@ -31,9 +32,12 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.Album
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
+import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.GalleryMenuRow
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.CheckCircle
@@ -41,11 +45,13 @@ import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.ui.graphics.graphicsLayer
 import com.pixel.gallery.ui.utils.photoGridDragSelect
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.compose.ui.platform.LocalContext
@@ -408,7 +414,7 @@ fun PhotoTile(
             label = "CornerRadius",
             transitionSpec = { spring(stiffness = Spring.StiffnessLow) }
         ) { state ->
-            if (state) 28.dp else 20.dp
+            if (state) 28.dp else ExpressiveShapes.GridCornerRadius
         }
         
         val overlayAlpha by transition.animateFloat(
@@ -437,7 +443,7 @@ fun PhotoTile(
             isVideo = isVideo,
             formattedDuration = formattedDuration,
             scale = 1.0f,
-            cornerRadius = 20.dp,
+            cornerRadius = ExpressiveShapes.GridCornerRadius,
             overlayAlpha = 0.0f,
             isSelected = false,
             isSelectionMode = false,
@@ -570,37 +576,26 @@ fun AlbumsScreen(
     onNavigateToAlbum: (String) -> Unit,
     onExclude: (String) -> Unit = {},
     onHide: (String) -> Unit = {},
+    onRename: suspend (String, String) -> Result<Unit>,
+    selectedPaths: Set<String> = emptySet(),
+    selectionMode: Boolean = false,
+    onToggleAlbumSelection: (String) -> Unit = {},
     columns: Int = 2,
     onColumnsChange: (Int) -> Unit = {},
     showHeaderButtons: Boolean = true,
     emptyMessage: String? = null,
 ) {
-    var isScrollbarDragging by remember { mutableStateOf(false) }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
-            state = gridState,
-            modifier = Modifier
-                .fillMaxSize()
-                .pinchToZoomColumns(
-                    currentColumns = columns,
-                    onColumnsChange = onColumnsChange,
-                    minColumns = 1,
-                    maxColumns = 4
-                ),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                top = 16.dp,
-                end = 16.dp,
-                bottom = 80.dp + bottomPadding
-            ),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    AlbumGrid(
+        columns = columns,
+        onColumnsChange = onColumnsChange,
+        state = gridState,
+        modifier = Modifier.fillMaxSize(),
+        bottomPadding = bottomPadding,
+        emptyMessage = if (albums.isEmpty()) emptyMessage else null,
+    ) {
             if (showHeaderButtons) {
                 // Reuse the existing Favourites slot for Labels; keep the Bin slot unchanged.
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columns) }) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -628,35 +623,22 @@ fun AlbumsScreen(
                 key = { albums[it].path }
             ) { index ->
                 val album = albums[index]
-                val onAlbumClick = { onNavigateToAlbum(album.path) }
                 val onAlbumExclude = remember(album.path) { { onExclude(album.path) } }
                 val onAlbumHide = remember(album.path) { { onHide(album.path) } }
                 AlbumCard(
                     album = album,
-                    onClick = onAlbumClick,
+                    onClick = {
+                        if (selectionMode) onToggleAlbumSelection(album.path)
+                        else onNavigateToAlbum(album.path)
+                    },
                     onExclude = onAlbumExclude,
                     onHide = onAlbumHide,
+                    selected = album.path in selectedPaths,
+                    selectionMode = selectionMode,
+                    onLongClick = { onToggleAlbumSelection(album.path) },
                     columns = columns
                 )
             }
-        }
-
-        if (albums.isEmpty() && emptyMessage != null) {
-            Text(
-                text = emptyMessage,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
-
-        com.pixel.gallery.ui.components.GalleryScrollbar(
-            lazyGridState = gridState,
-            layoutModifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(bottom = bottomPadding),
-            onDragStateChanged = { isScrollbarDragging = it }
-        )
     }
 }
 
@@ -667,34 +649,22 @@ fun AlbumCard(
     onClick: () -> Unit,
     onExclude: () -> Unit,
     onHide: () -> Unit,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     columns: Int = 2
 ) {
-    var showMenu by remember { mutableStateOf(false) }
     AlbumCoverCard(
         title = album.name,
         subtitle = "${album.itemCount} items",
         coverUri = album.coverUri.takeIf { it.isNotBlank() },
         coverModifiedMillis = album.lastModified,
         onClick = onClick,
-        onLongClick = { showMenu = true },
+        onLongClick = onLongClick,
+        selected = selected,
+        selectionMode = selectionMode,
         columns = columns,
-    ) {
-        DropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Hide Album") },
-                onClick = { showMenu = false; onHide() },
-                leadingIcon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null) }
-            )
-            DropdownMenuItem(
-                text = { Text("Exclude Album") },
-                onClick = { showMenu = false; onExclude() },
-                leadingIcon = { Icon(Icons.Outlined.FolderOff, contentDescription = null) }
-            )
-        }
-    }
+    )
 }
 
 /** Shared album/label presentation. Filesystem actions belong to the caller. */
@@ -709,6 +679,7 @@ fun AlbumCoverCard(
     columns: Int = 2,
     enabled: Boolean = true,
     selected: Boolean = false,
+    selectionMode: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     coverMimeType: String? = null,
     coverSizeBytes: Long? = null,
@@ -770,9 +741,44 @@ fun AlbumCoverCard(
         3 -> 8.dp
         else -> 6.dp
     }
+    val showFullAlbumNames = LocalShowFullAlbumNames.current
+    val visibleTitleLines = if (showFullAlbumNames) titleMaxLines else minOf(titleMaxLines, 2)
+    val subtitleTopPadding = if (columns <= 2) 2.dp else 0.dp
+    val textMeasurer = rememberTextMeasurer()
+    val captionMinHeight = if (showFullAlbumNames) 0.dp else {
+        // Reserve space below short captions so the next row starts at the same height.
+        val titleHeight = textMeasurer.measure(
+            text = List(visibleTitleLines) { "Ag" }.joinToString("\n"),
+            style = LocalTextStyle.current.merge(titleStyle),
+        ).size.height
+        val subtitleHeight = textMeasurer.measure(
+            text = "Ag",
+            style = LocalTextStyle.current.merge(subtitleStyle),
+        ).size.height
+        with(LocalDensity.current) { (titleHeight + subtitleHeight).toDp() } + subtitleTopPadding
+    }
+    val selectionTransition = updateTransition(selected, label = "AlbumSelectionTransition")
+    val coverScale by selectionTransition.animateFloat(
+        label = "AlbumCoverSelectionScale",
+        transitionSpec = {
+            if (targetState) spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)
+            else spring(stiffness = Spring.StiffnessLow)
+        },
+    ) { if (it) 0.92f else 1f }
+    val coverRadius by selectionTransition.animateDp(
+        label = "AlbumCoverSelectionCornerRadius",
+        transitionSpec = { spring(stiffness = Spring.StiffnessLow) },
+    ) { if (it) 28.dp else 32.dp }
+    val selectedOverlayAlpha by selectionTransition.animateFloat(
+        label = "AlbumCoverSelectionOverlay",
+        transitionSpec = { tween(200) },
+    ) { if (it) 0.3f else 0f }
+    val animatedCoverShape = if (selectionMode || selected) RoundedCornerShape(coverRadius) else coverShape
 
     Column(
         modifier = Modifier.combinedClickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
             enabled = enabled,
             onClick = onClick,
             onLongClick = onLongClick
@@ -782,11 +788,17 @@ fun AlbumCoverCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
+                .graphicsLayer {
+                    scaleX = coverScale
+                    scaleY = coverScale
+                    clip = true
+                    shape = animatedCoverShape
+                }
                 .background(
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = coverShape
+                    shape = animatedCoverShape
                 )
-                .clip(coverShape),
+                .clip(animatedCoverShape),
             contentAlignment = Alignment.Center
         ) {
             if (coverUri != null) {
@@ -805,7 +817,37 @@ fun AlbumCoverCard(
                     modifier = Modifier.size(if (columns <= 2) 56.dp else 36.dp)
                 )
             }
-            if (selected) {
+            if (selectedOverlayAlpha > 0f) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = selectedOverlayAlpha)))
+            }
+            if (selectionMode) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selected,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                    enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.scaleOut() + androidx.compose.animation.fadeOut(),
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface,
+                    ) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = "Selected",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(2.dp),
+                        )
+                    }
+                }
+                if (!selected) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp)
+                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                            .padding(2.dp)
+                            .background(Color.White.copy(alpha = 0.55f), CircleShape)
+                    )
+                }
+            } else if (selected) {
                 Surface(
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
                     shape = CircleShape,
@@ -821,19 +863,23 @@ fun AlbumCoverCard(
             }
         }
         Spacer(Modifier.height(spacerHeight))
-        Text(
-            text = title,
-            style = titleStyle,
-            maxLines = titleMaxLines,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 4.dp)
-        )
-        Text(
-            text = subtitle,
-            style = subtitleStyle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, top = if (columns <= 2) 2.dp else 0.dp)
-        )
+        Column(modifier = Modifier.fillMaxWidth().heightIn(min = captionMinHeight)) {
+            Text(
+                text = title,
+                style = titleStyle,
+                maxLines = visibleTitleLines,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            Text(
+                text = subtitle,
+                style = subtitleStyle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = subtitleTopPadding)
+            )
+        }
 
         captionContent()
     }

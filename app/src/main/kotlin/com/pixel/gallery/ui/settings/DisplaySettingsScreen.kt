@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Tab
 import androidx.compose.material.icons.outlined.PanTool
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,7 @@ fun DisplaySettingsScreen(
 ) {
     val startupAtAlbums by viewModel.startupAtAlbums.collectAsStateWithLifecycle()
     val handedness by viewModel.handedness.collectAsStateWithLifecycle()
+    val showFullAlbumNames by viewModel.showFullAlbumNames.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -62,7 +64,7 @@ fun DisplaySettingsScreen(
             verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing),
         ) {
             item {
-                SettingsGroup(itemCount = 3) { index ->
+                SettingsGroup(itemCount = 4) { index ->
                     when (index) {
                         0 -> {
                             Column(Modifier.padding(14.dp)) {
@@ -92,6 +94,14 @@ fun DisplaySettingsScreen(
                             )
                         }
                         2 -> {
+                            SettingsToggleItem(
+                                title = stringResource(R.string.display_show_full_album_names),
+                                icon = Icons.Outlined.TextFields,
+                                checked = showFullAlbumNames,
+                                onCheckedChange = viewModel::setShowFullAlbumNames,
+                            )
+                        }
+                        3 -> {
                             SettingsClickItem(
                                 title = "Themes",
                                 icon = Icons.Outlined.Palette,

@@ -2,7 +2,9 @@ package com.pixel.gallery.ui.viewmodel
 
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.Album
+import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.model.MediaTypeFilter
+import com.pixel.gallery.model.chronologicalTimestamp
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.utils.MimeTypes
 import java.text.SimpleDateFormat

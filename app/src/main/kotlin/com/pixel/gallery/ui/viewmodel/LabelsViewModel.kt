@@ -16,6 +16,8 @@ import com.pixel.gallery.data.repository.SettingsRepository
 import com.pixel.gallery.model.LabelEditRequest
 import com.pixel.gallery.model.LabelSummary
 import com.pixel.gallery.model.buildLabelSummaries
+import com.pixel.gallery.model.AlbumSortOrder
+import com.pixel.gallery.model.AlbumSorter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -30,8 +32,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-enum class LabelSortMode { CUSTOM, NAME_ASC, NAME_DESC, COUNT_ASC, COUNT_DESC }
 
 @HiltViewModel
 class LabelsViewModel @Inject constructor(
@@ -59,27 +59,15 @@ class LabelsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val labelSortMode = settingsRepository.labelSortOrder
-        .map { runCatching { LabelSortMode.valueOf(it) }.getOrDefault(LabelSortMode.CUSTOM) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, LabelSortMode.CUSTOM)
+        .map { AlbumSortOrder.fromStored(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AlbumSortOrder.NAME_ASC)
 
     val sortMode = labelSortMode
     val recentLabelIds = settingsRepository.recentLabelIds
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val labels = combine(labelEntries, memberships, visibleMedia, labelSortMode) { entries, links, media, sort ->
-        val summaries =
-        buildLabelSummaries(entries, links, media)
-        when (sort) {
-            LabelSortMode.CUSTOM -> summaries
-            LabelSortMode.NAME_ASC -> summaries.sortedWith(compareBy({ it.label.isSystem.not() }, { it.label.name.lowercase() }, { it.label.id }))
-            LabelSortMode.NAME_DESC -> summaries.sortedWith(
-                compareBy<LabelSummary>({ it.label.isSystem.not() })
-                    .thenByDescending { it.label.name.lowercase() }
-                    .thenBy { it.label.id }
-            )
-            LabelSortMode.COUNT_ASC -> summaries.sortedWith(compareBy({ it.label.isSystem.not() }, { it.count }, { it.label.name.lowercase() }))
-            LabelSortMode.COUNT_DESC -> summaries.sortedWith(compareBy({ it.label.isSystem.not() }, { -it.count }, { it.label.name.lowercase() }))
-        }
+        AlbumSorter.shared.sortLabels(buildLabelSummaries(entries, links, media), sort)
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -101,7 +89,8 @@ class LabelsViewModel @Inject constructor(
     fun createLabel(name: String) = mutate { repository.createLabel(name) }
     fun renameLabel(id: Long, name: String) = mutate { repository.renameLabel(id, name) }
     fun deleteLabel(id: Long) = mutate { repository.deleteLabel(id) }
-    fun setSortMode(mode: LabelSortMode) = viewModelScope.launch { settingsRepository.setLabelSortOrder(mode.name) }
+    fun deleteLabels(ids: Set<Long>) = mutate { repository.deleteLabels(ids) }
+    fun setSortMode(mode: AlbumSortOrder) = viewModelScope.launch { settingsRepository.setLabelSortOrder(mode.name) }
     fun moveLabel(id: Long, delta: Int) = mutate {
         val ordered = labelEntries.value.filterNot { it.isSystem }.map { it.id }.toMutableList()
         val index = ordered.indexOf(id)

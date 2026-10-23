@@ -49,6 +49,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var labelDesignSuite = false
     private var settingsSelectionSuite = false
     private var albumRegressionSuite = false
+    private var albumRenameSuite = false
+    private var albumSelectionSuite = false
     private var labelBackupEdgesSuite = false
     private var labelBackupUiSuite = false
     private var transferEdgesSuite = false
@@ -77,6 +79,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         labelDesignSuite = arguments?.getString("suite") == "label-designs"
         settingsSelectionSuite = arguments?.getString("suite") == "settings-selection"
         albumRegressionSuite = arguments?.getString("suite") == "album-regressions"
+        albumRenameSuite = arguments?.getString("suite") == "album-rename"
+        albumSelectionSuite = arguments?.getString("suite") == "album-selection"
         labelBackupEdgesSuite = arguments?.getString("suite") == "label-backup-edges"
         labelBackupUiSuite = arguments?.getString("suite") == "label-backup-ui"
         transferEdgesSuite = arguments?.getString("suite") == "transfer-edges"
@@ -98,6 +102,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                albumSelectionSuite -> AlbumSelectionChecks(this).exercise()
+                albumRenameSuite -> AlbumRenameChecks(targetContext).exercise()
                 viewerCompressionSuite -> ViewerCompressionDeviceChecks(targetContext).exercise()
                 nativeFitSuite -> NativeFitDeviceChecks(targetContext).exercise()
                 thumbnailQualitySuite -> ThumbnailQualityDeviceChecks(targetContext).exercise()

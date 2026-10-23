@@ -35,6 +35,8 @@ import com.pixel.gallery.ui.gallery.matchesAlbumSearch
 import com.pixel.gallery.model.Album
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
+import com.pixel.gallery.ui.home.AlbumRenameDialog
+import com.pixel.gallery.ui.components.AlbumSelectionTopBar
 import com.pixel.gallery.ui.settings.SettingsScreen
 import com.pixel.gallery.ui.gallery.FavouritesScreen
 import com.pixel.gallery.ui.gallery.TrashScreen
@@ -49,6 +51,7 @@ import com.pixel.gallery.ui.settings.LicensesScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.components.DeleteConfirmDialog
 import com.pixel.gallery.ui.components.HomeOverflowMenu
+import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
 import com.pixel.gallery.ui.settings.ThemeSettingsScreen
 import com.pixel.gallery.ui.settings.DisplaySettingsScreen
@@ -68,7 +71,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
-import com.pixel.gallery.ui.viewmodel.AlbumSortOrder
+import com.pixel.gallery.model.AlbumSortOrder
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -81,6 +84,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
+import com.pixel.gallery.ui.components.AlbumSortDialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.outlined.FileCopy
@@ -402,7 +406,6 @@ fun MainScaffold(
     val groupedVault by photosViewModel.groupedVaultEntries.collectAsState()
     val albums by photosViewModel.albums.collectAsState()
     val gridColumns by photosViewModel.gridColumns.collectAsState()
-    val albumGridColumns by photosViewModel.albumGridColumns.collectAsState()
     val externalMedia by photosViewModel.externalMedia.collectAsState()
 
     val photoSortOrder by photosViewModel.photoSortOrder.collectAsState()
@@ -600,6 +603,12 @@ fun MainScaffold(
     }
 
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var selectedAlbumPaths by remember { mutableStateOf(emptySet<String>()) }
+    var renamingAlbum by remember { mutableStateOf<Album?>(null) }
+    val albumSelectionMode = currentScreen == Screen.Home && selectedAlbumPaths.isNotEmpty()
+    val toggleAlbumPath: (String) -> Unit = { path ->
+        selectedAlbumPaths = if (path in selectedAlbumPaths) selectedAlbumPaths - path else selectedAlbumPaths + path
+    }
     var retainEmptyAlbumSelection by remember { mutableStateOf(false) }
     val selectionMode = selectedIds.isNotEmpty() ||
         (currentScreen is Screen.Photo && retainEmptyAlbumSelection)
@@ -715,10 +724,13 @@ fun MainScaffold(
     BackHandler(
         enabled = navigationStack.size > 1 ||
             quickSortEnabled ||
+            albumSelectionMode ||
             selectionMode ||
             (currentScreen == Screen.Home && isHomeSearchMode)
     ) {
-        if (selectionMode) {
+        if (albumSelectionMode) {
+            selectedAlbumPaths = emptySet()
+        } else if (selectionMode) {
             retainEmptyAlbumSelection = false
             selectedIds = emptySet()
         } else if (quickSortEnabled && currentScreen !is Screen.Viewer) {
@@ -735,6 +747,7 @@ fun MainScaffold(
 
     // Reset selection when navigating
     LaunchedEffect(currentScreen) {
+        selectedAlbumPaths = emptySet()
         if (ViewerLoadMetrics.currentEntryId() != 0L) {
             ViewerLoadMetrics.event(
                 "NAVIGATION_SCREEN",
@@ -782,9 +795,8 @@ fun MainScaffold(
     }
 
     val colorScheme = MaterialTheme.colorScheme
-    // Use one theme surface for the shell so the title bar and scrolling body
-    // stay identical in light and dark modes, including Samsung dynamic colors.
     val appShellColor = colorScheme.surface
+    val headerColor = colorScheme.surfaceContainerLow
     val navigateBack: () -> Unit = {
         if (navigationStack.size > 1) {
             navigationStack = navigationStack.dropLast(1)
@@ -800,7 +812,7 @@ fun MainScaffold(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(appShellColor)
+            .background(headerColor)
     ) {
         Scaffold(
             contentWindowInsets = WindowInsets(0), // Manual padding for full control
@@ -810,6 +822,7 @@ fun MainScaffold(
                 .then(
                     if (
                         currentScreen == Screen.Home &&
+                        !albumSelectionMode &&
                         selectedIds.isEmpty() &&
                         !isHomeSearchMode && !quickSortEnabled
                     ) {
@@ -820,9 +833,26 @@ fun MainScaffold(
                 ),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (selectionMode && currentScreen !is Screen.TransferDestination) {
+            if (albumSelectionMode) {
+                AlbumSelectionTopBar(
+                    count = selectedAlbumPaths.size,
+                    onClear = { selectedAlbumPaths = emptySet() },
+                    onRename = {
+                        renamingAlbum = searchedAlbums.firstOrNull { it.path == selectedAlbumPaths.singleOrNull() }
+                    },
+                    onHide = {
+                        selectedAlbumPaths.forEach(photosViewModel::addHiddenFolder)
+                        selectedAlbumPaths = emptySet()
+                    },
+                    onExclude = {
+                        selectedAlbumPaths.forEach(photosViewModel::addExcludedFolder)
+                        selectedAlbumPaths = emptySet()
+                    },
+                )
+            } else if (selectionMode && currentScreen !is Screen.TransferDestination) {
                 // Contextual Top Bar for Selection
                 TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = headerColor),
                     title = { com.pixel.gallery.ui.components.SelectedCountBadge(selectedIds.size) },
                     navigationIcon = {
                         IconButton(onClick = { selectedIds = emptySet(); retainEmptyAlbumSelection = false }) {
@@ -1244,8 +1274,8 @@ fun MainScaffold(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = appShellColor,
-                        scrolledContainerColor = appShellColor,
+                        containerColor = headerColor,
+                        scrolledContainerColor = headerColor,
                         titleContentColor = colorScheme.onSurface
                     ),
                     windowInsets = WindowInsets.statusBars,
@@ -1258,6 +1288,7 @@ fun MainScaffold(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = if (currentScreen is Screen.Viewer) 0.dp else innerPadding.calculateTopPadding())
+                .then(if (currentScreen == Screen.Home || selectionMode) Modifier.galleryContentEdge() else Modifier)
         ) {
             // Screen content management
             val baseScreen = remember(navigationStack) {
@@ -1280,7 +1311,7 @@ fun MainScaffold(
                     HorizontalPager(
                         state = homePagerState,
                         modifier = Modifier.fillMaxSize(),
-                        userScrollEnabled = selectedIds.isEmpty() && !quickSortEnabled
+                        userScrollEnabled = selectedIds.isEmpty() && !albumSelectionMode && !quickSortEnabled
                     ) { page ->
                         when (page) {
                             0 -> PhotosScreen(
@@ -1342,8 +1373,12 @@ fun MainScaffold(
                                 onNavigateToAlbum = { name -> navigationStack = navigationStack + Screen.Photo(name, homeMediaType) },
                                 onExclude = { path -> photosViewModel.addExcludedFolder(path) },
                                 onHide = { path -> photosViewModel.addHiddenFolder(path) },
-                                columns = albumGridColumns,
-                                onColumnsChange = { photosViewModel.setAlbumGridColumns(it) },
+                                onRename = photosViewModel::renameAlbum,
+                                selectedPaths = selectedAlbumPaths,
+                                selectionMode = albumSelectionMode,
+                                onToggleAlbumSelection = toggleAlbumPath,
+                                columns = gridColumns,
+                                onColumnsChange = { photosViewModel.setGridColumns(it) },
                                 showHeaderButtons = normalizedAlbumSearchQuery.isEmpty(),
                                 emptyMessage = if (normalizedAlbumSearchQuery.isNotEmpty()) {
                                     "No matching albums"
@@ -1376,21 +1411,19 @@ fun MainScaffold(
                 Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders })
                 Screen.Labels -> LabelsScreen(
-                    columns = albumGridColumns,
-                    onColumnsChange = photosViewModel::setAlbumGridColumns,
+                    columns = gridColumns,
+                    onColumnsChange = photosViewModel::setGridColumns,
                     labels = labelSummaries,
                     onBack = navigateBack,
                     onLabelClick = { navigationStack = navigationStack + Screen.Label(it) },
                     onCreateLabel = { labelsViewModel.createLabel(it) },
                     onRenameLabel = { id, name -> labelsViewModel.renameLabel(id, name) },
-                    onDeleteLabel = { labelsViewModel.deleteLabel(it) },
+                    onDeleteLabels = labelsViewModel::deleteLabels,
                     errorMessage = labelsError,
                     onClearError = labelsViewModel::clearError,
                     isSaving = labelsSaving,
                     sortMode = labelsViewModel.sortMode.collectAsState().value,
                     onSortModeChange = labelsViewModel::setSortMode,
-                    onMoveLabel = labelsViewModel::moveLabel,
-                    onOpenSettings = { editingLabelIds = emptySet() },
                 )
                 is Screen.Label -> {
                     val labelId = baseScreen.labelId
@@ -1745,7 +1778,7 @@ fun MainScaffold(
 
 
             // Only show the floating bar on the Home screen
-            if (currentScreen == Screen.Home && !quickSortEnabled) {
+            if (currentScreen == Screen.Home && !quickSortEnabled && !albumSelectionMode) {
                 HorizontalFloatingToolbar(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1805,8 +1838,8 @@ fun MainScaffold(
     if (editingLabelIds.isNotEmpty()) {
         LabelEditorSheet(
             labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = editingLabelIds, recentLabelIds = recentLabelIds,
-            columns = albumGridColumns,
-            onColumnsChange = photosViewModel::setAlbumGridColumns,
+            columns = gridColumns,
+            onColumnsChange = photosViewModel::setGridColumns,
             onDismiss = { editingLabelIds = emptySet(); labelsViewModel.clearError() },
             onApply = { edits -> labelsViewModel.applyEdits(editingLabelIds, edits) { editingLabelIds = emptySet() } },
             onReorderLabels = labelsViewModel::reorderLabels,
@@ -1828,6 +1861,18 @@ fun MainScaffold(
         )
     }
 
+    renamingAlbum?.let { album ->
+        AlbumRenameDialog(
+            album = album,
+            onDismiss = { renamingAlbum = null },
+            onRename = { path, name ->
+                photosViewModel.renameAlbum(path, name).also { result ->
+                    if (result.isSuccess) selectedAlbumPaths = emptySet()
+                }
+            },
+        )
+    }
+
     DuplicateReviewDialog(
         state = duplicateState,
         onDismiss = duplicateViewModel::dismiss,
@@ -1841,14 +1886,6 @@ fun MainScaffold(
                 SortCriterion("DATE", "Date", "Oldest first", "Newest first"),
                 SortCriterion("NAME", "Name", "A to Z", "Z to A"),
                 SortCriterion("SIZE", "Size", "Smallest first", "Largest first")
-            )
-        }
-
-        val albumCriteria = remember {
-            listOf(
-                SortCriterion("NAME", "Name", "A to Z", "Z to A"),
-                SortCriterion("COUNT", "Count", "Least first", "Most first"),
-                SortCriterion("DATE", "Date", "Oldest first", "Newest first")
             )
         }
 
@@ -1886,25 +1923,13 @@ fun MainScaffold(
             enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
             exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
         ) {
-            val currentCriterion = when (albumSortOrder) {
-                AlbumSortOrder.NAME_ASC, AlbumSortOrder.NAME_DESC -> "NAME"
-                AlbumSortOrder.COUNT_DESC, AlbumSortOrder.COUNT_ASC -> "COUNT"
-                AlbumSortOrder.DATE_DESC, AlbumSortOrder.DATE_ASC -> "DATE"
-            }
-            val currentDirection = when (albumSortOrder) {
-                AlbumSortOrder.NAME_DESC, AlbumSortOrder.COUNT_DESC, AlbumSortOrder.DATE_DESC -> "DESC"
-                AlbumSortOrder.NAME_ASC, AlbumSortOrder.COUNT_ASC, AlbumSortOrder.DATE_ASC -> "ASC"
-            }
-            SortDialog(
+            AlbumSortDialog(
                 visible = showAlbumSortDialog,
                 onDismissRequest = { showAlbumSortDialog = false },
                 title = "Sort Albums By",
-                criteria = albumCriteria,
-                initialCriterion = currentCriterion,
-                initialDirection = currentDirection,
-                onConfirm = { criterion, direction ->
-                    val newOrder = AlbumSortOrder.valueOf("${criterion}_${direction}")
-                    photosViewModel.setAlbumSortOrder(newOrder)
+                initialOrder = albumSortOrder,
+                onConfirm = { order ->
+                    photosViewModel.setAlbumSortOrder(order)
                     showAlbumSortDialog = false
                 }
             )

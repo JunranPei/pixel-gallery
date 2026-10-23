@@ -64,7 +64,7 @@ fun LabelEditorSheet(
         mutableStateOf<Map<Long, Boolean>>(emptyMap())
     }
     var newNames by rememberSaveable(selectedIds) { mutableStateOf<List<String>>(emptyList()) }
-    val gridColumns = columns.coerceIn(1, 4)
+    val gridColumns = columns.coerceIn(2, 6)
     val favouriteName = stringResource(R.string.labels_favourites)
     val normalizedQuery = normalizeLabelName(query)
     val matchingLabels = labels.filter {
@@ -172,8 +172,8 @@ fun LabelEditorSheet(
                     modifier = Modifier.fillMaxSize().pinchToZoomColumns(
                         currentColumns = gridColumns,
                         onColumnsChange = onColumnsChange,
-                        minColumns = 1,
-                        maxColumns = 4,
+                        minColumns = 2,
+                        maxColumns = 6,
                     ),
                     contentPadding = PaddingValues(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),

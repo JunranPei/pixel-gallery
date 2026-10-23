@@ -15,6 +15,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import com.pixel.gallery.model.Album
+import com.pixel.gallery.model.AlbumSortOrder
+import com.pixel.gallery.model.AlbumSorter
+import com.pixel.gallery.model.compareNaturalNames
+import com.pixel.gallery.model.chronologicalTimestamp
 import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.TransferMode
@@ -277,6 +281,9 @@ class PhotosViewModel @Inject constructor(
     val startupAtAlbums: StateFlow<Boolean> = settingsRepository.startupAtAlbums
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    val showFullAlbumNames: StateFlow<Boolean> = settingsRepository.showFullAlbumNames
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     val materialYou: StateFlow<Boolean> = settingsRepository.materialYou
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
@@ -339,14 +346,7 @@ class PhotosViewModel @Inject constructor(
             val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
             Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
         }
-        when (sort) {
-            AlbumSortOrder.NAME_ASC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a1.name, a2.name) }
-            AlbumSortOrder.NAME_DESC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a2.name, a1.name) }
-            AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
-            AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
-            AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
-            AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
-        }
+        AlbumSorter.shared.sortAlbums(grouped, sort)
     }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -417,6 +417,16 @@ class PhotosViewModel @Inject constructor(
     }
 
     // --- Actions ---
+    suspend fun renameAlbum(path: String, name: String): Result<Unit> = try {
+        repository.renameAlbum(path, name)
+        refresh()
+        Result.success(Unit)
+    } catch (error: kotlinx.coroutines.CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
+
     fun toggleFavourite(id: Long, isCurrentlyFavourite: Boolean, onError: (String) -> Unit = {}) {
         viewModelScope.launch {
             try {
@@ -512,6 +522,10 @@ class PhotosViewModel @Inject constructor(
 
 
     // --- Settings Actions ---
+    fun setShowFullAlbumNames(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setShowFullAlbumNames(value) }
+    }
+
     fun setStartupAtAlbums(value: Boolean) {
         viewModelScope.launch {
             settingsRepository.setStartupAtAlbums(value)
@@ -654,46 +668,6 @@ enum class PhotoSortOrder {
     SIZE_ASC
 }
 
-enum class AlbumSortOrder {
-    NAME_ASC,
-    NAME_DESC,
-    COUNT_DESC,
-    COUNT_ASC,
-    DATE_DESC,
-    DATE_ASC
-}
-
-private val CASE_INSENSITIVE_NATURAL_ORDER = Comparator<String> { s1, s2 ->
-    val len1 = s1.length
-    val len2 = s2.length
-    val minLen = minOf(len1, len2)
-    for (i in 0 until minLen) {
-        val c1 = s1[i]
-        val c2 = s2[i]
-        if (c1 != c2) {
-            val u1 = c1.uppercaseChar()
-            val u2 = c2.uppercaseChar()
-            if (u1 != u2) {
-                return@Comparator u1.compareTo(u2)
-            } else {
-                return@Comparator if (c1.isUpperCase()) -1 else 1
-            }
-        }
-    }
-    len1.compareTo(len2)
-}
-
-internal fun MediaEntry.chronologicalTimestamp(): Long {
-    val addedMillis = dateAddedSecs.takeIf { it > 0L }?.times(1000L) ?: 0L
-    val scannedTimestamp = bestTimestamp.takeIf {
-        it > 0L && (addedMillis == 0L || it != addedMillis)
-    }
-    return sourceDateTakenMillis?.takeIf { it > 0L }
-        ?: scannedTimestamp
-        ?: dateModifiedMillis.takeIf { it > 0L }
-        ?: addedMillis
-}
-
 private val MEDIA_DATE_DESCENDING =
     compareByDescending<MediaEntry> { it.chronologicalTimestamp() }
         .thenByDescending { it.dateModifiedMillis }
@@ -716,20 +690,14 @@ internal fun buildMediaAlbums(photosList: List<MediaEntry>, sort: AlbumSortOrder
     return sortMediaAlbums(grouped, sort)
 }
 
-internal fun sortMediaAlbums(grouped: List<Album>, sort: AlbumSortOrder): List<Album> = when (sort) {
-        AlbumSortOrder.NAME_ASC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a1.name, a2.name) }
-        AlbumSortOrder.NAME_DESC -> grouped.sortedWith { a1, a2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(a2.name, a1.name) }
-        AlbumSortOrder.COUNT_DESC -> grouped.sortedByDescending { it.itemCount }
-        AlbumSortOrder.COUNT_ASC -> grouped.sortedBy { it.itemCount }
-        AlbumSortOrder.DATE_DESC -> grouped.sortedByDescending { it.lastModified }
-        AlbumSortOrder.DATE_ASC -> grouped.sortedBy { it.lastModified }
-    }
+internal fun sortMediaAlbums(grouped: List<Album>, sort: AlbumSortOrder): List<Album> =
+    AlbumSorter.shared.sortAlbums(grouped, sort)
 
 internal fun sortMediaEntries(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> = when (sort) {
     PhotoSortOrder.DATE_DESC -> entries.sortedWith(MEDIA_DATE_DESCENDING)
     PhotoSortOrder.DATE_ASC -> entries.sortedWith(MEDIA_DATE_ASCENDING)
-    PhotoSortOrder.NAME_ASC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e1.path).name, java.io.File(e2.path).name) }
-    PhotoSortOrder.NAME_DESC -> entries.sortedWith { e1, e2 -> CASE_INSENSITIVE_NATURAL_ORDER.compare(java.io.File(e2.path).name, java.io.File(e1.path).name) }
+    PhotoSortOrder.NAME_ASC -> entries.sortedWith { e1, e2 -> compareNaturalNames(java.io.File(e1.path).name, java.io.File(e2.path).name) }
+    PhotoSortOrder.NAME_DESC -> entries.sortedWith { e1, e2 -> compareNaturalNames(java.io.File(e2.path).name, java.io.File(e1.path).name) }
     PhotoSortOrder.SIZE_DESC -> entries.sortedByDescending { it.sizeBytes }
     PhotoSortOrder.SIZE_ASC -> entries.sortedBy { it.sizeBytes }
 }

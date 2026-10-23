@@ -37,6 +37,9 @@ class LabelRepository @Inject constructor(
     }
 
     suspend fun deleteLabel(id: Long) = dao.deleteLabel(id)
+    suspend fun deleteLabels(ids: Set<Long>) = database.withTransaction {
+        ids.forEach { dao.deleteLabel(it) }
+    }
 
     suspend fun reorderLabels(orderedIds: List<Long>) = database.withTransaction {
         orderedIds.distinct().forEachIndexed { index, id -> dao.updateSortOrder(id, index + 1) }

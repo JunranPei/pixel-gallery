@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 
 data class SortCriterion(
@@ -23,6 +24,35 @@ data class SortCriterion(
     val ascLabel: String,
     val descLabel: String
 )
+
+/** Album and label grids share one set of sort choices and direction mapping. */
+@Composable
+fun AlbumSortDialog(
+    visible: Boolean,
+    onDismissRequest: () -> Unit,
+    title: String,
+    initialOrder: AlbumSortOrder,
+    onConfirm: (AlbumSortOrder) -> Unit,
+) {
+    val criteria = remember {
+        listOf(
+            SortCriterion("NAME", "Name", "A to Z", "Z to A"),
+            SortCriterion("COUNT", "Count", "Least first", "Most first"),
+            SortCriterion("DATE", "Date", "Oldest first", "Newest first"),
+        )
+    }
+    SortDialog(
+        visible = visible,
+        onDismissRequest = onDismissRequest,
+        title = title,
+        criteria = criteria,
+        initialCriterion = initialOrder.criterion,
+        initialDirection = initialOrder.direction,
+        onConfirm = { criterion, direction ->
+            onConfirm(AlbumSortOrder.fromSelection(criterion, direction))
+        },
+    )
+}
 
 @Composable
 fun SortDialog(

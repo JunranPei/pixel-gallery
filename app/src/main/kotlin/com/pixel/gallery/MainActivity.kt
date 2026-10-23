@@ -66,6 +66,7 @@ class MainActivity : FragmentActivity() {
         
         setContent {
             val materialYou by viewModel.materialYou.collectAsState(initial = true)
+            val showFullAlbumNames by viewModel.showFullAlbumNames.collectAsState()
             val themeMode by viewModel.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
             val systemDarkTheme = isSystemInDarkTheme()
             val darkTheme = when (themeMode) {
@@ -77,7 +78,11 @@ class MainActivity : FragmentActivity() {
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    MainScaffold()
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        com.pixel.gallery.ui.home.LocalShowFullAlbumNames provides showFullAlbumNames,
+                    ) {
+                        MainScaffold()
+                    }
                     if (showNotificationAccess.value) {
                         GalleryDialog(
                             onDismissRequest = { showNotificationAccess.value = false },
