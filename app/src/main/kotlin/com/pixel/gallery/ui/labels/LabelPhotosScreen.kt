@@ -38,6 +38,7 @@ fun LabelPhotosScreen(
     onSortPhotos: () -> Unit = {},
     onRemoveFromLabel: (Set<Long>) -> Unit = {},
     onEditLabel: () -> Unit = {},
+    isForeground: Boolean = true,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var searchMode by rememberSaveable(label?.id) { mutableStateOf(false) }
@@ -57,6 +58,7 @@ fun LabelPhotosScreen(
                     onSearchQueryChange = { searchQuery = it },
                     searchPlaceholder = stringResource(R.string.album_search_files),
                     clearSearchDescription = stringResource(R.string.album_clear_search),
+                    backEnabled = isForeground,
                     title = {
                     Column(Modifier.fillMaxWidth()) {
                         Text(

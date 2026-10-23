@@ -28,6 +28,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun LockedFolderScreen(
     onBack: () -> Unit,
     onNavigateToViewer: (Long) -> Unit,
+    isForeground: Boolean = true,
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
@@ -71,7 +72,8 @@ fun LockedFolderScreen(
         biometricPrompt.authenticate(promptInfo)
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isForeground, isAuthenticated) {
+        if (!isForeground || isAuthenticated) return@LaunchedEffect
         if (canAuthenticate != BiometricManager.BIOMETRIC_SUCCESS) {
             // No system lock present or available, bypass as requested
             isAuthenticated = true

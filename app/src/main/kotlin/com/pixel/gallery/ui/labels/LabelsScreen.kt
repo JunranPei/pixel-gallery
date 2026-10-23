@@ -65,6 +65,7 @@ fun LabelsScreen(
     onColumnsChange: (Int) -> Unit = {},
     sortMode: AlbumSortOrder = AlbumSortOrder.NAME_ASC,
     onSortModeChange: (AlbumSortOrder) -> Unit = {},
+    isForeground: Boolean = true,
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
     var editingLabel by remember { mutableStateOf<LabelEntry?>(null) }
@@ -74,7 +75,7 @@ fun LabelsScreen(
     val toggleSelection: (Long) -> Unit = { id ->
         selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
     }
-    BackHandler(enabled = selectionMode) { selectedIds = emptySet() }
+    BackHandler(enabled = isForeground && selectionMode) { selectedIds = emptySet() }
     LaunchedEffect(labels) {
         selectedIds = selectedIds.intersect(labels.filterNot { it.label.isSystem }.map { it.label.id }.toSet())
     }

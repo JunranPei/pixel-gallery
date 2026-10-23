@@ -1,6 +1,7 @@
 package com.pixel.gallery.ui.gallery
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
@@ -19,6 +20,7 @@ import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
+import com.pixel.gallery.ui.components.galleryContentEdge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +42,10 @@ fun TrashScreen(
         topBar = {
             if (selectedIds.isEmpty()) {
                 TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
                     title = { 
                         Text(
                             "Recycle Bin",
@@ -62,11 +68,16 @@ fun TrashScreen(
             }
         }
     ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .galleryContentEdge(),
+        ) {
         if (items.isEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
                     .padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -92,7 +103,7 @@ fun TrashScreen(
                 )
             }
         } else {
-            Box(modifier = Modifier.padding(innerPadding)) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 PhotosScreen(
                     items = items,
                     onNavigateToViewer = onNavigateToViewer,
@@ -104,6 +115,7 @@ fun TrashScreen(
                     state = gridState
                 )
             }
+        }
         }
     }
 }
