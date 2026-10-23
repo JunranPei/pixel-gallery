@@ -1,16 +1,24 @@
 package com.pixel.gallery.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
@@ -26,7 +34,10 @@ fun AlbumSelectionTopBar(
     onHide: (() -> Unit)? = null,
     onExclude: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    canFindDuplicates: Boolean = true,
+    onFindDuplicates: (() -> Unit)? = null,
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         title = { SelectedCountBadge(count) },
@@ -55,6 +66,22 @@ fun AlbumSelectionTopBar(
                 onDelete?.let { action ->
                     IconButton(enabled = enabled, onClick = action) {
                         Icon(Icons.Outlined.Delete, stringResource(R.string.delete))
+                    }
+                }
+                if (onFindDuplicates != null) {
+                    Box(Modifier.offset(x = (-8).dp)) {
+                        GalleryOverflowButton(
+                            expanded = showMenu,
+                            onExpandedChange = { showMenu = it },
+                        ) {
+                            GalleryMenuRow(
+                                stringResource(R.string.duplicate_find_selected_albums),
+                                Icons.Outlined.FileCopy,
+                                accented = true,
+                                enabled = enabled && canFindDuplicates,
+                                onClick = { showMenu = false; onFindDuplicates() },
+                            )
+                        }
                     }
                 }
             }

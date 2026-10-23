@@ -173,6 +173,16 @@ internal fun toggleAlbumSelection(
     }
 }
 
+private fun mediaParentPath(path: String): String {
+    val normalizedPath = path.replace('\\', '/')
+    val separator = normalizedPath.lastIndexOf('/')
+    return when {
+        separator == 0 -> "/"
+        separator > 0 -> normalizedPath.substring(0, separator)
+        else -> ""
+    }
+}
+
 private val AlbumGridStatesSaver = listSaver<MutableMap<String, LazyGridState>, Any>(
     save = { states ->
         buildList {
@@ -604,6 +614,9 @@ fun MainScaffold(
 
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
     var selectedAlbumPaths by remember { mutableStateOf(emptySet<String>()) }
+    val selectedAlbumEntries = remember(allPhotos, selectedAlbumPaths) {
+        allPhotos.filter { mediaParentPath(it.path) in selectedAlbumPaths }
+    }
     var renamingAlbum by remember { mutableStateOf<Album?>(null) }
     val albumSelectionMode = currentScreen == Screen.Home && selectedAlbumPaths.isNotEmpty()
     val toggleAlbumPath: (String) -> Unit = { path ->
@@ -848,6 +861,14 @@ fun MainScaffold(
                         selectedAlbumPaths.forEach(photosViewModel::addExcludedFolder)
                         selectedAlbumPaths = emptySet()
                     },
+                    canFindDuplicates = selectedAlbumEntries.size > 1,
+                    onFindDuplicates = {
+                        duplicateViewModel.start(
+                            selectedAlbumEntries,
+                            DeduplicationScope.ALL_FILES,
+                            context.getString(R.string.duplicate_scope_selected_albums),
+                        )
+                    },
                 )
             } else if (selectionMode && currentScreen !is Screen.TransferDestination) {
                 // Contextual Top Bar for Selection
@@ -985,7 +1006,7 @@ fun MainScaffold(
                                 }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete")
                                 }
-                                Box {
+                                Box(Modifier.offset(x = (-8).dp)) {
                                     IconButton(enabled = selectedEntries.isNotEmpty(), onClick = { showSelectionMenu = true }) {
                                         Icon(Icons.Default.MoreVert, contentDescription = "More")
                                     }
