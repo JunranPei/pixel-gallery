@@ -75,7 +75,7 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                                         .navigationBarsPadding().padding(bottom = 16.dp), { dockHeight = it })
                                 1 -> TransferDestinationContent(targets, emptyList(), "", targets.first(), false, null, null,
                                     {}, {}, {}, {}, { copyClicks++ }, { moveClicks++ }, handedness = hand.value)
-                                2 -> DisplaySettingsScreen({}, {})
+                                2 -> DisplaySettingsScreen({})
                                 3 -> PerformanceSettingsScreen({})
                                 4 -> {
                                     QuickSortTargetsSheet(availableTargets = targets, selectedTargets = targets, dockTop = false,

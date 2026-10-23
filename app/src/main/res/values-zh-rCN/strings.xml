@@ -62,4 +62,10 @@
     <string name="lock">锁定</string>
     <string name="unlock">解锁</string>
     <string name="display_show_full_album_names">显示完整相册名</string>
+    <string name="settings_section_general">常规</string>
+    <string name="settings_section_theme">主题</string>
+    <string name="settings_section_performance">性能</string>
+    <string name="settings_section_cache">缓存</string>
+    <string name="settings_section_label_backup">标签备份</string>
+    <string name="settings_section_exclude_folders">排除文件夹</string>
 </resources>

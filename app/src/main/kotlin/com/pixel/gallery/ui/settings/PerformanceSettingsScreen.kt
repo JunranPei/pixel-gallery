@@ -76,7 +76,10 @@ fun PerformanceSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing),
         ) {
             item {
-                SettingsGroup(itemCount = 3) { index ->
+                SettingsGroup(
+                    itemCount = 3,
+                    title = stringResource(R.string.settings_section_performance),
+                ) { index ->
                     when (index) {
                         0 -> {
                             SettingsSliderItem(
@@ -115,7 +118,10 @@ fun PerformanceSettingsScreen(
                 }
             }
             item {
-                SettingsGroup(itemCount = 1, tone = SettingsBlockTone.Emphasized) {
+                SettingsGroup(
+                    itemCount = 1,
+                    title = stringResource(R.string.settings_section_cache),
+                ) {
                     SettingsClickItem(
                         title = "Clear Cache",
                         icon = Icons.Outlined.DeleteSweep,

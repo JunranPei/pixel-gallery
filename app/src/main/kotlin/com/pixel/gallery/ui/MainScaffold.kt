@@ -53,7 +53,6 @@ import com.pixel.gallery.ui.components.DeleteConfirmDialog
 import com.pixel.gallery.ui.components.HomeOverflowMenu
 import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
-import com.pixel.gallery.ui.settings.ThemeSettingsScreen
 import com.pixel.gallery.ui.settings.DisplaySettingsScreen
 import com.pixel.gallery.ui.settings.LibrarySettingsScreen
 import androidx.compose.material.icons.filled.Close
@@ -274,7 +273,6 @@ sealed class Screen : Parcelable {
         val initialMediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     ) : Screen()
     @Parcelize object PerformanceSettings : Screen()
-    @Parcelize object ThemeSettings : Screen()
     @Parcelize object DisplaySettings : Screen()
     @Parcelize object LibrarySettings : Screen()
     @Parcelize data class TransferDestination(
@@ -1422,12 +1420,8 @@ fun MainScaffold(
                 Screen.PerformanceSettings -> PerformanceSettingsScreen(
                     onBack = navigateBack
                 )
-                Screen.ThemeSettings -> ThemeSettingsScreen(
-                    onBack = navigateBack,
-                )
                 Screen.DisplaySettings -> DisplaySettingsScreen(
                     onBack = navigateBack,
-                    onNavigateToThemeSettings = { navigationStack = navigationStack + Screen.ThemeSettings },
                 )
                 Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders })

@@ -39,6 +39,12 @@
     <string name="language_desc">Change application language</string>
     <string name="excluded_folders_desc">Manage ignored media locations</string>
     <string name="select_language">Select Language</string>
+    <string name="settings_section_general">General</string>
+    <string name="settings_section_theme">Theme</string>
+    <string name="settings_section_performance">Performance</string>
+    <string name="settings_section_cache">Cache</string>
+    <string name="settings_section_label_backup">Label backup</string>
+    <string name="settings_section_exclude_folders">Exclude folders</string>
     
     <!-- Hidden / Excluded -->
     <string name="no_hidden_albums">No Hidden Albums</string>

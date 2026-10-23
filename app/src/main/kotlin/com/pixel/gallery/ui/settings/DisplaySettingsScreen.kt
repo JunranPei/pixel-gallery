@@ -37,7 +37,6 @@ import com.pixel.gallery.R
 @Composable
 fun DisplaySettingsScreen(
     onBack: () -> Unit,
-    onNavigateToThemeSettings: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel(),
 ) {
     val startupAtAlbums by viewModel.startupAtAlbums.collectAsStateWithLifecycle()
@@ -64,7 +63,10 @@ fun DisplaySettingsScreen(
             verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing),
         ) {
             item {
-                SettingsGroup(itemCount = 4) { index ->
+                SettingsGroup(
+                    itemCount = 3,
+                    title = stringResource(R.string.settings_section_general),
+                ) { index ->
                     when (index) {
                         0 -> {
                             Column(Modifier.padding(14.dp)) {
@@ -101,15 +103,11 @@ fun DisplaySettingsScreen(
                                 onCheckedChange = viewModel::setShowFullAlbumNames,
                             )
                         }
-                        3 -> {
-                            SettingsClickItem(
-                                title = "Themes",
-                                icon = Icons.Outlined.Palette,
-                                onClick = onNavigateToThemeSettings,
-                            )
-                        }
                     }
                 }
+            }
+            item {
+                ThemeSettingsGroup(viewModel = viewModel, title = stringResource(R.string.settings_section_theme))
             }
         }
     }

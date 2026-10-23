@@ -21,15 +21,17 @@ fun LibrarySettingsScreen(onBack: () -> Unit, onNavigateToExcludedFolders: () ->
     ) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding),
             contentPadding = SettingsLayout.ContentPadding,
-            // One group: large outer corners, small inner corners and a 4dp gap.
             verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing)) {
             item {
-                SettingsGroup(itemCount = 2) { index ->
-                    when (index) {
-                        0 -> LabelBackupSettingsBlock()
-                        1 -> SettingsClickItem(title = "Excluded Folders", icon = Icons.Outlined.FolderOff,
-                            onClick = onNavigateToExcludedFolders)
-                    }
+                LabelBackupSettingsBlock(title = stringResource(R.string.settings_section_label_backup))
+            }
+            item {
+                SettingsGroup(
+                    itemCount = 1,
+                    title = stringResource(R.string.settings_section_exclude_folders),
+                ) {
+                    SettingsClickItem(title = "Excluded Folders", icon = Icons.Outlined.FolderOff,
+                        onClick = onNavigateToExcludedFolders)
                 }
             }
         }

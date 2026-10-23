@@ -27,7 +27,6 @@ import com.pixel.gallery.data.local.LABEL_DATABASE_CALLBACK
 import com.pixel.gallery.data.repository.*
 import com.pixel.gallery.model.*
 import com.pixel.gallery.ui.settings.LabelBackupSettingsBlock
-import com.pixel.gallery.ui.settings.SettingsGroup
 import com.pixel.gallery.ui.theme.PixelGalleryTheme
 import com.pixel.gallery.ui.viewmodel.LabelBackupViewModel
 import kotlinx.coroutines.runBlocking
@@ -94,19 +93,21 @@ internal class LabelBackupUiChecks(private val instrumentation: Instrumentation)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         try {
             instrumentation.runOnMainSync { activity.setContent { PixelGalleryTheme(dynamicColor = false, darkTheme = false) {
-                if (visible.value) SettingsGroup(itemCount = 1, modifier = Modifier.padding(top = 100.dp, start = 20.dp, end = 20.dp)) {
-                    LabelBackupSettingsBlock(viewModel)
-                } else Text("Other settings page")
+                if (visible.value) LabelBackupSettingsBlock(
+                    viewModel = viewModel,
+                    title = "Label backup",
+                    modifier = Modifier.padding(top = 100.dp, start = 20.dp, end = 20.dp),
+                ) else Text("Other settings page")
             } } }
             await("Label backup")
             val beforeCancel = db.labelDao().getMemberships().toSet()
-            click("Label backup"); click("Export labels"); await("SAVE"); back(); await("Label backup")
+            click("Export labels"); await("SAVE"); back(); await("Label backup")
             check(viewModel.state.value.exportResult == null)
-            click("Label backup"); click("Import labels"); awaitPicker(); back(); await("Label backup")
+            click("Import labels"); awaitPicker(); back(); await("Label backup")
             check(viewModel.state.value.preview == null && beforeCancel == db.labelDao().getMemberships().toSet())
 
             val exportName = "backup-ui-$token.json"
-            click("Label backup"); click("Export labels"); await("SAVE")
+            click("Export labels"); await("SAVE")
             chooseDownloads()
             val field = nodes().first { it.className?.toString() == "android.widget.EditText" }
             check(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
@@ -119,7 +120,7 @@ internal class LabelBackupUiChecks(private val instrumentation: Instrumentation)
             check(saved.labels.size == 3 && saved.media.size == 1 && saved.media.single().labelKeys.size == 2)
             snapshot("export-success"); click("OK")
             val originalBytes = exported.readBytes()
-            click("Label backup"); click("Export labels"); await("SAVE"); chooseDownloads()
+            click("Export labels"); await("SAVE"); chooseDownloads()
             val sameNameField = nodes().first { it.className?.toString() == "android.widget.EditText" }
             check(sameNameField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, exportName)
@@ -132,7 +133,7 @@ internal class LabelBackupUiChecks(private val instrumentation: Instrumentation)
             labels.deleteLabel(tag)
             db.labelDao().removeMemberships(1L, listOf(id))
             labels.createLabel("Local retained $token")
-            fun openImport(filename: String) { click("Label backup"); click("Import labels"); awaitPicker(); chooseDownloads(); click(filename) }
+            fun openImport(filename: String) { click("Import labels"); awaitPicker(); chooseDownloads(); click(filename) }
             openImport(exportName); await("Import preview"); await("Matched 1 of 1 files")
             snapshot("valid-preview")
             click("Restore labels"); await("Labels restored")

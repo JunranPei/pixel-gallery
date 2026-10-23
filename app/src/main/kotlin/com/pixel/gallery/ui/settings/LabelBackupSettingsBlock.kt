@@ -2,7 +2,6 @@ package com.pixel.gallery.ui.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,55 +25,57 @@ import com.pixel.gallery.ui.viewmodel.LabelBackupOperation
 import com.pixel.gallery.ui.viewmodel.LabelBackupViewModel
 import java.time.LocalDate
 
-/** One Library entry opens the shared dialog for exporting or importing label backups. */
+/** Label backup actions are shown inline; previews and results remain dialogs. */
 @Composable
-fun LabelBackupSettingsBlock(viewModel: LabelBackupViewModel = hiltViewModel()) {
+fun LabelBackupSettingsBlock(
+    viewModel: LabelBackupViewModel = hiltViewModel(),
+    title: String? = null,
+    modifier: Modifier = Modifier,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val busy = state.operation != null
     var showDetails by remember { mutableStateOf(false) }
-    var showActions by remember { mutableStateOf(false) }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {
         if (it != null) viewModel.export(it)
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) viewModel.preview(it)
     }
-    if (!busy) {
-        SettingsClickItem(title = stringResource(R.string.label_backup_title), icon = Icons.Outlined.Label,
-            onClick = { showActions = true })
-    } else {
-        ListItem(colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-            headlineContent = { Text(stringResource(R.string.label_backup_title), style = EmphasizedTypography.LabelLarge) },
-            supportingContent = {
-                val operation = stringResource(when (state.operation) {
-                    LabelBackupOperation.EXPORT -> R.string.label_backup_exporting
-                    LabelBackupOperation.SCAN -> R.string.label_backup_scanning
-                    else -> R.string.label_backup_importing
-                })
-                Text(if (state.total > 0) "$operation ${state.completed} / ${state.total}" else operation)
-            },
-            leadingContent = { Icon(Icons.Outlined.Label, null, tint = MaterialTheme.colorScheme.primary) },
-            trailingContent = { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) })
+    SettingsGroup(
+        itemCount = if (busy) 1 else 2,
+        modifier = modifier,
+        title = title,
+        description = if (title != null) stringResource(R.string.label_backup_menu_body) else null,
+    ) { index ->
+        if (busy) {
+            val operation = stringResource(when (state.operation) {
+                LabelBackupOperation.EXPORT -> R.string.label_backup_exporting
+                LabelBackupOperation.SCAN -> R.string.label_backup_scanning
+                else -> R.string.label_backup_importing
+            })
+            ListItem(
+                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                headlineContent = { Text(stringResource(R.string.label_backup_title), style = EmphasizedTypography.LabelLarge) },
+                supportingContent = {
+                    Text(if (state.total > 0) "$operation ${state.completed} / ${state.total}" else operation)
+                },
+                leadingContent = { Icon(Icons.Outlined.Label, null, tint = MaterialTheme.colorScheme.primary) },
+                trailingContent = { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) },
+            )
+        } else if (index == 0) {
+            SettingsClickItem(
+                title = stringResource(R.string.label_backup_export),
+                icon = Icons.Outlined.FileUpload,
+                onClick = { exporter.launch("pixel-gallery-labels-${LocalDate.now()}.json") },
+            )
+        } else {
+            SettingsClickItem(
+                title = stringResource(R.string.label_backup_import),
+                icon = Icons.Outlined.FileDownload,
+                onClick = { importer.launch(arrayOf("*/*")) },
+            )
+        }
     }
-    if (showActions && !busy) GalleryDialog(onDismissRequest = { showActions = false },
-        icon = Icons.Outlined.Label,
-        title = { Text(stringResource(R.string.label_backup_title)) },
-        text = {
-            Text(stringResource(R.string.label_backup_menu_body))
-            SettingsGroup(itemCount = 2) { index ->
-                when (index) {
-                    0 -> {
-                        SettingsClickItem(title = stringResource(R.string.label_backup_export), icon = Icons.Outlined.FileUpload,
-                            onClick = { showActions = false; exporter.launch("pixel-gallery-labels-${LocalDate.now()}.json") })
-                    }
-                    1 -> {
-                        SettingsClickItem(title = stringResource(R.string.label_backup_import), icon = Icons.Outlined.FileDownload,
-                            onClick = { showActions = false; importer.launch(arrayOf("*/*")) })
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { showActions = false }) { Text(stringResource(R.string.qs_cancel)) } })
 
     val preview = state.preview
     if (preview != null && !busy && state.error == null) {

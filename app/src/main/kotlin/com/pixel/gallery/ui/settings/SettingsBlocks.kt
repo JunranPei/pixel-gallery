@@ -4,14 +4,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /** Shared setting-page geometry. Independent blocks are separated by twice the item gap. */
@@ -89,12 +92,36 @@ fun SettingsGroup(
     itemCount: Int,
     modifier: Modifier = Modifier,
     tone: SettingsBlockTone = SettingsBlockTone.Standard,
+    title: String? = null,
+    description: String? = null,
     content: @Composable (index: Int) -> Unit,
 ) {
     val spec = remember(itemCount, tone) { SettingsGroupSpec(itemCount, tone) }
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(SettingsLayout.ItemSpacing)) {
-        repeat(spec.itemCount) { index ->
-            SettingsBlock(spec.blockAt(index)) { content(index) }
+    Column(modifier.fillMaxWidth()) {
+        if (title != null) {
+            Text(
+                text = title,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (description != null) {
+            Text(
+                text = description,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(SettingsLayout.ItemSpacing),
+        ) {
+            repeat(spec.itemCount) { index ->
+                SettingsBlock(spec.blockAt(index)) { content(index) }
+            }
         }
     }
 }

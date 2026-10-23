@@ -84,7 +84,7 @@ fun SettingsScreen(
                 }
             }
             item {
-                SettingsGroup(itemCount = 1, tone = SettingsBlockTone.Emphasized) {
+                SettingsGroup(itemCount = 1) {
                     SettingsClickItem(
                         title = "About",
                         description = "Pixel Gallery v${BuildConfig.VERSION_NAME}",

@@ -24,7 +24,7 @@ import com.pixel.gallery.ui.gallery.PhotoScreen
 import com.pixel.gallery.ui.quicksort.QuickSortTargetsSheet
 import com.pixel.gallery.ui.settings.LibrarySettingsScreen
 import com.pixel.gallery.ui.settings.DisplaySettingsScreen
-import com.pixel.gallery.ui.settings.ThemeSettingsScreen
+import com.pixel.gallery.ui.settings.ThemeSettingsGroup
 import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
 import com.pixel.gallery.ui.theme.PixelGalleryTheme
@@ -78,8 +78,8 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
                             3 -> ViewerScreen(initialId = media.contentId, photos = listOf(media),
                                 transformStateStore = remember { ViewerTransformStateStore() }, onBack = {})
                             4 -> LibrarySettingsScreen(onBack = {}, onNavigateToExcludedFolders = {})
-                            5 -> DisplaySettingsScreen(onBack = {}, onNavigateToThemeSettings = {})
-                            6 -> ThemeSettingsScreen(onBack = {})
+                            5 -> DisplaySettingsScreen(onBack = {})
+                            6 -> ThemeSettingsGroup(title = "Theme")
                             7, 8 -> SortDialog(visible = true, onDismissRequest = {},
                                 title = if (mode.intValue == 7) "Sort Photos" else "Sort Albums",
                                 criteria = if (mode.intValue == 7) listOf(
@@ -174,14 +174,10 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
             settle(500)
             snapshot("library-settings")
             val backupEntry = boundsForTextEither("Label backup", "标签备份")
-            tap(backupEntry.centerX().toFloat(), backupEntry.centerY().toFloat())
-            settle(300)
+            check(!backupEntry.isEmpty)
             check(findText("Export labels") != null || findText("导出标签") != null)
             check(findText("Import labels") != null || findText("导入标签") != null)
             snapshot("label-backup-settings")
-            val cancelBackup = boundsForTextEither("Cancel", "取消")
-            tap(cancelBackup.centerX().toFloat(), cancelBackup.centerY().toFloat())
-            settle(200)
             instrumentation.runOnMainSync { mode.intValue = 5 }
             settle(400)
             snapshot("hand-preference-settings")
