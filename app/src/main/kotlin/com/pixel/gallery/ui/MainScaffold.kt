@@ -106,13 +106,11 @@ import kotlinx.parcelize.Parcelize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
@@ -294,7 +292,7 @@ sealed class Screen : Parcelable {
     enum class TransferOrigin { Grid, Viewer }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun MainScaffold(
     initialScreen: Screen = Screen.Home,
@@ -439,6 +437,10 @@ fun MainScaffold(
     var isVaultRestoreRunning by remember { mutableStateOf(false) }
     var isVaultDeleteRunning by remember { mutableStateOf(false) }
 
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var selectedAlbumPaths by remember { mutableStateOf(emptySet<String>()) }
+    var retainEmptyAlbumSelection by remember { mutableStateOf(false) }
+
     // Simple navigation stack
     var navigationStack by rememberSaveable {
         mutableStateOf(
@@ -450,6 +452,27 @@ fun MainScaffold(
         )
     }
 
+    // Selection belongs to the base route, while viewer and destination pages
+    // temporarily cover that route. Commit both changes before composing a frame.
+    fun navigateToStack(nextStack: List<Screen>) {
+        require(nextStack.isNotEmpty()) { "The gallery navigation stack must retain a base route" }
+        val previousBaseIndex = navigationStack.indexOfLast {
+            it !is Screen.Viewer && it !is Screen.TransferDestination
+        }
+        val nextBaseIndex = nextStack.indexOfLast {
+            it !is Screen.Viewer && it !is Screen.TransferDestination
+        }
+        if (previousBaseIndex != nextBaseIndex ||
+            navigationStack.getOrNull(previousBaseIndex) != nextStack.getOrNull(nextBaseIndex)
+        ) {
+            selectedIds = emptySet()
+            selectedAlbumPaths = emptySet()
+            retainEmptyAlbumSelection = false
+            showSelectionMenu = false
+        }
+        navigationStack = nextStack
+    }
+
     LaunchedEffect(externalMedia) {
         externalMedia?.let { media ->
             ViewerLoadMetrics.entryRequested(
@@ -459,7 +482,7 @@ fun MainScaffold(
                 sourceItems = 1,
                 detail = "externalUri=${media.uri}",
             )
-            navigationStack = listOf(Screen.Home, Screen.Viewer(initialId = -1L, source = Screen.ViewerSource.External, externalUri = media.uri, externalMimeType = media.mimeType))
+            navigateToStack(listOf(Screen.Home, Screen.Viewer(initialId = -1L, source = Screen.ViewerSource.External, externalUri = media.uri, externalMimeType = media.mimeType)))
             photosViewModel.clearExternalMediaUri()
         }
     }
@@ -547,8 +570,6 @@ fun MainScaffold(
     val snackbarHostState = remember { SnackbarHostState() }
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    val rootView = LocalView.current
-    var homeHeaderCenterCorrectionPx by remember { mutableIntStateOf(0) }
     var homeHeaderWidthPx by remember { mutableFloatStateOf(0f) }
     var isHomeHeaderAnimating by remember { mutableStateOf(false) }
     val homeHeaderDraggableState = rememberDraggableState { delta ->
@@ -624,8 +645,6 @@ fun MainScaffold(
         }
     }
 
-    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
-    var selectedAlbumPaths by remember { mutableStateOf(emptySet<String>()) }
     val selectedAlbumEntries = remember(allPhotos, selectedAlbumPaths) {
         allPhotos.filter { mediaParentPath(it.path) in selectedAlbumPaths }
     }
@@ -634,7 +653,6 @@ fun MainScaffold(
     val toggleAlbumPath: (String) -> Unit = { path ->
         selectedAlbumPaths = if (path in selectedAlbumPaths) selectedAlbumPaths - path else selectedAlbumPaths + path
     }
-    var retainEmptyAlbumSelection by remember { mutableStateOf(false) }
     val selectionMode = selectedIds.isNotEmpty() ||
         (currentScreen is Screen.Photo && retainEmptyAlbumSelection)
     LaunchedEffect(quickQueue.reservedIds) { selectedIds = selectedIds - quickQueue.reservedIds }
@@ -753,7 +771,9 @@ fun MainScaffold(
             selectionMode ||
             (currentScreen == Screen.Home && isHomeSearchMode)
     ) {
-        if (albumSelectionMode) {
+        if (currentScreen is Screen.Viewer || currentScreen is Screen.TransferDestination) {
+            navigateToStack(navigationStack.dropLast(1))
+        } else if (albumSelectionMode) {
             selectedAlbumPaths = emptySet()
         } else if (selectionMode) {
             retainEmptyAlbumSelection = false
@@ -764,23 +784,19 @@ fun MainScaffold(
         } else if (currentScreen == Screen.Home && isHomeSearchMode) {
             homeHeaderTransition = HomeHeaderTransitionState()
         } else {
-            navigationStack = navigationStack.dropLast(1)
+            navigateToStack(navigationStack.dropLast(1))
         }
     }
 
 
-    // Reset selection when navigating
+    // Route-owned background work follows navigation; selection is updated
+    // synchronously by navigateToStack before the new route is rendered.
     LaunchedEffect(currentScreen) {
-        selectedAlbumPaths = emptySet()
         if (ViewerLoadMetrics.currentEntryId() != 0L) {
             ViewerLoadMetrics.event(
                 "NAVIGATION_SCREEN",
                 "screen=$currentScreen baseGridRetained=${currentScreen is Screen.Viewer}",
             )
-        }
-        if (currentScreen !is Screen.TransferDestination) {
-            selectedIds = emptySet()
-            retainEmptyAlbumSelection = false
         }
         if (quickSortOwner != quickSortScope ||
             (currentScreen !is Screen.Viewer && currentScreen !is Screen.Photo && currentScreen !is Screen.Label && currentScreen != Screen.Home)) {
@@ -794,19 +810,13 @@ fun MainScaffold(
     val scrollBehavior = FloatingToolbarDefaults.exitAlwaysScrollBehavior(
         exitDirection = FloatingToolbarExitDirection.Bottom
     )
-    // Equivalent to Simple Gallery's SCROLL | ENTER_ALWAYS AppBarLayout flags.
-    // It reacts only to nested-scroll events; there is no polling or background loop.
     val homeTopBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
-
-    LaunchedEffect(isHomeSearchMode, selectionMode, albumSelectionMode) {
-        if (isHomeSearchMode || selectionMode || albumSelectionMode) {
-            // A focused search field must not remain partially collapsed from the
-            // list's previous scroll position.
+    LaunchedEffect(isHomeSearchMode) {
+        if (isHomeSearchMode) {
             homeTopBarScrollBehavior.state.heightOffset = 0f
             homeTopBarScrollBehavior.state.contentOffset = 0f
         }
     }
-
     // Window Insets
     val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -823,7 +833,7 @@ fun MainScaffold(
     val headerColor = colorScheme.surfaceContainerLow
     val navigateBack: () -> Unit = {
         if (navigationStack.size > 1) {
-            navigationStack = navigationStack.dropLast(1)
+            navigateToStack(navigationStack.dropLast(1))
         } else {
             (context as? android.app.Activity)?.finish()
         }
@@ -835,20 +845,15 @@ fun MainScaffold(
     val selectedTrashEntries = remember(selectedIds, trash) { trash.filter { it.contentId in selectedIds } }
     val selectedVaultEntries = remember(selectedIds, vault) { vault.filter { it.contentId in selectedIds } }
 
-    val homeTopBar: @Composable () -> Unit = {
-CenterAlignedTopAppBar(
+    val homeTopBar: @Composable () -> GalleryHeaderSpec = {
+GalleryHeader(
+                    fullWidth = isHomeSearchMode,
+                    centerTitle = true,
                     title = {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(56.dp)
-                                .onGloballyPositioned { coordinates ->
-                                    val headerCenterX =
-                                        coordinates.positionInWindow().x +
-                                            coordinates.size.width / 2f
-                                    homeHeaderCenterCorrectionPx =
-                                        (rootView.width / 2f - headerCenterX).roundToInt()
-                                },
+                                .height(56.dp),
                         ) {
                             val searchingAlbums = homePagerState.currentPage == 1
                             val query = if (searchingAlbums) {
@@ -856,29 +861,153 @@ CenterAlignedTopAppBar(
                             } else {
                                 photoSearchQuery
                             }
+                            val dragOffsetPx = homeHeaderTransition.dragOffsetPx
+                            val dragDirection = when {
+                                dragOffsetPx > 0f -> 1f
+                                dragOffsetPx < 0f -> -1f
+                                else -> 1f
+                            }
+                            val nextPageOffsetPx =
+                                dragOffsetPx - dragDirection * homeHeaderWidthPx
+                            val titleOffsetPx = if (isHomeSearchMode) {
+                                nextPageOffsetPx
+                            } else {
+                                dragOffsetPx
+                            }
+                            val searchOffsetPx = if (isHomeSearchMode) {
+                                dragOffsetPx
+                            } else {
+                                nextPageOffsetPx
+                            }
+
+                            val headerPage: @Composable (Boolean, Modifier) -> Unit =
+                                { searchPage, pageModifier ->
+                                    Box(
+                                        modifier = pageModifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (!searchPage) {
+                                            Text(
+                                                text = "Pixel Gallery",
+                                                modifier = Modifier.align(Alignment.Center),
+                                                style = EmphasizedTypography.HeadlineMedium,
+                                            )
+                                        } else {
+                                            Row(
+                                                modifier = Modifier.fillMaxSize(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = query,
+                                                    onValueChange = { value ->
+                                                        if (searchingAlbums) {
+                                                            albumSearchQuery = value
+                                                        } else {
+                                                            photoSearchQuery = value
+                                                        }
+                                                    },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(56.dp)
+                                                        .focusRequester(searchFocusRequester),
+                                                    placeholder = {
+                                                        Text(
+                                                            text = if (searchingAlbums) {
+                                                                "Search albums"
+                                                            } else {
+                                                                "Search files"
+                                                            },
+                                                            style = MaterialTheme.typography.bodyLarge,
+                                                        )
+                                                    },
+                                                    leadingIcon = {
+                                                        Icon(
+                                                            Icons.Default.Search,
+                                                            contentDescription = null,
+                                                        )
+                                                    },
+                                                    trailingIcon = {
+                                                        if (query.isNotEmpty()) {
+                                                            IconButton(
+                                                                onClick = {
+                                                                    if (searchingAlbums) {
+                                                                        albumSearchQuery = ""
+                                                                    } else {
+                                                                        photoSearchQuery = ""
+                                                                    }
+                                                                },
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Default.Close,
+                                                                    contentDescription = "Clear search",
+                                                                )
+                                                            }
+                                                        }
+                                                    },
+                                                    textStyle = MaterialTheme.typography.bodyLarge,
+                                                    singleLine = true,
+                                                    shape = CircleShape,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .onSizeChanged { homeHeaderWidthPx = it.width.toFloat() }
+                                    .clipToBounds()
+                                    .onSizeChanged {
+                                        homeHeaderWidthPx = it.width.toFloat()
+                                    }
                                     .draggable(
                                         state = homeHeaderDraggableState,
                                         orientation = Orientation.Horizontal,
                                         enabled = selectedIds.isEmpty() && !isHomeHeaderAnimating,
                                         onDragStopped = { velocity ->
-                                            if (homeHeaderWidthPx <= 0f || homeHeaderTransition.dragOffsetPx == 0f) {
-                                                homeHeaderTransition = homeHeaderTransition.copy(dragOffsetPx = 0f)
+                                            if (
+                                                homeHeaderWidthPx <= 0f ||
+                                                homeHeaderTransition.dragOffsetPx == 0f
+                                            ) {
+                                                homeHeaderTransition = homeHeaderTransition.copy(
+                                                    dragOffsetPx = 0f,
+                                                )
                                                 return@draggable
                                             }
+
                                             val startingState = homeHeaderTransition
                                             val switchPage = shouldSwitchHomeHeader(
                                                 dragOffsetPx = startingState.dragOffsetPx,
                                                 widthPx = homeHeaderWidthPx,
                                                 velocityPxPerSecond = velocity,
                                             )
+                                            val direction =
+                                                if (startingState.dragOffsetPx > 0f) 1f else -1f
+                                            val targetOffset = if (switchPage) {
+                                                direction * homeHeaderWidthPx
+                                            } else {
+                                                0f
+                                            }
+
                                             isHomeHeaderAnimating = true
                                             try {
+                                                val animation = androidx.compose.animation.core.Animatable(
+                                                    startingState.dragOffsetPx,
+                                                )
+                                                animation.animateTo(
+                                                    targetValue = targetOffset,
+                                                    animationSpec = tween(durationMillis = 180),
+                                                ) {
+                                                    homeHeaderTransition = startingState.copy(
+                                                        dragOffsetPx = value,
+                                                    )
+                                                }
                                                 homeHeaderTransition = HomeHeaderTransitionState(
-                                                    isSearchMode = if (switchPage) !startingState.isSearchMode else startingState.isSearchMode,
+                                                    isSearchMode = if (switchPage) {
+                                                        !startingState.isSearchMode
+                                                    } else {
+                                                        startingState.isSearchMode
+                                                    },
                                                     dragOffsetPx = 0f,
                                                 )
                                             } finally {
@@ -887,47 +1016,21 @@ CenterAlignedTopAppBar(
                                         },
                                     ),
                             ) {
-                                if (isHomeSearchMode) {
-                                    Row(
-                                        modifier = Modifier.fillMaxSize(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Spacer(Modifier.width(16.dp))
-                                        OutlinedTextField(
-                                            value = query,
-                                            onValueChange = { value ->
-                                                if (searchingAlbums) albumSearchQuery = value else photoSearchQuery = value
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(56.dp)
-                                                .focusRequester(searchFocusRequester),
-                                            placeholder = {
-                                                Text(
-                                                    if (searchingAlbums) "Search albums" else "Search files",
-                                                    style = MaterialTheme.typography.bodyLarge,
-                                                )
-                                            },
-                                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                                            trailingIcon = {
-                                                if (query.isNotEmpty()) {
-                                                    IconButton(onClick = {
-                                                        if (searchingAlbums) albumSearchQuery = "" else photoSearchQuery = ""
-                                                    }) {
-                                                        Icon(Icons.Default.Close, contentDescription = "Clear search")
-                                                    }
-                                                }
-                                            },
-                                            textStyle = MaterialTheme.typography.bodyLarge,
-                                            singleLine = true,
-                                            shape = CircleShape,
-                                        )
-                                        Spacer(Modifier.width(16.dp))
-                                    }
-                                } else {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text("Pixel Gallery", style = EmphasizedTypography.HeadlineMedium)
-                                    }
+                                if (!isHomeSearchMode || dragOffsetPx != 0f) {
+                                    headerPage(
+                                        false,
+                                        Modifier.offset {
+                                            IntOffset(titleOffsetPx.roundToInt(), 0)
+                                        },
+                                    )
+                                }
+                                if (isHomeSearchMode || dragOffsetPx != 0f) {
+                                    headerPage(
+                                        true,
+                                        Modifier.offset {
+                                            IntOffset(searchOffsetPx.roundToInt(), 0)
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -986,42 +1089,294 @@ CenterAlignedTopAppBar(
                                     },
                                     onHiddenAlbums = {
                                         showMenu = false
-                                        navigationStack = navigationStack + Screen.HiddenAlbums
+                                        navigateToStack(navigationStack + Screen.HiddenAlbums)
                                     },
                                     onLockedFolder = {
                                         showMenu = false
-                                        navigationStack = navigationStack + Screen.LockedFolder
+                                        navigateToStack(navigationStack + Screen.LockedFolder)
                                     },
                                     onSettings = {
                                         showMenu = false
-                                        navigationStack = navigationStack + Screen.Settings
+                                        navigateToStack(navigationStack + Screen.Settings)
                                     },
                                 )
                         }
                     },
-                    windowInsets = WindowInsets.statusBars,
-                    scrollBehavior = if (isHomeSearchMode) null else homeTopBarScrollBehavior
                 )
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(headerColor)
-    ) {
-        val stableTopBarInset = 64.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        UnifiedGalleryContainer.instance.Shell(
-            containerColor = appShellColor,
-            modifier = Modifier
-                .nestedScroll(scrollBehavior)
-                .then(
-                    if (
-                        currentScreen == Screen.Home && !albumSelectionMode && selectedIds.isEmpty() &&
-                        !isHomeSearchMode && !quickSortEnabled
-                    ) Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection) else Modifier,
-                ),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
+    val baseScreenIndex = navigationStack.indexOfLast {
+        it !is Screen.Viewer && it !is Screen.TransferDestination
+    }.coerceAtLeast(0)
+    val baseScreen = navigationStack[baseScreenIndex]
+    val routePages = mutableMapOf<Int, GalleryPageContent>()
+    navigationStack.forEachIndexed { screenIndex, screen ->
+        if (screen !is Screen.Viewer && screen !is Screen.TransferDestination) {
+            key(screenIndex, screen) {
+                val isActiveRoute = screenIndex == baseScreenIndex
+                routePages[screenIndex] =
+                                    when (screen) {
+                Screen.Home -> GalleryPage(topBar = homeTopBar) { _ ->
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+,
+                    ) {
+                        HorizontalPager(
+                        state = homePagerState,
+                        modifier = Modifier.fillMaxSize(),
+                        userScrollEnabled = selectedIds.isEmpty() && !albumSelectionMode && !quickSortEnabled
+                    ) { page ->
+                        when (page) {
+                            0 -> PhotosScreen(
+                                quickSort = quickSortConfig,
+                                items = searchedPhotoGridItems,
+                                positionLabels = searchedPositionLabels,
+                                onNavigateToViewer = { id ->
+                                    val isSearchActive = normalizedPhotoSearchQuery.isNotEmpty() && photoSearchResult.photoQuery.isNotEmpty()
+                                    ViewerLoadMetrics.entryRequested(
+                                        context.applicationContext,
+                                        id,
+                                        if (isSearchActive) {
+                                            Screen.ViewerSource.Search.name
+                                        } else {
+                                            Screen.ViewerSource.All.name
+                                        },
+                                        searchedPhotos.size,
+                                    )
+                                    navigateToStack(navigationStack + Screen.Viewer(
+                                        initialId = id,
+                                        source = if (isSearchActive) {
+                                            Screen.ViewerSource.Search
+                                        } else {
+                                            Screen.ViewerSource.All
+                                        },
+                                        searchQuery = photoSearchResult.photoQuery.takeIf { isSearchActive },
+                                        mediaType = homeMediaType,
+                                    ))
+                                },
+                                selectedIds = selectedIds,
+                                onSelectionChange = updateSelection,
+                                onToggleSelection = toggleSelection,
+                                columns = gridColumns,
+                                onColumnsChange = { photosViewModel.setGridColumns(it) },
+                                bottomPadding = contentBottomPadding,
+                                state = if (normalizedPhotoSearchQuery.isEmpty()) {
+                                    recentsGridState
+                                } else {
+                                    photoSearchGridState
+                                },
+                                emptyMessage = if (normalizedPhotoSearchQuery.isNotEmpty()) {
+                                    "No matching files"
+                                } else when (homeMediaType) {
+                                    MediaTypeFilter.ALL -> null
+                                    MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_images)
+                                    MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_videos)
+                                },
+                            )
+                            1 -> AlbumsScreen(
+                                albums = searchedAlbums,
+                                bottomPadding = contentBottomPadding,
+                                gridState = if (normalizedAlbumSearchQuery.isEmpty()) {
+                                    albumsGridState
+                                } else {
+                                    albumSearchGridState
+                                },
+                                onNavigateToFavourites = { navigateToStack(navigationStack + Screen.Labels) },
+                                onNavigateToTrash = { navigateToStack(navigationStack + Screen.Trash) },
+                                onNavigateToAlbum = { name -> navigateToStack(navigationStack + Screen.Photo(name, homeMediaType)) },
+                                onExclude = { path -> photosViewModel.addExcludedFolder(path) },
+                                onHide = { path -> photosViewModel.addHiddenFolder(path) },
+                                onRename = photosViewModel::renameAlbum,
+                                selectedPaths = selectedAlbumPaths,
+                                selectionMode = albumSelectionMode,
+                                onToggleAlbumSelection = toggleAlbumPath,
+                                columns = gridColumns,
+                                onColumnsChange = { photosViewModel.setGridColumns(it) },
+                                showHeaderButtons = normalizedAlbumSearchQuery.isEmpty(),
+                                emptyMessage = if (normalizedAlbumSearchQuery.isNotEmpty()) {
+                                    "No matching albums"
+                                } else when (homeMediaType) {
+                                    MediaTypeFilter.ALL -> null
+                                    MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_image_albums)
+                                    MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_video_albums)
+                                },
+                            )
+                        }
+                    }
+                    }
+                                }
+
+                Screen.Settings -> SettingsScreen(
+                    onBack = navigateBack,
+                    onNavigateToDisplaySettings = { navigateToStack(navigationStack + Screen.DisplaySettings) },
+                    onNavigateToLicenses = { navigateToStack(navigationStack + Screen.Licenses) },
+                    onNavigateToPerformanceSettings = { navigateToStack(navigationStack + Screen.PerformanceSettings) },
+                    onNavigateToLibrarySettings = { navigateToStack(navigationStack + Screen.LibrarySettings) },
+                )
+                Screen.PerformanceSettings -> PerformanceSettingsScreen(
+                    onBack = navigateBack
+                )
+                Screen.DisplaySettings -> DisplaySettingsScreen(
+                    onBack = navigateBack,
+                )
+                Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
+                    onNavigateToExcludedFolders = { navigateToStack(navigationStack + Screen.ExcludedFolders) })
+                Screen.Labels -> LabelsScreen(
+                    columns = gridColumns,
+                    onColumnsChange = photosViewModel::setGridColumns,
+                    labels = labelSummaries,
+                    onBack = navigateBack,
+                    onLabelClick = { navigateToStack(navigationStack + Screen.Label(it)) },
+                    onCreateLabel = { labelsViewModel.createLabel(it) },
+                    onRenameLabel = { id, name -> labelsViewModel.renameLabel(id, name) },
+                    onDeleteLabels = labelsViewModel::deleteLabels,
+                    errorMessage = labelsError,
+                    onClearError = labelsViewModel::clearError,
+                    isSaving = labelsSaving,
+                    sortMode = labelsViewModel.sortMode.collectAsState().value,
+                    onSortModeChange = labelsViewModel::setSortMode,
+                    isForeground = isActiveRoute && currentScreen == screen,
+                )
+                is Screen.Label -> {
+                    val labelId = screen.labelId
+                    val labelState = remember(labelId) { albumGridStates.getOrPut("label:$labelId") { LazyGridState() } }
+                    val routeLabelPhotos = remember(labelId, allPhotos, labelMemberships, vault) {
+                        val ids = labelMemberships.filter { it.labelId == labelId }.mapTo(hashSetOf()) { it.contentId }
+                        val lockedIds = vault.mapTo(hashSetOf()) { it.contentId }
+                        allPhotos.filter { it.contentId in ids && it.contentId !in lockedIds }
+                    }
+                    val routeGroupedLabelPhotos by produceState<List<GridItem>>(
+                        emptyList(), routeLabelPhotos, gridColumns, photoSortOrder,
+                    ) {
+                        value = withContext(Dispatchers.Default) {
+                            photosViewModel.groupMedia(routeLabelPhotos, gridColumns, photoSortOrder)
+                        }
+                    }
+                    LabelPhotosScreen(
+                        label = labelEntries.find { it.id == labelId }, items = routeGroupedLabelPhotos,
+                        selectedIds = selectedIds, columns = gridColumns, gridState = labelState,
+                        onBack = navigateBack,
+                        onNavigateToViewer = { id -> navigateToStack(navigationStack + Screen.Viewer(id, Screen.ViewerSource.Label, labelId = labelId)) },
+                        onSelectionChange = updateSelection, onToggleSelection = toggleSelection,
+                        onColumnsChange = photosViewModel::setGridColumns,
+                        quickSort = quickSortConfig, onToggleQuickSort = toggleQuickSort,
+                        onSortPhotos = { showPhotoSortDialog = true },
+                        onRemoveFromLabel = { ids ->
+                            labelsViewModel.removeMediaFromLabel(labelId, ids) { selectedIds = emptySet() }
+                        },
+                        onEditLabel = { navigateToStack(navigationStack.dropLast(1) + Screen.Labels) },
+                        isForeground = isActiveRoute && currentScreen == screen,
+                    )
+                }
+                Screen.Favourites -> FavouritesScreen(
+                    onBack = navigateBack,
+                    onNavigateToViewer = { id ->
+                        ViewerLoadMetrics.entryRequested(
+                            context.applicationContext,
+                            id,
+                            Screen.ViewerSource.Favourites.name,
+                            favourites.size,
+                        )
+                        navigateToStack(navigationStack + Screen.Viewer(id, Screen.ViewerSource.Favourites))
+                    },
+                    selectedIds = selectedIds,
+                    onSelectionChange = updateSelection,
+                    onToggleSelection = toggleSelection,
+                    items = groupedFavourites,
+                    gridState = favouritesGridState
+                )
+                Screen.Trash -> TrashScreen(
+                    onBack = navigateBack,
+                    onSort = { showTrashSortDialog = true },
+                    onNavigateToViewer = { id ->
+                        ViewerLoadMetrics.entryRequested(
+                            context.applicationContext,
+                            id,
+                            Screen.ViewerSource.Trash.name,
+                            trash.size,
+                        )
+                        navigateToStack(navigationStack + Screen.Viewer(id, Screen.ViewerSource.Trash))
+                    },
+                    selectedIds = selectedIds,
+                    onSelectionChange = updateSelection,
+                    onToggleSelection = toggleSelection,
+                    items = groupedTrash,
+                    gridState = trashGridState
+                )
+                Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = navigateBack)
+                Screen.LockedFolder -> LockedFolderScreen(
+                    onBack = navigateBack,
+                    onSort = { showPhotoSortDialog = true },
+                    isForeground = isActiveRoute && currentScreen == screen,
+                    onNavigateToViewer = { id ->
+                        ViewerLoadMetrics.entryRequested(
+                            context.applicationContext,
+                            id,
+                            Screen.ViewerSource.Vault.name,
+                            vault.size,
+                        )
+                        navigateToStack(navigationStack + Screen.Viewer(id, Screen.ViewerSource.Vault))
+                    },
+                    selectedIds = selectedIds,
+                    onSelectionChange = updateSelection,
+                    onToggleSelection = toggleSelection,
+                    items = groupedVault
+                )
+                Screen.ExcludedFolders -> ExcludedFoldersScreen(onBack = navigateBack)
+                Screen.Licenses -> LicensesScreen(onBack = navigateBack)
+                is Screen.Photo -> {
+                    val albumName = screen.albumName
+                    val albumState = remember(albumName) {
+                        albumGridStates.getOrPut(albumName) { LazyGridState() }
+                    }
+                    PhotoScreen(
+                        quickSort = quickSortConfig,
+                        onToggleQuickSort = toggleQuickSort,
+                        albumName = albumName,
+                        initialMediaType = screen.initialMediaType,
+                        isForeground = isActiveRoute && currentScreen == screen,
+                        onBack = navigateBack,
+                        onNavigateToViewer = { id, type, query ->
+                            ViewerLoadMetrics.entryRequested(
+                                context.applicationContext,
+                                id,
+                                Screen.ViewerSource.Album.name,
+                                allPhotos.size,
+                                detail = "album=$albumName",
+                            )
+                            navigateToStack(navigationStack + Screen.Viewer(
+                                id, Screen.ViewerSource.Album, albumName,
+                                searchQuery = query, mediaType = type,
+                            ))
+                        },
+                        selectedIds = selectedIds,
+                        onSelectionChange = updateSelection,
+                        onToggleSelection = toggleSelection,
+                        onAlbumPhotosChanged = { photos ->
+                            albumPhotoLists[albumName] = photos
+                        },
+                        selectionMode = selectionMode,
+                        onDeduplicate = { photos ->
+                            duplicateViewModel.start(
+                                photos,
+                                DeduplicationScope.WITHIN_ALBUMS,
+                                context.getString(R.string.duplicate_scope_album, albumName),
+                            )
+                        },
+                        gridState = albumState
+                    )
+                }
+                is Screen.Viewer -> error("Viewer is prepared separately")
+                is Screen.TransferDestination -> error("Transfer is an overlay")
+            }
+            }
+        }
+    }
+
+    val selectionHeader: GalleryHeaderSpec? = run {
+
             if (albumSelectionMode) {
                 AlbumSelectionTopBar(
                     count = selectedAlbumPaths.size,
@@ -1046,9 +1401,9 @@ CenterAlignedTopAppBar(
                         )
                     },
                 )
-            } else if (selectionMode && currentScreen !is Screen.TransferDestination) {
-                if (currentScreen == Screen.Trash || currentScreen == Screen.LockedFolder) {
-                    val currentMediaIds = if (currentScreen == Screen.Trash) {
+            } else if (selectionMode) {
+                if (baseScreen == Screen.Trash || baseScreen == Screen.LockedFolder) {
+                    val currentMediaIds = if (baseScreen == Screen.Trash) {
                         trash.mapTo(linkedSetOf()) { it.contentId }
                     } else {
                         vault.mapTo(linkedSetOf()) { it.contentId }
@@ -1066,7 +1421,7 @@ CenterAlignedTopAppBar(
                                 },
                             ),
                         )
-                        if (currentScreen == Screen.Trash) {
+                        if (baseScreen == Screen.Trash) {
                             add(
                                 MediaCollectionTopBarAction(
                                     icon = Icons.Outlined.RestoreFromTrash,
@@ -1142,7 +1497,7 @@ CenterAlignedTopAppBar(
                         overflowExpanded = showSelectionMenu,
                         onOverflowExpandedChange = { showSelectionMenu = it },
                     ) {
-                        if (currentScreen == Screen.Trash) {
+                        if (baseScreen == Screen.Trash) {
                             GalleryMenuRow("Sort Bin", Icons.AutoMirrored.Filled.Sort, accented = true, onClick = {
                                 showSelectionMenu = false
                                 showTrashSortDialog = true
@@ -1155,7 +1510,7 @@ CenterAlignedTopAppBar(
                         }
                     }
                 } else {
-                    TopAppBar(
+                    GalleryHeader(
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = headerColor),
                         title = { com.pixel.gallery.ui.components.SelectedCountBadge(selectedIds.size) },
                         navigationIcon = {
@@ -1170,8 +1525,8 @@ CenterAlignedTopAppBar(
                                 horizontalArrangement = Arrangement.spacedBy((-8).dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                            if (currentScreen is Screen.Photo) {
-                                val currentMediaIds = albumPhotoLists[currentScreen.albumName]
+                            if (baseScreen is Screen.Photo) {
+                                val currentMediaIds = albumPhotoLists[baseScreen.albumName]
                                     .orEmpty()
                                     .map { it.contentId }
                                     .filterNot { it in quickQueue.reservedIds }
@@ -1193,11 +1548,11 @@ CenterAlignedTopAppBar(
                                     )
                                 }
                             }
-                            if (currentScreen is Screen.Label) {
+                            if (baseScreen is Screen.Label) {
                                 IconButton(
                                     enabled = selectedIds.isNotEmpty() && !labelsSaving,
                                     onClick = {
-                                        labelsViewModel.removeMediaFromLabel(currentScreen.labelId, selectedIds) {
+                                        labelsViewModel.removeMediaFromLabel(baseScreen.labelId, selectedIds) {
                                             selectedIds = emptySet()
                                         }
                                     },
@@ -1222,10 +1577,10 @@ CenterAlignedTopAppBar(
 
                                 IconButton(enabled = selectedEntries.isNotEmpty(), onClick = {
                                     photosViewModel.clearTransferState()
-                                    navigationStack = navigationStack + Screen.TransferDestination(
+                                    navigateToStack(navigationStack + Screen.TransferDestination(
                                         selectedEntries.map { it.contentId }.toLongArray(),
                                         Screen.TransferOrigin.Grid
-                                    )
+                                    ))
                                 }) {
                                     Icon(
                                         painter = painterResource(R.drawable.ic_transfer_to_folder),
@@ -1260,400 +1615,13 @@ CenterAlignedTopAppBar(
                     }
                     )
                 }
-            }
-        },
-            content = { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = if (visibleViewer != null) 0.dp else stableTopBarInset)
-                .then(if (selectionMode || albumSelectionMode) Modifier.galleryContentEdge() else Modifier)
-        ) {
-            // Screen content management
-            val baseScreenIndex = remember(navigationStack) {
-                navigationStack.indexOfLast {
-                    it !is Screen.Viewer && it !is Screen.TransferDestination
-                }.coerceAtLeast(0)
-            }
-            // Keep every screen in the active navigation stack composed. Retaining each
-            // route in place preserves its remembered UI and grid state; only the active
-            // layer is visible and exposed to accessibility.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset {
-                        if (visibleViewer != null || selectionMode || albumSelectionMode) {
-                            IntOffset.Zero
-                        } else {
-                            IntOffset(0, -stableTopBarInset.roundToPx())
-                        }
-                    }
-                    .drawWithContent {
-                        if (visibleViewer == null) drawContent()
-                    }
-            ) {
-                navigationStack.forEachIndexed { screenIndex, screen ->
-                    if (screen !is Screen.Viewer && screen !is Screen.TransferDestination) {
-                        key(screenIndex, screen) {
-                            val isActiveRoute = screenIndex == baseScreenIndex
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .zIndex(screenIndex.toFloat())
-                                    .clipToBounds()
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer {
-                                            // Keep every route (including its top bar) composed in
-                                            // place. Switching the active layer only changes its
-                                            // visibility; translating a retained Scaffold in and
-                                            // out of the viewport causes a one-frame top-bar flash.
-                                            translationX = 0f
-                                            alpha = if (isActiveRoute) 1f else 0f
-                                        }
-                                        .then(
-                                            if (isActiveRoute) Modifier else Modifier.clearAndSetSemantics {},
-                                        )
-                                ) {
-                                    when (screen) {
-                Screen.Home -> {
-                    Scaffold(
-                        modifier = Modifier.then(
-                            if (
-                                currentScreen == Screen.Home &&
-                                !albumSelectionMode &&
-                                selectedIds.isEmpty() &&
-                                !isHomeSearchMode && !quickSortEnabled
-                            ) {
-                                Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
-                            } else {
-                                Modifier
-                            },
-                        ),
-                        containerColor = appShellColor,
-                        contentWindowInsets = WindowInsets(0),
-                        topBar = {
-                            if (!albumSelectionMode && selectedIds.isEmpty()) homeTopBar()
-                        },
-                    ) { homePadding ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(homePadding)
-                                .then(
-                                    if (!albumSelectionMode && selectedIds.isEmpty()) Modifier.galleryContentEdge()
-                                    else Modifier,
-                                ),
-                        ) {
-                            HorizontalPager(
-                        state = homePagerState,
-                        modifier = Modifier.fillMaxSize(),
-                        userScrollEnabled = selectedIds.isEmpty() && !albumSelectionMode && !quickSortEnabled
-                    ) { page ->
-                        when (page) {
-                            0 -> PhotosScreen(
-                                quickSort = quickSortConfig,
-                                items = searchedPhotoGridItems,
-                                positionLabels = searchedPositionLabels,
-                                onNavigateToViewer = { id ->
-                                    val isSearchActive = normalizedPhotoSearchQuery.isNotEmpty() && photoSearchResult.photoQuery.isNotEmpty()
-                                    ViewerLoadMetrics.entryRequested(
-                                        context.applicationContext,
-                                        id,
-                                        if (isSearchActive) {
-                                            Screen.ViewerSource.Search.name
-                                        } else {
-                                            Screen.ViewerSource.All.name
-                                        },
-                                        searchedPhotos.size,
-                                    )
-                                    navigationStack = navigationStack + Screen.Viewer(
-                                        initialId = id,
-                                        source = if (isSearchActive) {
-                                            Screen.ViewerSource.Search
-                                        } else {
-                                            Screen.ViewerSource.All
-                                        },
-                                        searchQuery = photoSearchResult.photoQuery.takeIf { isSearchActive },
-                                        mediaType = homeMediaType,
-                                    )
-                                },
-                                selectedIds = selectedIds,
-                                onSelectionChange = updateSelection,
-                                onToggleSelection = toggleSelection,
-                                columns = gridColumns,
-                                onColumnsChange = { photosViewModel.setGridColumns(it) },
-                                bottomPadding = contentBottomPadding,
-                                state = if (normalizedPhotoSearchQuery.isEmpty()) {
-                                    recentsGridState
-                                } else {
-                                    photoSearchGridState
-                                },
-                                emptyMessage = if (normalizedPhotoSearchQuery.isNotEmpty()) {
-                                    "No matching files"
-                                } else when (homeMediaType) {
-                                    MediaTypeFilter.ALL -> null
-                                    MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_images)
-                                    MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_videos)
-                                },
-                            )
-                            1 -> AlbumsScreen(
-                                albums = searchedAlbums,
-                                bottomPadding = contentBottomPadding,
-                                gridState = if (normalizedAlbumSearchQuery.isEmpty()) {
-                                    albumsGridState
-                                } else {
-                                    albumSearchGridState
-                                },
-                                onNavigateToFavourites = { navigationStack = navigationStack + Screen.Labels },
-                                onNavigateToTrash = { navigationStack = navigationStack + Screen.Trash },
-                                onNavigateToAlbum = { name -> navigationStack = navigationStack + Screen.Photo(name, homeMediaType) },
-                                onExclude = { path -> photosViewModel.addExcludedFolder(path) },
-                                onHide = { path -> photosViewModel.addHiddenFolder(path) },
-                                onRename = photosViewModel::renameAlbum,
-                                selectedPaths = selectedAlbumPaths,
-                                selectionMode = albumSelectionMode,
-                                onToggleAlbumSelection = toggleAlbumPath,
-                                columns = gridColumns,
-                                onColumnsChange = { photosViewModel.setGridColumns(it) },
-                                showHeaderButtons = normalizedAlbumSearchQuery.isEmpty(),
-                                emptyMessage = if (normalizedAlbumSearchQuery.isNotEmpty()) {
-                                    "No matching albums"
-                                } else when (homeMediaType) {
-                                    MediaTypeFilter.ALL -> null
-                                    MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_image_albums)
-                                    MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_video_albums)
-                                },
-                            )
-                        }
-                    }
-                        }
-                    }
-                }
-                Screen.Settings -> SettingsScreen(
-                    onBack = navigateBack,
-                    onNavigateToDisplaySettings = { navigationStack = navigationStack + Screen.DisplaySettings },
-                    onNavigateToLicenses = { navigationStack = navigationStack + Screen.Licenses },
-                    onNavigateToPerformanceSettings = { navigationStack = navigationStack + Screen.PerformanceSettings },
-                    onNavigateToLibrarySettings = { navigationStack = navigationStack + Screen.LibrarySettings },
-                )
-                Screen.PerformanceSettings -> PerformanceSettingsScreen(
-                    onBack = navigateBack
-                )
-                Screen.DisplaySettings -> DisplaySettingsScreen(
-                    onBack = navigateBack,
-                )
-                Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
-                    onNavigateToExcludedFolders = { navigationStack = navigationStack + Screen.ExcludedFolders })
-                Screen.Labels -> LabelsScreen(
-                    columns = gridColumns,
-                    onColumnsChange = photosViewModel::setGridColumns,
-                    labels = labelSummaries,
-                    onBack = navigateBack,
-                    onLabelClick = { navigationStack = navigationStack + Screen.Label(it) },
-                    onCreateLabel = { labelsViewModel.createLabel(it) },
-                    onRenameLabel = { id, name -> labelsViewModel.renameLabel(id, name) },
-                    onDeleteLabels = labelsViewModel::deleteLabels,
-                    errorMessage = labelsError,
-                    onClearError = labelsViewModel::clearError,
-                    isSaving = labelsSaving,
-                    sortMode = labelsViewModel.sortMode.collectAsState().value,
-                    onSortModeChange = labelsViewModel::setSortMode,
-                    isForeground = isActiveRoute && currentScreen == screen,
-                )
-                is Screen.Label -> {
-                    val labelId = screen.labelId
-                    val labelState = remember(labelId) { albumGridStates.getOrPut("label:$labelId") { LazyGridState() } }
-                    val routeLabelPhotos = remember(labelId, allPhotos, labelMemberships, vault) {
-                        val ids = labelMemberships.filter { it.labelId == labelId }.mapTo(hashSetOf()) { it.contentId }
-                        val lockedIds = vault.mapTo(hashSetOf()) { it.contentId }
-                        allPhotos.filter { it.contentId in ids && it.contentId !in lockedIds }
-                    }
-                    val routeGroupedLabelPhotos by produceState<List<GridItem>>(
-                        emptyList(), routeLabelPhotos, gridColumns, photoSortOrder,
-                    ) {
-                        value = withContext(Dispatchers.Default) {
-                            photosViewModel.groupMedia(routeLabelPhotos, gridColumns, photoSortOrder)
-                        }
-                    }
-                    LabelPhotosScreen(
-                        label = labelEntries.find { it.id == labelId }, items = routeGroupedLabelPhotos,
-                        selectedIds = selectedIds, columns = gridColumns, gridState = labelState,
-                        onBack = navigateBack,
-                        onNavigateToViewer = { id -> navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Label, labelId = labelId) },
-                        onSelectionChange = updateSelection, onToggleSelection = toggleSelection,
-                        onColumnsChange = photosViewModel::setGridColumns,
-                        quickSort = quickSortConfig, onToggleQuickSort = toggleQuickSort,
-                        onSortPhotos = { showPhotoSortDialog = true },
-                        onRemoveFromLabel = { ids ->
-                            labelsViewModel.removeMediaFromLabel(labelId, ids) { selectedIds = emptySet() }
-                        },
-                        onEditLabel = { navigationStack = navigationStack.dropLast(1) + Screen.Labels },
-                        isForeground = isActiveRoute && currentScreen == screen,
-                    )
-                }
-                Screen.Favourites -> FavouritesScreen(
-                    onBack = navigateBack,
-                    onNavigateToViewer = { id ->
-                        ViewerLoadMetrics.entryRequested(
-                            context.applicationContext,
-                            id,
-                            Screen.ViewerSource.Favourites.name,
-                            favourites.size,
-                        )
-                        navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Favourites)
-                    },
-                    selectedIds = selectedIds,
-                    onSelectionChange = updateSelection,
-                    onToggleSelection = toggleSelection,
-                    items = groupedFavourites,
-                    gridState = favouritesGridState
-                )
-                Screen.Trash -> TrashScreen(
-                    onBack = navigateBack,
-                    onSort = { showTrashSortDialog = true },
-                    onNavigateToViewer = { id ->
-                        ViewerLoadMetrics.entryRequested(
-                            context.applicationContext,
-                            id,
-                            Screen.ViewerSource.Trash.name,
-                            trash.size,
-                        )
-                        navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Trash)
-                    },
-                    selectedIds = selectedIds,
-                    onSelectionChange = updateSelection,
-                    onToggleSelection = toggleSelection,
-                    items = groupedTrash,
-                    gridState = trashGridState
-                )
-                Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = navigateBack)
-                Screen.LockedFolder -> LockedFolderScreen(
-                    onBack = navigateBack,
-                    onSort = { showPhotoSortDialog = true },
-                    isForeground = isActiveRoute && currentScreen == screen,
-                    onNavigateToViewer = { id ->
-                        ViewerLoadMetrics.entryRequested(
-                            context.applicationContext,
-                            id,
-                            Screen.ViewerSource.Vault.name,
-                            vault.size,
-                        )
-                        navigationStack = navigationStack + Screen.Viewer(id, Screen.ViewerSource.Vault)
-                    },
-                    selectedIds = selectedIds,
-                    onSelectionChange = updateSelection,
-                    onToggleSelection = toggleSelection,
-                    items = groupedVault
-                )
-                Screen.ExcludedFolders -> ExcludedFoldersScreen(onBack = navigateBack)
-                Screen.Licenses -> LicensesScreen(onBack = navigateBack)
-                is Screen.Photo -> {
-                    val albumName = screen.albumName
-                    val albumState = remember(albumName) {
-                        albumGridStates.getOrPut(albumName) { LazyGridState() }
-                    }
-                    PhotoScreen(
-                        quickSort = quickSortConfig,
-                        onToggleQuickSort = toggleQuickSort,
-                        albumName = albumName,
-                        initialMediaType = screen.initialMediaType,
-                        isForeground = isActiveRoute && currentScreen == screen,
-                        onBack = navigateBack,
-                        onNavigateToViewer = { id, type, query ->
-                            ViewerLoadMetrics.entryRequested(
-                                context.applicationContext,
-                                id,
-                                Screen.ViewerSource.Album.name,
-                                allPhotos.size,
-                                detail = "album=$albumName",
-                            )
-                            navigationStack = navigationStack + Screen.Viewer(
-                                id, Screen.ViewerSource.Album, albumName,
-                                searchQuery = query, mediaType = type,
-                            )
-                        },
-                        selectedIds = selectedIds,
-                        onSelectionChange = updateSelection,
-                        onToggleSelection = toggleSelection,
-                        onAlbumPhotosChanged = { photos ->
-                            albumPhotoLists[albumName] = photos
-                        },
-                        selectionMode = selectionMode,
-                        onDeduplicate = { photos ->
-                            duplicateViewModel.start(
-                                photos,
-                                DeduplicationScope.WITHIN_ALBUMS,
-                                context.getString(R.string.duplicate_scope_album, albumName),
-                            )
-                        },
-                        gridState = albumState
-                    )
-                }
-                is Screen.Viewer -> {
-                    // Fallback: Viewer screens render as overlays below.
-                }
-                is Screen.TransferDestination -> {
-                    // Fallback, transfer screens are rendered as overlays below.
-                }
-            }
-                                }
-                            }
-                        }
-                    }
-                }
+            } else null
             }
 
-            // Keep the full-screen viewer composed underneath its destination picker.
-            if (visibleViewer != null) {
+    val viewerPage: GalleryPageContent? = if (visibleViewer != null) {
+        key(visibleViewer) {
                 val viewer = visibleViewer
                 val cachedAlbumPhotos = viewer.albumName?.let(albumPhotoLists::get)
-                // [Legacy/Original Code commented out per user request - avoid emptyList() black screen flash on enter]
-                // val photosForViewer by remember(viewer, allPhotos, favourites, trash, vault) {
-                //     flow {
-                //         val result = when (viewer.source) {
-                //             Screen.ViewerSource.All -> allPhotos
-                //             Screen.ViewerSource.Favourites -> favourites
-                //             Screen.ViewerSource.Trash -> trash
-                //             Screen.ViewerSource.Vault -> vault
-                //             Screen.ViewerSource.Album -> {
-                //                 allPhotos.filter {
-                //                     val lastSlash = it.path.lastIndexOf('/')
-                //                     if (lastSlash <= 0) false
-                //                     else {
-                //                         val parentPath = it.path.substring(0, lastSlash)
-                //                         val prevSlash = parentPath.lastIndexOf('/')
-                //                         val parentName = if (prevSlash >= 0) parentPath.substring(prevSlash + 1) else parentPath
-                //                         parentName == viewer.albumName
-                //                     }
-                //                 }
-                //             }
-                //             Screen.ViewerSource.External -> {
-                //                 val uri = viewer.externalUri ?: ""
-                //                 val mimeType = viewer.externalMimeType ?: "image/*"
-                //                 listOf(
-                //                     com.pixel.gallery.data.local.entity.MediaEntry(
-                //                         contentId = -1L,
-                //                         path = uri,
-                //                         uri = uri,
-                //                         sourceMimeType = mimeType,
-                //                         width = 0,
-                //                         height = 0,
-                //                         sourceRotationDegrees = 0,
-                //                         sizeBytes = 0,
-                //                         dateAddedSecs = 0,
-                //                         dateModifiedMillis = 0,
-                //                         isTrashed = false,
-                //                         bestTimestamp = 0L
-                //                     )
-                //                 )
-                //             }
-                //         }
-                //         emit(result)
-                //     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
-                // }.collectAsState(initial = emptyList())
                 val livePhotosForViewer = remember(
                     viewer,
                     allPhotos,
@@ -1755,14 +1723,14 @@ CenterAlignedTopAppBar(
                         labelsForMedia = { labelNamesByMedia[it].orEmpty() },
                         labelIdsForMedia = { labelIdsByMedia[it].orEmpty() },
                         onOpenLabel = { labelId ->
-                            navigationStack = navigationStack.dropLast(1) + Screen.Label(labelId)
+                            navigateToStack(navigationStack.dropLast(1) + Screen.Label(labelId))
                         },
                         allowLabels = viewer.source !in setOf(Screen.ViewerSource.Trash, Screen.ViewerSource.External),
                         reservedIds = quickQueue.reservedIds,
                         initialId = viewer.initialId,
                         photos = photosForViewer,
                         transformStateStore = viewerTransformStateStore,
-                        onBack = { navigationStack = navigationStack.dropLast(1) },
+                        onBack = { navigateToStack(navigationStack.dropLast(1)) },
                         allowTransfer = viewer.source !in setOf(
                             Screen.ViewerSource.Trash,
                             Screen.ViewerSource.Vault,
@@ -1770,26 +1738,94 @@ CenterAlignedTopAppBar(
                         ),
                         onRequestTransfer = { media ->
                             photosViewModel.clearTransferState()
-                            navigationStack = navigationStack + Screen.TransferDestination(
+                            navigateToStack(navigationStack + Screen.TransferDestination(
                                 longArrayOf(media.contentId),
                                 Screen.TransferOrigin.Viewer
-                            )
+                            ))
                         },
                         allowUnlockFromVault = viewer.source == Screen.ViewerSource.Vault,
                         onUnlockFromVault = { media ->
                             photosViewModel.restoreFromVault(media.contentId) { restored ->
-                                if (restored) navigationStack = navigationStack.dropLast(1)
+                                if (restored) navigateToStack(navigationStack.dropLast(1))
                             }
                         },
                     )
                 } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black)
-                    )
+                    GalleryPage(topBar = { GalleryHeader(title = {}, visible = false) }) { _ -> }
+
                 }
             }
+        } else null
+
+    val reviewPage = DuplicateReviewDialog(
+        state = duplicateState,
+        onDismiss = duplicateViewModel::dismiss,
+        onToggle = duplicateViewModel::toggle,
+        onConfirm = duplicateViewModel::confirm,
+    )
+    val homeHeaderOwnsShell = baseScreen == Screen.Home && visibleViewer == null && reviewPage == null
+    val density = LocalDensity.current
+    val baseRouteTopInset = 64.dp +
+        WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() +
+        if (baseScreen == Screen.Home) {
+            with(density) {
+                homeTopBarScrollBehavior.state.heightOffset.coerceIn(-64.dp.toPx(), 0f).toDp()
+            }
+        } else 0.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+    ) {
+        UnifiedGalleryContainer.instance.Shell(
+            containerColor = if (visibleViewer != null && reviewPage == null) Color.Black else appShellColor,
+            modifier = Modifier.nestedScroll(scrollBehavior).then(
+                if (currentScreen == Screen.Home && reviewPage == null && !isHomeSearchMode && !quickSortEnabled) {
+                    Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
+                } else Modifier,
+            ),
+            scrollBehavior = if (homeHeaderOwnsShell) homeTopBarScrollBehavior else null,
+        snackbarHost = {
+            routePages.getValue(baseScreenIndex).snackbarHost()
+            SnackbarHost(snackbarHostState)
+        },
+        header = reviewPage?.header ?: viewerPage?.header ?: selectionHeader ?: routePages.getValue(baseScreenIndex).header,
+            content = { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+
+        ) {
+            // Screen content management
+            // Keep every screen in the active navigation stack composed. Retaining each
+            // route in place preserves its remembered UI and grid state; only the active
+            // layer is visible and exposed to accessibility.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = baseRouteTopInset)
+                    .galleryContentEdge()
+                    .drawWithContent {
+                        if (visibleViewer == null && reviewPage == null) drawContent()
+                    }
+            ) {
+                navigationStack.forEachIndexed { screenIndex, screen ->
+                    if (screen !is Screen.Viewer && screen !is Screen.TransferDestination) {
+                        key(screenIndex, screen) {
+                            val isActiveRoute = screenIndex == baseScreenIndex
+                            RetainedGalleryLayer(visible = isActiveRoute && visibleViewer == null && reviewPage == null) {
+                                routePages.getValue(screenIndex).content()
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The same viewer model remains mounted beneath Move/Copy.
+            viewerPage?.let { page ->
+                RetainedGalleryLayer(visible = reviewPage == null) { page.content() }
+            }
+
 
             if (currentScreen is Screen.TransferDestination) {
                 val transferScreen = currentScreen
@@ -1801,7 +1837,7 @@ CenterAlignedTopAppBar(
                     entries = transferableEntries,
                     onBack = {
                         photosViewModel.clearTransferState()
-                        navigationStack = navigationStack.dropLast(1)
+                        navigateToStack(navigationStack.dropLast(1))
                     },
                     columns = gridColumns,
                     onColumnsChange = photosViewModel::setGridColumns,
@@ -1815,14 +1851,16 @@ CenterAlignedTopAppBar(
                         }
                         if (summary.failed == 0) scope.launch { snackbarHostState.showSnackbar(message) }
                         selectedIds = emptySet()
-                        navigationStack = if (
-                            transferScreen.origin == Screen.TransferOrigin.Viewer &&
-                            summary.mode == TransferMode.MOVE
-                        ) {
-                            navigationStack.dropLast(2)
-                        } else {
-                            navigationStack.dropLast(1)
-                        }
+                        navigateToStack(
+                            if (
+                                transferScreen.origin == Screen.TransferOrigin.Viewer &&
+                                summary.mode == TransferMode.MOVE
+                            ) {
+                                navigationStack.dropLast(2)
+                            } else {
+                                navigationStack.dropLast(1)
+                            },
+                        )
                         photosViewModel.clearTransferState()
                     }
                 )
@@ -1831,7 +1869,7 @@ CenterAlignedTopAppBar(
 
 
             // Only show the floating bar on the Home screen
-            if (currentScreen == Screen.Home && !quickSortEnabled && !albumSelectionMode) {
+            if (currentScreen == Screen.Home && !quickSortEnabled && !albumSelectionMode && reviewPage == null) {
                 HorizontalFloatingToolbar(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1885,6 +1923,11 @@ CenterAlignedTopAppBar(
                     }
                 )
             }
+            reviewPage?.let { page ->
+                Box(Modifier.fillMaxSize().padding(top = innerPadding.calculateTopPadding())) {
+                    page.content()
+                }
+            }
             }
 
     if (editingLabelIds.isNotEmpty()) {
@@ -1927,12 +1970,7 @@ CenterAlignedTopAppBar(
         )
     }
 
-    DuplicateReviewDialog(
-        state = duplicateState,
-        onDismiss = duplicateViewModel::dismiss,
-        onToggle = duplicateViewModel::toggle,
-        onConfirm = duplicateViewModel::confirm,
-    )
+
 
     // Custom sort dialog overlays
         val photoCriteria = remember {

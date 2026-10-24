@@ -19,18 +19,22 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExcludedFoldersScreen(
     onBack: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val excludedFolders by viewModel.excludedFolders.collectAsState()
 
-    Scaffold(
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { 
                     Text(
                         "Excluded Folders",

@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.gallery
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -51,7 +55,6 @@ import com.pixel.gallery.ui.components.GalleryOverflowButton
 import com.pixel.gallery.ui.components.MediaTypeMenuSection
 import com.pixel.gallery.model.MediaTypeFilter
 import com.pixel.gallery.ui.components.GalleryMenuRow
-import com.pixel.gallery.ui.components.galleryContentEdge
 
 internal fun MediaEntry.matchesAlbumSearch(query: String): Boolean {
     val normalizedQuery = query.trim()
@@ -107,13 +110,14 @@ fun PhotoScreen(
     isForeground: Boolean = true,
     selectionMode: Boolean = selectedIds.isNotEmpty(),
     viewModel: PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val browsingIndex by viewModel.browsingIndex.collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
     var searchMode by rememberSaveable(albumName) { mutableStateOf(false) }
     var searchQuery by rememberSaveable(albumName) { mutableStateOf("") }
+    var searchFocusRequested by remember(albumName) { mutableStateOf(false) }
     val normalizedSearchQuery = searchQuery.trim()
     // This visit inherits the parent once; subsequent choices stay local.
     var mediaType by rememberSaveable(albumName) { mutableStateOf(initialMediaType) }
@@ -154,21 +158,27 @@ fun PhotoScreen(
         albumPhotos.firstOrNull()?.path?.substringBeforeLast('/', "").orEmpty()
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            contentWindowInsets = WindowInsets(0),
+
+        return GalleryPage(
         topBar = {
-            if (!selectionMode) {
-                TopAppBar(
+
+                GalleryHeader(
+                fullWidth = searchMode,
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     title = {
                         AlbumSearchTitle(
                             isSearchMode = searchMode,
-                            onSearchModeChange = { searchMode = it },
+                            onSearchModeChange = { enabled ->
+                                if (enabled && !searchMode) searchFocusRequested = true
+                                if (!enabled) searchFocusRequested = false
+                                searchMode = enabled
+                            },
                             searchQuery = searchQuery,
                             onSearchQueryChange = { searchQuery = it },
                             searchPlaceholder = stringResource(R.string.album_search_files),
                             clearSearchDescription = stringResource(R.string.album_clear_search),
+                            focusRequested = searchFocusRequested,
+                            onFocusRequestConsumed = { searchFocusRequested = false },
                             backEnabled = isForeground,
                             title = {
                             Column(modifier = Modifier.fillMaxWidth()) {
@@ -260,10 +270,10 @@ fun PhotoScreen(
                         }
                     }
                 )
-            }
+
         }
     ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding).galleryContentEdge()) {
+        Box(modifier = Modifier.padding(innerPadding)) {
 
 
             PhotosScreen(
@@ -292,7 +302,7 @@ fun PhotoScreen(
                 },
             )
         }
-    }
+
 
     val photoCriteria = remember {
             listOf(
@@ -330,5 +340,7 @@ fun PhotoScreen(
                 }
             )
         }
+
+
     }
 }

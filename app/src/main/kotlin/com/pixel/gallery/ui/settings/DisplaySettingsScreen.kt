@@ -1,5 +1,7 @@
 package com.pixel.gallery.ui.settings
 
+import androidx.compose.foundation.layout.navigationBarsPadding
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,9 +18,7 @@ import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -33,19 +33,23 @@ import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.components.SettingsOptionControl
 import com.pixel.gallery.model.Handedness
 import com.pixel.gallery.R
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @Composable
 fun DisplaySettingsScreen(
     onBack: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel(),
-) {
+): GalleryPageContent {
     val startupAtAlbums by viewModel.startupAtAlbums.collectAsStateWithLifecycle()
     val handedness by viewModel.handedness.collectAsStateWithLifecycle()
     val showFullAlbumNames by viewModel.showFullAlbumNames.collectAsStateWithLifecycle()
 
-    Scaffold(
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { Text("Display", style = EmphasizedTypography.TitleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

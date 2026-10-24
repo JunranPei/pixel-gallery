@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.components
 
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryHeaderSpec
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -35,9 +38,9 @@ fun AlbumSelectionTopBar(
     onDelete: (() -> Unit)? = null,
     canFindDuplicates: Boolean = true,
     onFindDuplicates: (() -> Unit)? = null,
-) {
+): GalleryHeaderSpec {
     var showMenu by remember { mutableStateOf(false) }
-    TopAppBar(
+    return GalleryHeader(
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         title = { SelectedCountBadge(count) },
         navigationIcon = {

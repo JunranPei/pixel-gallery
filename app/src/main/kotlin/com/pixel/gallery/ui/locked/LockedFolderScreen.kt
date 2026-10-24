@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.locked
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -20,7 +24,6 @@ import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.components.MediaCollectionTopBar
-import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -36,7 +39,7 @@ fun LockedFolderScreen(
     onToggleSelection: (Long) -> Unit = {},
     items: List<GridItem> = emptyList(),
     viewModel: com.pixel.gallery.ui.viewmodel.PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val gridColumns by viewModel.gridColumns.collectAsState()
     val context = LocalContext.current
     var isAuthenticated by remember { mutableStateOf(false) }
@@ -84,12 +87,11 @@ fun LockedFolderScreen(
         }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
+    return GalleryPage(
         topBar = {
-            if (selectedIds.isEmpty()) {
+
                 MediaCollectionTopBar("Locked Folder", onBack, sortLabel = "Sort Locked Files", onSort = onSort)
-            }
+
         }
     ) { innerPadding ->
         if (!isAuthenticated) {
@@ -97,7 +99,7 @@ fun LockedFolderScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .galleryContentEdge()
+
                     .padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -153,7 +155,7 @@ fun LockedFolderScreen(
                 )
             }
         } else {
-            Box(modifier = Modifier.padding(innerPadding).galleryContentEdge()) {
+            Box(modifier = Modifier.padding(innerPadding)) {
                 PhotosScreen(
                     items = items,
                     onNavigateToViewer = onNavigateToViewer,

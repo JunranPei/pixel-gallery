@@ -16,6 +16,8 @@ import androidx.compose.ui.unit.dp
 import com.pixel.gallery.MainActivity
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.*
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
 import com.pixel.gallery.ui.components.*
 import com.pixel.gallery.ui.deduplication.*
 import com.pixel.gallery.ui.labels.LabelsScreen
@@ -63,9 +65,8 @@ internal class ConfirmationTouchChecks(private val instrumentation: Instrumentat
         instrumentation.runOnMainSync {
             activity.setContent {
                 PixelGalleryTheme(darkTheme = dark.value, dynamicColor = false) {
-                    Surface(Modifier.fillMaxSize()) {
-                        when (mode.intValue) {
-                            0 -> Scaffold(topBar = { TopAppBar(title = { Text("Select album") }) }) { padding ->
+                    val page = when (mode.intValue) {
+                            0 -> GalleryPage(topBar = { GalleryHeader(title = { Text("Select album") }) }) { padding ->
                                 TransferDestinationContent(
                                     destinations = targets.filter { matchesTransferDestinationQuery(it, query.value) },
                                     albumUses = emptyList(), query = query.value, selectedDestination = selected.value,
@@ -87,9 +88,13 @@ internal class ConfirmationTouchChecks(private val instrumentation: Instrumentat
                                 DuplicateUiState("All files", DuplicatePhase.REVIEW,
                                     result = DuplicateScanResult(listOf(DuplicateGroup(media, listOf(newer), DuplicateFingerprint(fixture.length(), "fixture"))), emptyList(), 2),
                                     selectedIds = setOf(newer.contentId)), {}, {}, { deleteDecisions++ })
+                            4 -> LabelsScreen(emptyList(), {}, {}, { createdLabels++ }, { _, _ -> }, {})
+                            else -> null
+                    }
+                    GalleryPageCheckHost(page, fullScreenContent = mode.intValue == 1) {
+                        when (mode.intValue) {
                             3 -> DeleteConfirmDialog(true, { mode.intValue = 0 }, "Delete permanently?",
                                 "These items will be deleted permanently. This action cannot be undone.", "Delete", true, { deleteDecisions++ })
-                            4 -> LabelsScreen(emptyList(), {}, {}, { createdLabels++ }, { _, _ -> }, {})
                             5 -> SortDialog(true, { mode.intValue = 0 }, "Sort albums",
                                 listOf(SortCriterion("name", "Name", "A to Z", "Z to A"), SortCriterion("count", "Count", "Fewest", "Most"), SortCriterion("date", "Date", "Oldest", "Newest")),
                                 "name", "ASC", { _, _ -> mode.intValue = 0 })

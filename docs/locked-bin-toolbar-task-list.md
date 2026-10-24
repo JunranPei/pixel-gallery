@@ -2,29 +2,41 @@
 
 Active acceptance list. Mark an item complete only after its stated evidence exists.
 
-1. [x] **Keep overflow controls fixed.** Main, album, Bin, and Locked Folder grids use the same right-aligned overflow position in normal and selected states; other actions do not move it.
+1. [ ] **Keep overflow controls fixed.** Main, album, Bin, and Locked Folder grids use the same right-aligned overflow position in normal and selected states; other actions do not move it.
 2. [x] **Finish Bin actions.** Use the refreshed toolbar and shared overflow; offer file-date, deletion-date, name, and size sorting; provide select all, restore, and permanent delete; remove the `Empty` action.
 3. [x] **Finish Locked Folder actions.** Use the refreshed toolbar and shared overflow; offer date, name, and size sorting; provide select all, share, move out, and permanent delete.
 4. [x] **Share reusable controls.** Reuse the common toolbar, sorter, and selection behavior where their layouts and actions match; selected sort options keep their shape/color feedback without a checkmark.
 5. [x] **Keep locked labels usable and hidden from label grids.** Locking preserves label and Favorites memberships; the Locked Folder viewer can show and edit them; locked media does not appear in label/Favorites album grids; moving it out restores its memberships.
 6. [x] **Expose label editing in locked details.** The viewer action and Details sheet offer the same add/edit-label entry point as ordinary media, including when the file has no labels yet.
-7. [x] **Build, install, and verify.** Run relevant tests and builds; install the resulting app and inspect the critical UI/actions on the available emulator, recording any unavailable path clearly.
+7. [ ] **Build and install for user verification.** The user has explicitly taken over UI testing. Build and install without running tests or interacting with the app; the current UI acceptance stays pending their report.
 8. [ ] **Deliver the requested artifacts.** Increment only the fourth version segment, commit, push and verify the remote branch, then build the arm64-v8a release package.
-9. [x] **Prevent toolbar flicker when clearing selection.** Check entering and leaving selection and screen transitions; keep the rightmost overflow anchor fixed throughout.
+9. [ ] **Prevent toolbar flicker when clearing selection.** Check entering and leaving selection and screen transitions; keep the rightmost overflow anchor fixed throughout.
 10. [x] **Remove ticks from the shared option selector globally.** Every `SettingsOptionControl` consumer uses shape/color feedback without a selected checkmark, including settings and sorting.
 11. [x] **Fix newly created label presentation.** Pending/new labels use the same album-card layout as existing labels, including empty labels; verify creation, selection, save and reopen.
 12. [x] **Unify the three half-page pickers.** Label, Move/Copy and Quick Sort reuse the common sheet and grid controls; preserve only their necessary action differences. Move/Copy follows the Label layout. Interaction restoration has passed the subsequent regression.
 13. [x] **Share grid columns across pickers.** Quick Sort, Label and Move/Copy follow the album grid column setting and retain pinch adjustment/scrollbars.
-14. [x] **Keep the viewer beneath Move/Copy.** Opening the destination half sheet from a viewer must keep that viewer, current page and zoom composed underneath; dismissing the sheet returns to the same image.
+14. [ ] **Keep the viewer beneath Move/Copy.** Opening the destination half sheet from a viewer must keep that viewer, current page and zoom composed underneath; dismissing the sheet returns to the same image.
 15. [x] **Preserve Quick Sort interaction.** Start compact without automatic upward movement; dragging down collapses to the persistent header rather than disappearing; expansion, closing the chooser and exiting selection/Quick Sort must remain usable. Shared visual components must not force a modal interaction on Quick Sort or remove partial/full dragging from Label and Move/Copy.
 16. [x] **Show Undo without target albums.** Quick Sort keeps its Undo control visible when no target album is selected; availability of an undoable job controls enabled/disabled state, not visibility.
-17. [x] **Keep every grid top bar stable during route changes.** Main, Labels, label-media, album-media, Bin and Locked grids retain their composed top bars in place; changing the active grid only changes layer visibility and never rebuilds or translates a retained Scaffold through the top-bar slot.
+17. [ ] **Use exactly one toolbar and one root body.** The private-constructor singleton owns the only mounted toolbar and body background. All pages, including selection, search, Locked, Hidden, Settings and viewer, supply header content only. Route or selection changes must not replace the root, mount another toolbar, or change selection geometry.
 
 The five follow-up requirements above were recovered from the user's later messages in the previous chat on 2026-10-24. They are part of acceptance, not optional follow-up work. The user subsequently confirmed that the refreshed Locked Folder toolbar was installed.
 
-## Final functional acceptance (2026-10-24)
+18. [ ] **Preserve Hidden state.** List all saved hidden directories, including empty or unindexed ones. Keep file IDs, labels and Favourites memberships unchanged. Exclude hidden media from normal photos/albums, label counts/covers/grids and Favourites; unhide restores visibility using the existing relationships. Match complete directory boundaries.
+19. [ ] **Preserve search and viewer interactions.** Home retains horizontal swipe between title and full-width search, without exposing the settled hidden page. Returning from selection must not request keyboard focus again. Opening Move/Labels from expanded viewer controls must retain their expanded state.
 
-All 16 functional/verification requirements (#1-7, #9-17) have now passed, including restoration after the user's interaction regression reports. The shared class preserves separate modal Label/Move and persistent non-modal Quick Sort behavior. Delivery (#8) remains pending the final commit/push and release package verification.
+## Current revision (2026-10-25)
+
+The earlier acceptance below is historical and does not establish acceptance of this revision. Later user reports reopened toolbar, search, selection and Hidden defects. The user now performs all UI testing; no tests or app UI operations are being run for this revision.
+
+- Route functions now return header/content descriptions. Legacy route-local Scaffolds and actual top bars are removed, including full-screen duplicate review and viewer headers.
+- `UnifiedGalleryContainer` has a private constructor and one instance; a mount guard prevents two roots in the same window. One permanent toolbar uses fixed slots and one permanent body owns its background.
+- Hidden is a visibility setting only. The saved paths are the directory-list source. Favourites now combines hidden paths; shared folder-boundary matching prevents `/A` from hiding `/A2`. Underlying media and label backup sources continue to include hidden files.
+- Build, installation and delivery evidence will be recorded below. Flicker and interaction behavior remain pending user verification.
+
+## Historical functional acceptance (2026-10-24)
+
+At that time the prior run recorded all 16 functional/verification requirements (#1-7, #9-17) as passed, including restoration after the user's interaction regression reports. The shared class preserves separate modal Label/Move and persistent non-modal Quick Sort behavior. Delivery (#8) remains pending the final commit/push and release package verification.
 
 Restoration results: `scratch/picker-restoration-header-device.log`, `scratch/picker-restoration-album-device-final2.log`, and `scratch/picker-empty-undo-device-final.log` all finish with `INSTRUMENTATION_CODE: -1` and passing reports. The real MainScaffold suite scans 318 sample files and verifies selection/clear/exit, stationary compact Quick Sort entry, drag-down retaining the header, system Back, album toolbar Back, Move overlay/cancel, and 98-file selection. The dedicated gesture suite verifies four-column layout, drag tracking, cancellation, count-chip clearing and shared option callbacks. The Undo suite additionally asserts visible empty-target controls, disabled taps producing no callback, and available Undo invoking its callback.
 

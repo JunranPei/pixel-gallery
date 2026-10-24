@@ -21,13 +21,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.launch
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PerformanceSettingsScreen(
     onBack: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel(),
-) {
+): GalleryPageContent {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -36,31 +39,11 @@ fun PerformanceSettingsScreen(
     val glidePersistentGridCacheSize by viewModel.glidePersistentGridCacheSize.collectAsState()
     var showClearCacheConfirm by remember { mutableStateOf(false) }
 
-    if (showClearCacheConfirm) {
-        GalleryDialog(
-            onDismissRequest = { showClearCacheConfirm = false },
-            title = { Text(stringResource(R.string.dialog_cache_title)) },
-            icon = Icons.Outlined.DeleteSweep,
-            text = {
-                ConfirmationReminder(stringResource(R.string.dialog_cache_body), Icons.Outlined.DeleteSweep)
-                ConfirmationReminder(stringResource(R.string.dialog_cache_decode))
-            },
-            confirmButton = {
-                Button(onClick = {
-                    showClearCacheConfirm = false
-                    viewModel.clearAllCaches(context) {
-                        scope.launch { snackbarHostState.showSnackbar("Cache cleared successfully") }
-                    }
-                }) { Text(stringResource(R.string.dialog_clear)) }
-            },
-            dismissButton = { TextButton(onClick = { showClearCacheConfirm = false }) { Text(stringResource(R.string.dialog_cancel)) } },
-        )
-    }
-
-    Scaffold(
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { Text("Performance & Caching", style = EmphasizedTypography.TitleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -70,6 +53,26 @@ fun PerformanceSettingsScreen(
             )
         },
     ) { innerPadding ->
+        if (showClearCacheConfirm) {
+            GalleryDialog(
+                onDismissRequest = { showClearCacheConfirm = false },
+                title = { Text(stringResource(R.string.dialog_cache_title)) },
+                icon = Icons.Outlined.DeleteSweep,
+                text = {
+                    ConfirmationReminder(stringResource(R.string.dialog_cache_body), Icons.Outlined.DeleteSweep)
+                    ConfirmationReminder(stringResource(R.string.dialog_cache_decode))
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showClearCacheConfirm = false
+                        viewModel.clearAllCaches(context) {
+                            scope.launch { snackbarHostState.showSnackbar("Cache cleared successfully") }
+                        }
+                    }) { Text(stringResource(R.string.dialog_clear)) }
+                },
+                dismissButton = { TextButton(onClick = { showClearCacheConfirm = false }) { Text(stringResource(R.string.dialog_cancel)) } },
+            )
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(innerPadding),
             contentPadding = SettingsLayout.ContentPadding,

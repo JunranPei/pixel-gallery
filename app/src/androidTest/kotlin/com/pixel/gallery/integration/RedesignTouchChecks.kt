@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,6 +20,9 @@ import androidx.compose.ui.unit.dp
 import com.pixel.gallery.MainActivity
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.*
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.UnifiedGalleryContainer
 import com.pixel.gallery.ui.deduplication.*
 import com.pixel.gallery.ui.gallery.PhotoScreen
 import com.pixel.gallery.ui.quicksort.QuickSortTargetsSheet
@@ -63,14 +67,7 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         instrumentation.runOnMainSync {
             activity.setContent {
                 PixelGalleryTheme(darkTheme = dark.value, dynamicColor = false) {
-                    Box(Modifier.fillMaxSize().background(if (dark.value) Color(0xff121212) else Color.White)
-                        .onGloballyPositioned { root = it.boundsInWindow() }) {
-                        when (mode.intValue) {
-                            0 -> QuickSortTargetsSheet(targets, selectedTargets = selected.value, dockTop = false, columns = 4,
-                                albumUses = listOf(QuickSortAlbumUse("fixture-job", targets[0].stableKey, System.currentTimeMillis())),
-                                onDockTopChange = {}, onApply = {}, onDismiss = {},
-                                onTargetsChange = { selected.value = it },
-                                onPanelHeightChange = { panelHeight = it.value * density })
+                    val page = when (mode.intValue) {
                             1 -> DuplicateReviewDialog(
                                 DuplicateUiState(title = "Synthetic duplicates", phase = DuplicatePhase.REVIEW,
                                     result = DuplicateScanResult(emptyList(), emptyList(), 2)), {}, {}, {})
@@ -79,6 +76,20 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
                                 transformStateStore = remember { ViewerTransformStateStore() }, onBack = {})
                             4 -> LibrarySettingsScreen(onBack = {}, onNavigateToExcludedFolders = {})
                             5 -> DisplaySettingsScreen(onBack = {})
+                            else -> null
+                    }
+                    GalleryPageCheckHost(
+                        page = page,
+                        fullScreenContent = mode.intValue == 3,
+                        containerColor = if (dark.value) Color(0xff121212) else Color.White,
+                        modifier = Modifier.onGloballyPositioned { root = it.boundsInWindow() },
+                    ) {
+                        when (mode.intValue) {
+                            0 -> QuickSortTargetsSheet(targets, selectedTargets = selected.value, dockTop = false, columns = 4,
+                                albumUses = listOf(QuickSortAlbumUse("fixture-job", targets[0].stableKey, System.currentTimeMillis())),
+                                onDockTopChange = {}, onApply = {}, onDismiss = {},
+                                onTargetsChange = { selected.value = it },
+                                onPanelHeightChange = { panelHeight = it.value * density })
                             6 -> ThemeSettingsGroup(title = "Theme")
                             7, 8 -> SortDialog(visible = true, onDismissRequest = {},
                                 title = if (mode.intValue == 7) "Sort Photos" else "Sort Albums",
@@ -296,6 +307,33 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         settle(280)
         return instrumentation.uiAutomation.takeScreenshot().also { bitmap ->
             File(output, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
+}
+
+/** Renders factory-based production pages through the same sole shell as the app. */
+@Composable
+internal fun GalleryPageCheckHost(
+    page: GalleryPageContent?,
+    modifier: Modifier = Modifier,
+    fullScreenContent: Boolean = false,
+    containerColor: Color = MaterialTheme.colorScheme.surface,
+    fallbackContent: @Composable BoxScope.() -> Unit = {},
+) {
+    val header = page?.header ?: GalleryHeader(title = {}, visible = false)
+    UnifiedGalleryContainer.instance.Shell(
+        modifier = modifier,
+        containerColor = containerColor,
+        header = header,
+        showHeader = page != null,
+        snackbarHost = { page?.snackbarHost?.invoke() },
+    ) { padding ->
+        Box(
+            Modifier.fillMaxSize().then(
+                if (page != null && !fullScreenContent) Modifier.padding(padding) else Modifier,
+            ),
+        ) {
+            if (page != null) page.content() else fallbackContent()
         }
     }
 }

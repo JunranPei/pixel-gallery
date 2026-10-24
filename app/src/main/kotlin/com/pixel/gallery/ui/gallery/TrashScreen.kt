@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.gallery
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -18,7 +22,6 @@ import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
-import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.components.MediaCollectionTopBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,22 +36,21 @@ fun TrashScreen(
     items: List<GridItem> = emptyList(),
     gridState: LazyGridState = rememberLazyGridState(),
     viewModel: PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val gridColumns by viewModel.gridColumns.collectAsState()
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
+    return GalleryPage(
         topBar = {
-            if (selectedIds.isEmpty()) {
+
                 MediaCollectionTopBar("Recycle Bin", onBack, sortLabel = "Sort Bin", onSort = onSort)
-            }
+
         }
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .galleryContentEdge(),
+                ,
         ) {
         if (items.isEmpty()) {
             Column(

@@ -11,11 +11,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.R
 import com.pixel.gallery.ui.theme.EmphasizedTypography
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibrarySettingsScreen(onBack: () -> Unit, onNavigateToExcludedFolders: () -> Unit) {
-    Scaffold(topBar = { TopAppBar(
+fun LibrarySettingsScreen(onBack: () -> Unit, onNavigateToExcludedFolders: () -> Unit): GalleryPageContent {
+    return GalleryPage(modifier = Modifier.navigationBarsPadding(), topBar = { GalleryHeader(
         title = { Text(stringResource(R.string.library_settings_title), style = EmphasizedTypography.TitleLarge) },
         navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
     ) }) { padding ->

@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.gallery
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,13 +31,13 @@ import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 fun HiddenAlbumsScreen(
     onBack: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
-) {
-    val hiddenFolders by viewModel.hiddenFolders.collectAsState()
+): GalleryPageContent {
     val hiddenAlbums by viewModel.hiddenAlbums.collectAsState()
 
-    Scaffold(
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { 
                     Text(
                         "Hidden Albums",
@@ -48,9 +52,7 @@ fun HiddenAlbumsScreen(
             )
         }
     ) { innerPadding ->
-        // A hidden path can temporarily have no resolved album rows while the
-        // media index catches up. Treat that state as empty instead of showing
-        // a blank LazyColumn with no content or explanation.
+        // This list includes every saved hidden root, including empty folders.
         if (hiddenAlbums.isEmpty()) {
             Column(
                 modifier = Modifier
@@ -79,7 +81,7 @@ fun HiddenAlbumsScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                items(hiddenAlbums) { album ->
+                items(hiddenAlbums, key = { it.path }) { album ->
                     ListItem(
                         headlineContent = { Text(album.name) },
                         supportingContent = { Text(album.path) },

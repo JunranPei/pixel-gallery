@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
@@ -65,9 +66,11 @@ internal fun AlbumSearchTitle(
     title: @Composable () -> Unit,
     searchPlaceholder: String,
     clearSearchDescription: String,
+    focusRequested: Boolean,
+    onFocusRequestConsumed: () -> Unit,
     backEnabled: Boolean = true,
 ) {
-    var headerState by remember { mutableStateOf(SearchHeaderState(isSearchMode = isSearchMode)) }
+    var headerState by remember(isSearchMode) { mutableStateOf(SearchHeaderState(isSearchMode = isSearchMode)) }
     var isAnimating by remember { mutableStateOf(false) }
     var widthPx by remember { mutableFloatStateOf(0f) }
     val focusRequester = remember { FocusRequester() }
@@ -80,18 +83,22 @@ internal fun AlbumSearchTitle(
         }
     }
 
-    LaunchedEffect(isSearchMode) {
-        headerState = SearchHeaderState(isSearchMode = isSearchMode)
-        if (isSearchMode) {
+    LaunchedEffect(isSearchMode, headerState.isSearchMode, focusRequested, backEnabled) {
+        if (isSearchMode && headerState.isSearchMode && focusRequested && backEnabled) {
             focusRequester.requestFocus()
-        } else {
-            focusManager.clearFocus(force = true)
-            if (searchQuery.isNotEmpty()) onSearchQueryChange("")
         }
     }
 
+    fun changeSearchMode(nextMode: Boolean) {
+        if (!nextMode) {
+            focusManager.clearFocus(force = true)
+            if (searchQuery.isNotEmpty()) onSearchQueryChange("")
+        }
+        onSearchModeChange(nextMode)
+    }
+
     BackHandler(enabled = backEnabled && isSearchMode) {
-        onSearchModeChange(false)
+        changeSearchMode(false)
     }
 
     val dragOffsetPx = headerState.dragOffsetPx
@@ -126,7 +133,7 @@ internal fun AlbumSearchTitle(
                         }
                         val nextMode = if (switchPage) !startingState.isSearchMode else startingState.isSearchMode
                         headerState = SearchHeaderState(isSearchMode = nextMode)
-                        if (switchPage) onSearchModeChange(nextMode)
+                        if (switchPage) changeSearchMode(nextMode)
                     } finally {
                         isAnimating = false
                     }
@@ -148,7 +155,10 @@ internal fun AlbumSearchTitle(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
-                    modifier = Modifier.fillMaxSize().focusRequester(focusRequester),
+                    modifier = Modifier.fillMaxSize().focusRequester(focusRequester)
+                        .onFocusChanged {
+                            if (it.isFocused && focusRequested) onFocusRequestConsumed()
+                        },
                     placeholder = { androidx.compose.material3.Text(searchPlaceholder) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = {

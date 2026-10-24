@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.labels
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.material.icons.Icons
@@ -19,7 +23,6 @@ import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.gallery.AlbumSearchTitle
-import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.components.GalleryOverflowButton
 import com.pixel.gallery.ui.components.GalleryMenuRow
@@ -39,25 +42,33 @@ fun LabelPhotosScreen(
     onRemoveFromLabel: (Set<Long>) -> Unit = {},
     onEditLabel: () -> Unit = {},
     isForeground: Boolean = true,
-) {
+): GalleryPageContent {
     var showMenu by remember { mutableStateOf(false) }
     var searchMode by rememberSaveable(label?.id) { mutableStateOf(false) }
     var searchQuery by rememberSaveable(label?.id) { mutableStateOf("") }
+    var searchFocusRequested by remember(label?.id) { mutableStateOf(false) }
     var mediaType by rememberSaveable(label?.id) { mutableStateOf(MediaTypeFilter.ALL) }
     val displayedItems = remember(items, searchQuery, mediaType) {
         filterAlbumGridItems(items, searchQuery, mediaType)
     }
-    Scaffold(contentWindowInsets = WindowInsets(0), topBar = {
-        if (selectedIds.isEmpty()) TopAppBar(
+    return GalleryPage(topBar = {
+        GalleryHeader(
+                fullWidth = searchMode,
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             title = {
                 AlbumSearchTitle(
                     isSearchMode = searchMode,
-                    onSearchModeChange = { searchMode = it },
+                    onSearchModeChange = { enabled ->
+                        if (enabled && !searchMode) searchFocusRequested = true
+                        if (!enabled) searchFocusRequested = false
+                        searchMode = enabled
+                    },
                     searchQuery = searchQuery,
                     onSearchQueryChange = { searchQuery = it },
                     searchPlaceholder = stringResource(R.string.album_search_files),
                     clearSearchDescription = stringResource(R.string.album_clear_search),
+                    focusRequested = searchFocusRequested,
+                    onFocusRequestConsumed = { searchFocusRequested = false },
                     backEnabled = isForeground,
                     title = {
                     Column(Modifier.fillMaxWidth()) {
@@ -102,7 +113,7 @@ fun LabelPhotosScreen(
                     }
             })
     }) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding).galleryContentEdge()) {
+        Box(Modifier.fillMaxSize().padding(padding)) {
             PhotosScreen(items = displayedItems, onNavigateToViewer = onNavigateToViewer, selectedIds = selectedIds,
                 onSelectionChange = onSelectionChange, onToggleSelection = onToggleSelection,
                 columns = columns, onColumnsChange = onColumnsChange, state = gridState,

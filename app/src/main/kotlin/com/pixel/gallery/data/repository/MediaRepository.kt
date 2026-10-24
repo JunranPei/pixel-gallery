@@ -20,6 +20,7 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.local.entity.VaultEntry
 import com.google.gson.Gson
 import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.isInsideMediaFolder
 import com.pixel.gallery.model.renamedAlbumDirectory
 import com.pixel.gallery.model.remapAlbumPath
 import com.pixel.gallery.model.ConflictPolicy
@@ -198,10 +199,14 @@ class MediaRepository @Inject constructor(
 
     val favourites: StateFlow<List<MediaEntry>> = combine(
         mediaDao.observeFavouritesChanges().map { mediaDao.getFavouritesPaged() },
-        settingsRepository.excludedFolders
-    ) { entries, excluded ->
+        settingsRepository.excludedFolders,
+        settingsRepository.hiddenFolders,
+    ) { entries, excluded, hidden ->
+        // Visibility never removes the saved favourite or label memberships.
+        val invisibleFolders = excluded + hidden
         entries.filter { entry ->
-            !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.startsWith(it) }
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") &&
+                invisibleFolders.none { entry.path.isInsideMediaFolder(it) }
         }
     }.stateIn(
         scope = repositoryScope,

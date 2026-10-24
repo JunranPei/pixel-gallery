@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.viewer
 
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
@@ -12,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -365,7 +369,7 @@ internal fun ViewerScreen(
     onOpenLabel: (Long) -> Unit = {},
     allowLabels: Boolean = true,
     reservedIds: Set<Long> = emptySet()
-) {
+): GalleryPageContent {
     val context = LocalContext.current
     val initialIndex = remember(initialId, photos) {
         val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
@@ -779,10 +783,162 @@ internal fun ViewerScreen(
         }
     }
     
+    val headerVisibility by animateFloatAsState(
+        targetValue = if (showUI) 1f else 0f,
+        animationSpec = tween(durationMillis = 150),
+        label = "ViewerHeaderVisibility",
+    )
+    return GalleryPage(
+        topBar = {
+            GalleryHeader(
+                modifier = Modifier
+                    .graphicsLayer {
+                        alpha = headerVisibility
+                        translationY = -size.height * (1f - headerVisibility)
+                    }
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+                        )
+                    ),
+                visible = showUI || headerVisibility > 0f,
+                title = {},
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                actions = {
+                    if (hasMotionPhoto || motionVideoFile != null) {
+                        IconButton(
+                            enabled = !isExtractingMotion,
+                            onClick = {
+                                if (isPlayingMotion) {
+                                    isPlayingMotion = false
+                                } else if (motionVideoFile != null) {
+                                    isPlayingMotion = true
+                                } else {
+                                    val media = currentMedia ?: return@IconButton
+                                    val requestedKey = currentMediaCacheKey ?: return@IconButton
+                                    isExtractingMotion = true
+                                    viewerScope.launch {
+                                        val extracted = withContext(Dispatchers.IO) {
+                                            viewModel.extractMotionVideo(media.path)
+                                        }
+                                        if (latestMediaCacheKey.value == requestedKey) {
+                                            motionVideoFile = extracted
+                                            isPlayingMotion = extracted != null
+                                            isExtractingMotion = false
+                                        } else {
+                                            withContext(Dispatchers.IO) { extracted?.delete() }
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (isPlayingMotion) Icons.Default.MotionPhotosPause else Icons.Default.MotionPhotosOn,
+                                contentDescription = "Motion Photo",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    if (currentIndexTarget != null) {
+                        IconButton(onClick = {
+                            showUI = true
+                            showMenu = true
+                        }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.width(236.dp),
+                        shape = RoundedCornerShape(32.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 6.dp,
+                    ) {
+                        currentIndexTarget?.let { indexTarget ->
+                            val indexReady = imageIndexReady == true
+                            val indexChecking = imageIndexReady == null
+                            val formatName = indexTarget.format.displayName
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        when {
+                                            imageIndexBusy -> "Building $formatName index…"
+                                            indexChecking -> "Checking $formatName index…"
+                                            indexReady -> "Delete $formatName index"
+                                            else -> "Build $formatName index"
+                                        }
+                                    )
+                                },
+                                enabled = !imageIndexBusy && !indexChecking && !isCurrentReserved,
+                                onClick = {
+                                    showMenu = false
+                                    if (indexReady) {
+                                        imageIndexAction = IndexedImageAction.DELETE
+                                    } else {
+                                        imageIndexBusy = true
+                                        val requestedTarget = indexTarget
+                                        viewerScope.launch {
+                                            val detected = withContext(Dispatchers.IO) {
+                                                File(requestedTarget.path).detectImageContent()
+                                                    ?: DetectedImageContent(null, "Unrecognized image format")
+                                            }
+                                            if (currentIndexTarget == requestedTarget) {
+                                                val detectedFormat = detected.indexedFormat
+                                                when {
+                                                    detectedFormat == null -> {
+                                                        unsupportedIndexFormat = detected.displayName
+                                                        imageIndexBusy = false
+                                                    }
+                                                    detectedFormat == requestedTarget.format -> {
+                                                        imageIndexBusy = false
+                                                        imageIndexAction = IndexedImageAction.BUILD
+                                                    }
+                                                    else -> {
+                                                        pendingIndexBuildAfterResolution = true
+                                                        resolvedIndexFormat = detectedFormat
+                                                    }
+                                                }
+                                            } else {
+                                                imageIndexBusy = false
+                                            }
+                                        }
+                                    }
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    navigationIconContentColor = Color.White
+                )
+            )
+        },
+    ) { _ ->
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -1305,159 +1461,6 @@ internal fun ViewerScreen(
             }
         }
 
-        // Top Overlay
-        AnimatedVisibility(
-            visible = showUI,
-            enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { -it },
-            exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { -it },
-            modifier = Modifier.align(Alignment.TopCenter)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
-                        )
-                    )
-                    .windowInsetsPadding(WindowInsets.statusBars)
-            ) {
-                TopAppBar(
-                    title = {},
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                        }
-                    },
-                    actions = {
-                        if (hasMotionPhoto || motionVideoFile != null) {
-                            IconButton(
-                                enabled = !isExtractingMotion,
-                                onClick = {
-                                    if (isPlayingMotion) {
-                                        isPlayingMotion = false
-                                    } else if (motionVideoFile != null) {
-                                        isPlayingMotion = true
-                                    } else {
-                                        val media = currentMedia ?: return@IconButton
-                                        val requestedKey = currentMediaCacheKey ?: return@IconButton
-                                        isExtractingMotion = true
-                                        viewerScope.launch {
-                                            val extracted = withContext(Dispatchers.IO) {
-                                                viewModel.extractMotionVideo(media.path)
-                                            }
-                                            if (latestMediaCacheKey.value == requestedKey) {
-                                                motionVideoFile = extracted
-                                                isPlayingMotion = extracted != null
-                                                isExtractingMotion = false
-                                            } else {
-                                                withContext(Dispatchers.IO) { extracted?.delete() }
-                                            }
-                                        }
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlayingMotion) Icons.Default.MotionPhotosPause else Icons.Default.MotionPhotosOn,
-                                    contentDescription = "Motion Photo",
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                        if (currentIndexTarget != null) {
-                            IconButton(onClick = {
-                                showUI = true
-                                showMenu = true
-                            }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                            modifier = Modifier.width(236.dp),
-                            shape = RoundedCornerShape(32.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            tonalElevation = 0.dp,
-                            shadowElevation = 6.dp,
-                        ) {
-                            currentIndexTarget?.let { indexTarget ->
-                                val indexReady = imageIndexReady == true
-                                val indexChecking = imageIndexReady == null
-                                val formatName = indexTarget.format.displayName
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            when {
-                                                imageIndexBusy -> "Building $formatName index…"
-                                                indexChecking -> "Checking $formatName index…"
-                                                indexReady -> "Delete $formatName index"
-                                                else -> "Build $formatName index"
-                                            }
-                                        )
-                                    },
-                                    enabled = !imageIndexBusy && !indexChecking && !isCurrentReserved,
-                                    onClick = {
-                                        showMenu = false
-                                        if (indexReady) {
-                                            imageIndexAction = IndexedImageAction.DELETE
-                                        } else {
-                                            imageIndexBusy = true
-                                            val requestedTarget = indexTarget
-                                            viewerScope.launch {
-                                                val detected = withContext(Dispatchers.IO) {
-                                                    File(requestedTarget.path).detectImageContent()
-                                                        ?: DetectedImageContent(null, "Unrecognized image format")
-                                                }
-                                                if (currentIndexTarget == requestedTarget) {
-                                                    val detectedFormat = detected.indexedFormat
-                                                    when {
-                                                        detectedFormat == null -> {
-                                                            unsupportedIndexFormat = detected.displayName
-                                                            imageIndexBusy = false
-                                                        }
-                                                        detectedFormat == requestedTarget.format -> {
-                                                            imageIndexBusy = false
-                                                            imageIndexAction = IndexedImageAction.BUILD
-                                                        }
-                                                        else -> {
-                                                            pendingIndexBuildAfterResolution = true
-                                                            resolvedIndexFormat = detectedFormat
-                                                        }
-                                                    }
-                                                } else {
-                                                    imageIndexBusy = false
-                                                }
-                                            }
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(
-                                                if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp),
-                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            )
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        navigationIconContentColor = Color.White
-                    )
-                )
-            }
-        }
-
         // Bottom Overlay
         AnimatedVisibility(
             visible = showUI,
@@ -1836,6 +1839,7 @@ internal fun ViewerScreen(
                 },
             )
         }
+    }
     }
 }
 

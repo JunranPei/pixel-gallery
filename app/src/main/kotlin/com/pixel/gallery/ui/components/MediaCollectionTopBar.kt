@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.components
 
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryHeaderSpec
+
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -8,7 +11,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,9 +29,9 @@ fun MediaCollectionTopBar(
     onBack: () -> Unit,
     sortLabel: String = "Sort Photos",
     onSort: () -> Unit,
-) {
+): GalleryHeaderSpec {
     var expanded by remember { mutableStateOf(false) }
-    TopAppBar(
+    return GalleryHeader(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,

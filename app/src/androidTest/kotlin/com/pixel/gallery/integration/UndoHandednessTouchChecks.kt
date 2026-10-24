@@ -24,6 +24,8 @@ import com.pixel.gallery.MainActivity
 import com.pixel.gallery.R
 import com.pixel.gallery.data.repository.SettingsRepository
 import com.pixel.gallery.model.*
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
 import com.pixel.gallery.ui.quicksort.*
 import com.pixel.gallery.ui.settings.DisplaySettingsScreen
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
@@ -66,9 +68,26 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                     PixelGalleryTheme(darkTheme = false, dynamicColor = false) {
                         val containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
                         SideEffect { disabledColor = containerColor }
-                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-                            .then(if (mode.intValue <= 1) Modifier.statusBarsPadding() else Modifier)
-                            .onGloballyPositioned { root = it.boundsInWindow() }) {
+                        val page = when (mode.intValue) {
+                            2 -> DisplaySettingsScreen({})
+                            3 -> PerformanceSettingsScreen({})
+                            6 -> GalleryPage(topBar = { GalleryHeader(title = { Text("Photos") }) }) {
+                                Box(Modifier.fillMaxSize().navigationBarsPadding()
+                                    .onGloballyPositioned { photoViewport = it.boundsInWindow() }) {
+                                    PhotosScreen(emptyList(), {}, quickSort = QuickSortUiConfig(
+                                        targets, false, {}, {}, {}, { _, _ -> }, dockBottomInset = raisedInset.value,
+                                        handedness = hand.value, undoAvailable = false))
+                                }
+                            }
+                            else -> null
+                        }
+                        GalleryPageCheckHost(
+                            page = page,
+                            containerColor = MaterialTheme.colorScheme.background,
+                            modifier = Modifier
+                                .then(if (mode.intValue <= 1) Modifier.statusBarsPadding() else Modifier)
+                                .onGloballyPositioned { root = it.boundsInWindow() },
+                        ) {
                             when (mode.intValue) {
                                 0 -> QuickSortDock(QuickSortUiConfig(if (noTargets.value) emptyList() else targets, false, {}, {}, {}, { _, _ -> },
                                     handedness = hand.value, undoAvailable = undoAvailable.value, onUndo = { undoClicks++ }),
@@ -76,8 +95,6 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                                         .navigationBarsPadding().padding(bottom = 16.dp), { dockHeight = it })
                                 1 -> TransferDestinationContent(targets, emptyList(), "", targets.first(), false, null, null,
                                     {}, {}, {}, {}, { copyClicks++ }, { moveClicks++ }, handedness = hand.value)
-                                2 -> DisplaySettingsScreen({})
-                                3 -> PerformanceSettingsScreen({})
                                 4 -> {
                                     QuickSortTargetsSheet(availableTargets = targets, selectedTargets = targets, dockTop = false,
                                         onDockTopChange = {}, onApply = {}, onDismiss = {})
@@ -94,16 +111,6 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                                     QuickSortTargetsSheet(availableTargets = targets, selectedTargets = targets, dockTop = false,
                                         onDockTopChange = {}, onApply = {}, onDismiss = {})
                                     QuickSortFailureDialog(QuickSortMoveFailure(2, "Storage permission was denied")) {}
-                                }
-                                6 -> Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-                                    Surface(Modifier.fillMaxWidth().height(64.dp)) {
-                                        Box(contentAlignment = Alignment.Center) { Text("Photos") }
-                                    }
-                                    Box(Modifier.weight(1f).onGloballyPositioned { photoViewport = it.boundsInWindow() }) {
-                                        PhotosScreen(emptyList(), {}, quickSort = QuickSortUiConfig(
-                                            targets, false, {}, {}, {}, { _, _ -> }, dockBottomInset = raisedInset.value,
-                                            handedness = hand.value, undoAvailable = false))
-                                    }
                                 }
                             }
                         }

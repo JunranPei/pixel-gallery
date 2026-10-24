@@ -22,6 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import com.pixel.gallery.BuildConfig
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,10 +34,11 @@ fun SettingsScreen(
     onNavigateToLicenses: () -> Unit,
     onNavigateToPerformanceSettings: () -> Unit,
     onNavigateToLibrarySettings: () -> Unit,
-) {
-    Scaffold(
+): GalleryPageContent {
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { 
                     Text(
                         "Settings",

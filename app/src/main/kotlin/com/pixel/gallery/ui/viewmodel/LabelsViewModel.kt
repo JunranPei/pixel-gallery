@@ -16,6 +16,7 @@ import com.pixel.gallery.data.repository.SettingsRepository
 import com.pixel.gallery.model.LabelEditRequest
 import com.pixel.gallery.model.LabelSummary
 import com.pixel.gallery.model.buildLabelSummaries
+import com.pixel.gallery.model.isInsideMediaFolder
 import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.model.AlbumSorter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -143,5 +144,5 @@ internal fun filterVisibleLabelMedia(
     !media.path.contains("/PixelGallery-QuickSortUndo/") &&
         media.contentId !in lockedIds &&
         !media.isTrashed &&
-        invisibleFolders.none { media.path.startsWith(it) }
+        invisibleFolders.none { media.path.isInsideMediaFolder(it) }
 }

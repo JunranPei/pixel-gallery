@@ -4,6 +4,7 @@ import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.text.format.Formatter
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +29,6 @@ import com.pixel.gallery.model.DuplicateScanStage
 import androidx.compose.material3.Button
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,11 +36,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -58,11 +56,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import com.pixel.gallery.R
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 import com.pixel.gallery.model.duplicateMediaTimestamp
 import com.pixel.gallery.data.local.entity.MediaEntry
 import java.io.File
@@ -77,8 +76,8 @@ fun DuplicateReviewDialog(
     onDismiss: () -> Unit,
     onToggle: (Long) -> Unit,
     onConfirm: () -> Unit,
-) {
-    if (state.phase == DuplicatePhase.IDLE) return
+): GalleryPageContent? {
+    if (state.phase == DuplicatePhase.IDLE) return null
 
     var showConfirmation by remember(state.phase) { mutableStateOf(false) }
     val context = LocalContext.current
@@ -91,263 +90,239 @@ fun DuplicateReviewDialog(
     val allCopiesSelected = copyIds.isNotEmpty() && copyIds.all { it in state.selectedIds }
     val canDismiss = state.phase != DuplicatePhase.AWAITING_PERMISSION &&
         state.phase != DuplicatePhase.VERIFYING
+    val showFooter = state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()
 
-    Dialog(
-        onDismissRequest = { if (canDismiss) onDismiss() },
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-            dismissOnBackPress = canDismiss,
-            dismissOnClickOutside = false,
-        ),
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-        ) {
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                containerColor = MaterialTheme.colorScheme.surface,
-                topBar = {
-                    TopAppBar(
-                        title = { Text(stringResource(R.string.duplicate_review_title)) },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                        ),
-                        navigationIcon = {
-                            IconButton(onClick = onDismiss, enabled = canDismiss) {
-                                Icon(Icons.Default.Close, stringResource(R.string.duplicate_close))
-                            }
-                        },
-                    )
+
+    return GalleryPage(
+        topBar = {
+            GalleryHeader(
+                title = { Text(stringResource(R.string.duplicate_review_title)) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                ),
+                navigationIcon = {
+                    IconButton(onClick = onDismiss, enabled = canDismiss) {
+                        Icon(Icons.Default.Close, stringResource(R.string.duplicate_close))
+                    }
                 },
-                bottomBar = {
-                if (state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()) {
-                    Surface(
-                        // Keep this area opaque and aligned with the page background so it
-                        // reads as part of the screen instead of a floating color block.
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 0.dp,
-                        shadowElevation = 0.dp,
-                    ) {
+            )
+        },
+    ) { _ ->
+        BackHandler { if (canDismiss) onDismiss() }
+        Column(
+            Modifier.fillMaxSize()
+                .then(if (showFooter) Modifier else Modifier.navigationBarsPadding()),
+        ) {
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                when {
+                    state.phase == DuplicatePhase.REVIEW && groups.isEmpty() -> {
+                        val checked = ((state.result?.scannedCount ?: 0) - (state.result?.skippedCount ?: 0)).coerceAtLeast(0)
+                        val skipped = state.result?.skippedCount ?: 0
                         Column(
-                            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxSize().padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    stringResource(
-                                        R.string.duplicate_selection_summary,
-                                        selectedEntries.size,
-                                        Formatter.formatShortFileSize(context, selectedBytes),
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(
-                                    onClick = {
-                                        toggleCopySelection(copyIds, state.selectedIds, onToggle)
-                                    },
-                                ) {
-                                    Text(
-                                        stringResource(
-                                            if (allCopiesSelected) {
-                                                R.string.duplicate_clear_selection
-                                            } else {
-                                                R.string.duplicate_select_copies
-                                            },
-                                        ),
-                                    )
-                                }
-                            }
-                            if (!state.canTrash) {
-                                Text(
-                                    stringResource(R.string.duplicate_trash_unavailable),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            Button(
-                                onClick = { showConfirmation = true },
-                                enabled = selectedEntries.isNotEmpty() && state.canTrash,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(stringResource(R.string.duplicate_move_to_bin))
-                            }
+                            Icon(if (skipped > 0 || checked == 0) Icons.Outlined.Info else Icons.Outlined.CheckCircle,
+                                contentDescription = null, modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(16.dp))
+                            Text(stringResource(if (skipped > 0 || checked == 0) R.string.duplicate_check_incomplete else R.string.duplicate_none_found),
+                                style = MaterialTheme.typography.titleMedium,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Spacer(Modifier.height(8.dp))
+                            Text(stringResource(if (skipped > 0) R.string.duplicate_empty_partial else R.string.duplicate_empty_checked,
+                                checked, skipped), style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                     }
-                    }
-                },
-            ) { padding ->
-            when {
-                state.phase == DuplicatePhase.REVIEW && groups.isEmpty() -> {
-                    val checked = ((state.result?.scannedCount ?: 0) - (state.result?.skippedCount ?: 0)).coerceAtLeast(0)
-                    val skipped = state.result?.skippedCount ?: 0
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(padding).padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Icon(if (skipped > 0 || checked == 0) Icons.Outlined.Info else Icons.Outlined.CheckCircle,
-                            contentDescription = null, modifier = Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(16.dp))
-                        Text(stringResource(if (skipped > 0 || checked == 0) R.string.duplicate_check_incomplete else R.string.duplicate_none_found),
-                            style = MaterialTheme.typography.titleMedium,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        Spacer(Modifier.height(8.dp))
-                        Text(stringResource(if (skipped > 0) R.string.duplicate_empty_partial else R.string.duplicate_empty_checked,
-                            checked, skipped), style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    }
-                }
-                !cachedPreview && state.phase in setOf(DuplicatePhase.IDLE, DuplicatePhase.SCANNING,
-                    DuplicatePhase.VALIDATING, DuplicatePhase.AWAITING_PERMISSION, DuplicatePhase.VERIFYING) -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(padding)
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(state.title, style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(24.dp))
-                        val progress = state.progress
-                        if (state.phase == DuplicatePhase.SCANNING && progress != null && progress.total > 0 && progress.stage != DuplicateScanStage.PREPARING) {
-                            LinearProgressIndicator(
-                                progress = { (progress.completed.toFloat() / progress.total).coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth(),
-                                drawStopIndicator = {},
+                    !cachedPreview && state.phase in setOf(DuplicatePhase.IDLE, DuplicatePhase.SCANNING,
+                        DuplicatePhase.VALIDATING, DuplicatePhase.AWAITING_PERMISSION, DuplicatePhase.VERIFYING) -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text(state.title, style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(24.dp))
+                            val progress = state.progress
+                            if (state.phase == DuplicatePhase.SCANNING && progress != null && progress.total > 0 && progress.stage != DuplicateScanStage.PREPARING) {
+                                LinearProgressIndicator(
+                                    progress = { (progress.completed.toFloat() / progress.total).coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    drawStopIndicator = {},
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Text(stringResource(R.string.duplicate_scan_progress, progress.completed, progress.total))
+                                if (progress.bytesRead > 0) {
+                                    Text(Formatter.formatShortFileSize(context, progress.bytesRead),
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else {
+                                CircularProgressIndicator()
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                stringResource(
+                                    when (state.phase) {
+                                        DuplicatePhase.VALIDATING -> R.string.duplicate_validating
+                                        DuplicatePhase.AWAITING_PERMISSION -> R.string.duplicate_awaiting_permission
+                                        DuplicatePhase.VERIFYING -> R.string.duplicate_verifying
+                                        else -> when (progress?.stage) {
+                                            DuplicateScanStage.PREPARING -> R.string.duplicate_preparing
+                                            DuplicateScanStage.INVENTORY -> R.string.duplicate_inventory
+                                            DuplicateScanStage.SAMPLING -> R.string.duplicate_sampling
+                                            else -> R.string.duplicate_scanning
+                                        }
+                                    },
+                                ),
                             )
                             Spacer(Modifier.height(12.dp))
-                            Text(stringResource(R.string.duplicate_scan_progress, progress.completed, progress.total))
-                            if (progress.bytesRead > 0) {
-                                Text(Formatter.formatShortFileSize(context, progress.bytesRead),
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        } else {
-                            CircularProgressIndicator()
+                            Text(
+                                stringResource(R.string.duplicate_scan_short),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                         }
-                        Spacer(Modifier.height(16.dp))
+                    }
+
+                    state.phase == DuplicatePhase.REVIEW || cachedPreview -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            item("summary") {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Text(state.title, style = MaterialTheme.typography.titleMedium)
+                                    if (cachedPreview) {
+                                        Text(stringResource(R.string.duplicate_index_updating), style = MaterialTheme.typography.bodyMedium)
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                    }
+                                    Text(stringResource(R.string.duplicate_scan_short), style = MaterialTheme.typography.bodyMedium)
+                                    Text(stringResource(R.string.duplicate_keeper_rule), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (!cachedPreview) {
+                                        Text(stringResource(R.string.duplicate_scan_summary, state.result?.scannedCount ?: 0, groups.size), style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    val skipped = state.result?.skippedCount ?: 0
+                                    if (skipped > 0) {
+                                        Text(
+                                            stringResource(R.string.duplicate_scan_skipped, skipped),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    }
+                                    if (groups.isEmpty() && !cachedPreview) {
+                                        Text(
+                                            stringResource(R.string.duplicate_none_found),
+                                            style = MaterialTheme.typography.titleMedium,
+                                        )
+                                    }
+                                }
+                            }
+                            groups.forEachIndexed { index, group ->
+                                item("group-${group.keeper.contentId}") {
+                                    DuplicateGroupCard(
+                                        index = index,
+                                        group = group,
+                                        selectedIds = state.selectedIds,
+                                        enabled = !cachedPreview,
+                                        onToggle = { id -> if (!cachedPreview) onToggle(id) },
+                                    )
+                                }
+                            }
+                            item("end") { Spacer(Modifier.height(16.dp)) }
+                        }
+                    }
+
+                    state.phase == DuplicatePhase.COMPLETE || state.phase == DuplicatePhase.ERROR -> {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            item {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                ) {
+                                    Text(state.title, style = MaterialTheme.typography.titleMedium)
+                                    if (state.phase == DuplicatePhase.ERROR) {
+                                        Text(
+                                            stringResource(R.string.duplicate_failed),
+                                            style = MaterialTheme.typography.headlineSmall,
+                                        )
+                                        state.error?.let { Text(it) }
+                                    } else {
+                                        Text(
+                                            stringResource(
+                                                if (state.cancelled) R.string.duplicate_cleanup_cancelled
+                                                else R.string.duplicate_cleanup_complete,
+                                            ),
+                                            style = MaterialTheme.typography.headlineSmall,
+                                        )
+                                    }
+                                    Text(stringResource(R.string.duplicate_removed_summary, state.removedCount))
+                                    if (state.skippedCount > 0) {
+                                        Text(stringResource(R.string.duplicate_cleanup_skipped, state.skippedCount))
+                                    }
+                                    if (state.removedCount > 0) {
+                                        Text(stringResource(R.string.duplicate_restore_hint))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (showFooter) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
                             stringResource(
-                                when (state.phase) {
-                                    DuplicatePhase.VALIDATING -> R.string.duplicate_validating
-                                    DuplicatePhase.AWAITING_PERMISSION -> R.string.duplicate_awaiting_permission
-                                    DuplicatePhase.VERIFYING -> R.string.duplicate_verifying
-                                    else -> when (progress?.stage) {
-                                        DuplicateScanStage.PREPARING -> R.string.duplicate_preparing
-                                        DuplicateScanStage.INVENTORY -> R.string.duplicate_inventory
-                                        DuplicateScanStage.SAMPLING -> R.string.duplicate_sampling
-                                        else -> R.string.duplicate_scanning
-                                    }
-                                },
+                                R.string.duplicate_selection_summary,
+                                selectedEntries.size,
+                                Formatter.formatShortFileSize(context, selectedBytes),
                             ),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
                         )
-                        Spacer(Modifier.height(12.dp))
+                        TextButton(
+                            onClick = {
+                                toggleCopySelection(copyIds, state.selectedIds, onToggle)
+                            },
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (allCopiesSelected) {
+                                        R.string.duplicate_clear_selection
+                                    } else {
+                                        R.string.duplicate_select_copies
+                                    },
+                                ),
+                            )
+                        }
+                    }
+                    if (!state.canTrash) {
                         Text(
-                            stringResource(R.string.duplicate_scan_short),
-                            style = MaterialTheme.typography.bodyMedium,
+                            stringResource(R.string.duplicate_trash_unavailable),
+                            style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                }
-
-                state.phase == DuplicatePhase.REVIEW || cachedPreview -> {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(padding),
+                    Button(
+                        onClick = { showConfirmation = true },
+                        enabled = selectedEntries.isNotEmpty() && state.canTrash,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        item("summary") {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                Text(state.title, style = MaterialTheme.typography.titleMedium)
-                                if (cachedPreview) {
-                                    Text(stringResource(R.string.duplicate_index_updating), style = MaterialTheme.typography.bodyMedium)
-                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                                }
-                                Text(stringResource(R.string.duplicate_scan_short), style = MaterialTheme.typography.bodyMedium)
-                                Text(stringResource(R.string.duplicate_keeper_rule), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (!cachedPreview) {
-                                    Text(stringResource(R.string.duplicate_scan_summary, state.result?.scannedCount ?: 0, groups.size), style = MaterialTheme.typography.bodyMedium)
-                                }
-                                val skipped = state.result?.skippedCount ?: 0
-                                if (skipped > 0) {
-                                    Text(
-                                        stringResource(R.string.duplicate_scan_skipped, skipped),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                }
-                                if (groups.isEmpty() && !cachedPreview) {
-                                    Text(
-                                        stringResource(R.string.duplicate_none_found),
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
-                                }
-                            }
-                        }
-                        groups.forEachIndexed { index, group ->
-                            item("group-${group.keeper.contentId}") {
-                                DuplicateGroupCard(
-                                    index = index,
-                                    group = group,
-                                    selectedIds = state.selectedIds,
-                                    enabled = !cachedPreview,
-                                    onToggle = { id -> if (!cachedPreview) onToggle(id) },
-                                )
-                            }
-                        }
-                        item("end") { Spacer(Modifier.height(16.dp)) }
+                        Text(stringResource(R.string.duplicate_move_to_bin))
                     }
-                }
-
-                state.phase == DuplicatePhase.COMPLETE || state.phase == DuplicatePhase.ERROR -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
-                        item {
-                            Column(
-                                modifier = Modifier.padding(24.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                            ) {
-                                Text(state.title, style = MaterialTheme.typography.titleMedium)
-                                if (state.phase == DuplicatePhase.ERROR) {
-                                    Text(
-                                        stringResource(R.string.duplicate_failed),
-                                        style = MaterialTheme.typography.headlineSmall,
-                                    )
-                                    state.error?.let { Text(it) }
-                                } else {
-                                    Text(
-                                        stringResource(
-                                            if (state.cancelled) R.string.duplicate_cleanup_cancelled
-                                            else R.string.duplicate_cleanup_complete,
-                                        ),
-                                        style = MaterialTheme.typography.headlineSmall,
-                                    )
-                                }
-                                Text(stringResource(R.string.duplicate_removed_summary, state.removedCount))
-                                if (state.skippedCount > 0) {
-                                    Text(stringResource(R.string.duplicate_cleanup_skipped, state.skippedCount))
-                                }
-                                if (state.removedCount > 0) {
-                                    Text(stringResource(R.string.duplicate_restore_hint))
-                                }
-                            }
-                        }
-                    }
-                }
                 }
             }
         }

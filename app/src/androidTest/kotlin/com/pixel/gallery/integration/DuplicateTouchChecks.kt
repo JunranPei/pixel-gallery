@@ -141,8 +141,9 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
                         val state by viewModel.state.collectAsState()
                         val display = resultOverride.value?.let { state.copy(phase = DuplicatePhase.REVIEW, result = it) }
                             ?: if (showCachedPreview.value) state.copy(phase = DuplicatePhase.SCANNING) else state
-                        DuplicateReviewDialog(display,
+                        val page = DuplicateReviewDialog(display,
                             {}, viewModel::toggle, viewModel::confirm)
+                        GalleryPageCheckHost(page)
                     }
                 }
             }

@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.labels
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.AlbumSelectionTopBar
 import androidx.activity.compose.BackHandler
@@ -43,7 +47,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import com.pixel.gallery.ui.components.AlbumSortDialog
 import com.pixel.gallery.ui.gallery.AlbumSearchTitle
-import com.pixel.gallery.ui.components.galleryContentEdge
 
 @Composable
 fun labelDisplayName(label: LabelEntry): String =
@@ -66,7 +69,7 @@ fun LabelsScreen(
     sortMode: AlbumSortOrder = AlbumSortOrder.NAME_ASC,
     onSortModeChange: (AlbumSortOrder) -> Unit = {},
     isForeground: Boolean = true,
-) {
+): GalleryPageContent {
     var showNameDialog by remember { mutableStateOf(false) }
     var editingLabel by remember { mutableStateOf<LabelEntry?>(null) }
     var deletingLabels by remember { mutableStateOf(emptyList<LabelEntry>()) }
@@ -83,6 +86,7 @@ fun LabelsScreen(
     var showSortDialog by remember { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchMode by rememberSaveable { mutableStateOf(false) }
+    var searchFocusRequested by remember { mutableStateOf(false) }
     val gridState = rememberLazyGridState()
     val gridColumns = columns.coerceIn(2, 6)
     val sortedLabels = remember(labels, searchQuery) {
@@ -90,8 +94,7 @@ fun LabelsScreen(
         labels.filter { query.isEmpty() || it.label.name.contains(query, ignoreCase = true) }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
+    return GalleryPage(
         topBar = {
             if (selectionMode) {
                 AlbumSelectionTopBar(
@@ -106,16 +109,24 @@ fun LabelsScreen(
                     onDelete = { deletingLabels = labels.filter { it.label.id in selectedIds }.map { it.label } },
                 )
             } else {
-            TopAppBar(
+            GalleryHeader(
+                fullWidth = searchMode,
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 title = {
                     AlbumSearchTitle(
                         isSearchMode = searchMode,
-                        onSearchModeChange = { searchMode = it },
+                        onSearchModeChange = { enabled ->
+                            if (enabled && !searchMode) searchFocusRequested = true
+                            if (!enabled) searchFocusRequested = false
+                            searchMode = enabled
+                        },
                         searchQuery = searchQuery,
                         onSearchQueryChange = { searchQuery = it },
                         searchPlaceholder = stringResource(R.string.labels_search),
                         clearSearchDescription = stringResource(R.string.album_clear_search),
+                        focusRequested = searchFocusRequested,
+                        onFocusRequestConsumed = { searchFocusRequested = false },
+                        backEnabled = isForeground,
                         title = {
                             Text(
                                 stringResource(R.string.labels_title),
@@ -147,7 +158,7 @@ fun LabelsScreen(
             }
         }
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding).galleryContentEdge()) {
+        Box(Modifier.fillMaxSize().padding(padding)) {
             AlbumGrid(
                 columns = gridColumns,
                 onColumnsChange = onColumnsChange,
@@ -200,7 +211,7 @@ fun LabelsScreen(
                 }
             }
         }
-    }
+
     if (showNameDialog) {
         var name by remember(editingLabel?.id) { mutableStateOf(editingLabel?.name.orEmpty()) }
         var attempted by remember { mutableStateOf(false) }
@@ -264,5 +275,7 @@ fun LabelsScreen(
                 showSortDialog = false
             },
         )
+    }
+
     }
 }

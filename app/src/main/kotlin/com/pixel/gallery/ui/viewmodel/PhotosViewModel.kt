@@ -19,6 +19,7 @@ import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.model.AlbumSorter
 import com.pixel.gallery.model.compareNaturalNames
 import com.pixel.gallery.model.chronologicalTimestamp
+import com.pixel.gallery.model.isInsideMediaFolder
 import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.TransferMode
@@ -77,8 +78,9 @@ class PhotosViewModel @Inject constructor(
 
     val allPhotos: StateFlow<List<MediaEntry>> = repository.allEntries
 
-    val hiddenFolders: StateFlow<Set<String>> = settingsRepository.hiddenFolders
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    // Wait for saved visibility before publishing media; an empty placeholder
+    // could briefly expose hidden files while preferences are loading.
+    private val hiddenFolders: Flow<Set<String>> = settingsRepository.hiddenFolders
 
     val photoSortOrder: StateFlow<PhotoSortOrder> = settingsRepository.photoSortOrder
         .map { runCatching { PhotoSortOrder.valueOf(it) }.getOrDefault(PhotoSortOrder.DATE_DESC) }
@@ -96,7 +98,7 @@ class PhotosViewModel @Inject constructor(
 
     private val orderedMedia = resumedState.flatMapLatest { resumed ->
         if (!resumed) emptyFlow() else combine(allPhotos, hiddenFolders, photoSortOrder) { all, hidden, sort ->
-            val visible = all.filter { entry -> !hidden.any { entry.path.startsWith(it) } }
+            val visible = all.filter { entry -> hidden.none { entry.path.isInsideMediaFolder(it) } }
             OrderedMedia(sortMedia(visible, sort), sort)
         }
     }.flowOn(Dispatchers.Default)
@@ -340,15 +342,17 @@ class PhotosViewModel @Inject constructor(
         hiddenFolders,
         albumSortOrder
     ) { all, hidden, sort ->
-        val grouped = all.filter { entry ->
-            hidden.any { entry.path.startsWith(it) }
-        }.groupBy { 
-            getParentFolderName(it.path)
-        }.map { (name, entries) ->
-            val firstEntry = entries.first()
-            val parentPath = if (firstEntry.path.lastIndexOf('/') > 0) firstEntry.path.substring(0, firstEntry.path.lastIndexOf('/')) else ""
-            val lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L
-            Album(name, parentPath, firstEntry.uri, entries.size, lastModified)
+        // Saved roots must remain manageable even when empty or not indexed.
+        // Keep the exact saved path so Unhide removes the matching setting.
+        val grouped = hidden.map { root ->
+            val entries = all.filter { it.path.isInsideMediaFolder(root) }
+            Album(
+                name = java.io.File(root).name.ifBlank { root },
+                path = root,
+                coverUri = entries.firstOrNull()?.uri.orEmpty(),
+                itemCount = entries.size,
+                lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L,
+            )
         }
         AlbumSorter.shared.sortAlbums(grouped, sort)
     }

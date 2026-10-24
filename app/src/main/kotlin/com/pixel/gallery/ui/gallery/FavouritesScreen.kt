@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.gallery
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -29,14 +33,13 @@ fun FavouritesScreen(
     items: List<GridItem> = emptyList(),
     gridState: LazyGridState = rememberLazyGridState(),
     viewModel: PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val gridColumns by viewModel.gridColumns.collectAsState()
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
+    return GalleryPage(
         topBar = {
-            if (selectedIds.isEmpty()) {
-                TopAppBar(
+
+                GalleryHeader(
                     title = { 
                         Text(
                             "Favourites",
@@ -49,7 +52,7 @@ fun FavouritesScreen(
                         }
                     }
                 )
-            }
+
         }
     ) { innerPadding ->
         if (items.isEmpty()) {
