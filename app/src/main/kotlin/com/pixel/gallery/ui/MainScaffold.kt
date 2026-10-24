@@ -109,6 +109,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
@@ -118,6 +119,7 @@ import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+
 import kotlinx.coroutines.withContext
 import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.ui.transfer.TransferDestinationScreen
@@ -131,6 +133,28 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+/**
+ * A top-bar overlay that deliberately reports zero height to the parent Scaffold.
+ *
+ * Route Scaffolds own their normal bars. Selection bars are drawn over those bars
+ * in this one stable host, so entering/leaving selection never changes the content
+ * measurement or reconstructs the route underneath it.
+ */
+@Composable
+private fun StableSelectionBarOverlay(content: @Composable () -> Unit) {
+    Layout(
+        content = content,
+        modifier = Modifier.fillMaxWidth(),
+    ) { measurables, constraints ->
+        val placeable = measurables.firstOrNull()?.measure(
+            constraints.copy(minHeight = 0),
+        )
+        layout(constraints.maxWidth, 0) {
+            placeable?.place(0, 0)
+        }
+    }
+}
 
 // Height of the toolbar + gap, used to pad content so last items aren't hidden
 private val FloatingBarHeight = 80.dp
@@ -1119,6 +1143,7 @@ CenterAlignedTopAppBar(
                 ),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
+            StableSelectionBarOverlay {
             if (albumSelectionMode) {
                 AlbumSelectionTopBar(
                     count = selectedAlbumPaths.size,
@@ -1143,7 +1168,11 @@ CenterAlignedTopAppBar(
                         )
                     },
                 )
-            } else if (selectionMode && currentScreen !is Screen.TransferDestination) {
+            } else if (
+                selectionMode &&
+                    currentScreen !is Screen.TransferDestination &&
+                    currentScreen != Screen.Labels
+            ) {
                 if (currentScreen == Screen.Trash || currentScreen == Screen.LockedFolder) {
                     val currentMediaIds = if (currentScreen == Screen.Trash) {
                         trash.mapTo(linkedSetOf()) { it.contentId }
@@ -1357,6 +1386,7 @@ CenterAlignedTopAppBar(
                     }
                     )
                 }
+            }
             }
         }
     ) { innerPadding ->

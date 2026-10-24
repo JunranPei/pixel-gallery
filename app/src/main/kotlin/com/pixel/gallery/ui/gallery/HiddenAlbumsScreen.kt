@@ -48,7 +48,10 @@ fun HiddenAlbumsScreen(
             )
         }
     ) { innerPadding ->
-        if (hiddenFolders.isEmpty()) {
+        // A hidden path can temporarily have no resolved album rows while the
+        // media index catches up. Treat that state as empty instead of showing
+        // a blank LazyColumn with no content or explanation.
+        if (hiddenAlbums.isEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
