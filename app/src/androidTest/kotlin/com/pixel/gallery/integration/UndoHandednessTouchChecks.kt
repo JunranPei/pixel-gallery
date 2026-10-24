@@ -39,6 +39,7 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
     private val mode = mutableIntStateOf(0)
     private val hand = mutableStateOf(Handedness.RIGHT)
     private val undoAvailable = mutableStateOf(true)
+    private val noTargets = mutableStateOf(false)
     private val raisedInset = mutableStateOf(0.dp)
     private var disabledColor = 0
     private val targets = (1..3).map { TransferDestination("hand-fixture-$it", "Album $it", "/Pictures/HandFixture/$it") }
@@ -69,7 +70,7 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
                             .then(if (mode.intValue <= 1) Modifier.statusBarsPadding() else Modifier)
                             .onGloballyPositioned { root = it.boundsInWindow() }) {
                             when (mode.intValue) {
-                                0 -> QuickSortDock(QuickSortUiConfig(targets, false, {}, {}, {}, { _, _ -> },
+                                0 -> QuickSortDock(QuickSortUiConfig(if (noTargets.value) emptyList() else targets, false, {}, {}, {}, { _, _ -> },
                                     handedness = hand.value, undoAvailable = undoAvailable.value, onUndo = { undoClicks++ }),
                                     gestures, emptySet(), Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                                         .navigationBarsPadding().padding(bottom = 16.dp), { dockHeight = it })
@@ -141,6 +142,24 @@ internal class UndoHandednessTouchChecks(private val instrumentation: Instrument
             }
             disabledBitmap.recycle()
             snapshot("quick-sort-no-undo")
+
+            instrumentation.runOnMainSync { noTargets.value = true }
+            settle()
+            val emptyDisabled = requireNode { it.contentDescription?.toString() == undoDescription }
+            check(dockHeight > 0) { "Empty-target Undo was not laid out" }
+            check(gestures.targetBounds.isEmpty())
+            tap(bounds(emptyDisabled))
+            check(undoClicks == 2) { "Unavailable empty-target Undo executed" }
+            snapshot("quick-sort-empty-targets-undo-disabled")
+            instrumentation.runOnMainSync { undoAvailable.value = true }
+            settle()
+            val emptyEnabled = requireNode { it.contentDescription?.toString() == undoDescription }
+            check(emptyEnabled.isEnabled)
+            tap(bounds(emptyEnabled))
+            check(undoClicks == 3) { "Available empty-target Undo did not execute" }
+            snapshot("quick-sort-empty-targets-undo-enabled")
+            instrumentation.runOnMainSync { noTargets.value = false; undoAvailable.value = false }
+            settle()
 
             // Exercise PhotosScreen's actual dock placement with less room than the
             // full dock requires. Album capsules retain their height while the top clips.

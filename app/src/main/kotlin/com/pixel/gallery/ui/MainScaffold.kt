@@ -464,6 +464,9 @@ fun MainScaffold(
     }
 
     val currentScreen = navigationStack.last()
+    // A destination picker overlays its source viewer instead of disposing it.
+    // Retaining this same composition also preserves the current page and zoom.
+    val visibleViewer = navigationStack.lastOrNull { it !is Screen.TransferDestination } as? Screen.Viewer
     // A viewer belongs to its underlying grid; another album or Home starts a different scope.
     val quickSortScope = navigationStack.lastOrNull { it !is Screen.Viewer }
     val activeLabelId = when (val labelSource = navigationStack.lastOrNull { it !is Screen.TransferDestination }) {
@@ -651,12 +654,12 @@ fun MainScaffold(
     val toggleQuickSort: () -> Unit = {
         quickSortEnabled = !quickSortEnabled
         if (quickSortEnabled) {
+            quickTargetsPanelHeight = 0.dp
             quickSortOwner = quickSortScope
             photosViewModel.setQuickSortDockTop(false)
             showQuickTargets = true
         } else {
             showQuickTargets = false
-            quickTargetsPanelHeight = 0.dp
         }
     }
     // Keep user order, while refreshing covers from the current album inventory.
@@ -669,18 +672,19 @@ fun MainScaffold(
         dockTop = false,
         onDockTopChange = {},
         onReorderTargets = photosViewModel::setQuickSortTargets,
-        onManageTargets = { showQuickTargets = true },
+        onManageTargets = {
+            if (!showQuickTargets) quickTargetsPanelHeight = 0.dp
+            showQuickTargets = true
+        },
         onMove = { ids, destination ->
             quickSortViewModel.enqueue(allPhotos.filter { it.contentId in ids }, destination, onQuickEnqueued, quickSortSessionId)
         },
-        // Do not draw the dock at the screen edge during the first frame of
-        // the chooser. It is measured immediately by the sheet; reserving a
-        // temporary off-screen inset prevents a one-frame overlap.
-        dockBottomInset = if (showQuickTargets && quickTargetsPanelHeight == 0.dp) {
-            1000.dp
-        } else {
-            quickTargetsPanelHeight
-        },
+        // Start at the compact header's real height, without an off-screen
+        // placeholder or an automatic expansion. Only a user's drag changes it.
+        dockBottomInset = if (showQuickTargets) {
+            if (quickTargetsPanelHeight > 0.dp) quickTargetsPanelHeight
+            else 68.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        } else 0.dp,
         reservedIds = quickQueue.reservedIds,
         handedness = handedness,
         undoAvailable = undoableQuickJob != null,
@@ -698,7 +702,6 @@ fun MainScaffold(
             retainEmptyAlbumSelection = false
             quickSortEnabled = false
             showQuickTargets = false
-            quickTargetsPanelHeight = 0.dp
         },
     ) else null
 
@@ -757,7 +760,6 @@ fun MainScaffold(
         } else if (quickSortEnabled && currentScreen !is Screen.Viewer) {
             quickSortEnabled = false
             showQuickTargets = false
-            quickTargetsPanelHeight = 0.dp
         } else if (currentScreen == Screen.Home && isHomeSearchMode) {
             homeHeaderTransition = HomeHeaderTransitionState()
         } else {
@@ -784,7 +786,6 @@ fun MainScaffold(
             quickSortEnabled = false
             quickSortOwner = null
             showQuickTargets = false
-            quickTargetsPanelHeight = 0.dp
         }
     }
 
@@ -1356,15 +1357,13 @@ CenterAlignedTopAppBar(
                     }
                     )
                 }
-            } else if (currentScreen == Screen.Home) {
-                homeTopBar()
             }
         }
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = if (currentScreen is Screen.Viewer) 0.dp else innerPadding.calculateTopPadding())
+                .padding(top = if (visibleViewer != null) 0.dp else innerPadding.calculateTopPadding())
                 .then(if (selectionMode || albumSelectionMode) Modifier.galleryContentEdge() else Modifier)
         ) {
             // Screen content management
@@ -1373,15 +1372,14 @@ CenterAlignedTopAppBar(
                     it !is Screen.Viewer && it !is Screen.TransferDestination
                 }.coerceAtLeast(0)
             }
-            // Keep every screen in the active navigation stack composed. Moving inactive
-            // layers outside the clipped viewport preserves their remembered UI and grid
-            // state. The active route is last in draw order; inactive routes are placed
-            // outside the clipped viewport and removed from accessibility semantics.
+            // Keep every screen in the active navigation stack composed. Retaining each
+            // route in place preserves its remembered UI and grid state; only the active
+            // layer is visible and exposed to accessibility.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .drawWithContent {
-                        if (currentScreen !is Screen.Viewer) drawContent()
+                        if (visibleViewer == null) drawContent()
                     }
             ) {
                 navigationStack.forEachIndexed { screenIndex, screen ->
@@ -1398,7 +1396,12 @@ CenterAlignedTopAppBar(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .graphicsLayer {
-                                            translationX = if (isActiveRoute) 0f else size.width
+                                            // Keep every route (including its top bar) composed in
+                                            // place. Switching the active layer only changes its
+                                            // visibility; translating a retained Scaffold in and
+                                            // out of the viewport causes a one-frame top-bar flash.
+                                            translationX = 0f
+                                            alpha = if (isActiveRoute) 1f else 0f
                                         }
                                         .then(
                                             if (isActiveRoute) Modifier else Modifier.clearAndSetSemantics {},
@@ -1407,8 +1410,23 @@ CenterAlignedTopAppBar(
                                     when (screen) {
                 Screen.Home -> {
                     Scaffold(
+                        modifier = Modifier.then(
+                            if (
+                                currentScreen == Screen.Home &&
+                                !albumSelectionMode &&
+                                selectedIds.isEmpty() &&
+                                !isHomeSearchMode && !quickSortEnabled
+                            ) {
+                                Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
+                            } else {
+                                Modifier
+                            },
+                        ),
                         containerColor = appShellColor,
                         contentWindowInsets = WindowInsets(0),
+                        topBar = {
+                            if (!albumSelectionMode && selectedIds.isEmpty()) homeTopBar()
+                        },
                     ) { homePadding ->
                         Box(
                             modifier = Modifier
@@ -1678,9 +1696,9 @@ CenterAlignedTopAppBar(
                 }
             }
 
-            // Overlay full-screen viewer if active
-            if (currentScreen is Screen.Viewer) {
-                val viewer = currentScreen
+            // Keep the full-screen viewer composed underneath its destination picker.
+            if (visibleViewer != null) {
+                val viewer = visibleViewer
                 val cachedAlbumPhotos = viewer.albumName?.let(albumPhotoLists::get)
                 // [Legacy/Original Code commented out per user request - avoid emptyList() black screen flash on enter]
                 // val photosForViewer by remember(viewer, allPhotos, favourites, trash, vault) {
@@ -1978,9 +1996,9 @@ CenterAlignedTopAppBar(
             selectedTargets = quickPreferences.targets,
             dockTop = quickPreferences.dockTop,
             onDockTopChange = photosViewModel::setQuickSortDockTop,
-            onApply = { photosViewModel.setQuickSortTargets(it); showQuickTargets = false; quickTargetsPanelHeight = 0.dp },
-            onDismiss = { showQuickTargets = false; quickTargetsPanelHeight = 0.dp },
+            onApply = { photosViewModel.setQuickSortTargets(it) },
             onPanelHeightChange = { quickTargetsPanelHeight = it },
+            onDismiss = { showQuickTargets = false; quickSortEnabled = false; selectedIds = emptySet() },
             onTargetsChange = photosViewModel::setQuickSortTargets,
             onCreateAlbum = { parent, name, onResult -> photosViewModel.createTransferFolder(parent, name, onResult) },
             columns = gridColumns,

@@ -61,7 +61,7 @@ import com.pixel.gallery.ui.components.GalleryScrollbar
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
 import java.util.Locale
 
-/** Non-modal chooser: selections apply immediately and the photo dock remains available above it. */
+/** Shared half-page chooser; changes apply immediately without moving the photo dock. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickSortTargetsSheet(
@@ -128,9 +128,23 @@ fun QuickSortTargetsSheet(
     val gridColumns = columns.coerceIn(2, 6)
     SelectionBottomSheet(
         title = stringResource(R.string.qs_targets_title),
-        subtitle = stringResource(R.string.qs_targets_selected_count, draft.size),
         onDismiss = onDismiss,
         confirmDismiss = { !isCreating },
+        persistent = true,
+        showBackButton = false,
+        onPanelHeightChange = onPanelHeightChange,
+        headerActions = {
+            InputChip(
+                selected = true,
+                onClick = { draft = emptyList(); onTargetsChange(emptyList()) },
+                enabled = draft.isNotEmpty() && !isCreating,
+                label = { Text(stringResource(R.string.qs_targets_selected_count, draft.size), maxLines = 1) },
+                trailingIcon = { Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_selection), Modifier.size(18.dp)) },
+                shape = CircleShape,
+                border = null,
+                modifier = Modifier.padding(end = 16.dp),
+            )
+        },
     ) {
         SelectionSearchField(
             query = query,

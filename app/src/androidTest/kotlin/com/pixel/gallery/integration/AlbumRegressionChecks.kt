@@ -72,10 +72,28 @@ internal class AlbumRegressionChecks(private val instrumentation: Instrumentatio
 
             // A collapsed panel must disappear when the album's toolbar back button is tapped.
             click("More"); click("Quick sort"); await("Choose albums")
+            val compactHeader = Rect().also(find("Choose albums")!!::getBoundsInScreen)
+            settle(1000)
+            check(compactHeader == Rect().also(find("Choose albums")!!::getBoundsInScreen)) {
+                "Quick Sort moved upward without a user drag"
+            }
+            check(find("New album") == null) { "Quick Sort expanded automatically" }
             snapshot("quick-sort-in-album-collapsed")
+            val quickSortTile = awaitTile()
+            event(MotionEvent.ACTION_DOWN, quickSortTile.centerX().toFloat(), quickSortTile.centerY().toFloat())
+            SystemClock.sleep(650)
+            event(MotionEvent.ACTION_UP, quickSortTile.centerX().toFloat(), quickSortTile.centerY().toFloat())
+            await("1 selected")
+            click("Clear selection"); await(album)
+            check(find("Clear selection") == null && find("Choose albums") != null) {
+                "Selection could not be exited while Quick Sort was compact"
+            }
+            snapshot("quick-sort-selection-can-exit")
             click("Back"); awaitAbsent("Choose albums")
             check(find("Albums") != null)
-            tap(540f, 700f); awaitAbsent("Choose albums")
+            // The enlarged sample inventory now places an album at y=700.
+            // Use the actual gap above the first cover row for the blank tap.
+            tap(540f, 450f); awaitAbsent("Choose albums")
             snapshot("album-exit-no-panel")
             reopenAlbum()
             click("More"); await("Quick sort"); click("Quick sort"); await("Choose albums")
@@ -83,15 +101,38 @@ internal class AlbumRegressionChecks(private val instrumentation: Instrumentatio
             drag(540f, header.centerY().toFloat(), 540f, 700f)
             await("New album")
             snapshot("quick-sort-in-album-expanded")
+            val expandedHeader = Rect().also(find("Choose albums")!!::getBoundsInScreen)
+            drag(540f, expandedHeader.top.toFloat() - 20f, 540f, 2320f)
+            await("Choose albums")
+            check(find("New album") == null) { "Downward drag failed to collapse the chooser" }
+            snapshot("quick-sort-drag-down-keeps-header")
+            back(); awaitAbsent("Choose albums"); await(album)
+            click("More"); click("Quick sort"); await("Choose albums")
+            val reopenedHeader = Rect().also(find("Choose albums")!!::getBoundsInScreen)
+            drag(540f, reopenedHeader.centerY().toFloat(), 540f, 700f)
+            await("New album")
             click("Back"); awaitAbsent("Choose albums")
             snapshot("expanded-album-exit-no-panel")
             reopenAlbum()
             click("More"); await("Quick sort"); back()
             snapshot("reopened-album-no-quick-sort")
             // Normal viewer navigation remains intact after closing selection and sorting.
-            val reopenedTile = awaitTile()
-            tap(reopenedTile.centerX().toFloat(), reopenedTile.centerY().toFloat())
+            await(album)
+            // Target the visible first tile; retained off-screen grids may expose
+            // accessibility rectangles while their semantics are being refreshed.
+            tap(180f, 400f)
             await("Share"); check(find("Clear selection") == null)
+            val shareBounds = Rect().also(find("Share")!!::getBoundsInScreen)
+            drag(540f, shareBounds.centerY().toFloat(), 540f, shareBounds.centerY() - 350f)
+            await("Move")
+            snapshot("viewer-before-move")
+            click("Move"); await("Select album")
+            snapshot("viewer-under-move-half-sheet")
+            back()
+            check(find(album) == null) { "Cancelling Move exited the viewer" }
+            if (find("Share") == null) tap(540f, 1200f)
+            await("Share")
+            snapshot("viewer-after-cancel-move")
             back(); await(album)
             check(find("Choose albums") == null)
             click("Back"); reopenAlbum("QA 03 Large")
@@ -122,8 +163,8 @@ internal class AlbumRegressionChecks(private val instrumentation: Instrumentatio
     }
     private fun awaitTile(): Rect {
         repeat(50) {
-            val tile = nodes().filter { it.isClickable }.map { Rect().also(it::getBoundsInScreen) }
-                .firstOrNull { it.width() > 120 && kotlin.math.abs(it.width() - it.height()) < 10 && it.top > 200 && it.bottom < 1900 }
+            val tile = nodes().filter { it.isClickable && it.isVisibleToUser }.map { Rect().also(it::getBoundsInScreen) }
+                .firstOrNull { it.width() > 120 && kotlin.math.abs(it.width() - it.height()) < 10 && it.top > 200 && it.bottom < 1900 && it.left >= 0 && it.right <= context.resources.displayMetrics.widthPixels }
             if (tile != null) return tile
             settle(150)
         }

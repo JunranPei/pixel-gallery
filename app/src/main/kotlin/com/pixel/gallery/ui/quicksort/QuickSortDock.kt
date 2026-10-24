@@ -120,11 +120,9 @@ internal fun QuickSortDock(
     }
     if (previewTargets.isEmpty()) {
         SideEffect {
-            onMeasuredHeight(0)
             gestures.dockBounds = null
             gestures.targetBounds.clear()
         }
-        return
     }
 
     val duplicateNames = previewTargets.groupingBy { it.displayName }.eachCount()
@@ -150,6 +148,7 @@ internal fun QuickSortDock(
                     stringResource(R.string.qs_undo))
             }
         }
+        if (previewTargets.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Box(
@@ -267,6 +266,7 @@ internal fun QuickSortDock(
             )
         }
     }
+        }
     }
 }
 

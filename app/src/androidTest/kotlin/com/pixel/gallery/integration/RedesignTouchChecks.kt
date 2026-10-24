@@ -66,7 +66,7 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
                     Box(Modifier.fillMaxSize().background(if (dark.value) Color(0xff121212) else Color.White)
                         .onGloballyPositioned { root = it.boundsInWindow() }) {
                         when (mode.intValue) {
-                            0 -> QuickSortTargetsSheet(targets, selectedTargets = selected.value, dockTop = false,
+                            0 -> QuickSortTargetsSheet(targets, selectedTargets = selected.value, dockTop = false, columns = 4,
                                 albumUses = listOf(QuickSortAlbumUse("fixture-job", targets[0].stableKey, System.currentTimeMillis())),
                                 onDockTopChange = {}, onApply = {}, onDismiss = {},
                                 onTargetsChange = { selected.value = it },
