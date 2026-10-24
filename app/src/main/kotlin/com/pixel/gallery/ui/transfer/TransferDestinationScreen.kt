@@ -105,6 +105,9 @@ import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.utils.StorageUtils
 import com.pixel.gallery.ui.components.GalleryScrollbar
+import com.pixel.gallery.ui.home.AlbumCoverCard
+import com.pixel.gallery.ui.components.SelectionGrid
+import com.pixel.gallery.ui.components.SelectionSearchField
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
@@ -461,90 +464,28 @@ internal fun ConflictChoice(
     }
 }
 
-@OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun TransferDestinationCard(
     destination: TransferDestination,
     selected: Boolean,
     showParentPath: Boolean,
-    onClick: () -> Unit
+    columns: Int,
+    enabled: Boolean,
+    onClick: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .clip(ExpressiveShapes.ExtraLargeIncreased)
-            .clickable(onClick = onClick)
-            .padding(4.dp)
+    AlbumCoverCard(
+        title = destination.displayName,
+        subtitle = "${destination.itemCount} items",
+        coverUri = destination.coverUri?.takeIf { it.isNotBlank() },
+        coverModifiedMillis = destination.lastModified,
+        columns = columns,
+        selected = selected,
+        enabled = enabled,
+        onClick = onClick,
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(ExpressiveShapes.ExtraLargeIncreased)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .then(
-                    if (selected) {
-                        Modifier.border(
-                            BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-                            ExpressiveShapes.ExtraLargeIncreased
-                        )
-                    } else Modifier
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            if (destination.coverUri != null) {
-                GlideImage(
-                    model = destination.coverUri,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Icon(
-                    Icons.Default.FolderOpen,
-                    contentDescription = null,
-                    modifier = Modifier.size(52.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            if (selected) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(5.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface
-                ) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = stringResource(R.string.transfer_selected),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(2.dp)
-                    )
-                }
-            }
-        }
-        Text(
-            text = destination.displayName,
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 10.dp)
-        )
-        Text(
-            text = if (destination.itemCount == 1) "1 item" else "${destination.itemCount} items",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 4.dp)
-        )
         if (showParentPath) {
-            Text(
-                text = File(destination.path).parent.orEmpty(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-            )
+            Text(File(destination.path).parent.orEmpty(), style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -596,37 +537,24 @@ fun TransferDestinationContent(
     val gridState = rememberLazyGridState()
     val gridColumns = columns.coerceIn(2, 6)
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = query, onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f), singleLine = true, enabled = !isRunning,
-                placeholder = { Text(stringResource(R.string.transfer_search)) },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, stringResource(R.string.transfer_clear_search)) } },
-                shape = CircleShape,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
-                ),
-            )
-            Surface(onClick = onNewAlbum, enabled = !isRunning, shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.size(56.dp)) {
-                Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.CreateNewFolder, stringResource(R.string.transfer_new_album)) }
-            }
+        SelectionSearchField(
+            query = query,
+            onQueryChange = onQueryChange,
+            placeholder = stringResource(R.string.transfer_search),
+            enabled = !isRunning,
+        ) {
+            androidx.compose.material3.FilledTonalIconButton(
+                onClick = onNewAlbum, enabled = !isRunning,
+                modifier = Modifier.size(48.dp), shape = ExpressiveShapes.LargeIncreased,
+            ) { Icon(Icons.Default.CreateNewFolder, stringResource(R.string.transfer_new_album)) }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(gridColumns), state = gridState,
-                modifier = Modifier.fillMaxSize().pinchToZoomColumns(
-                    currentColumns = gridColumns,
-                    onColumnsChange = onColumnsChange,
-                    minColumns = 2,
-                    maxColumns = 6,
-                ),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 180.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+            SelectionGrid(
+                columns = gridColumns,
+                onColumnsChange = onColumnsChange,
+                state = gridState,
+                bottomPadding = 180.dp,
+                modifier = Modifier.fillMaxSize(),
             ) {
                 if (frequent.isNotEmpty()) {
                     item(key = "frequent-heading", span = { GridItemSpan(maxLineSpan) }) {
@@ -634,7 +562,7 @@ fun TransferDestinationContent(
                     }
                     items(frequent, key = { "frequent-${it.stableKey}" }) { destination ->
                         TransferDestinationCard(destination, destination.stableKey == selectedDestination?.stableKey,
-                            destination.displayName.lowercase() in duplicateNames, onClick = { if (!isRunning) onSelect(destination) })
+                            destination.displayName.lowercase() in duplicateNames, columns = gridColumns, enabled = !isRunning, onClick = { if (!isRunning) onSelect(destination) })
                     }
                 }
                 item(key = "albums-heading", span = { GridItemSpan(maxLineSpan) }) {
@@ -646,7 +574,7 @@ fun TransferDestinationContent(
                 }
                 items(destinations, key = { it.stableKey }) { destination ->
                     TransferDestinationCard(destination, destination.stableKey == selectedDestination?.stableKey,
-                        destination.displayName.lowercase() in duplicateNames, onClick = { if (!isRunning) onSelect(destination) })
+                        destination.displayName.lowercase() in duplicateNames, columns = gridColumns, enabled = !isRunning, onClick = { if (!isRunning) onSelect(destination) })
                 }
                 item(key = "other-folders", span = { GridItemSpan(maxLineSpan) }) {
                     TextButton(onClick = onOtherFolders, enabled = !isRunning) {
@@ -654,11 +582,6 @@ fun TransferDestinationContent(
                     }
                 }
             }
-            GalleryScrollbar(
-                lazyGridState = gridState,
-                layoutModifier = Modifier.align(Alignment.CenterEnd),
-                onDragStateChanged = {},
-            )
             if (isRunning) {
                 Surface(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.extraLarge) {

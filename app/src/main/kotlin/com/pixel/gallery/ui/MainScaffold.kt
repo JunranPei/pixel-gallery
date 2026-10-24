@@ -59,20 +59,20 @@ import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
 import com.pixel.gallery.ui.settings.DisplaySettingsScreen
 import com.pixel.gallery.ui.settings.LibrarySettingsScreen
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.RestoreFromTrash
-import androidx.compose.material.icons.filled.MoreVert
 import kotlinx.coroutines.flow.*
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
+import com.pixel.gallery.ui.viewmodel.TrashSortOrder
 import com.pixel.gallery.model.AlbumSortOrder
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -87,6 +87,11 @@ import androidx.compose.animation.core.tween
 import com.pixel.gallery.ui.components.SortDialog
 import com.pixel.gallery.ui.components.SortCriterion
 import com.pixel.gallery.ui.components.AlbumSortDialog
+import com.pixel.gallery.ui.components.GalleryOverflowButton
+import com.pixel.gallery.ui.components.GalleryMenuRow
+import com.pixel.gallery.ui.components.shareMedia
+import com.pixel.gallery.ui.components.MediaCollectionSelectionTopBar
+import com.pixel.gallery.ui.components.MediaCollectionTopBarAction
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.outlined.FileCopy
@@ -414,6 +419,7 @@ fun MainScaffold(
     val groupedFavourites by photosViewModel.groupedFavourites.collectAsState()
     val trash by photosViewModel.trashedMedia.collectAsState()
     val groupedTrash by photosViewModel.groupedTrashedMedia.collectAsState()
+    val trashSortOrder by photosViewModel.trashSortOrder.collectAsState()
     val vault by photosViewModel.vaultEntries.collectAsState()
     val groupedVault by photosViewModel.groupedVaultEntries.collectAsState()
     val albums by photosViewModel.albums.collectAsState()
@@ -424,11 +430,13 @@ fun MainScaffold(
     val albumSortOrder by photosViewModel.albumSortOrder.collectAsState()
 
     var showPhotoSortDialog by remember { mutableStateOf(false) }
+    var showTrashSortDialog by remember { mutableStateOf(false) }
     var showAlbumSortDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeletePermanentlyConfirm by remember { mutableStateOf(false) }
     var showSelectionMenu by remember { mutableStateOf(false) }
     var isVaultRestoreRunning by remember { mutableStateOf(false) }
+    var isVaultDeleteRunning by remember { mutableStateOf(false) }
 
     // Simple navigation stack
     var navigationStack by rememberSaveable {
@@ -463,9 +471,10 @@ fun MainScaffold(
         is Screen.Viewer -> labelSource.labelId
         else -> null
     }
-    val activeLabelPhotos = remember(activeLabelId, allPhotos, labelMemberships) {
+    val activeLabelPhotos = remember(activeLabelId, allPhotos, labelMemberships, vault) {
         val ids = labelMemberships.filter { it.labelId == activeLabelId }.mapTo(hashSetOf()) { it.contentId }
-        allPhotos.filter { it.contentId in ids }
+        val lockedIds = vault.mapTo(hashSetOf()) { it.contentId }
+        allPhotos.filter { it.contentId in ids && it.contentId !in lockedIds }
     }
     val favouriteLabelName = stringResource(R.string.labels_favourites)
     val labelNamesByMedia = remember(labelEntries, labelMemberships, favouriteLabelName) {
@@ -787,11 +796,12 @@ fun MainScaffold(
     // It reacts only to nested-scroll events; there is no polling or background loop.
     val homeTopBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
 
-    LaunchedEffect(isHomeSearchMode) {
-        if (isHomeSearchMode) {
+    LaunchedEffect(isHomeSearchMode, selectionMode, albumSelectionMode) {
+        if (isHomeSearchMode || selectionMode || albumSelectionMode) {
             // A focused search field must not remain partially collapsed from the
             // list's previous scroll position.
             homeTopBarScrollBehavior.state.heightOffset = 0f
+            homeTopBarScrollBehavior.state.contentOffset = 0f
         }
     }
 
@@ -820,6 +830,8 @@ fun MainScaffold(
     val selectedEntries = remember(selectedIds, allPhotos, trash, vault) {
         (allPhotos + trash + vault).filter { selectedIds.contains(it.contentId) }
     }
+    val selectedTrashEntries = remember(selectedIds, trash) { trash.filter { it.contentId in selectedIds } }
+    val selectedVaultEntries = remember(selectedIds, vault) { vault.filter { it.contentId in selectedIds } }
 
     val homeTopBar: @Composable () -> Unit = {
 CenterAlignedTopAppBar(
@@ -873,71 +885,6 @@ CenterAlignedTopAppBar(
                                                 modifier = Modifier.align(Alignment.Center),
                                                 style = EmphasizedTypography.HeadlineMedium,
                                             )
-                                            Box(modifier = Modifier.align(Alignment.CenterEnd)) {
-                                                IconButton(onClick = { showMenu = !showMenu }) {
-                                                    Icon(
-                                                        Icons.Default.MoreVert,
-                                                        contentDescription = "More",
-                                                    )
-                                                }
-                                                HomeOverflowMenu(
-                                                    expanded = showMenu,
-                                                    mediaType = homeMediaType,
-                                                    onMediaTypeChange = { type ->
-                                                        showMenu = false
-                                                        if (type != homeMediaType) {
-                                                            homeMediaType = type
-                                                            selectedIds = emptySet()
-                                                            scope.launch {
-                                                                recentsGridState.scrollToItem(0)
-                                                                albumsGridState.scrollToItem(0)
-                                                                photoSearchGridState.scrollToItem(0)
-                                                                albumSearchGridState.scrollToItem(0)
-                                                            }
-                                                        }
-                                                    },
-                                                    onDismissRequest = { showMenu = false },
-                                                    showQuickSort = homePagerState.currentPage == 0 && !quickSortEnabled,
-                                                    sortLabel = if (homePagerState.currentPage == 0) "Sort photos" else "Sort albums",
-                                                    duplicateLabel = stringResource(
-                                                        if (homePagerState.currentPage == 0) R.string.duplicate_find_all
-                                                        else R.string.duplicate_find_each_album,
-                                                    ),
-                                                    canFindDuplicates = allPhotos.size > 1,
-                                                    onQuickSort = {
-                                                        showMenu = false
-                                                        toggleQuickSort()
-                                                    },
-                                                    onSort = {
-                                                        showMenu = false
-                                                        if (homePagerState.currentPage == 0) showPhotoSortDialog = true
-                                                        else showAlbumSortDialog = true
-                                                    },
-                                                    onFindDuplicates = {
-                                                        showMenu = false
-                                                        val isPhotosPage = homePagerState.currentPage == 0
-                                                        duplicateViewModel.start(
-                                                            allPhotos,
-                                                            if (isPhotosPage) DeduplicationScope.ALL_FILES else DeduplicationScope.WITHIN_ALBUMS,
-                                                            context.getString(
-                                                                if (isPhotosPage) R.string.duplicate_scope_all else R.string.duplicate_scope_each_album,
-                                                            ),
-                                                        )
-                                                    },
-                                                    onHiddenAlbums = {
-                                                        showMenu = false
-                                                        navigationStack = navigationStack + Screen.HiddenAlbums
-                                                    },
-                                                    onLockedFolder = {
-                                                        showMenu = false
-                                                        navigationStack = navigationStack + Screen.LockedFolder
-                                                    },
-                                                    onSettings = {
-                                                        showMenu = false
-                                                        navigationStack = navigationStack + Screen.Settings
-                                                    },
-                                                )
-                                            }
                                         } else {
                                             Row(
                                                 modifier = Modifier.fillMaxSize(),
@@ -1086,6 +1033,68 @@ CenterAlignedTopAppBar(
                         scrolledContainerColor = headerColor,
                         titleContentColor = colorScheme.onSurface
                     ),
+                    actions = {
+                        if (!isHomeSearchMode) {
+                                HomeOverflowMenu(
+                                    expanded = showMenu,
+                                    onExpandedChange = { showMenu = it },
+                                    mediaType = homeMediaType,
+                                    onMediaTypeChange = { type ->
+                                        showMenu = false
+                                        if (type != homeMediaType) {
+                                            homeMediaType = type
+                                            selectedIds = emptySet()
+                                            scope.launch {
+                                                recentsGridState.scrollToItem(0)
+                                                albumsGridState.scrollToItem(0)
+                                                photoSearchGridState.scrollToItem(0)
+                                                albumSearchGridState.scrollToItem(0)
+                                            }
+                                        }
+                                    },
+                                    onDismissRequest = { showMenu = false },
+                                    showQuickSort = homePagerState.currentPage == 0 && !quickSortEnabled,
+                                    sortLabel = if (homePagerState.currentPage == 0) "Sort photos" else "Sort albums",
+                                    duplicateLabel = stringResource(
+                                        if (homePagerState.currentPage == 0) R.string.duplicate_find_all
+                                        else R.string.duplicate_find_each_album,
+                                    ),
+                                    canFindDuplicates = allPhotos.size > 1,
+                                    onQuickSort = {
+                                        showMenu = false
+                                        toggleQuickSort()
+                                    },
+                                    onSort = {
+                                        showMenu = false
+                                        if (homePagerState.currentPage == 0) showPhotoSortDialog = true
+                                        else showAlbumSortDialog = true
+                                    },
+                                    onFindDuplicates = {
+                                        showMenu = false
+                                        val isPhotosPage = homePagerState.currentPage == 0
+                                        duplicateViewModel.start(
+                                            allPhotos,
+                                            if (isPhotosPage) DeduplicationScope.ALL_FILES else DeduplicationScope.WITHIN_ALBUMS,
+                                            context.getString(
+                                                if (isPhotosPage) R.string.duplicate_scope_all else R.string.duplicate_scope_each_album,
+                                            ),
+                                        )
+                                    },
+                                    onHiddenAlbums = {
+                                        showMenu = false
+                                        navigationStack = navigationStack + Screen.HiddenAlbums
+                                    },
+                                    onLockedFolder = {
+                                        showMenu = false
+                                        navigationStack = navigationStack + Screen.LockedFolder
+                                    },
+                                    onSettings = {
+                                        showMenu = false
+                                        navigationStack = navigationStack + Screen.Settings
+                                    },
+                                )
+                        }
+                    },
                     windowInsets = WindowInsets.statusBars,
                     scrollBehavior = if (isHomeSearchMode) null else homeTopBarScrollBehavior
                 )
@@ -1099,7 +1108,14 @@ CenterAlignedTopAppBar(
         Scaffold(
             contentWindowInsets = WindowInsets(0), // Manual padding for full control
         containerColor = appShellColor,
-            modifier = Modifier.nestedScroll(scrollBehavior),
+            modifier = Modifier
+                .nestedScroll(scrollBehavior)
+                .then(
+                    if (
+                        currentScreen == Screen.Home && !albumSelectionMode && selectedIds.isEmpty() &&
+                        !isHomeSearchMode && !quickSortEnabled
+                    ) Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection) else Modifier,
+                ),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (albumSelectionMode) {
@@ -1127,68 +1143,63 @@ CenterAlignedTopAppBar(
                     },
                 )
             } else if (selectionMode && currentScreen !is Screen.TransferDestination) {
-                // Contextual Top Bar for Selection
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = headerColor),
-                    title = { com.pixel.gallery.ui.components.SelectedCountBadge(selectedIds.size) },
-                    navigationIcon = {
-                        IconButton(onClick = { selectedIds = emptySet(); retainEmptyAlbumSelection = false }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear selection")
-                        }
-                    },
-                    actions = {
-                        Row(
-                            // Keep each IconButton's 48dp touch target while reducing
-                            // the visual center-to-center spacing to 40dp.
-                            horizontalArrangement = Arrangement.spacedBy((-8).dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (currentScreen is Screen.Photo) {
-                                val currentAlbumName = currentScreen.albumName
-                                val currentAlbumIds = albumPhotoLists[currentAlbumName]
-                                    .orEmpty()
-                                    .map { it.contentId }
-                                    .filterNot { it in quickQueue.reservedIds }
-                                    .toSet()
-                                val isAlbumFullySelected = currentAlbumIds.isNotEmpty() &&
-                                    currentAlbumIds.all { it in selectedIds }
-                                IconButton(
-                                    enabled = currentAlbumIds.isNotEmpty(),
+                if (currentScreen == Screen.Trash || currentScreen == Screen.LockedFolder) {
+                    val currentMediaIds = if (currentScreen == Screen.Trash) {
+                        trash.mapTo(linkedSetOf()) { it.contentId }
+                    } else {
+                        vault.mapTo(linkedSetOf()) { it.contentId }
+                    }
+                    val allSelected = currentMediaIds.isNotEmpty() && currentMediaIds.all { it in selectedIds }
+                    val collectionActions = buildList {
+                        add(
+                            MediaCollectionTopBarAction(
+                                icon = Icons.Filled.CheckCircle,
+                                label = stringResource(if (allSelected) R.string.deselect_all else R.string.select_all),
+                                enabled = currentMediaIds.isNotEmpty(),
+                                onClick = {
+                                    updateSelection(if (allSelected) emptySet() else currentMediaIds)
+                                    retainEmptyAlbumSelection = selectedIds.isEmpty()
+                                },
+                            ),
+                        )
+                        if (currentScreen == Screen.Trash) {
+                            add(
+                                MediaCollectionTopBarAction(
+                                    icon = Icons.Outlined.RestoreFromTrash,
+                                    label = "Restore",
                                     onClick = {
-                                        selectedIds = toggleAlbumSelection(
-                                            selectedIds = selectedIds,
-                                            albumIds = currentAlbumIds,
-                                            reservedIds = quickQueue.reservedIds,
-                                        )
-                                        retainEmptyAlbumSelection = selectedIds.isEmpty()
+                                        photosViewModel.restoreMediaBulk(selectedTrashEntries.map { it.uri })
+                                        selectedIds = emptySet()
                                     },
-                                ) {
-                                    Icon(
-                                        Icons.Filled.CheckCircle,
-                                        contentDescription = stringResource(
-                                            if (isAlbumFullySelected) R.string.deselect_all else R.string.select_all
-                                        ),
-                                    )
-                                }
-                            }
-                            if (currentScreen == Screen.Trash) {
-                                IconButton(onClick = {
-                                    photosViewModel.restoreMediaBulk(selectedEntries.map { it.uri })
-                                    selectedIds = emptySet()
-                                }) {
-                                    Icon(Icons.Outlined.RestoreFromTrash, contentDescription = "Restore")
-                                }
-                                IconButton(onClick = {
-                                    isDeletePermanentlyConfirm = true
-                                    showDeleteConfirmDialog = true
-                                }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete permanently")
-                                }
-                            } else if (currentScreen == Screen.LockedFolder) {
-                                IconButton(
-                                    enabled = !isVaultRestoreRunning,
+                                ),
+                            )
+                            add(
+                                MediaCollectionTopBarAction(
+                                    icon = Icons.Default.Delete,
+                                    label = "Delete permanently",
                                     onClick = {
-                                        val idsToRestore = selectedIds.toList()
+                                        isDeletePermanentlyConfirm = true
+                                        showDeleteConfirmDialog = true
+                                    },
+                                ),
+                            )
+                        } else {
+                            add(
+                                MediaCollectionTopBarAction(
+                                    icon = Icons.Default.Share,
+                                    label = "Share",
+                                    enabled = selectedVaultEntries.isNotEmpty(),
+                                    onClick = { shareMedia(context, selectedVaultEntries) },
+                                ),
+                            )
+                            add(
+                                MediaCollectionTopBarAction(
+                                    icon = Icons.Outlined.LockOpen,
+                                    label = "Move out of Locked Folder",
+                                    enabled = !isVaultRestoreRunning && selectedVaultEntries.isNotEmpty(),
+                                    showProgress = isVaultRestoreRunning,
+                                    onClick = {
+                                        val idsToRestore = selectedVaultEntries.map { it.contentId }
                                         isVaultRestoreRunning = true
                                         photosViewModel.restoreFromVaultBulk(idsToRestore) { result ->
                                             isVaultRestoreRunning = false
@@ -1203,21 +1214,82 @@ CenterAlignedTopAppBar(
                                             }
                                             scope.launch { snackbarHostState.showSnackbar(message) }
                                         }
-                                    }
+                                    },
+                                ),
+                            )
+                            add(
+                                MediaCollectionTopBarAction(
+                                    icon = Icons.Default.Delete,
+                                    label = "Delete permanently",
+                                    enabled = !isVaultDeleteRunning && selectedVaultEntries.isNotEmpty(),
+                                    showProgress = isVaultDeleteRunning,
+                                    onClick = {
+                                        isDeletePermanentlyConfirm = true
+                                        showDeleteConfirmDialog = true
+                                    },
+                                ),
+                            )
+                        }
+                    }
+                    MediaCollectionSelectionTopBar(
+                        count = selectedIds.size,
+                        onClear = { selectedIds = emptySet(); retainEmptyAlbumSelection = false },
+                        actions = collectionActions,
+                        overflowExpanded = showSelectionMenu,
+                        onOverflowExpandedChange = { showSelectionMenu = it },
+                    ) {
+                        if (currentScreen == Screen.Trash) {
+                            GalleryMenuRow("Sort Bin", Icons.AutoMirrored.Filled.Sort, accented = true, onClick = {
+                                showSelectionMenu = false
+                                showTrashSortDialog = true
+                            })
+                        } else {
+                            GalleryMenuRow("Sort Locked Files", Icons.AutoMirrored.Filled.Sort, accented = true, onClick = {
+                                showSelectionMenu = false
+                                showPhotoSortDialog = true
+                            })
+                        }
+                    }
+                } else {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = headerColor),
+                        title = { com.pixel.gallery.ui.components.SelectedCountBadge(selectedIds.size) },
+                        navigationIcon = {
+                            IconButton(onClick = { selectedIds = emptySet(); retainEmptyAlbumSelection = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear selection")
+                            }
+                        },
+                        actions = {
+                            Row(
+                                // Keep each IconButton's 48dp touch target while reducing
+                                // the visual center-to-center spacing to 40dp.
+                                horizontalArrangement = Arrangement.spacedBy((-8).dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                            if (currentScreen is Screen.Photo) {
+                                val currentMediaIds = albumPhotoLists[currentScreen.albumName]
+                                    .orEmpty()
+                                    .map { it.contentId }
+                                    .filterNot { it in quickQueue.reservedIds }
+                                    .toSet()
+                                val isAlbumFullySelected = currentMediaIds.isNotEmpty() &&
+                                    currentMediaIds.all { it in selectedIds }
+                                IconButton(
+                                    enabled = currentMediaIds.isNotEmpty(),
+                                    onClick = {
+                                        updateSelection(if (isAlbumFullySelected) emptySet() else currentMediaIds)
+                                        retainEmptyAlbumSelection = selectedIds.isEmpty()
+                                    },
                                 ) {
-                                    if (isVaultRestoreRunning) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(20.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Icon(
-                                            Icons.Outlined.LockOpen,
-                                            contentDescription = "Move out of Locked Folder"
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Filled.CheckCircle,
+                                        contentDescription = stringResource(
+                                            if (isAlbumFullySelected) R.string.deselect_all else R.string.select_all
+                                        ),
+                                    )
                                 }
-                            } else if (currentScreen is Screen.Label) {
+                            }
+                            if (currentScreen is Screen.Label) {
                                 IconButton(
                                     enabled = selectedIds.isNotEmpty() && !labelsSaving,
                                     onClick = {
@@ -1228,17 +1300,18 @@ CenterAlignedTopAppBar(
                                 ) {
                                     Icon(Icons.Outlined.Label, contentDescription = "Remove from label")
                                 }
+                                GalleryOverflowButton(
+                                    expanded = showSelectionMenu,
+                                    onExpandedChange = { showSelectionMenu = it },
+                                ) {
+                                    GalleryMenuRow("Sort Photos", Icons.AutoMirrored.Filled.Sort, accented = true, onClick = {
+                                        showSelectionMenu = false
+                                        showPhotoSortDialog = true
+                                    })
+                                }
                             } else {
                                 IconButton(enabled = selectedEntries.isNotEmpty(), onClick = {
-                                    val uris = selectedEntries.map {
-                                        FileProvider.getUriForFile(context, context.packageName + ".fileprovider", java.io.File(it.path))
-                                    }
-                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-                                        type = "*/*" // Could be more specific if all are same type
-                                        putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
-                                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(android.content.Intent.createChooser(intent, "Share Media"))
+                                    shareMedia(context, selectedEntries)
                                 }) {
                                     Icon(Icons.Default.Share, contentDescription = "Share")
                                 }
@@ -1262,34 +1335,29 @@ CenterAlignedTopAppBar(
                                 }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete")
                                 }
-                                Box(Modifier.offset(x = (-8).dp)) {
-                                    IconButton(enabled = selectedEntries.isNotEmpty(), onClick = { showSelectionMenu = true }) {
-                                        Icon(Icons.Default.MoreVert, contentDescription = "More")
-                                    }
-                                    DropdownMenu(
-                                        expanded = showSelectionMenu,
-                                        onDismissRequest = { showSelectionMenu = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.label_edit)) },
-                                            onClick = { showSelectionMenu = false; openLabelEditor(selectedIds) },
-                                            leadingIcon = { Icon(Icons.Outlined.Label, null) },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Move to locked folder") },
-                                            onClick = {
-                                                showSelectionMenu = false
-                                                selectedEntries.forEach { photosViewModel.moveToVault(it) }
-                                                selectedIds = emptySet()
-                                            },
-                                            leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) }
-                                        )
-                                    }
+                                GalleryOverflowButton(
+                                    expanded = showSelectionMenu,
+                                    onExpandedChange = { showSelectionMenu = it },
+                                ) {
+                                    GalleryMenuRow(
+                                        stringResource(R.string.label_edit),
+                                        Icons.Outlined.Label,
+                                        accented = true,
+                                        onClick = { showSelectionMenu = false; openLabelEditor(selectedIds) },
+                                    )
+                                    GalleryMenuRow("Move to locked folder", Icons.Outlined.Lock, onClick = {
+                                        showSelectionMenu = false
+                                        selectedEntries.forEach(photosViewModel::moveToVault)
+                                        selectedIds = emptySet()
+                                    })
                                 }
                             }
                         }
                     }
-                )
+                    )
+                }
+            } else if (currentScreen == Screen.Home) {
+                homeTopBar()
             }
         }
     ) { innerPadding ->
@@ -1339,23 +1407,8 @@ CenterAlignedTopAppBar(
                                     when (screen) {
                 Screen.Home -> {
                     Scaffold(
-                        modifier = Modifier.then(
-                            if (
-                                currentScreen == Screen.Home &&
-                                !albumSelectionMode &&
-                                selectedIds.isEmpty() &&
-                                !isHomeSearchMode && !quickSortEnabled
-                            ) {
-                                Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
-                            } else {
-                                Modifier
-                            },
-                        ),
                         containerColor = appShellColor,
                         contentWindowInsets = WindowInsets(0),
-                        topBar = {
-                            if (!albumSelectionMode && selectedIds.isEmpty()) homeTopBar()
-                        },
                     ) { homePadding ->
                         Box(
                             modifier = Modifier
@@ -1485,9 +1538,10 @@ CenterAlignedTopAppBar(
                 is Screen.Label -> {
                     val labelId = screen.labelId
                     val labelState = remember(labelId) { albumGridStates.getOrPut("label:$labelId") { LazyGridState() } }
-                    val routeLabelPhotos = remember(labelId, allPhotos, labelMemberships) {
+                    val routeLabelPhotos = remember(labelId, allPhotos, labelMemberships, vault) {
                         val ids = labelMemberships.filter { it.labelId == labelId }.mapTo(hashSetOf()) { it.contentId }
-                        allPhotos.filter { it.contentId in ids }
+                        val lockedIds = vault.mapTo(hashSetOf()) { it.contentId }
+                        allPhotos.filter { it.contentId in ids && it.contentId !in lockedIds }
                     }
                     val routeGroupedLabelPhotos by produceState<List<GridItem>>(
                         emptyList(), routeLabelPhotos, gridColumns, photoSortOrder,
@@ -1531,11 +1585,7 @@ CenterAlignedTopAppBar(
                 )
                 Screen.Trash -> TrashScreen(
                     onBack = navigateBack,
-                    onEmptyBin = {
-                        selectedIds = trash.map { it.contentId }.toSet()
-                        isDeletePermanentlyConfirm = true
-                        showDeleteConfirmDialog = true
-                    },
+                    onSort = { showTrashSortDialog = true },
                     onNavigateToViewer = { id ->
                         ViewerLoadMetrics.entryRequested(
                             context.applicationContext,
@@ -1554,6 +1604,7 @@ CenterAlignedTopAppBar(
                 Screen.HiddenAlbums -> HiddenAlbumsScreen(onBack = navigateBack)
                 Screen.LockedFolder -> LockedFolderScreen(
                     onBack = navigateBack,
+                    onSort = { showPhotoSortDialog = true },
                     isForeground = isActiveRoute && currentScreen == screen,
                     onNavigateToViewer = { id ->
                         ViewerLoadMetrics.entryRequested(
@@ -1778,7 +1829,7 @@ CenterAlignedTopAppBar(
                         onOpenLabel = { labelId ->
                             navigationStack = navigationStack.dropLast(1) + Screen.Label(labelId)
                         },
-                        allowLabels = viewer.source !in setOf(Screen.ViewerSource.Trash, Screen.ViewerSource.Vault, Screen.ViewerSource.External),
+                        allowLabels = viewer.source !in setOf(Screen.ViewerSource.Trash, Screen.ViewerSource.External),
                         reservedIds = quickQueue.reservedIds,
                         initialId = viewer.initialId,
                         photos = photosForViewer,
@@ -1932,6 +1983,8 @@ CenterAlignedTopAppBar(
             onPanelHeightChange = { quickTargetsPanelHeight = it },
             onTargetsChange = photosViewModel::setQuickSortTargets,
             onCreateAlbum = { parent, name, onResult -> photosViewModel.createTransferFolder(parent, name, onResult) },
+            columns = gridColumns,
+            onColumnsChange = photosViewModel::setGridColumns,
         )
     }
 
@@ -1963,6 +2016,40 @@ CenterAlignedTopAppBar(
             )
         }
 
+        val trashCriteria = remember {
+            listOf(
+                SortCriterion("FILE_DATE", "File date", "Oldest first", "Newest first"),
+                SortCriterion("DELETED_DATE", "Deleted", "Oldest first", "Newest first"),
+                SortCriterion("NAME", "Name", "A to Z", "Z to A"),
+                SortCriterion("SIZE", "Size", "Smallest first", "Largest first"),
+            )
+        }
+
+        val currentTrashCriterion = when (trashSortOrder) {
+            TrashSortOrder.FILE_DATE_DESC, TrashSortOrder.FILE_DATE_ASC -> "FILE_DATE"
+            TrashSortOrder.DELETED_DATE_DESC, TrashSortOrder.DELETED_DATE_ASC -> "DELETED_DATE"
+            TrashSortOrder.NAME_DESC, TrashSortOrder.NAME_ASC -> "NAME"
+            TrashSortOrder.SIZE_DESC, TrashSortOrder.SIZE_ASC -> "SIZE"
+        }
+        val currentTrashDirection = when (trashSortOrder) {
+            TrashSortOrder.FILE_DATE_DESC, TrashSortOrder.DELETED_DATE_DESC,
+            TrashSortOrder.NAME_DESC, TrashSortOrder.SIZE_DESC -> "DESC"
+            TrashSortOrder.FILE_DATE_ASC, TrashSortOrder.DELETED_DATE_ASC,
+            TrashSortOrder.NAME_ASC, TrashSortOrder.SIZE_ASC -> "ASC"
+        }
+        SortDialog(
+            visible = showTrashSortDialog,
+            onDismissRequest = { showTrashSortDialog = false },
+            title = "Sort Bin By",
+            criteria = trashCriteria,
+            initialCriterion = currentTrashCriterion,
+            initialDirection = currentTrashDirection,
+            onConfirm = { criterion, direction ->
+                photosViewModel.setTrashSortOrder(TrashSortOrder.valueOf("${criterion}_${direction}"))
+                showTrashSortDialog = false
+            },
+        )
+
         AnimatedVisibility(
             visible = showPhotoSortDialog,
             enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
@@ -1980,7 +2067,7 @@ CenterAlignedTopAppBar(
             SortDialog(
                 visible = showPhotoSortDialog,
                 onDismissRequest = { showPhotoSortDialog = false },
-                title = "Sort Photos By",
+                title = if (currentScreen == Screen.LockedFolder) "Sort Locked Files By" else "Sort Photos By",
                 criteria = photoCriteria,
                 initialCriterion = currentCriterion,
                 initialDirection = currentDirection,
@@ -2022,11 +2109,27 @@ CenterAlignedTopAppBar(
             isDeletePermanently = isDeletePermanentlyConfirm,
             onConfirm = {
                 if (isDeletePermanentlyConfirm) {
-                    photosViewModel.deleteMediaBulk(selectedEntries.map { it.uri })
+                    when (currentScreen) {
+                        Screen.LockedFolder -> {
+                            isVaultDeleteRunning = true
+                            photosViewModel.deleteFromVaultBulk(selectedVaultEntries.map { it.contentId }) { result ->
+                                isVaultDeleteRunning = false
+                                selectedIds = result.failedIds.toSet()
+                                val message = buildString {
+                                    append("Deleted ${result.deletedIds.size} item")
+                                    if (result.deletedIds.size != 1) append('s')
+                                    if (result.failedIds.isNotEmpty()) append("; ${result.failedIds.size} failed")
+                                }
+                                scope.launch { snackbarHostState.showSnackbar(message) }
+                            }
+                        }
+                        Screen.Trash -> photosViewModel.deleteMediaBulk(selectedTrashEntries.map { it.uri })
+                        else -> photosViewModel.deleteMediaBulk(selectedEntries.map { it.uri })
+                    }
                 } else {
                     photosViewModel.moveToTrashBulk(selectedEntries.map { it.uri })
                 }
-                selectedIds = emptySet()
+                if (currentScreen != Screen.LockedFolder) selectedIds = emptySet()
             }
         )
     }

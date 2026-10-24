@@ -97,6 +97,11 @@ class MediaRepository @Inject constructor(
         val failedIds: List<Long>
     )
 
+    data class VaultDeleteResult(
+        val deletedIds: List<Long>,
+        val failedIds: List<Long>,
+    )
+
     private data class ReplaceJournal(
         val sourcePath: String,
         val targetPath: String,
@@ -285,7 +290,9 @@ class MediaRepository @Inject constructor(
     suspend fun <T> withValidLabelMedia(contentIds: Set<Long>, block: suspend () -> T): T = withMediaMutation {
         withContext(Dispatchers.IO) {
             val entries = contentIds.toList().chunked(400).flatMap { mediaDao.getEntriesByIds(it) }
-            if (entries.map { it.contentId }.toSet() != contentIds) {
+            val entryIds = entries.mapTo(hashSetOf()) { it.contentId }
+            val vaultItems = (contentIds - entryIds).mapNotNull { mediaDao.getVaultEntry(it) }
+            if (entryIds + vaultItems.map { it.id }.toSet() != contentIds) {
                 throw LabelMediaUnavailableException("Some selected files changed; reopen their labels")
             }
             for (entry in entries) {
@@ -298,6 +305,11 @@ class MediaRepository @Inject constructor(
                     } == true
                 }.getOrDefault(false)
                 if (!valid) throw LabelMediaUnavailableException("A selected file moved or was removed; reopen its labels")
+            }
+            for (vaultItem in vaultItems) {
+                if (!java.io.File(vaultItem.vaultPath).isFile) {
+                    throw LabelMediaUnavailableException("A selected locked file is no longer available; reopen its labels")
+                }
             }
             block()
         }
@@ -430,6 +442,28 @@ class MediaRepository @Inject constructor(
                     .onFailure { android.util.Log.e("MediaRepository", "Delete sync failed", it) }
                 true
             }
+        }
+    }
+
+    suspend fun deleteVaultBulk(ids: List<Long>): VaultDeleteResult = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            val deletedIds = mutableListOf<Long>()
+            val failedIds = mutableListOf<Long>()
+            ids.distinct().forEach { id ->
+                val entry = mediaDao.getVaultEntry(id)
+                val file = entry?.let { java.io.File(it.vaultPath) }
+                val deleted = entry != null && file != null &&
+                    (!file.exists() || (file.delete() && !file.exists()))
+                if (deleted) {
+                    mediaDao.deleteVaultEntry(id)
+                    mediaDao.deleteMediaLabels(id)
+                    entry?.let { deletePersistentIndexes(listOf(it.vaultPath)) }
+                    deletedIds += id
+                } else {
+                    failedIds += id
+                }
+            }
+            VaultDeleteResult(deletedIds = deletedIds, failedIds = failedIds)
         }
     }
 
@@ -575,7 +609,8 @@ class MediaRepository @Inject constructor(
             // Update entry to point to vault path for correct rendering
             entry.copy(
                 path = it.vaultPath,
-                uri = Uri.fromFile(java.io.File(it.vaultPath)).toString()
+                uri = Uri.fromFile(java.io.File(it.vaultPath)).toString(),
+                vaultOriginalPath = it.originalPath,
             )
         }.sortedByDescending { it.bestTimestamp }
     }.stateIn(
@@ -1842,7 +1877,12 @@ class MediaRepository @Inject constructor(
                             sourceDateTakenMillis = if (mediaStoreTaken > 0) mediaStoreTaken else null,
                             durationMillis = cursor.getLong(durationColumn),
                             isTrashed = queryTrashed,
-                            bestTimestamp = bestTime
+                            bestTimestamp = bestTime,
+                            trashedAtMillis = when {
+                                !queryTrashed -> 0L
+                                knownEntry?.isTrashed == true -> knownEntry.trashedAtMillis
+                                else -> System.currentTimeMillis()
+                            },
                         )
                     )
                 }

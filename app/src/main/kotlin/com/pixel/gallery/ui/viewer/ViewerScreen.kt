@@ -51,7 +51,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.FileProvider
 import android.content.res.Configuration
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -93,6 +92,7 @@ import io.github.indexedjxl.IndexedJxlStatus
 import io.github.indexedjxl.IndexedJxlStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
+import com.pixel.gallery.ui.components.shareMedia
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -1485,13 +1485,7 @@ internal fun ViewerScreen(
                 ) {
                     ViewerAction(Icons.Outlined.Share, "Share", labelFraction = bottomActionsReveal.fraction) {
                         currentMedia?.let { media ->
-                            val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", File(media.path))
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = media.sourceMimeType
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(intent, "Share Media"))
+                            shareMedia(context, listOf(media))
                         }
                     }
                     ViewerAction(Icons.Outlined.Edit, "Edit", enabled = !isCurrentReserved, labelFraction = bottomActionsReveal.fraction) {
@@ -1659,14 +1653,21 @@ internal fun ViewerScreen(
         DeleteConfirmDialog(
             visible = showDeleteConfirm && !isCurrentReserved,
             onDismissRequest = { showDeleteConfirm = false },
-            title = "Move to Recycle Bin?",
-            message = stringResource(R.string.dialog_restore),
-            confirmLabel = "Move to Bin",
-            isDeletePermanently = false,
+            title = if (allowUnlockFromVault) "Delete permanently?" else "Move to Recycle Bin?",
+            message = if (allowUnlockFromVault) "This action cannot be undone." else stringResource(R.string.dialog_restore),
+            confirmLabel = if (allowUnlockFromVault) "Delete" else "Move to Bin",
+            isDeletePermanently = allowUnlockFromVault,
             onConfirm = {
                 currentMedia?.takeUnless { isCurrentReserved }?.let { media ->
-                    viewModel.moveToTrash(media.contentId, media.uri, media.path)
-                    onBack()
+                    if (allowUnlockFromVault) {
+                        viewModel.deleteFromVaultBulk(listOf(media.contentId)) { result ->
+                            if (media.contentId in result.deletedIds) onBack()
+                            else android.widget.Toast.makeText(context, "Could not delete locked file", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        viewModel.moveToTrash(media.contentId, media.uri, media.path)
+                        onBack()
+                    }
                 }
             }
         )
@@ -1853,8 +1854,9 @@ fun InfoBottomSheet(
     onEditLabels: () -> Unit = {},
     onOpenLabel: (Long) -> Unit = {},
 ) {
-    val metadata = remember(media.path) { viewModel.getMediaMetadata(media.path) }
-    val coords = remember(media.path) { viewModel.getCoordinates(media.path) }
+    val displayPath = media.vaultOriginalPath ?: media.path
+    val metadata = remember(displayPath) { viewModel.getMediaMetadata(displayPath) }
+    val coords = remember(displayPath) { viewModel.getCoordinates(displayPath) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1874,8 +1876,8 @@ fun InfoBottomSheet(
                 modifier = Modifier.padding(bottom = 24.dp)
             )
 
-            InfoRow(Icons.Outlined.Image, media.path.substringAfterLast("/"), "${media.width} x ${media.height} • ${media.sizeBytes / 1024} KB")
-            InfoRow(Icons.Outlined.Folder, "Storage Path", media.path)
+            InfoRow(Icons.Outlined.Image, displayPath.substringAfterLast("/"), "${media.width} x ${media.height} • ${media.sizeBytes / 1024} KB")
+            InfoRow(Icons.Outlined.Folder, "Storage Path", displayPath)
             // Sharing apps can strip EXIF while MediaStore still retains DATE_TAKEN.
             // Fall back through the timestamps already collected for this item.
             val dateTaken = metadata["Date Taken"]
@@ -1899,6 +1901,11 @@ fun InfoBottomSheet(
                         1 -> labels.first()
                         else -> stringResource(R.string.labels_attached_count, labels.size)
                     },
+                    trailing = {
+                        Text(stringResource(if (labels.isEmpty()) R.string.labels_add else R.string.label_edit))
+                    },
+                    onTrailingClick = onEditLabels,
+                    trailingEnabled = canEditLabels,
                 )
                 if (labels.isNotEmpty()) FlowRow(
                     modifier = Modifier.padding(start = 40.dp),

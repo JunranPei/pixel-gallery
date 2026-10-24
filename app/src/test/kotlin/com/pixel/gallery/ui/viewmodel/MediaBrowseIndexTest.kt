@@ -97,6 +97,37 @@ class MediaBrowseIndexTest {
     }
 
     @Test
+    fun binSortSupportsFileDateDeletionDateNameAndSizeWithUnknownDeletionDatesLast() {
+        val trashed = listOf(
+            entries[0].copy(trashedAtMillis = 1_000L),
+            entries[1].copy(trashedAtMillis = 3_000L),
+            entries[2].copy(trashedAtMillis = 0L),
+        )
+        assertEquals(listOf(1L, 2L, 3L), sortTrashEntries(trashed, TrashSortOrder.DELETED_DATE_ASC).map { it.contentId })
+        assertEquals(listOf(2L, 1L, 3L), sortTrashEntries(trashed, TrashSortOrder.DELETED_DATE_DESC).map { it.contentId })
+        assertEquals(listOf(2L, 3L, 1L), sortTrashEntries(trashed, TrashSortOrder.NAME_ASC).map { it.contentId })
+        assertEquals(listOf(1L, 2L, 3L), sortTrashEntries(trashed, TrashSortOrder.SIZE_ASC).map { it.contentId })
+        assertEquals(
+            sortMediaEntries(trashed, PhotoSortOrder.DATE_DESC).map { it.contentId },
+            sortTrashEntries(trashed, TrashSortOrder.FILE_DATE_DESC).map { it.contentId },
+        )
+    }
+
+    @Test
+    fun binNameSortUsesOriginalFilenameInsteadOfTheSystemTrashExpiryPrefix() {
+        val trashed = listOf(
+            entries[0].copy(path = "/Pictures/.trashed-1700000000-zebra.jpg", isTrashed = true),
+            entries[1].copy(path = "/Pictures/.trashed-1800000000-apple.jpg", isTrashed = true),
+        )
+        assertEquals(listOf(2L, 1L), sortTrashEntries(trashed, TrashSortOrder.NAME_ASC).map { it.contentId })
+        assertEquals(listOf(1L, 2L), sortTrashEntries(trashed, TrashSortOrder.NAME_DESC).map { it.contentId })
+        // An ordinary filename that happens to start with the prefix stays literal.
+        assertEquals(listOf(1L, 2L), sortMediaEntries(trashed.map { it.copy(isTrashed = false) }, PhotoSortOrder.NAME_ASC).map { it.contentId })
+        val locked = trashed.map { it.copy(path = "/vault/${it.contentId}", vaultOriginalPath = "/Pictures/${if (it.contentId == 1L) "zebra.jpg" else "apple.jpg"}") }
+        assertEquals(listOf(2L, 1L), sortMediaEntries(locked, PhotoSortOrder.NAME_ASC).map { it.contentId })
+    }
+
+    @Test
     fun cancelledAlbumBuildCannotPoisonItsCache() {
         val index = MediaBrowseIndex.build(entries, 3, PhotoSortOrder.DATE_DESC, zone)
         try {

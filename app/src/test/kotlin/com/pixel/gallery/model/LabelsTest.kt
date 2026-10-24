@@ -3,6 +3,7 @@ package com.pixel.gallery.model
 import com.pixel.gallery.data.local.entity.MediaLabelEntry
 import com.pixel.gallery.data.local.entity.LabelEntry
 import com.pixel.gallery.data.local.entity.MediaEntry
+import com.pixel.gallery.ui.viewmodel.filterVisibleLabelMedia
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -77,6 +78,24 @@ class LabelsTest {
         ).single()
         assertEquals(2, afterHidden.count)
         assertEquals(middle, afterHidden.cover)
+    }
+
+    @Test
+    fun `locked media stays linked but is filtered from label summaries until returned`() {
+        val locked = media(99, 500)
+        val links = listOf(MediaLabelEntry(2, 99), MediaLabelEntry(1, 99))
+        val label = LabelEntry(2, "Secret", "secret")
+
+        val visibleWhileLocked = filterVisibleLabelMedia(listOf(locked), emptySet(), setOf(99L))
+        val hiddenWhileLocked = buildLabelSummaries(listOf(label), links, visibleWhileLocked).single()
+        assertEquals(0, hiddenWhileLocked.count)
+        assertTrue(links.any { it.labelId == 1L && it.contentId == 99L })
+        assertTrue(links.any { it.labelId == 2L && it.contentId == 99L })
+
+        val returnedToLibrary = filterVisibleLabelMedia(listOf(locked), emptySet(), emptySet())
+        val visibleAfterReturn = buildLabelSummaries(listOf(label), links, returnedToLibrary).single()
+        assertEquals(1, visibleAfterReturn.count)
+        assertEquals(locked, visibleAfterReturn.cover)
     }
 
     @Test

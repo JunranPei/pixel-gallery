@@ -39,6 +39,8 @@ import com.pixel.gallery.model.normalizeLabelName
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.components.GalleryScrollbar
+import com.pixel.gallery.ui.components.SelectionGrid
+import com.pixel.gallery.ui.components.SelectionSearchField
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
@@ -70,7 +72,10 @@ fun LabelEditorSheet(
     val matchingLabels = labels.filter {
         normalizeLabelName(if (it.isSystem) favouriteName else it.name).contains(normalizedQuery)
     }
-    val selectedLabels = matchingLabels.filter { label ->
+    // Keep the selected section complete while the lower album grid follows
+    // the search query. A search must never make an already selected label
+    // disappear from the reorder/remove area.
+    val selectedLabels = labels.filter { label ->
         changes[label.id] ?: (labelSelection(label.id, selectedIds, memberships) != LabelSelection.NONE)
     }
     var selectedOrder by rememberSaveable(selectedIds) { mutableStateOf(selectedLabels.map { it.id }) }
@@ -119,24 +124,30 @@ fun LabelEditorSheet(
         if (isSaving) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(stringResource(R.string.labels_search)) },
-                leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                shape = ExpressiveShapes.LargeIncreased,
-                singleLine = true,
-                enabled = !isSaving
+            SelectionSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                placeholder = stringResource(R.string.labels_search),
+                enabled = !isSaving,
             )
-            if (orderedSelectedLabels.isNotEmpty()) {
+            if (orderedSelectedLabels.isNotEmpty() || newNames.isNotEmpty()) {
                 Text(stringResource(R.string.labels_selected), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    newNames.forEach { name ->
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            trailingIcon = {
+                                IconButton(onClick = { newNames = newNames - name }, enabled = !isSaving, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Close, stringResource(R.string.labels_remove_from), modifier = Modifier.size(16.dp))
+                                }
+                            },
+                        )
+                    }
                     orderedSelectedLabels.forEach { label ->
                         val title = if (label.isSystem) favouriteName else label.name
                         AssistChip(
@@ -165,20 +176,12 @@ fun LabelEditorSheet(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(gridColumns),
-                    state = gridState,
-                    modifier = Modifier.fillMaxSize().pinchToZoomColumns(
-                        currentColumns = gridColumns,
-                        onColumnsChange = onColumnsChange,
-                        minColumns = 2,
-                        maxColumns = 6,
-                    ),
-                    contentPadding = PaddingValues(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+            SelectionGrid(
+                columns = gridColumns,
+                onColumnsChange = onColumnsChange,
+                state = gridState,
+                modifier = Modifier.weight(1f, fill = false),
+            ) {
                 item(key = "all-header", span = { GridItemSpan(maxLineSpan) }) {
                     Text(stringResource(R.string.labels_all), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(vertical = 8.dp))
                 }
@@ -192,40 +195,32 @@ fun LabelEditorSheet(
                         }
                     val onToggle = { changes = changes + (label.id to (state != ToggleableState.On)) }
                     val summary = summariesById[label.id]
-                    if (summary != null) {
-                        AlbumCoverCard(
-                            title = if (label.isSystem) favouriteName else label.name,
-                            subtitle = stringResource(R.string.labels_count, summary.count),
-                            coverUri = summary.cover?.uri,
-                            coverModifiedMillis = summary.cover?.dateModifiedMillis ?: 0L,
-                            coverMimeType = summary.cover?.sourceMimeType,
-                            coverSizeBytes = summary.cover?.sizeBytes,
-                            coverRotationDegrees = summary.cover?.sourceRotationDegrees ?: 0,
-                            columns = gridColumns,
-                            selected = state != ToggleableState.Off,
-                            enabled = !isSaving,
-                            onClick = onToggle,
-                            emptyIcon = if (label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
-                        )
-                    } else {
-                        LabelCheckboxRow(
-                            title = if (label.isSystem) favouriteName else label.name,
-                            subtitle = if (state == ToggleableState.Indeterminate) stringResource(R.string.labels_mixed) else null,
-                            state = state,
-                            isFavourite = label.isSystem,
-                            enabled = !isSaving,
-                            onClick = onToggle,
-                        )
-                    }
+                    AlbumCoverCard(
+                        title = if (label.isSystem) favouriteName else label.name,
+                        subtitle = stringResource(R.string.labels_count, summary?.count ?: 0),
+                        coverUri = summary?.cover?.uri,
+                        coverModifiedMillis = summary?.cover?.dateModifiedMillis ?: 0L,
+                        coverMimeType = summary?.cover?.sourceMimeType,
+                        coverSizeBytes = summary?.cover?.sizeBytes,
+                        coverRotationDegrees = summary?.cover?.sourceRotationDegrees ?: 0,
+                        columns = gridColumns,
+                        selected = state != ToggleableState.Off,
+                        enabled = !isSaving,
+                        onClick = onToggle,
+                        emptyIcon = if (label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
+                    )
                 }
                 items(matchingDrafts, key = { "draft:$it" }) { name ->
-                    LabelCheckboxRow(
+                    AlbumCoverCard(
                         title = name,
                         subtitle = stringResource(R.string.labels_pending),
-                        state = ToggleableState.On,
-                        isFavourite = false,
+                        coverUri = null,
+                        coverModifiedMillis = 0L,
+                        columns = gridColumns,
+                        selected = true,
                         enabled = !isSaving,
-                        onClick = { newNames = newNames - name }
+                        onClick = { newNames = newNames - name },
+                        emptyIcon = Icons.Outlined.Label,
                     )
                 }
                 if (canCreate) {
@@ -253,12 +248,6 @@ fun LabelEditorSheet(
                         }
                     }
                 }
-                }
-                GalleryScrollbar(
-                    lazyGridState = gridState,
-                    layoutModifier = Modifier.align(Alignment.CenterEnd),
-                    onDragStateChanged = {},
-                )
             }
     }
 }
@@ -267,30 +256,3 @@ private val LabelEditsSaver = mapSaver<Map<Long, Boolean>>(
     save = { edits -> edits.mapKeys { it.key.toString() } },
     restore = { saved -> saved.entries.associate { it.key.toLong() to (it.value as Boolean) } }
 )
-
-@Composable
-private fun LabelCheckboxRow(
-    title: String,
-    subtitle: String?,
-    state: ToggleableState,
-    isFavourite: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth()
-            .triStateToggleable(state = state, enabled = enabled, role = Role.Checkbox, onClick = onClick)
-            .heightIn(min = 64.dp),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (isFavourite) Icons.Default.Favorite else Icons.Outlined.Label, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            }
-            TriStateCheckbox(state = state, onClick = null, enabled = enabled)
-        }
-    }
-}

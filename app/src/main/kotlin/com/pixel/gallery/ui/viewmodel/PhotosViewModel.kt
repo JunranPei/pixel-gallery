@@ -84,6 +84,10 @@ class PhotosViewModel @Inject constructor(
         .map { runCatching { PhotoSortOrder.valueOf(it) }.getOrDefault(PhotoSortOrder.DATE_DESC) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, PhotoSortOrder.DATE_DESC)
 
+    val trashSortOrder: StateFlow<TrashSortOrder> = settingsRepository.trashSortOrder
+        .map { runCatching { TrashSortOrder.valueOf(it) }.getOrDefault(TrashSortOrder.FILE_DATE_DESC) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, TrashSortOrder.FILE_DATE_DESC)
+
     val albumSortOrder: StateFlow<AlbumSortOrder> = settingsRepository.albumSortOrder
         .map { runCatching { AlbumSortOrder.valueOf(it) }.getOrDefault(AlbumSortOrder.NAME_ASC) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AlbumSortOrder.NAME_ASC)
@@ -262,8 +266,8 @@ class PhotosViewModel @Inject constructor(
         if (resumed) repository.trash else emptyFlow()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, photoSortOrder) { media, cols, sort ->
-        groupMedia(media, cols, sort)
+    val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, trashSortOrder) { media, cols, sort ->
+        groupTrashMedia(media, cols, sort)
     }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -506,6 +510,17 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
+    fun deleteFromVaultBulk(
+        ids: List<Long>,
+        onComplete: (MediaRepository.VaultDeleteResult) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val result = repository.deleteVaultBulk(ids)
+            if (result.deletedIds.isNotEmpty()) refresh()
+            onComplete(result)
+        }
+    }
+
     fun deleteMediaBulk(uris: List<String>) {
         viewModelScope.launch {
             runCatching { repository.deleteMediaBulk(uris) }
@@ -651,6 +666,12 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
+    fun setTrashSortOrder(order: TrashSortOrder) {
+        viewModelScope.launch {
+            settingsRepository.setTrashSortOrder(order.name)
+        }
+    }
+
     fun setAlbumSortOrder(order: AlbumSortOrder) {
         viewModelScope.launch {
             settingsRepository.setAlbumSortOrder(order.name)
@@ -666,6 +687,17 @@ enum class PhotoSortOrder {
     NAME_DESC,
     SIZE_DESC,
     SIZE_ASC
+}
+
+enum class TrashSortOrder {
+    FILE_DATE_DESC,
+    FILE_DATE_ASC,
+    DELETED_DATE_DESC,
+    DELETED_DATE_ASC,
+    NAME_ASC,
+    NAME_DESC,
+    SIZE_DESC,
+    SIZE_ASC,
 }
 
 private val MEDIA_DATE_DESCENDING =
@@ -693,11 +725,68 @@ internal fun buildMediaAlbums(photosList: List<MediaEntry>, sort: AlbumSortOrder
 internal fun sortMediaAlbums(grouped: List<Album>, sort: AlbumSortOrder): List<Album> =
     AlbumSorter.shared.sortAlbums(grouped, sort)
 
-internal fun sortMediaEntries(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> = when (sort) {
-    PhotoSortOrder.DATE_DESC -> entries.sortedWith(MEDIA_DATE_DESCENDING)
-    PhotoSortOrder.DATE_ASC -> entries.sortedWith(MEDIA_DATE_ASCENDING)
-    PhotoSortOrder.NAME_ASC -> entries.sortedWith { e1, e2 -> compareNaturalNames(java.io.File(e1.path).name, java.io.File(e2.path).name) }
-    PhotoSortOrder.NAME_DESC -> entries.sortedWith { e1, e2 -> compareNaturalNames(java.io.File(e2.path).name, java.io.File(e1.path).name) }
-    PhotoSortOrder.SIZE_DESC -> entries.sortedByDescending { it.sizeBytes }
-    PhotoSortOrder.SIZE_ASC -> entries.sortedBy { it.sizeBytes }
+internal class MediaSorter private constructor() {
+    fun sortMedia(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> = when (sort) {
+        PhotoSortOrder.DATE_DESC -> entries.sortedWith(MEDIA_DATE_DESCENDING)
+        PhotoSortOrder.DATE_ASC -> entries.sortedWith(MEDIA_DATE_ASCENDING)
+        PhotoSortOrder.NAME_ASC -> entries.sortedWith { a, b -> compareNaturalNames(a.sortName(), b.sortName()) }
+        PhotoSortOrder.NAME_DESC -> entries.sortedWith { a, b -> compareNaturalNames(b.sortName(), a.sortName()) }
+        PhotoSortOrder.SIZE_DESC -> entries.sortedWith(compareByDescending<MediaEntry> { it.sizeBytes }.thenByDescending { it.contentId })
+        PhotoSortOrder.SIZE_ASC -> entries.sortedWith(compareBy<MediaEntry> { it.sizeBytes }.thenBy { it.contentId })
+    }
+
+    fun sortTrash(entries: List<MediaEntry>, sort: TrashSortOrder): List<MediaEntry> = when (sort) {
+        TrashSortOrder.FILE_DATE_DESC -> sortMedia(entries, PhotoSortOrder.DATE_DESC)
+        TrashSortOrder.FILE_DATE_ASC -> sortMedia(entries, PhotoSortOrder.DATE_ASC)
+        TrashSortOrder.DELETED_DATE_DESC -> entries.sortedWith(
+            compareBy<MediaEntry> { it.trashedAtMillis <= 0L }
+                .thenByDescending { it.trashedAtMillis }
+                .thenByDescending { it.contentId },
+        )
+        TrashSortOrder.DELETED_DATE_ASC -> entries.sortedWith(
+            compareBy<MediaEntry> { it.trashedAtMillis <= 0L }
+                .thenBy { it.trashedAtMillis }
+                .thenBy { it.contentId },
+        )
+        TrashSortOrder.NAME_ASC -> sortMedia(entries, PhotoSortOrder.NAME_ASC)
+        TrashSortOrder.NAME_DESC -> sortMedia(entries, PhotoSortOrder.NAME_DESC)
+        TrashSortOrder.SIZE_DESC -> sortMedia(entries, PhotoSortOrder.SIZE_DESC)
+        TrashSortOrder.SIZE_ASC -> sortMedia(entries, PhotoSortOrder.SIZE_ASC)
+    }
+
+    private fun MediaEntry.sortName(): String {
+        val name = java.io.File(vaultOriginalPath ?: path).name
+        return if (isTrashed && vaultOriginalPath == null) name.replaceFirst(TRASH_FILENAME_PREFIX, "") else name
+    }
+
+    companion object {
+        private val TRASH_FILENAME_PREFIX = Regex("^\\.trashed-[0-9]+-")
+        val shared = MediaSorter()
+    }
+}
+
+internal fun sortMediaEntries(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> =
+    MediaSorter.shared.sortMedia(entries, sort)
+
+internal fun sortTrashEntries(entries: List<MediaEntry>, sort: TrashSortOrder): List<MediaEntry> =
+    MediaSorter.shared.sortTrash(entries, sort)
+
+private fun groupTrashMedia(entries: List<MediaEntry>, columns: Int, sort: TrashSortOrder): List<PhotosViewModel.GridItem> {
+    val ordered = sortTrashEntries(entries, sort)
+    val dateSort = when (sort) {
+        TrashSortOrder.FILE_DATE_ASC, TrashSortOrder.DELETED_DATE_ASC -> PhotoSortOrder.DATE_ASC
+        TrashSortOrder.FILE_DATE_DESC, TrashSortOrder.DELETED_DATE_DESC -> PhotoSortOrder.DATE_DESC
+        else -> null
+    }
+    return if (dateSort == null) ordered.map { PhotosViewModel.GridItem.Photo(it) }
+    else groupOrderedMedia(
+        ordered,
+        columns,
+        dateSort,
+        timestampOf = if (sort == TrashSortOrder.DELETED_DATE_ASC || sort == TrashSortOrder.DELETED_DATE_DESC) {
+            { it.trashedAtMillis }
+        } else {
+            { it.chronologicalTimestamp() }
+        },
+    )
 }

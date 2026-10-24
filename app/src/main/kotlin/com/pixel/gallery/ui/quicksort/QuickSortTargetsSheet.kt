@@ -54,6 +54,11 @@ import androidx.compose.ui.semantics.customActions
 import com.pixel.gallery.model.matchesTransferDestinationQuery
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.theme.ExpressiveShapes
+import com.pixel.gallery.ui.components.SelectionGrid
+import com.pixel.gallery.ui.components.SelectionSearchField
+import com.pixel.gallery.ui.components.SelectionBottomSheet
+import com.pixel.gallery.ui.components.GalleryScrollbar
+import com.pixel.gallery.ui.utils.pinchToZoomColumns
 import java.util.Locale
 
 /** Non-modal chooser: selections apply immediately and the photo dock remains available above it. */
@@ -69,6 +74,8 @@ fun QuickSortTargetsSheet(
     onDismiss: () -> Unit,
     onPanelHeightChange: (Dp) -> Unit = {},
     onTargetsChange: (List<TransferDestination>) -> Unit = {},
+    columns: Int = 3,
+    onColumnsChange: (Int) -> Unit = {},
     onCreateAlbum: (
         parent: TransferDestination,
         name: String,
@@ -78,7 +85,6 @@ fun QuickSortTargetsSheet(
     },
 ) {
     val context = LocalContext.current
-    val density = LocalDensity.current
     var draft by remember { mutableStateOf(selectedTargets.distinctBy { it.stableKey }) }
     LaunchedEffect(selectedTargets) { draft = selectedTargets.distinctBy { it.stableKey } }
     var query by rememberSaveable { mutableStateOf("") }
@@ -119,138 +125,94 @@ fun QuickSortTargetsSheet(
             matchesTransferDestinationQuery(it, search) }
     }
     val selectionIndices = remember(draft) { draft.mapIndexed { index, target -> target.stableKey to index }.toMap() }
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val panel = rememberVerticalRevealState(expanded) { expanded = it }
-    val flingThreshold = with(density) { 600.dp.toPx() }
-
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val collapsedHeight = 68.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val expandedHeight = (maxHeight - 240.dp).coerceAtLeast(collapsedHeight)
-        val range = with(density) { (expandedHeight - collapsedHeight).toPx() }
-        val panelHeight = collapsedHeight + (expandedHeight - collapsedHeight) * panel.fraction
-        val latestRange by rememberUpdatedState(range)
-        val enabled by rememberUpdatedState(!isCreating)
-        val nestedScroll = remember(panel) {
-            object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                    if (enabled && source == NestedScrollSource.UserInput && available.y < 0f && panel.fraction < 1f) {
-                        if (!panel.dragging) panel.start()
-                        val before = panel.fraction
-                        panel.dragBy(available.y, latestRange)
-                        return Offset(0f, -(panel.fraction - before) * latestRange)
-                    }
-                    return Offset.Zero
-                }
-                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                    if (enabled && source == NestedScrollSource.UserInput && available.y > 0f && panel.fraction > 0f) {
-                        if (!panel.dragging) panel.start()
-                        val before = panel.fraction
-                        panel.dragBy(available.y, latestRange)
-                        return Offset(0f, -(panel.fraction - before) * latestRange)
-                    }
-                    return Offset.Zero
-                }
-                override suspend fun onPreFling(available: Velocity): Velocity {
-                    if (!panel.dragging) return Velocity.Zero
-                    panel.finish(available.y, flingThreshold)
-                    return available
-                }
+    val gridColumns = columns.coerceIn(2, 6)
+    SelectionBottomSheet(
+        title = stringResource(R.string.qs_targets_title),
+        subtitle = stringResource(R.string.qs_targets_selected_count, draft.size),
+        onDismiss = onDismiss,
+        confirmDismiss = { !isCreating },
+    ) {
+        SelectionSearchField(
+            query = query,
+            onQueryChange = { query = it },
+            placeholder = stringResource(R.string.qs_search_albums),
+            enabled = !isCreating,
+        ) {
+            FilledTonalIconButton(
+                onClick = { albumName = ""; albumNameError = null; showCreateAlbum = true },
+                enabled = !isCreating,
+                modifier = Modifier.size(48.dp),
+                shape = ExpressiveShapes.LargeIncreased,
+            ) {
+                Icon(Icons.Outlined.CreateNewFolder, stringResource(R.string.qs_targets_new_album))
             }
         }
-        Surface(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(panelHeight)
-                .onGloballyPositioned { coordinates ->
-                    onPanelHeightChange(with(density) { coordinates.size.height.toDp() })
-                },
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 0.dp,
-            shadowElevation = 6.dp,
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-                Column(Modifier.fillMaxWidth().verticalRevealDrag(panel, range, !isCreating, flingThreshold)) {
-                    Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.Center) {
-                        Spacer(Modifier.width(32.dp).height(4.dp).background(MaterialTheme.colorScheme.outlineVariant, CircleShape))
-                    }
-                    Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(R.string.qs_targets_title), style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        InputChip(selected = true,
-                            onClick = { draft = emptyList(); onTargetsChange(emptyList()) },
-                            enabled = draft.isNotEmpty() && !isCreating,
-                            label = { Text(stringResource(R.string.qs_targets_selected_count, draft.size), maxLines = 1) },
-                            trailingIcon = { Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_selection), Modifier.size(18.dp)) },
-                            shape = CircleShape,
-                            colors = InputChipDefaults.inputChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                selectedTrailingIconColor = MaterialTheme.colorScheme.onPrimaryContainer),
-                            border = null)
-                    }
-                }
-                // Keep the grid mounted through the entire drag, including a return from collapsed.
-                if (panel.fraction > 0f) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextField(value = query, onValueChange = { query = it }, modifier = Modifier.weight(1f),
-                            singleLine = true, enabled = !isCreating, shape = CircleShape,
-                            placeholder = { Text(stringResource(R.string.qs_search_albums), style = MaterialTheme.typography.bodySmall) },
-                            leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(20.dp)) },
-                            trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_search))
-                            } },
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            ))
-                        FilledTonalIconButton(onClick = { albumName = ""; albumNameError = null; showCreateAlbum = true },
-                            enabled = !isCreating, modifier = Modifier.size(48.dp), shape = ExpressiveShapes.LargeIncreased) {
-                            Icon(Icons.Outlined.CreateNewFolder, stringResource(R.string.qs_targets_new_album))
-                        }
-                    }
-                    SettingsOptionControl(
-                        options = listOf(
-                            "frequent" to stringResource(R.string.qs_targets_frequent),
-                            "all" to stringResource(R.string.qs_targets_all),
-                            "selected" to stringResource(R.string.qs_targets_selected),
-                        ),
-                        selectedMode = activeTab,
-                        onSelected = { activeTab = it },
-                        enabled = !isCreating,
-                        modifier = Modifier.padding(horizontal = 16.dp),
+            SettingsOptionControl(
+                options = listOf(
+                    "frequent" to stringResource(R.string.qs_targets_frequent),
+                    "all" to stringResource(R.string.qs_targets_all),
+                    "selected" to stringResource(R.string.qs_targets_selected),
+                ),
+                selectedMode = activeTab,
+                onSelected = { activeTab = it },
+                enabled = !isCreating,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = { draft = emptyList(); onTargetsChange(emptyList()) },
+                enabled = draft.isNotEmpty() && !isCreating,
+            ) {
+                Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_selection))
+            }
+        }
+        Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
+            if (filtered.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        stringResource(when {
+                            query.isNotBlank() -> R.string.qs_targets_no_results
+                            activeTab == "frequent" -> R.string.qs_targets_no_frequent
+                            activeTab == "selected" -> R.string.qs_targets_no_selection
+                            else -> R.string.qs_targets_empty
+                        }),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(24.dp),
                     )
-                    if (filtered.isEmpty()) {
-                        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                            Text(stringResource(when {
-                                query.isNotBlank() -> R.string.qs_targets_no_results
-                                activeTab == "frequent" -> R.string.qs_targets_no_frequent
-                                activeTab == "selected" -> R.string.qs_targets_no_selection
-                                else -> R.string.qs_targets_empty
-                            }), color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(24.dp))
-                        }
-                    } else {
-                        LazyVerticalGrid(columns = GridCells.Fixed(4), state = albumGridState,
-                            modifier = Modifier.fillMaxWidth().weight(1f).nestedScroll(nestedScroll),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            items(filtered, key = { it.stableKey }) { target ->
-                                val index = selectionIndices[target.stableKey] ?: -1
-                                QuickSortTargetAlbumCard(target, index, draft.size, parentLabels[target.stableKey], !isCreating,
-                                    onToggle = {
-                                        val next = if (index >= 0) draft.filterNot { it.stableKey == target.stableKey } else draft + target
-                                        draft = next; onTargetsChange(next)
-                                    },
-                                    onMoveEarlier = { val next = moveQuickSortTarget(draft, index, index - 1); draft = next; onTargetsChange(next) },
-                                    onMoveLater = { val next = moveQuickSortTarget(draft, index, index + 1); draft = next; onTargetsChange(next) })
-                            }
-                        }
+                }
+            } else {
+                SelectionGrid(
+                    columns = gridColumns,
+                    onColumnsChange = onColumnsChange,
+                    state = albumGridState,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(filtered, key = { it.stableKey }) { target ->
+                        val index = selectionIndices[target.stableKey] ?: -1
+                        QuickSortTargetAlbumCard(
+                            target = target,
+                            selectionIndex = index,
+                            selectedCount = draft.size,
+                            parentLabel = parentLabels[target.stableKey],
+                            enabled = !isCreating,
+                            columns = gridColumns,
+                            onToggle = {
+                                val next = if (index >= 0) draft.filterNot { it.stableKey == target.stableKey } else draft + target
+                                draft = next
+                                onTargetsChange(next)
+                            },
+                            onMoveEarlier = { val next = moveQuickSortTarget(draft, index, index - 1); draft = next; onTargetsChange(next) },
+                            onMoveLater = { val next = moveQuickSortTarget(draft, index, index + 1); draft = next; onTargetsChange(next) },
+                        )
                     }
                 }
             }
+
         }
     }
 
@@ -337,6 +299,7 @@ private fun QuickSortTargetAlbumCard(
     selectedCount: Int,
     parentLabel: String?,
     enabled: Boolean,
+    columns: Int,
     onToggle: () -> Unit,
     onMoveEarlier: () -> Unit,
     onMoveLater: () -> Unit,
@@ -360,7 +323,7 @@ private fun QuickSortTargetAlbumCard(
         AlbumCoverCard(title = target.displayName,
             subtitle = pluralStringResource(R.plurals.qs_targets_item_count, target.itemCount, target.itemCount),
             coverUri = target.coverUri?.takeIf { it.isNotBlank() }, coverModifiedMillis = target.lastModified,
-            onClick = onToggle, columns = 4, enabled = enabled, coverShape = ExpressiveShapes.LargeIncreased, titleMaxLines = 1) {
+            onClick = onToggle, columns = columns, enabled = enabled, coverShape = ExpressiveShapes.LargeIncreased, titleMaxLines = 1) {
             if (parentLabel != null) Text(parentLabel, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 4.dp, top = 2.dp))

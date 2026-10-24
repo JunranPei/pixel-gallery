@@ -220,16 +220,24 @@ internal fun groupOrderedMedia(
     columns: Int,
     sort: PhotoSortOrder,
     timeZone: TimeZone = TimeZone.getDefault(),
+    timestampOf: (MediaEntry) -> Long = MediaEntry::chronologicalTimestamp,
 ): List<GridItem> {
     val dates = MediaDateBuckets(columns, sort, timeZone)
     val items = ArrayList<GridItem>(orderedEntries.size)
     var lastDate: Long? = null
     orderedEntries.forEach { entry ->
-        val timestamp = entry.chronologicalTimestamp()
-        dates.at(timestamp)?.let { date ->
-            if (lastDate != date.key) {
-                items += GridItem.Header(date.title, timestamp)
-                lastDate = date.key
+        val timestamp = timestampOf(entry)
+        if (timestamp <= 0L) {
+            if (lastDate != Long.MIN_VALUE) {
+                items += GridItem.Header("Unknown date", 0L)
+                lastDate = Long.MIN_VALUE
+            }
+        } else {
+            dates.at(timestamp)?.let { date ->
+                if (lastDate != date.key) {
+                    items += GridItem.Header(date.title, timestamp)
+                    lastDate = date.key
+                }
             }
         }
         items += GridItem.Photo(entry)

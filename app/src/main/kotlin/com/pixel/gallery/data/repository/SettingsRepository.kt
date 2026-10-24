@@ -42,6 +42,7 @@ class SettingsRepository @Inject constructor(
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
     private val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
     private val PHOTO_SORT_ORDER = stringPreferencesKey("photo_sort_order")
+    private val TRASH_SORT_ORDER = stringPreferencesKey("trash_sort_order")
     private val ALBUM_SORT_ORDER = stringPreferencesKey("album_sort_order")
     private val LABEL_SORT_ORDER = stringPreferencesKey("label_sort_order")
     private val RECENT_LABEL_IDS = stringPreferencesKey("recent_label_ids")
@@ -195,6 +196,13 @@ class SettingsRepository @Inject constructor(
         context.dataStore.edit { preferences ->
             preferences[PHOTO_SORT_ORDER] = value
         }
+    }
+
+    val trashSortOrder: Flow<String> = context.dataStore.data
+        .map { preferences -> preferences[TRASH_SORT_ORDER] ?: "FILE_DATE_DESC" }
+
+    suspend fun setTrashSortOrder(value: String) {
+        context.dataStore.edit { preferences -> preferences[TRASH_SORT_ORDER] = value }
     }
 
     val albumSortOrder: Flow<String> = context.dataStore.data

@@ -1,6 +1,5 @@
 package com.pixel.gallery.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
@@ -8,8 +7,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,9 +17,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/** Shared Theme mode control for any number of mutually exclusive options.
- * Selection changes both shape (rounded rectangle to capsule) and color, with a checkmark.
- */
+/** Shared control for mutually exclusive options, with selection shown by shape and color. */
 @Composable
 fun <T> SettingsOptionControl(
     options: List<Pair<T, String>>,
@@ -57,28 +52,13 @@ fun <T> SettingsOptionControl(
                     .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = { onSelected(mode) }),
                 contentAlignment = Alignment.Center,
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    AnimatedVisibility(visible = selected) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier
-                                .padding(end = if (compact) 4.dp else 8.dp)
-                                .size(if (compact) 14.dp else 18.dp),
-                        )
-                    }
-                    Text(
-                        text = label,
-                        style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
-                        color = contentColor,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1,
-                    )
-                }
+                Text(
+                    text = label,
+                    style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+                    color = contentColor,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                )
             }
         }
     }

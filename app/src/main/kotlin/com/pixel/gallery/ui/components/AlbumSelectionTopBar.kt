@@ -1,9 +1,8 @@
 package com.pixel.gallery.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Delete
@@ -69,7 +68,7 @@ fun AlbumSelectionTopBar(
                     }
                 }
                 if (onFindDuplicates != null) {
-                    Box(Modifier.offset(x = (-8).dp)) {
+                    androidx.compose.foundation.layout.Box(Modifier.size(48.dp)) {
                         GalleryOverflowButton(
                             expanded = showMenu,
                             onExpandedChange = { showMenu = it },

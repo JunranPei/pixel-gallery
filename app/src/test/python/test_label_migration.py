@@ -21,6 +21,11 @@ def migration_statements():
             for token in re.findall(r'""".*?"""|INSERT_FAVOURITES_LABEL', block, re.DOTALL)]
 
 
+def migration_4_5_statements():
+    block = MIGRATION.split("internal val MIGRATION_4_5_SQL = listOf(", 1)[1].split("\n)", 1)[0]
+    return re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', block)
+
+
 def query_for(method):
     pattern = r'@Query\("([^"]+)"\)\s*(?:suspend\s+)?fun\s+' + method + r'\('
     return re.search(pattern, DAO).group(1)
@@ -35,12 +40,16 @@ class LabelMigrationTest(unittest.TestCase):
         self.db.executescript("""
             CREATE TABLE media_entries(contentId INTEGER PRIMARY KEY, path TEXT, isTrashed INTEGER);
             CREATE TABLE favourites(id INTEGER PRIMARY KEY NOT NULL);
+            CREATE TABLE trash(id INTEGER PRIMARY KEY NOT NULL, path TEXT NOT NULL, dateMillis INTEGER NOT NULL);
             CREATE TABLE vault(id INTEGER PRIMARY KEY, vaultPath TEXT, originalPath TEXT, entryJson TEXT);
             INSERT INTO media_entries VALUES (10, '/DCIM/a.jpg', 0), (20, '/DCIM/b.jpg', 1);
             INSERT INTO favourites VALUES (10), (20), (99);
+            INSERT INTO trash VALUES (20, '/DCIM/b.jpg', 123456789);
             INSERT INTO vault VALUES (99, '/vault/99', '/DCIM/secret.jpg', '{"contentId":99}');
         """)
         for statement in migration_statements():
+            self.db.execute(statement)
+        for statement in migration_4_5_statements():
             self.db.execute(statement)
         self.db.commit()
 
@@ -55,7 +64,7 @@ class LabelMigrationTest(unittest.TestCase):
         self.assertEqual(2, self.db.execute("SELECT COUNT(*) FROM media_entries").fetchone()[0])
 
     def test_refreshing_or_removing_media_cache_preserves_user_labels(self):
-        self.db.execute("INSERT OR REPLACE INTO media_entries VALUES (10, '/Pictures/a.jpg', 0)")
+        self.db.execute("INSERT OR REPLACE INTO media_entries (contentId, path, isTrashed) VALUES (10, '/Pictures/a.jpg', 0)")
         self.db.execute("DELETE FROM media_entries WHERE contentId=20")
         self.assertEqual(3, self.db.execute("SELECT COUNT(*) FROM media_labels").fetchone()[0])
 
@@ -65,6 +74,14 @@ class LabelMigrationTest(unittest.TestCase):
         self.db.execute("DELETE FROM labels WHERE id=2")
         self.assertEqual(3, self.db.execute("SELECT COUNT(*) FROM media_labels").fetchone()[0])
         self.assertEqual(2, self.db.execute("SELECT COUNT(*) FROM media_entries").fetchone()[0])
+
+    def test_v4_to_v5_migration_preserves_legacy_trash_deletion_date(self):
+        self.assertEqual(123456789, self.db.execute(
+            "SELECT trashedAtMillis FROM media_entries WHERE contentId=20").fetchone()[0])
+        self.assertEqual(0, self.db.execute(
+            "SELECT trashedAtMillis FROM media_entries WHERE contentId=10").fetchone()[0])
+        self.assertIsNone(self.db.execute(
+            "SELECT vaultOriginalPath FROM media_entries WHERE contentId=10").fetchone()[0])
 
     def test_old_favourite_api_sql_uses_the_new_single_source(self):
         self.db.execute(query_for("removeFavourite"), {"id": 10})

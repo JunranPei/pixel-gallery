@@ -22,7 +22,7 @@ import com.pixel.gallery.data.local.entity.VaultEntry
         LabelEntry::class,
         MediaLabelEntry::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class GalleryDatabase : RoomDatabase() {

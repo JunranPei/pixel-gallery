@@ -140,12 +140,25 @@ fun SortDialog(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                SettingsOptionControl(
-                    options = criteria.map { it.id to it.label },
-                    selectedMode = selectedCriterion,
-                    onSelected = { selectedCriterion = it },
-                    unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                )
+                if (criteria.size > 3) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        criteria.chunked(2).forEach { rowCriteria ->
+                            SettingsOptionControl(
+                                options = rowCriteria.map { it.id to it.label },
+                                selectedMode = selectedCriterion,
+                                onSelected = { selectedCriterion = it },
+                                unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            )
+                        }
+                    }
+                } else {
+                    SettingsOptionControl(
+                        options = criteria.map { it.id to it.label },
+                        selectedMode = selectedCriterion,
+                        onSelected = { selectedCriterion = it },
+                        unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(20.dp))
 

@@ -23,7 +23,7 @@ interface MediaDao {
         loadAllPages(::getAllEntriesPage, MediaEntry::contentId)
             .sortedWith(compareByDescending<MediaEntry> { it.bestTimestamp }.thenByDescending { it.contentId })
 
-    @Query("SELECT contentId, path, dateModifiedMillis, isTrashed FROM media_entries WHERE contentId > :afterContentId ORDER BY contentId LIMIT :limit")
+    @Query("SELECT contentId, path, dateModifiedMillis, isTrashed, trashedAtMillis FROM media_entries WHERE contentId > :afterContentId ORDER BY contentId LIMIT :limit")
     suspend fun getKnownEntriesPage(limit: Int, afterContentId: Long): List<KnownEntry>
 
     @Transaction
@@ -131,7 +131,8 @@ data class KnownEntry(
     val contentId: Long,
     val path: String,
     val dateModifiedMillis: Long,
-    val isTrashed: Boolean
+    val isTrashed: Boolean,
+    val trashedAtMillis: Long = 0L,
 )
 
 data class MediaPath(

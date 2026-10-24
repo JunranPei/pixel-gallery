@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.pixel.gallery.data.local.GalleryDatabase
 import com.pixel.gallery.data.local.LABEL_DATABASE_CALLBACK
 import com.pixel.gallery.data.local.MIGRATION_3_4
+import com.pixel.gallery.data.local.MIGRATION_4_5
 import com.pixel.gallery.data.local.dao.LabelDao
 import com.pixel.gallery.data.local.dao.MediaDao
 import dagger.Module
@@ -25,7 +26,7 @@ object DatabaseModule {
             context,
             GalleryDatabase::class.java,
             "gallery_db"
-        ).addMigrations(MIGRATION_3_4)
+        ).addMigrations(MIGRATION_3_4, MIGRATION_4_5)
             .addCallback(LABEL_DATABASE_CALLBACK)
             .build()
     }

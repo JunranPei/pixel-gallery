@@ -6,7 +6,6 @@ import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +19,8 @@ import androidx.fragment.app.FragmentActivity
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
+import com.pixel.gallery.ui.components.MediaCollectionTopBar
+import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -28,6 +29,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun LockedFolderScreen(
     onBack: () -> Unit,
     onNavigateToViewer: (Long) -> Unit,
+    onSort: () -> Unit = {},
     isForeground: Boolean = true,
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
@@ -86,19 +88,7 @@ fun LockedFolderScreen(
         contentWindowInsets = WindowInsets(0),
         topBar = {
             if (selectedIds.isEmpty()) {
-                TopAppBar(
-                    title = { 
-                        Text(
-                            "Locked Folder",
-                            style = EmphasizedTypography.TitleLarge
-                        ) 
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                )
+                MediaCollectionTopBar("Locked Folder", onBack, sortLabel = "Sort Locked Files", onSort = onSort)
             }
         }
     ) { innerPadding ->
@@ -107,6 +97,7 @@ fun LockedFolderScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+                    .galleryContentEdge()
                     .padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -162,7 +153,7 @@ fun LockedFolderScreen(
                 )
             }
         } else {
-            Box(modifier = Modifier.padding(innerPadding)) {
+            Box(modifier = Modifier.padding(innerPadding).galleryContentEdge()) {
                 PhotosScreen(
                     items = items,
                     onNavigateToViewer = onNavigateToViewer,

@@ -1,11 +1,9 @@
 package com.pixel.gallery.ui.gallery
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -21,13 +19,14 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.components.galleryContentEdge
+import com.pixel.gallery.ui.components.MediaCollectionTopBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrashScreen(
     onBack: () -> Unit,
     onNavigateToViewer: (Long) -> Unit,
-    onEmptyBin: () -> Unit = {},
+    onSort: () -> Unit = {},
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
@@ -41,30 +40,7 @@ fun TrashScreen(
         contentWindowInsets = WindowInsets(0),
         topBar = {
             if (selectedIds.isEmpty()) {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                    title = { 
-                        Text(
-                            "Recycle Bin",
-                            style = EmphasizedTypography.TitleLarge
-                        ) 
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        if (items.isNotEmpty()) {
-                            TextButton(onClick = onEmptyBin) {
-                                Text("Empty", color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-                )
+                MediaCollectionTopBar("Recycle Bin", onBack, sortLabel = "Sort Bin", onSort = onSort)
             }
         }
     ) { innerPadding ->

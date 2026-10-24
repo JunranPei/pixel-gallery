@@ -46,15 +46,11 @@ class LabelsViewModel @Inject constructor(
     private val visibleMedia = combine(
         mediaRepository.allEntries,
         settingsRepository.hiddenFolders,
-        settingsRepository.excludedFolders
-    ) { entries, hidden, excluded ->
-        val invisible = hidden + excluded
-        entries.filter { media ->
-            !media.path.contains("/PixelGallery-QuickSortUndo/") &&
-            // Match PhotosViewModel / MediaRepository visibility exactly so
-            // label counts never include files missing from the normal grid.
-            !media.isTrashed && invisible.none { media.path.startsWith(it) }
-        }
+        settingsRepository.excludedFolders,
+        mediaRepository.vaultEntries,
+    ) { entries, hidden, excluded, lockedEntries ->
+        val lockedIds = lockedEntries.mapTo(hashSetOf()) { it.contentId }
+        filterVisibleLabelMedia(entries, hidden + excluded, lockedIds)
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -137,4 +133,15 @@ class LabelsViewModel @Inject constructor(
             }
         }
     }
+}
+
+internal fun filterVisibleLabelMedia(
+    entries: List<MediaEntry>,
+    invisibleFolders: Set<String>,
+    lockedIds: Set<Long>,
+): List<MediaEntry> = entries.filter { media ->
+    !media.path.contains("/PixelGallery-QuickSortUndo/") &&
+        media.contentId !in lockedIds &&
+        !media.isTrashed &&
+        invisibleFolders.none { media.path.startsWith(it) }
 }

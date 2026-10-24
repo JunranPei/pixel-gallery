@@ -41,6 +41,7 @@ import com.pixel.gallery.model.MediaTypeFilter
 @Composable
 fun HomeOverflowMenu(
     expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onDismissRequest: () -> Unit,
     showQuickSort: Boolean,
     sortLabel: String,
@@ -55,7 +56,7 @@ fun HomeOverflowMenu(
     mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     onMediaTypeChange: (MediaTypeFilter) -> Unit = {},
 ) {
-    GalleryOverflowMenu(expanded, onDismissRequest) {
+    GalleryOverflowButton(expanded, onExpandedChange) {
         MediaTypeMenuSection(mediaType, onMediaTypeChange)
         if (showQuickSort) {
             GalleryMenuRow(
