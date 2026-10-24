@@ -109,7 +109,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
@@ -133,28 +132,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
 import kotlin.math.roundToInt
-
-/**
- * A top-bar overlay that deliberately reports zero height to the parent Scaffold.
- *
- * Route Scaffolds own their normal bars. Selection bars are drawn over those bars
- * in this one stable host, so entering/leaving selection never changes the content
- * measurement or reconstructs the route underneath it.
- */
-@Composable
-private fun StableSelectionBarOverlay(content: @Composable () -> Unit) {
-    Layout(
-        content = content,
-        modifier = Modifier.fillMaxWidth(),
-    ) { measurables, constraints ->
-        val placeable = measurables.firstOrNull()?.measure(
-            constraints.copy(minHeight = 0),
-        )
-        layout(constraints.maxWidth, 0) {
-            placeable?.place(0, 0)
-        }
-    }
-}
 
 // Height of the toolbar + gap, used to pad content so last items aren't hidden
 private val FloatingBarHeight = 80.dp
@@ -879,157 +856,29 @@ CenterAlignedTopAppBar(
                             } else {
                                 photoSearchQuery
                             }
-                            val dragOffsetPx = homeHeaderTransition.dragOffsetPx
-                            val dragDirection = when {
-                                dragOffsetPx > 0f -> 1f
-                                dragOffsetPx < 0f -> -1f
-                                else -> 1f
-                            }
-                            val nextPageOffsetPx =
-                                dragOffsetPx - dragDirection * homeHeaderWidthPx
-                            val titleOffsetPx = if (isHomeSearchMode) {
-                                nextPageOffsetPx
-                            } else {
-                                dragOffsetPx
-                            }
-                            val searchOffsetPx = if (isHomeSearchMode) {
-                                dragOffsetPx
-                            } else {
-                                nextPageOffsetPx
-                            }
-
-                            val headerPage: @Composable (Boolean, Modifier) -> Unit =
-                                { searchPage, pageModifier ->
-                                    Box(
-                                        modifier = pageModifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        if (!searchPage) {
-                                            Text(
-                                                text = "Pixel Gallery",
-                                                modifier = Modifier.align(Alignment.Center),
-                                                style = EmphasizedTypography.HeadlineMedium,
-                                            )
-                                        } else {
-                                            Row(
-                                                modifier = Modifier.fillMaxSize(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Spacer(Modifier.width(16.dp).fillMaxHeight())
-                                                OutlinedTextField(
-                                                    value = query,
-                                                    onValueChange = { value ->
-                                                        if (searchingAlbums) {
-                                                            albumSearchQuery = value
-                                                        } else {
-                                                            photoSearchQuery = value
-                                                        }
-                                                    },
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(56.dp)
-                                                        .focusRequester(searchFocusRequester),
-                                                    placeholder = {
-                                                        Text(
-                                                            text = if (searchingAlbums) {
-                                                                "Search albums"
-                                                            } else {
-                                                                "Search files"
-                                                            },
-                                                            style = MaterialTheme.typography.bodyLarge,
-                                                        )
-                                                    },
-                                                    leadingIcon = {
-                                                        Icon(
-                                                            Icons.Default.Search,
-                                                            contentDescription = null,
-                                                        )
-                                                    },
-                                                    trailingIcon = {
-                                                        if (query.isNotEmpty()) {
-                                                            IconButton(
-                                                                onClick = {
-                                                                    if (searchingAlbums) {
-                                                                        albumSearchQuery = ""
-                                                                    } else {
-                                                                        photoSearchQuery = ""
-                                                                    }
-                                                                },
-                                                            ) {
-                                                                Icon(
-                                                                    Icons.Default.Close,
-                                                                    contentDescription = "Clear search",
-                                                                )
-                                                            }
-                                                        }
-                                                    },
-                                                    textStyle = MaterialTheme.typography.bodyLarge,
-                                                    singleLine = true,
-                                                    shape = CircleShape,
-                                                )
-                                                Spacer(Modifier.width(16.dp).fillMaxHeight())
-                                            }
-                                        }
-                                    }
-                                }
-
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .offset {
-                                        IntOffset(homeHeaderCenterCorrectionPx, 0)
-                                    }
-                                    .onSizeChanged {
-                                        homeHeaderWidthPx = it.width.toFloat()
-                                    }
+                                    .onSizeChanged { homeHeaderWidthPx = it.width.toFloat() }
                                     .draggable(
                                         state = homeHeaderDraggableState,
                                         orientation = Orientation.Horizontal,
                                         enabled = selectedIds.isEmpty() && !isHomeHeaderAnimating,
                                         onDragStopped = { velocity ->
-                                            if (
-                                                homeHeaderWidthPx <= 0f ||
-                                                homeHeaderTransition.dragOffsetPx == 0f
-                                            ) {
-                                                homeHeaderTransition = homeHeaderTransition.copy(
-                                                    dragOffsetPx = 0f,
-                                                )
+                                            if (homeHeaderWidthPx <= 0f || homeHeaderTransition.dragOffsetPx == 0f) {
+                                                homeHeaderTransition = homeHeaderTransition.copy(dragOffsetPx = 0f)
                                                 return@draggable
                                             }
-
                                             val startingState = homeHeaderTransition
                                             val switchPage = shouldSwitchHomeHeader(
                                                 dragOffsetPx = startingState.dragOffsetPx,
                                                 widthPx = homeHeaderWidthPx,
                                                 velocityPxPerSecond = velocity,
                                             )
-                                            val direction =
-                                                if (startingState.dragOffsetPx > 0f) 1f else -1f
-                                            val targetOffset = if (switchPage) {
-                                                direction * homeHeaderWidthPx
-                                            } else {
-                                                0f
-                                            }
-
                                             isHomeHeaderAnimating = true
                                             try {
-                                                val animation = androidx.compose.animation.core.Animatable(
-                                                    startingState.dragOffsetPx,
-                                                )
-                                                animation.animateTo(
-                                                    targetValue = targetOffset,
-                                                    animationSpec = tween(durationMillis = 180),
-                                                ) {
-                                                    homeHeaderTransition = startingState.copy(
-                                                        dragOffsetPx = value,
-                                                    )
-                                                }
                                                 homeHeaderTransition = HomeHeaderTransitionState(
-                                                    isSearchMode = if (switchPage) {
-                                                        !startingState.isSearchMode
-                                                    } else {
-                                                        startingState.isSearchMode
-                                                    },
+                                                    isSearchMode = if (switchPage) !startingState.isSearchMode else startingState.isSearchMode,
                                                     dragOffsetPx = 0f,
                                                 )
                                             } finally {
@@ -1038,18 +887,48 @@ CenterAlignedTopAppBar(
                                         },
                                     ),
                             ) {
-                                headerPage(
-                                    false,
-                                    Modifier.offset {
-                                        IntOffset(titleOffsetPx.roundToInt(), 0)
-                                    },
-                                )
-                                headerPage(
-                                    true,
-                                    Modifier.offset {
-                                        IntOffset(searchOffsetPx.roundToInt(), 0)
-                                    },
-                                )
+                                if (isHomeSearchMode) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Spacer(Modifier.width(16.dp))
+                                        OutlinedTextField(
+                                            value = query,
+                                            onValueChange = { value ->
+                                                if (searchingAlbums) albumSearchQuery = value else photoSearchQuery = value
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(56.dp)
+                                                .focusRequester(searchFocusRequester),
+                                            placeholder = {
+                                                Text(
+                                                    if (searchingAlbums) "Search albums" else "Search files",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                )
+                                            },
+                                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                            trailingIcon = {
+                                                if (query.isNotEmpty()) {
+                                                    IconButton(onClick = {
+                                                        if (searchingAlbums) albumSearchQuery = "" else photoSearchQuery = ""
+                                                    }) {
+                                                        Icon(Icons.Default.Close, contentDescription = "Clear search")
+                                                    }
+                                                }
+                                            },
+                                            textStyle = MaterialTheme.typography.bodyLarge,
+                                            singleLine = true,
+                                            shape = CircleShape,
+                                        )
+                                        Spacer(Modifier.width(16.dp))
+                                    }
+                                } else {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("Pixel Gallery", style = EmphasizedTypography.HeadlineMedium)
+                                    }
+                                }
                             }
                         }
                     },
@@ -1130,9 +1009,8 @@ CenterAlignedTopAppBar(
             .fillMaxSize()
             .background(headerColor)
     ) {
-        Scaffold(
-            contentWindowInsets = WindowInsets(0), // Manual padding for full control
-        containerColor = appShellColor,
+        UnifiedGalleryContainer.instance.Shell(
+            containerColor = appShellColor,
             modifier = Modifier
                 .nestedScroll(scrollBehavior)
                 .then(
@@ -1143,7 +1021,6 @@ CenterAlignedTopAppBar(
                 ),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            StableSelectionBarOverlay {
             if (albumSelectionMode) {
                 AlbumSelectionTopBar(
                     count = selectedAlbumPaths.size,
@@ -1168,11 +1045,7 @@ CenterAlignedTopAppBar(
                         )
                     },
                 )
-            } else if (
-                selectionMode &&
-                    currentScreen !is Screen.TransferDestination &&
-                    currentScreen != Screen.Labels
-            ) {
+            } else if (selectionMode && currentScreen !is Screen.TransferDestination) {
                 if (currentScreen == Screen.Trash || currentScreen == Screen.LockedFolder) {
                     val currentMediaIds = if (currentScreen == Screen.Trash) {
                         trash.mapTo(linkedSetOf()) { it.contentId }
@@ -1387,9 +1260,8 @@ CenterAlignedTopAppBar(
                     )
                 }
             }
-            }
-        }
-    ) { innerPadding ->
+        },
+            content = { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -2005,8 +1877,7 @@ CenterAlignedTopAppBar(
                     }
                 )
             }
-        }
-    }
+            }
 
     if (editingLabelIds.isNotEmpty()) {
         LabelEditorSheet(
@@ -2179,6 +2050,8 @@ CenterAlignedTopAppBar(
                 }
                 if (currentScreen != Screen.LockedFolder) selectedIds = emptySet()
             }
+        )
+        }
         )
     }
 
