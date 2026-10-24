@@ -1009,6 +1009,7 @@ CenterAlignedTopAppBar(
             .fillMaxSize()
             .background(headerColor)
     ) {
+        val stableTopBarInset = 64.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         UnifiedGalleryContainer.instance.Shell(
             containerColor = appShellColor,
             modifier = Modifier
@@ -1265,7 +1266,7 @@ CenterAlignedTopAppBar(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = if (visibleViewer != null) 0.dp else innerPadding.calculateTopPadding())
+                .padding(top = if (visibleViewer != null) 0.dp else stableTopBarInset)
                 .then(if (selectionMode || albumSelectionMode) Modifier.galleryContentEdge() else Modifier)
         ) {
             // Screen content management
@@ -1280,6 +1281,13 @@ CenterAlignedTopAppBar(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .offset {
+                        if (visibleViewer != null || selectionMode || albumSelectionMode) {
+                            IntOffset.Zero
+                        } else {
+                            IntOffset(0, -stableTopBarInset.roundToPx())
+                        }
+                    }
                     .drawWithContent {
                         if (visibleViewer == null) drawContent()
                     }

@@ -1571,13 +1571,11 @@ internal fun ViewerScreen(
                     ) {
                         if (allowTransfer) {
                             ViewerSecondaryAction(Icons.AutoMirrored.Outlined.DriveFileMove, "Move") {
-                                expandedBottomActions = false
                                 currentMedia?.let(onRequestTransfer)
                             }
                         }
                         if (allowLabels) {
                             ViewerSecondaryAction(Icons.Outlined.Label, "Labels", enabled = !isCurrentReserved) {
-                                expandedBottomActions = false
                                 currentMedia?.let { onEditLabels(setOf(it.contentId)) }
                             }
                         }
