@@ -4,7 +4,6 @@ import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
-import android.widget.Toast
 import android.content.Intent
 import android.os.Environment
 import android.os.Build
@@ -53,8 +52,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -108,6 +105,7 @@ import com.pixel.gallery.ui.components.GalleryScrollbar
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.components.SelectionGrid
 import com.pixel.gallery.ui.components.SelectionSearchField
+import com.pixel.gallery.ui.components.LocalGalleryMessages
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
@@ -133,7 +131,7 @@ fun TransferDestinationScreen(
     val transferState by viewModel.transferUiState.collectAsState()
     var lastTransferMode by rememberSaveable { mutableStateOf(TransferMode.MOVE) }
     BackHandler(enabled = transferState.isRunning) {}
-    val snackbarHostState = remember { SnackbarHostState() }
+    val messages = LocalGalleryMessages.current
     val scope = rememberCoroutineScope()
     val createdDestinations = remember { mutableStateListOf<TransferDestination>() }
     var query by remember { mutableStateOf("") }
@@ -192,9 +190,7 @@ fun TransferDestinationScreen(
         }
         val path = StorageUtils.convertTreeDocumentUriToDirPath(context, uri)
         if (path == null) {
-            scope.launch {
-                snackbarHostState.showSnackbar("This folder is not available as a media destination")
-            }
+            messages.show("This folder is not available as a media destination")
         } else {
             val file = File(path.trimEnd(File.separatorChar))
             val destination = TransferDestination(
@@ -232,7 +228,7 @@ fun TransferDestinationScreen(
         val destination = selectedDestination ?: return
         val transferEntries = entries.filterNot { isSameTransferDirectory(it.path, destination.path) }
         if (transferEntries.isEmpty()) {
-            Toast.makeText(context, R.string.transfer_already_in_album, Toast.LENGTH_SHORT).show()
+            messages.show(context.getString(R.string.transfer_already_in_album))
             return
         }
         confirmation = PendingTransfer(mode, destination, transferEntries)

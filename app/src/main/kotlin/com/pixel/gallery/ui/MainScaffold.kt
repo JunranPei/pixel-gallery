@@ -56,6 +56,9 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import com.pixel.gallery.ui.components.GalleryMessageProvider
+import com.pixel.gallery.ui.components.GalleryMessageHost
+import com.pixel.gallery.ui.components.LocalGalleryMessages
 import com.pixel.gallery.ui.components.HomeOverflowMenu
 import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
@@ -305,6 +308,18 @@ fun MainScaffold(
     initialScreen: Screen = Screen.Home,
     initialHomeTab: Int = -1,
     photosViewModel: PhotosViewModel = hiltViewModel()
+) {
+    GalleryMessageProvider {
+        MainScaffoldContent(initialScreen, initialHomeTab, photosViewModel)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MainScaffoldContent(
+    initialScreen: Screen,
+    initialHomeTab: Int,
+    photosViewModel: PhotosViewModel,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val labelsViewModel: LabelsViewModel = hiltViewModel()
@@ -570,7 +585,7 @@ fun MainScaffold(
     val scope = rememberCoroutineScope()
     val navigationReveal = remember { GalleryNavigationState(scope) }
     val navigationExpanded by remember { derivedStateOf { navigationReveal.expanded } }
-    val snackbarHostState = remember { SnackbarHostState() }
+    val messages = LocalGalleryMessages.current
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     var homeMediaType by rememberSaveable { mutableStateOf(MediaTypeFilter.ALL) }
@@ -1403,7 +1418,7 @@ fun MainScaffold(
                                                     append("; ${result.failedIds.size} failed")
                                                 }
                                             }
-                                            scope.launch { snackbarHostState.showSnackbar(message) }
+                                            messages.show(message)
                                         }
                                     },
                                 ),
@@ -1744,8 +1759,7 @@ fun MainScaffold(
             ),
             scrollBehavior = if (homeHeaderOwnsShell) homeTopBarScrollBehavior else null,
         snackbarHost = {
-            routePages.getValue(baseScreenIndex).snackbarHost()
-            SnackbarHost(snackbarHostState)
+            GalleryMessageHost()
         },
         header = reviewPage?.header ?: viewerPage?.takeIf { visibleViewer != null }?.header ?: selectionHeader ?: routePages.getValue(baseScreenIndex).header,
             content = { innerPadding ->
@@ -1814,7 +1828,7 @@ fun MainScaffold(
                             if (summary.failed > 0) append("; ${summary.failed} failed")
                             if (summary.skipped > 0) append("; ${summary.skipped} skipped")
                         }
-                        if (summary.failed == 0) scope.launch { snackbarHostState.showSnackbar(message) }
+                        if (summary.failed == 0) messages.show(message)
                         selectedIds = emptySet()
                         navigateToStack(
                             if (
@@ -2030,7 +2044,7 @@ fun MainScaffold(
                                     if (result.deletedIds.size != 1) append('s')
                                     if (result.failedIds.isNotEmpty()) append("; ${result.failedIds.size} failed")
                                 }
-                                scope.launch { snackbarHostState.showSnackbar(message) }
+                                messages.show(message)
                             }
                         }
                         Screen.Trash -> photosViewModel.deleteMediaBulk(selectedTrashEntries.map { it.uri })
@@ -2061,4 +2075,3 @@ fun MainScaffold(
         }
     }
 }
-

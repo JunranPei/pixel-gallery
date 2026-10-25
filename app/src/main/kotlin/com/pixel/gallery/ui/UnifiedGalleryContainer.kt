@@ -86,7 +86,6 @@ fun GalleryHeader(
 class GalleryPageContent internal constructor(
     val header: GalleryHeaderSpec,
     val content: @Composable () -> Unit,
-    val snackbarHost: @Composable () -> Unit,
 )
 
 /** Prepares state/slots without emitting a Scaffold, toolbar, or body surface. */
@@ -94,14 +93,12 @@ class GalleryPageContent internal constructor(
 fun GalleryPage(
     modifier: Modifier = Modifier,
     topBar: @Composable () -> GalleryHeaderSpec,
-    snackbarHost: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ): GalleryPageContent {
     val header = topBar()
     return GalleryPageContent(
         header = header,
         content = { Box(modifier.fillMaxSize()) { content(PaddingValues(0.dp)) } },
-        snackbarHost = snackbarHost,
     )
 }
 

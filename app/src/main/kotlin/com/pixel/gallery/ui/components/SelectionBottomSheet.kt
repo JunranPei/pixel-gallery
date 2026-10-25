@@ -125,6 +125,10 @@ fun SelectionBottomSheet(
                 SelectionSheetHeader(title, subtitle, onDismiss, headerActions, showBackButton)
                 content()
             }
+            // Overlay only; keep the sheet viewport, drag range and content layout unchanged.
+            Box(Modifier.fillMaxWidth().height(viewport.coerceIn(0.dp, 720.dp)).imePadding()) {
+                GalleryMessageHost(Modifier.align(Alignment.BottomCenter), modal = true)
+            }
         }
     }
 }

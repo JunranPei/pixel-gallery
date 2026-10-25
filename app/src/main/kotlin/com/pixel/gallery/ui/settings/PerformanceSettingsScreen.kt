@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
-import kotlinx.coroutines.launch
+import com.pixel.gallery.ui.components.LocalGalleryMessages
 import com.pixel.gallery.ui.GalleryHeader
 import com.pixel.gallery.ui.GalleryPage
 import com.pixel.gallery.ui.GalleryPageContent
@@ -32,8 +32,7 @@ fun PerformanceSettingsScreen(
     viewModel: PhotosViewModel = hiltViewModel(),
 ): GalleryPageContent {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val messages = LocalGalleryMessages.current
     val glideThreadCount by viewModel.glideThreadCount.collectAsState()
     val glideCacheSize by viewModel.glideCacheSize.collectAsState()
     val glidePersistentGridCacheSize by viewModel.glidePersistentGridCacheSize.collectAsState()
@@ -41,7 +40,6 @@ fun PerformanceSettingsScreen(
 
     return GalleryPage(
         modifier = Modifier.navigationBarsPadding(),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             GalleryHeader(
                 title = { Text("Performance & Caching", style = EmphasizedTypography.TitleLarge) },
@@ -66,7 +64,7 @@ fun PerformanceSettingsScreen(
                     Button(onClick = {
                         showClearCacheConfirm = false
                         viewModel.clearAllCaches(context) {
-                            scope.launch { snackbarHostState.showSnackbar("Cache cleared successfully") }
+                            messages.show("Cache cleared successfully")
                         }
                     }) { Text(stringResource(R.string.dialog_clear)) }
                 },

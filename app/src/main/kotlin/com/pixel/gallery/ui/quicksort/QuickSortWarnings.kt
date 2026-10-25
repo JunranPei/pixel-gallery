@@ -12,8 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import android.widget.Toast
-import androidx.compose.ui.platform.LocalContext
+import com.pixel.gallery.ui.components.LocalGalleryMessages
 import android.os.Build
 import android.os.Environment
 import com.pixel.gallery.R
@@ -58,9 +57,10 @@ internal fun QuickSortConflictDialog(job: QuickSortJob, onResolve: (ConflictPoli
 internal fun QuickSortWarningDialog(message: String, onDismiss: () -> Unit) {
     val reason = transferFailureReason(message)
     if (reason == R.string.transfer_already_in_album || reason == R.string.transfer_already_moving) {
-        val context = LocalContext.current
+        val messages = LocalGalleryMessages.current
+        val text = stringResource(reason)
         LaunchedEffect(message) {
-            Toast.makeText(context, reason, Toast.LENGTH_SHORT).show()
+            messages.show(text)
             onDismiss()
         }
         return

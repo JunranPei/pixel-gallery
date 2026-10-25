@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.viewer
 
+import com.pixel.gallery.ui.components.LocalGalleryMessages
+import androidx.compose.material3.SnackbarDuration
+
 import com.pixel.gallery.ui.GalleryHeader
 import com.pixel.gallery.ui.GalleryPage
 import com.pixel.gallery.ui.GalleryPageContent
@@ -374,6 +377,7 @@ internal fun ViewerScreen(
     reservedIds: Set<Long> = emptySet()
 ): GalleryPageContent {
     val context = LocalContext.current
+    val messages = LocalGalleryMessages.current
     val initialIndex = remember(initialId, photos) {
         val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
         photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0).also { index ->
@@ -1568,7 +1572,7 @@ internal fun ViewerScreen(
                                 onClick = {
                                     currentMedia?.let {
                                         viewModel.toggleFavourite(it.contentId, isFavourite) { message ->
-                                            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                                            messages.show(message, SnackbarDuration.Long)
                                         }
                                     }
                                 }
@@ -1711,7 +1715,7 @@ internal fun ViewerScreen(
                     if (allowUnlockFromVault) {
                         viewModel.deleteFromVaultBulk(listOf(media.contentId)) { result ->
                             if (media.contentId in result.deletedIds) onBack()
-                            else android.widget.Toast.makeText(context, "Could not delete locked file", android.widget.Toast.LENGTH_LONG).show()
+                            else messages.show("Could not delete locked file", SnackbarDuration.Long)
                         }
                     } else {
                         viewModel.moveToTrash(media.contentId, media.uri, media.path)
@@ -1852,11 +1856,10 @@ internal fun ViewerScreen(
                                         )
                                     }
                                 }
-                                android.widget.Toast.makeText(
-                                    context,
+                                messages.show(
                                     result.getOrElse { it.message ?: "$formatName index operation failed" },
-                                    android.widget.Toast.LENGTH_LONG,
-                                ).show()
+                                    SnackbarDuration.Long,
+                                )
                             }
                         },
                     ) {
