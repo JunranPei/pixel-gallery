@@ -1926,6 +1926,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
     }
 
+    /** A read-only query for the host's single-finger dismiss arbitration. */
+    fun isAtRestWithinFit(): Boolean {
+        if (!isReady || anim != null || isZooming || isPanning || isQuickScaling) return false
+        val state = snapshotViewState() ?: return false
+        return state.scale <= state.baseFitScale * 1.02f
+    }
+
     /** Captures the small, decoder-independent transform state for pager restoration. */
     fun snapshotViewState(): ViewState? {
         if (!isReady || scale <= 0f) return null

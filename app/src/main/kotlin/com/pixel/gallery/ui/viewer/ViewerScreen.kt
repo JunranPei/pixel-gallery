@@ -862,21 +862,34 @@ internal fun ViewerScreen(
         animationSpec = tween(durationMillis = 150),
         label = "ViewerHeaderVisibility",
     )
+    val viewerGesturesEnabled = isForeground && !inVideoPip && !showInfo && !showMenu &&
+        !showDeleteConfirm && !videoOptionsOpen && imageIndexAction == null &&
+        !pagerState.isScrollInProgress && !pagerReturningToSettledPage
+    val dismissGesture = rememberViewerDismissGesture(
+        key = currentMediaCacheKey,
+        isForeground = isForeground,
+        enabled = viewerGesturesEnabled && currentMedia != null && !currentMedia.sourceMimeType.startsWith("video/") && !isPlayingMotion,
+        onDismiss = onBack,
+    )
     val rotationGesture = rememberViewerRotationGesture(
         isForeground = isForeground,
-        enabled = isForeground && !inVideoPip && !showInfo && !showMenu &&
-            !showDeleteConfirm && !videoOptionsOpen && imageIndexAction == null &&
-            !pagerState.isScrollInProgress && !pagerReturningToSettledPage,
+        enabled = viewerGesturesEnabled,
     ) {
         val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         requestedViewerOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         directionKey?.let { presentationModel.repository.saveDirection(directionIsVideo, it, requestedViewerOrientation!!) }
     }
+    DisposableEffect(rotationGesture, dismissGesture) {
+        rotationGesture.dismissGesture = dismissGesture
+        onDispose { if (rotationGesture.dismissGesture === dismissGesture) rotationGesture.dismissGesture = null }
+    }
     return GalleryPage(
-        modifier = Modifier.background(Color.Black),
+        modifier = Modifier.viewerDismissMotion(dismissGesture)
+            .onSizeChanged { dismissGesture.resize(it.width, it.height) }.background(Color.Black),
         topBar = {
             GalleryHeader(
                 modifier = Modifier
+                    .viewerDismissMotion(dismissGesture)
                     .viewerRotationArea(rotationGesture.takeIf { showUI || headerVisibility > 0f }, excluded = true)
                     .graphicsLayer {
                         alpha = headerVisibility
@@ -1101,6 +1114,8 @@ internal fun ViewerScreen(
                 media.sourceMimeType.equals("image/gif", ignoreCase = true) ||
                     media.path.endsWith(".gif", ignoreCase = true)
             }
+            CompositionLocalProvider(LocalViewerDismissGesture provides
+                dismissGesture.takeIf { !isVideo && pagerState.settledPage == page && !pagerState.isScrollInProgress }) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -1594,6 +1609,7 @@ internal fun ViewerScreen(
                     }
                     } // Image renderer lifetime, reset on a new visit only when memory is off.
                 }
+            }
             }
         }
 

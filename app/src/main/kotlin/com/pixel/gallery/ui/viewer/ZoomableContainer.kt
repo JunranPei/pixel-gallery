@@ -110,6 +110,9 @@ fun ZoomableContainer(
     }
     var animationGeneration by remember(diagnosticsKey) { mutableIntStateOf(0) }
     var zoomLifecycleOpen by remember(diagnosticsKey) { mutableStateOf(false) }
+    ViewerDismissImageEligibility {
+        enabled && !zoomLifecycleOpen && animationJob?.isActive != true && renderScale <= 1.02f
+    }
 
     fun trace(name: String, detail: String) {
         if (diagnosticsKey.isNotEmpty()) {

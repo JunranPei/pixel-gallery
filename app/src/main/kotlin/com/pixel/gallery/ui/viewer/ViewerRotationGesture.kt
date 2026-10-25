@@ -25,6 +25,7 @@ import kotlin.math.hypot
 class ViewerRotationGesture internal constructor(private val touchSlop: Float, minimumSpan: Float) {
     internal var enabled: () -> Boolean = { false }
     internal var onRotate: () -> Unit = {}
+    internal var dismissGesture: ViewerDismissGesture? = null
     private val tracker = RotationGestureTracker(touchSlop, minimumSpan)
     private val areas = mutableMapOf<Any, Pair<LayoutCoordinates, Boolean>>()
     private var eligible = false
@@ -53,6 +54,13 @@ class ViewerRotationGesture internal constructor(private val touchSlop: Float, m
     }
 
     fun dispatch(event: MotionEvent, toContent: (MotionEvent) -> Boolean): Boolean {
+        val dismiss = dismissGesture
+        return if (dismiss != null) {
+            dismiss.dispatch(event, { x, y -> enabled() && inMedia(x, y) }) { dispatchRotation(it, toContent) }
+        } else dispatchRotation(event, toContent)
+    }
+
+    private fun dispatchRotation(event: MotionEvent, toContent: (MotionEvent) -> Boolean): Boolean {
         val action = event.actionMasked
         if (action == MotionEvent.ACTION_DOWN) {
             tracker.cancel()

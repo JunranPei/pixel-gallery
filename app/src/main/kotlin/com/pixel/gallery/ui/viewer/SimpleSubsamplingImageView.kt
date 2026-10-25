@@ -558,6 +558,10 @@ internal fun SimpleSubsamplingImageView(
     val currentPreviewUserScale by rememberUpdatedState(previewUserScale)
     val currentPreviewOffsetX by rememberUpdatedState(previewOffsetX)
     val currentPreviewOffsetY by rememberUpdatedState(previewOffsetY)
+    ViewerDismissImageEligibility {
+        isActivePage && subsamplingReady && !previewOwnsTransform && !previewTakeoverPending &&
+            ssivView?.isAtRestWithinFit() == true
+    }
 
     // Active-page bookkeeping is intentionally separate from preview loading.
     // A preview that was loaded while swiping must not be restarted on the settle frame.
