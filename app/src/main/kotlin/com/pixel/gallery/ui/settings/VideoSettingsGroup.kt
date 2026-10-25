@@ -18,7 +18,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pixel.gallery.R
 import com.pixel.gallery.data.repository.*
 import com.pixel.gallery.ui.components.SettingsOptionControl
-import com.pixel.gallery.ui.theme.EmphasizedTypography
 
 @Composable
 fun VideoSettingsGroup(viewModel: VideoSettingsViewModel = hiltViewModel()) {
@@ -36,14 +35,17 @@ fun VideoSettingsGroup(viewModel: VideoSettingsViewModel = hiltViewModel()) {
             }.onFailure { directoryError = true }
         }
     }
-    SettingsGroup(itemCount = 10, title = stringResource(R.string.video_settings_title)) { index ->
+    SettingsGroup(itemCount = 9, title = stringResource(R.string.video_settings_title)) { index ->
         when (index) {
-            0 -> SettingsToggleItem(stringResource(R.string.video_autoplay), icon = Icons.Outlined.PlayCircle,
+            0, 5 -> ViewerPresentationSetting(if (index == 0) 0 else 1, settings.screenDirection, settings.rememberView,
+                onDirection = { value -> viewModel.update { it.copy(screenDirection = value) } },
+                onRememberView = { value -> viewModel.update { it.copy(rememberDirection = value, rememberZoom = value) } })
+            1 -> SettingsToggleItem(stringResource(R.string.video_autoplay), icon = Icons.Outlined.PlayCircle,
                 checked = settings.autoplay, onCheckedChange = { value -> viewModel.update { it.copy(autoplay = value) } })
-            1 -> SettingsToggleItem(stringResource(R.string.video_default_mute), icon = Icons.Outlined.VolumeOff,
+            2 -> SettingsToggleItem(stringResource(R.string.video_default_mute), icon = Icons.Outlined.VolumeOff,
                 checked = settings.muted, onCheckedChange = { value -> viewModel.update { it.copy(muted = value) } })
-            2 -> Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.video_end_action), style = EmphasizedTypography.LabelLarge)
+            3 -> Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsOptionHeading(stringResource(R.string.video_end_action), Icons.Outlined.Repeat)
                 SettingsOptionControl(
                     options = listOf(VideoEndAction.STOP to stringResource(R.string.video_end_stop),
                         VideoEndAction.LOOP to stringResource(R.string.video_end_loop),
@@ -52,17 +54,8 @@ fun VideoSettingsGroup(viewModel: VideoSettingsViewModel = hiltViewModel()) {
                     onSelected = { value -> viewModel.update { it.copy(endAction = value) } },
                 )
             }
-            3 -> SettingsToggleItem(stringResource(R.string.video_remember_position), icon = Icons.Outlined.History,
-                checked = settings.rememberPosition, onCheckedChange = { value -> viewModel.update { it.copy(rememberPosition = value) } })
-            4 -> SettingsToggleItem(stringResource(R.string.video_remember_speed),
-                description = stringResource(R.string.video_remember_speed_description), icon = Icons.Outlined.Speed,
-                checked = settings.rememberSpeed, onCheckedChange = { value -> viewModel.update { it.copy(rememberSpeed = value) } })
-            in 5..7 -> ViewerPresentationSetting(index - 5, settings.screenDirection, settings.rememberDirection, settings.rememberZoom,
-                onDirection = { value -> viewModel.update { it.copy(screenDirection = value) } },
-                onRememberDirection = { value -> viewModel.update { it.copy(rememberDirection = value) } },
-                onRememberZoom = { value -> viewModel.update { it.copy(rememberZoom = value) } })
-            8 -> Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.video_background), style = EmphasizedTypography.LabelLarge)
+            4 -> Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsOptionHeading(stringResource(R.string.video_background), Icons.Outlined.Headphones)
                 SettingsOptionControl(
                     options = listOf(VideoBackgroundAction.PAUSE to stringResource(R.string.video_background_pause),
                         VideoBackgroundAction.AUDIO to stringResource(R.string.video_background_audio),
@@ -71,7 +64,11 @@ fun VideoSettingsGroup(viewModel: VideoSettingsViewModel = hiltViewModel()) {
                     onSelected = { value -> viewModel.update { it.copy(backgroundAction = value) } },
                 )
             }
-            9 -> Column {
+            6 -> SettingsToggleItem(stringResource(R.string.video_remember_position), icon = Icons.Outlined.History,
+                checked = settings.rememberPosition, onCheckedChange = { value -> viewModel.update { it.copy(rememberPosition = value) } })
+            7 -> SettingsToggleItem(stringResource(R.string.video_remember_speed), icon = Icons.Outlined.Speed,
+                checked = settings.rememberSpeed, onCheckedChange = { value -> viewModel.update { it.copy(rememberSpeed = value) } })
+            8 -> Column {
                 SettingsClickItem(stringResource(R.string.video_capture_directory),
                     description = if (settings.captureTree.isBlank()) "Pictures/Video captures" else
                         Uri.decode(settings.captureTree.substringAfterLast('/')),

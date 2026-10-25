@@ -7,8 +7,6 @@ import com.pixel.gallery.ui.GalleryHeader
 import com.pixel.gallery.ui.GalleryPage
 import com.pixel.gallery.ui.GalleryPageContent
 import com.pixel.gallery.ui.components.GalleryDialog
-import com.pixel.gallery.ui.components.GalleryMenuGroupSpacing
-import com.pixel.gallery.ui.components.LocalGallerySettingsAction
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
@@ -392,7 +390,7 @@ internal fun ViewerScreen(
     val presentationModel: VideoSettingsViewModel = hiltViewModel()
     val videoPreferences by presentationModel.settings.collectAsState()
     val imagePreferences by presentationModel.imageSettings.collectAsState()
-    val rememberImageZoom = imagePreferences?.rememberZoom == true
+    val rememberImageZoom = imagePreferences?.rememberView == true
     val imageTransforms = remember(presentationModel.repository, rememberImageZoom) {
         if (rememberImageZoom) rememberedImageTransforms(presentationModel.repository, transformStateStore)
         else ViewerTransformStateStore()
@@ -455,7 +453,7 @@ internal fun ViewerScreen(
     val directionIsVideo = directionMedia?.sourceMimeType?.startsWith("video/") == true
     val directionKey = directionMedia?.let { "${it.uri}:${it.dateModifiedMillis}" }
     val screenDirection = if (directionIsVideo) videoPreferences?.screenDirection else imagePreferences?.screenDirection
-    val rememberDirection = if (directionIsVideo) videoPreferences?.rememberDirection == true else imagePreferences?.rememberDirection == true
+    val rememberDirection = if (directionIsVideo) videoPreferences?.rememberView == true else imagePreferences?.rememberView == true
     val rotationScope = rememberCoroutineScope()
     val contentRotation = remember(directionKey, screenDirection != null) {
         ViewerContentRotation(if (rememberDirection && directionKey != null)
@@ -915,7 +913,6 @@ internal fun ViewerScreen(
                     }
                 },
                 actions = {
-                    val openSettings = LocalGallerySettingsAction.current
                     toolbarVideo?.takeIf { it.uri == currentMedia?.uri }?.let { session ->
                         VideoToolbarActions(session, onRotateScreen = {
                             val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -1041,30 +1038,6 @@ internal fun ViewerScreen(
                                 },
                             )
                         }
-                        Spacer(Modifier.height(GalleryMenuGroupSpacing))
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.settings)) },
-                            enabled = openSettings != null,
-                            onClick = {
-                                showMenu = false
-                                openSettings?.invoke()
-                            },
-                            leadingIcon = {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.Settings,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            },
-                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -2286,11 +2259,13 @@ internal fun VideoPlayer(
 
     val showVideoSurface = hasRenderedFirstFrame && hasPresentedVideoSurface
     val videoRatio = session?.let {
-        val w = it.native?.width ?: it.player.videoSize.width
-        val h = it.native?.height ?: it.player.videoSize.height
-        if (w > 0 && h > 0) w.toFloat() * (if (it.native == null) it.player.videoSize.pixelWidthHeightRatio else 1f) / h else 16f / 9f
+        val w = it.native?.width ?: it.videoSize.width
+        val h = it.native?.height ?: it.videoSize.height
+        if (w > 0 && h > 0) w.toFloat() * (if (it.native == null) it.videoSize.pixelWidthHeightRatio else 1f) / h else 16f / 9f
     } ?: (16f / 9f)
-    val rotatedOutput = contentRotation?.let { it.busy || it.settledDegrees != 0 } == true
+    val surfaceTransition = rememberVideoSurfaceTransition(session,
+        contentRotation?.let { it.busy || it.settledDegrees != 0 } == true)
+    val rotatedOutput = surfaceTransition.texture
     LaunchedEffect(session, contentRotation?.settledDegrees) {
         session?.contentRotationDegrees = contentRotation?.settledDegrees ?: 0
         session?.updatePipParams()
@@ -2385,6 +2360,7 @@ internal fun VideoPlayer(
                                             session?.surface = this@apply
                                             session?.texture = null
                                             nativeVideoView?.setSurface(holder.surface)
+                                            session?.nativeSurfaceBound(this@apply)
                                         }
                                         override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
                                         override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
@@ -2412,6 +2388,17 @@ internal fun VideoPlayer(
                                 }
                             }.apply {
                                 setEnableComposeSurfaceSyncWorkaround(true)
+                                (videoSurfaceView as? android.view.SurfaceView)?.let { outputView ->
+                                    session?.surface = outputView
+                                    session?.texture = null
+                                    outputView.holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                                            session?.outputReadiness?.bind(holder.surface, texture = false)
+                                        }
+                                        override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
+                                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {}
+                                    })
+                                }
                                 player = exoPlayer
                                 useController = false
                                 resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -2436,6 +2423,10 @@ internal fun VideoPlayer(
                             .alpha(if (showVideoSurface) 1f else 0f)
                     )
                 }
+            }
+            surfaceTransition.cover?.let { bitmap ->
+                Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize())
             }
         }
         dismissFrame?.let { bitmap ->

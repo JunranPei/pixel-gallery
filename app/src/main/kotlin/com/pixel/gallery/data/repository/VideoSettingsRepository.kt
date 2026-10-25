@@ -27,7 +27,9 @@ data class ImageViewerSettings(
     val screenDirection: ViewerScreenDirection = ViewerScreenDirection.SYSTEM,
     val rememberDirection: Boolean = false,
     val rememberZoom: Boolean = true,
-)
+) {
+    val rememberView: Boolean get() = rememberDirection || rememberZoom
+}
 
 data class SavedViewerZoom(val scale: Float, val centerX: Float, val centerY: Float,
     val baseFitScale: Float = 1f, val sourceWidth: Int = 0, val sourceHeight: Int = 0)
@@ -44,7 +46,9 @@ data class VideoSettings(
     val screenDirection: ViewerScreenDirection = ViewerScreenDirection.SYSTEM,
     val rememberDirection: Boolean = false,
     val rememberZoom: Boolean = false,
-)
+) {
+    val rememberView: Boolean get() = rememberDirection || rememberZoom
+}
 
 val VideoPlaybackSpeeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 
@@ -77,9 +81,8 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
     fun update(transform: (VideoSettings) -> VideoSettings) {
         scope.launch { store.edit {
             val value = transform(decode(it[key]))
-            videoMemoryPolicy = value.rememberDirection to value.rememberZoom
-            if (!value.rememberDirection) { clearMemory("video:direction:"); clearMemory("video:rotation:") }
-            if (!value.rememberZoom) clearMemory("video:zoom:")
+            videoMemoryPolicy = value.rememberView to value.rememberView
+            if (!value.rememberView) clearMemory("video:")
             it[key] = gson.toJson(value)
         } }
     }
@@ -87,9 +90,8 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
     fun updateImage(transform: (ImageViewerSettings) -> ImageViewerSettings) {
         scope.launch { store.edit {
             val value = transform(decodeImage(it[imageKey]))
-            imageMemoryPolicy = value.rememberDirection to value.rememberZoom
-            if (!value.rememberDirection) { clearMemory("image:direction:"); clearMemory("image:rotation:") }
-            if (!value.rememberZoom) clearMemory("image:zoom:")
+            imageMemoryPolicy = value.rememberView to value.rememberView
+            if (!value.rememberView) clearMemory("image:")
             it[imageKey] = gson.toJson(value)
         } }
     }
@@ -116,7 +118,7 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
     }.getOrNull()?.takeIf { it.scale.isFinite() && it.scale > 0 && it.centerX.isFinite() && it.centerY.isFinite() }
 
     fun saveZoom(isVideo: Boolean, source: String, value: SavedViewerZoom) {
-        val allowed = if (isVideo) settings.value?.rememberZoom == true else imageSettings.value?.rememberZoom == true
+        val allowed = if (isVideo) settings.value?.rememberView == true else imageSettings.value?.rememberView == true
         if (allowed) writeMemory("${if (isVideo) "video" else "image"}:zoom:$source", gson.toJson(value))
     }
 
@@ -124,8 +126,8 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
     private fun writeMemory(key: String, value: String) {
         val video = key.startsWith("video:")
         val policy = (if (video) videoMemoryPolicy else imageMemoryPolicy)
-            ?: if (video) ((settings.value?.rememberDirection == true) to (settings.value?.rememberZoom == true))
-            else ((imageSettings.value?.rememberDirection == true) to (imageSettings.value?.rememberZoom == true))
+            ?: if (video) ((settings.value?.rememberView == true) to (settings.value?.rememberView == true))
+            else ((imageSettings.value?.rememberView == true) to (imageSettings.value?.rememberView == true))
         val directionRecord = key.contains(":direction:") || key.contains(":rotation:")
         if (if (directionRecord) !policy.first else !policy.second) return
         if (viewerHistory.getString(key, null) == value) return

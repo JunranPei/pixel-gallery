@@ -104,6 +104,7 @@
     <string name="viewer_direction_landscape">横屏</string>
     <string name="viewer_direction_portrait">竖屏</string>
     <string name="viewer_direction_description">没有方向记忆时按此选项打开。双指明显转动后松手可切换方向。</string>
+    <string name="viewer_remember_view">记忆查看状态</string>
     <string name="viewer_remember_direction">记忆画面旋转</string>
     <string name="viewer_remember_direction_description">重新打开同一项时恢复画面角度，屏幕方向单独设置。</string>
     <string name="viewer_remember_zoom">记忆缩放和位置</string>

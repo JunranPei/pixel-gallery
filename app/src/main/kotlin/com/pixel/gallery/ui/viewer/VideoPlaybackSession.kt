@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.media3.common.*
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp4.Mp4Extractor
@@ -22,6 +23,7 @@ import com.pixel.gallery.MainActivity
 import com.pixel.gallery.data.repository.*
 import com.pixel.gallery.services.VideoPlaybackService
 import java.util.UUID
+import kotlinx.coroutines.*
 
 /** View-only playback state. Never changes the media file or the image renderer. */
 class VideoPlaybackSession(
@@ -43,10 +45,14 @@ class VideoPlaybackSession(
     var speed by mutableFloatStateOf(if (initialSettings.rememberSpeed) initialSettings.lastSpeed else 1f)
         private set
     var firstFrame by mutableStateOf(false)
+    var videoSize by mutableStateOf(VideoSize.UNKNOWN)
+        private set
     var native by mutableStateOf<NativeVideoPlayback?>(null)
         private set
     var surface: SurfaceView? = null
     var texture: android.view.TextureView? = null
+    internal val outputReadiness = VideoOutputReadiness()
+    private val outputScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var contentRotationDegrees: Int = 0
     var onPresentationCheckpoint: (() -> Unit)? = null
     var captureBusy by mutableStateOf(false)
@@ -73,6 +79,12 @@ class VideoPlaybackSession(
         player.setAudioAttributes(AudioAttributes.DEFAULT, true)
         player.setHandleAudioBecomingNoisy(true)
         player.setWakeMode(C.WAKE_MODE_LOCAL)
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
+                // TextureView confirms latching in onSurfaceTextureUpdated instead.
+                if (!outputReadiness.texture) outputReadiness.rendered(output)
+            }
+        })
         player.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() { firstFrame = true; updatePipParams() }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -94,7 +106,10 @@ class VideoPlaybackSession(
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
                 if (reason == Player.DISCONTINUITY_REASON_SEEK) checkpoint()
             }
-            override fun onVideoSizeChanged(videoSize: VideoSize) { updatePipParams() }
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                this@VideoPlaybackSession.videoSize = videoSize
+                updatePipParams()
+            }
             override fun onPlayerError(error: PlaybackException) {
                 if (released || native != null) return
                 val position = player.currentPosition
@@ -112,6 +127,29 @@ class VideoPlaybackSession(
         applyOptions()
         player.setMediaItem(MediaItem.fromUri(uri), initialPosition)
         player.prepare()
+    }
+
+    internal fun nativeSurfaceBound(view: SurfaceView) {
+        val output = view.holder.surface
+        outputReadiness.bind(output, texture = false)
+        native?.refreshPausedFrame()
+        outputScope.launch {
+            // MediaPlayer has no per-output first-frame callback. Probe only this handoff,
+            // stopping as soon as a buffer exists; there is no steady-playback polling.
+            repeat(12) {
+                if (!outputReadiness.owns(output) || released) return@launch
+                val copied = try {
+                    withTimeoutOrNull(100) { captureVideoFrame(view, 1, 1) }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+                if (copied != null) {
+                    copied.recycle()
+                    outputReadiness.rendered(output)
+                    return@launch
+                }
+                delay(32)
+            }
+        }
     }
 
     fun updateSettings(value: VideoSettings) {
@@ -239,6 +277,7 @@ class VideoPlaybackSession(
         onPresentationCheckpoint?.invoke()
         onPresentationCheckpoint = null
         released = true
+        outputScope.cancel()
         VideoPlaybackService.drop(appContext, id)
         native?.release()
         player.release()
@@ -284,6 +323,9 @@ class NativeVideoPlayback(context: Context, uri: Uri, position: Long,
         runCatching { media.setDataSource(context, uri); media.prepareAsync() }.onFailure { onFailure() }
     }
     fun setSurface(surface: Surface?) { runCatching { media.setSurface(surface) } }
+    fun refreshPausedFrame() {
+        if (ready && !isPlaying) runCatching { media.seekTo(currentPosition.toLong(), MediaPlayer.SEEK_CLOSEST) }
+    }
     fun configure(muted: Boolean, speed: Float, loop: Boolean) {
         if (!ready) return
         media.setVolume(if (muted) 0f else 1f, if (muted) 0f else 1f)

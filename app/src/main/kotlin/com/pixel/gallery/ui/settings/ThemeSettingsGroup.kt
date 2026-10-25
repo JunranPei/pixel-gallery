@@ -40,7 +40,7 @@ fun ThemeSettingsGroup(
                         Icon(
                             imageVector = Icons.Outlined.Palette,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(end = 12.dp).size(32.dp),
                         )
                         Text(
@@ -63,7 +63,6 @@ fun ThemeSettingsGroup(
             1 -> {
                 SettingsToggleItem(
                     title = "Material You",
-                    description = "Use system dynamic colors",
                     icon = Icons.Outlined.Palette,
                     checked = materialYou,
                     onCheckedChange = viewModel::setMaterialYou,

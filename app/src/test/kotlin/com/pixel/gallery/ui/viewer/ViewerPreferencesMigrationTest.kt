@@ -8,6 +8,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ViewerPreferencesMigrationTest {
+    @Test fun eitherLegacyMemoryOptionEnablesTheUnifiedViewMemory() {
+        val gson = Gson()
+        for (legacy in listOf(
+            """{"rememberDirection":true,"rememberZoom":false}""",
+            """{"rememberDirection":false,"rememberZoom":true}""",
+        )) {
+            assertTrue(gson.fromJson(legacy, ImageViewerSettings::class.java).rememberView)
+            assertTrue(gson.fromJson(legacy, VideoSettings::class.java).rememberView)
+        }
+    }
+
+    @Test fun unifiedViewMemoryCanBeDisabledWithoutChangingPlaybackProgressMemory() {
+        val video = VideoSettings(rememberDirection = true, rememberZoom = true, rememberPosition = true)
+            .copy(rememberDirection = false, rememberZoom = false)
+        assertFalse(video.rememberView)
+        assertTrue(video.rememberPosition)
+        assertTrue(ImageViewerSettings().rememberView)
+    }
+
     @Test fun olderPlayerSettingsKeepPlaybackChoicesAndReceiveSafeViewerDefaults() {
         val settings = Gson().fromJson("""{"autoplay":false,"muted":true,"rememberSpeed":true,"lastSpeed":1.5}""", VideoSettings::class.java)
         assertFalse(settings.autoplay)

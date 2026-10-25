@@ -29,7 +29,7 @@ internal fun VideoZoomMemory(
     session: VideoPlaybackSession?,
 ) {
     val host = LocalContext.current as? android.app.Activity
-    val rememberZoom = settings?.rememberZoom
+    val rememberZoom = settings?.rememberView
     var restored by remember(source) { mutableStateOf(false) }
     val currentViewport by rememberUpdatedState(viewport)
     val lifecycle = LocalLifecycleOwner.current.lifecycle

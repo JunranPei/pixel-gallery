@@ -1,9 +1,8 @@
 package com.pixel.gallery.ui.viewer
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.PictureInPictureAlt
@@ -14,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -40,6 +41,7 @@ import com.pixel.gallery.data.repository.VideoPlaybackSpeeds
 import com.pixel.gallery.ui.components.LocalGalleryMessages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private val MutedIcon = ImageVector.Builder("Muted", 24.dp, 24.dp, 24f, 24f).apply {
     path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
@@ -94,7 +96,6 @@ fun VideoToolbarActions(session: VideoPlaybackSession, onRotateScreen: () -> Uni
     }
     if (showSpeed) InlineSpeedChoices(session.speed, onDismiss = { showSpeed = false }) { speed ->
         if (!session.setSpeed(speed)) scope.launch { messages.show(context.getString(R.string.video_speed_failed)) }
-        showSpeed = false
     }
     }
     IconButton(enabled = visibleActions >= 4 && session.firstFrame && !session.captureBusy,
@@ -138,23 +139,58 @@ private fun InlineSpeedChoices(speed: Float, onDismiss: () -> Unit, onSelect: (F
             )
         }
     }
-    val rowState = rememberLazyListState(
-        initialFirstVisibleItemIndex = (VideoPlaybackSpeeds.indexOf(speed) - 3).coerceAtLeast(0))
     val width = (LocalConfiguration.current.screenWidthDp.dp - 16.dp).coerceAtMost(416.dp)
+    val latestSelect by rememberUpdatedState(onSelect)
+    val latestSpeed by rememberUpdatedState(speed)
+    var dragPosition by remember { mutableStateOf<Float?>(null) }
     Popup(popupPositionProvider = position, onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true)) {
         Surface(color = Color(0xF0202020), shape = RoundedCornerShape(12.dp),
             modifier = Modifier.width(width)) {
-            LazyRow(state = rowState, contentPadding = PaddingValues(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                items(VideoPlaybackSpeeds) { value ->
-                    val active = value == speed
-                    Surface(onClick = { onSelect(value) }, color = if (active) Color.White else Color.Transparent,
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier.size(48.dp).semantics { selected = active }) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(speedLabel(value), color = if (active) Color.Black else Color.White,
-                                style = MaterialTheme.typography.labelMedium)
+            BoxWithConstraints(Modifier.padding(4.dp).fillMaxWidth().height(48.dp)) {
+                val cellWidth = maxWidth / VideoPlaybackSpeeds.size
+                val cellPx = with(LocalDensity.current) { cellWidth.toPx() }
+                val selectedIndex = VideoPlaybackSpeeds.indexOf(speed).coerceAtLeast(0)
+                val thumbWidth = cellWidth.coerceAtMost(48.dp)
+                val thumbPx = with(LocalDensity.current) { thumbWidth.toPx() }
+                Box(Modifier.fillMaxSize().pointerInput(cellPx) {
+                    var requestedIndex = -1
+                    fun moveTo(x: Float) {
+                        val clamped = x.coerceIn(cellPx / 2, cellPx * (VideoPlaybackSpeeds.size - .5f))
+                        dragPosition = clamped
+                        val index = (clamped / cellPx - .5f).roundToInt().coerceIn(VideoPlaybackSpeeds.indices)
+                        // Only change playback at a new detent, not on every pointer frame.
+                        if (index != requestedIndex) {
+                            requestedIndex = index
+                            if (VideoPlaybackSpeeds[index] != latestSpeed) latestSelect(VideoPlaybackSpeeds[index])
+                        }
+                    }
+                    detectHorizontalDragGestures(
+                        onDragStart = { position ->
+                            requestedIndex = VideoPlaybackSpeeds.indexOf(latestSpeed)
+                            moveTo(position.x)
+                        },
+                        onDragEnd = { dragPosition = null },
+                        onDragCancel = { dragPosition = null },
+                    ) { change, _ ->
+                        change.consume()
+                        moveTo(change.position.x)
+                    }
+                }) {
+                    Surface(color = Color.White, shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.width(thumbWidth).height(48.dp).graphicsLayer {
+                            translationX = (dragPosition ?: ((selectedIndex + .5f) * cellPx)) - thumbPx / 2
+                        }) {}
+                    Row(Modifier.fillMaxSize()) {
+                        VideoPlaybackSpeeds.forEachIndexed { index, value ->
+                            val active = index == selectedIndex
+                            Box(Modifier.weight(1f).fillMaxHeight()
+                                .semantics { selected = active }
+                                .clickable { if (value != speed) onSelect(value) },
+                                contentAlignment = Alignment.Center) {
+                                Text(speedLabel(value), color = if (active) Color.Black else Color.White,
+                                    style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                 }

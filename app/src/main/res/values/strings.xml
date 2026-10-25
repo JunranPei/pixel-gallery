@@ -180,6 +180,7 @@
     <string name="viewer_direction_landscape">Landscape</string>
     <string name="viewer_direction_portrait">Portrait</string>
     <string name="viewer_direction_description">Used when opening media without a remembered orientation. Twist with two fingers and release to switch.</string>
+    <string name="viewer_remember_view">Remember view</string>
     <string name="viewer_remember_direction">Remember picture rotation</string>
     <string name="viewer_remember_direction_description">Restore the picture rotation when reopening the same item. Screen orientation is set separately.</string>
     <string name="viewer_remember_zoom">Remember zoom and position</string>

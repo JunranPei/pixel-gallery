@@ -23,29 +23,41 @@ internal fun RotatableVideoSurface(session: VideoPlaybackSession, aspectRatio: F
                     isOpaque = false
                     session.surface = null
                     session.texture = this
-                    if (native == null) session.player.setVideoTextureView(this)
-                    else {
                         var output: Surface? = null
+                        var reportedFrame = false
                         surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                                 output = Surface(texture)
-                                native.setSurface(output)
+                                reportedFrame = false
+                                session.outputReadiness.bind(output!!, texture = true)
+                                if (native == null) session.player.setVideoSurface(output)
+                                else {
+                                    native.setSurface(output)
+                                    native.refreshPausedFrame()
+                                }
                             }
                             override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) {}
-                            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {}
+                            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
+                                if (!reportedFrame) output?.let {
+                                    session.outputReadiness.rendered(it)
+                                    reportedFrame = true
+                                }
+                            }
                             override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
-                                if (session.texture === this@apply) native.setSurface(null)
+                                output?.let {
+                                    if (native == null) session.player.clearVideoSurface(it)
+                                    else if (session.outputReadiness.owns(it)) native.setSurface(null)
+                                }
                                 output?.release()
                                 output = null
                                 return true
                             }
                         }
-                    }
                 }
             },
             update = { it.keepScreenOn = keepScreenOn },
             onRelease = { view ->
-                if (native == null) session.player.clearVideoTextureView(view)
+                view.surfaceTexture?.let { view.surfaceTextureListener?.onSurfaceTextureDestroyed(it) }
                 if (session.texture === view) session.texture = null
             },
             modifier = Modifier.align(Alignment.Center).size(width, height),

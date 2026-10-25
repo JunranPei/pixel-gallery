@@ -113,8 +113,8 @@ fun DisplaySettingsScreen(
             item {
                 ThemeSettingsGroup(viewModel = viewModel, title = stringResource(R.string.settings_section_theme))
             }
-            item { VideoSettingsGroup() }
             item { ImageSettingsGroup() }
+            item { VideoSettingsGroup() }
         }
     }
 }
