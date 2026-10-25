@@ -22,7 +22,7 @@ import com.pixel.gallery.data.local.entity.LabelEntry
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.theme.EmphasizedTypography
-import com.pixel.gallery.ui.gallery.AlbumSearchTitle
+import com.pixel.gallery.ui.gallery.rememberAlbumSearch
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.components.GalleryOverflowButton
 import com.pixel.gallery.ui.components.GalleryMenuRow
@@ -53,24 +53,23 @@ fun LabelPhotosScreen(
     }
     return GalleryPage(topBar = {
         GalleryHeader(
-                fullWidth = searchMode,
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            search = rememberAlbumSearch(
+                isSearchMode = searchMode,
+                onSearchModeChange = { enabled ->
+                    if (enabled && !searchMode) searchFocusRequested = true
+                    if (!enabled) searchFocusRequested = false
+                    searchMode = enabled
+                },
+                searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                searchPlaceholder = stringResource(R.string.album_search_files),
+                clearSearchDescription = stringResource(R.string.album_clear_search),
+                focusRequested = searchFocusRequested,
+                onFocusRequestConsumed = { searchFocusRequested = false },
+                backEnabled = isForeground,
+            ),
             title = {
-                AlbumSearchTitle(
-                    isSearchMode = searchMode,
-                    onSearchModeChange = { enabled ->
-                        if (enabled && !searchMode) searchFocusRequested = true
-                        if (!enabled) searchFocusRequested = false
-                        searchMode = enabled
-                    },
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = { searchQuery = it },
-                    searchPlaceholder = stringResource(R.string.album_search_files),
-                    clearSearchDescription = stringResource(R.string.album_clear_search),
-                    focusRequested = searchFocusRequested,
-                    onFocusRequestConsumed = { searchFocusRequested = false },
-                    backEnabled = isForeground,
-                    title = {
                     Column(Modifier.fillMaxWidth()) {
                         Text(
                             label?.let { labelDisplayName(it) } ?: stringResource(R.string.labels_title),
@@ -91,8 +90,6 @@ fun LabelPhotosScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    },
-                )
             },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.labels_back)) } },
             actions = {

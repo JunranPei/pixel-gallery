@@ -10,7 +10,6 @@ import androidx.activity.compose.BackHandler
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,8 +32,8 @@ import com.pixel.gallery.model.isValidLabelName
 import com.pixel.gallery.model.normalizeLabelName
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
-import com.pixel.gallery.ui.home.AlbumCoverCard
-import com.pixel.gallery.ui.home.AlbumGrid
+import com.pixel.gallery.ui.home.AlbumCollectionGrid
+import com.pixel.gallery.ui.home.AlbumCollectionItem
 import com.pixel.gallery.ui.components.GalleryOverflowButton
 import com.pixel.gallery.ui.components.GalleryMenuRow
 import com.pixel.gallery.model.AlbumSortOrder
@@ -46,7 +45,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import com.pixel.gallery.ui.components.AlbumSortDialog
-import com.pixel.gallery.ui.gallery.AlbumSearchTitle
+import com.pixel.gallery.ui.gallery.rememberAlbumSearch
 
 @Composable
 fun labelDisplayName(label: LabelEntry): String =
@@ -94,6 +93,21 @@ fun LabelsScreen(
         labels.filter { query.isEmpty() || it.label.name.contains(query, ignoreCase = true) }
     }
 
+    val entries = sortedLabels.map { summary ->
+        AlbumCollectionItem(
+            key = summary.label.id,
+            title = labelDisplayName(summary.label),
+            subtitle = stringResource(R.string.labels_count, summary.count),
+            coverUri = summary.cover?.uri,
+            coverModifiedMillis = summary.cover?.dateModifiedMillis ?: 0L,
+            coverMimeType = summary.cover?.sourceMimeType,
+            coverSizeBytes = summary.cover?.sizeBytes,
+            coverRotationDegrees = summary.cover?.sourceRotationDegrees ?: 0,
+            emptyIcon = if (summary.label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
+            selectable = !summary.label.isSystem,
+        )
+    }
+
     return GalleryPage(
         topBar = {
             if (selectionMode) {
@@ -110,24 +124,23 @@ fun LabelsScreen(
                 )
             } else {
             GalleryHeader(
-                fullWidth = searchMode,
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                search = rememberAlbumSearch(
+                    isSearchMode = searchMode,
+                    onSearchModeChange = { enabled ->
+                        if (enabled && !searchMode) searchFocusRequested = true
+                        if (!enabled) searchFocusRequested = false
+                        searchMode = enabled
+                    },
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    searchPlaceholder = stringResource(R.string.labels_search),
+                    clearSearchDescription = stringResource(R.string.album_clear_search),
+                    focusRequested = searchFocusRequested,
+                    onFocusRequestConsumed = { searchFocusRequested = false },
+                    backEnabled = isForeground,
+                ),
                 title = {
-                    AlbumSearchTitle(
-                        isSearchMode = searchMode,
-                        onSearchModeChange = { enabled ->
-                            if (enabled && !searchMode) searchFocusRequested = true
-                            if (!enabled) searchFocusRequested = false
-                            searchMode = enabled
-                        },
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        searchPlaceholder = stringResource(R.string.labels_search),
-                        clearSearchDescription = stringResource(R.string.album_clear_search),
-                        focusRequested = searchFocusRequested,
-                        onFocusRequestConsumed = { searchFocusRequested = false },
-                        backEnabled = isForeground,
-                        title = {
                             Text(
                                 stringResource(R.string.labels_title),
                                 style = EmphasizedTypography.TitleLarge,
@@ -135,8 +148,6 @@ fun LabelsScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                        },
-                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -159,57 +170,45 @@ fun LabelsScreen(
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            AlbumGrid(
+            AlbumCollectionGrid.instance.Content(
+                entries = entries,
                 columns = gridColumns,
                 onColumnsChange = onColumnsChange,
                 state = gridState,
                 modifier = Modifier.fillMaxSize(),
-            ) {
-                errorMessage?.let { message ->
-                    item(key = "error", span = { GridItemSpan(maxLineSpan) }) {
-                        Surface(shape = ExpressiveShapes.LargeIncreased, color = MaterialTheme.colorScheme.errorContainer) {
-                            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
-                                TextButton(onClick = onClearError) { Text(stringResource(R.string.labels_dismiss_error)) }
+                enabled = !isSaving,
+                selectedKeys = selectedIds,
+                selectionMode = selectionMode,
+                onOpen = onLabelClick,
+                onToggleSelection = toggleSelection,
+                beforeItems = {
+                    errorMessage?.let { message ->
+                        item(key = "error", span = { GridItemSpan(maxLineSpan) }) {
+                            Surface(shape = ExpressiveShapes.LargeIncreased, color = MaterialTheme.colorScheme.errorContainer) {
+                                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
+                                    TextButton(onClick = onClearError) { Text(stringResource(R.string.labels_dismiss_error)) }
+                                }
                             }
                         }
                     }
-                }
-                items(sortedLabels, key = { it.label.id }) { summary ->
-                    AlbumCoverCard(
-                        title = labelDisplayName(summary.label),
-                        subtitle = stringResource(R.string.labels_count, summary.count),
-                        coverUri = summary.cover?.uri,
-                        coverModifiedMillis = summary.cover?.dateModifiedMillis ?: 0L,
-                        coverMimeType = summary.cover?.sourceMimeType,
-                        coverSizeBytes = summary.cover?.sizeBytes,
-                        coverRotationDegrees = summary.cover?.sourceRotationDegrees ?: 0,
-                        columns = gridColumns,
-                        emptyIcon = if (summary.label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
-                        enabled = !isSaving,
-                        selected = summary.label.id in selectedIds,
-                        selectionMode = selectionMode && !summary.label.isSystem,
-                        onClick = {
-                            if (!selectionMode) onLabelClick(summary.label.id)
-                            else if (!summary.label.isSystem) toggleSelection(summary.label.id)
-                        },
-                        onLongClick = if (summary.label.isSystem) null else {{ toggleSelection(summary.label.id) }},
-                    )
-                }
-                if (sortedLabels.none { !it.label.isSystem }) {
-                    item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(stringResource(R.string.labels_empty), style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(16.dp))
-                            FilledTonalButton(onClick = { editingLabel = null; showNameDialog = true }, enabled = !isSaving) {
-                                Icon(Icons.Default.Add, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.labels_new))
+                },
+                afterItems = {
+                    if (sortedLabels.none { !it.label.isSystem }) {
+                        item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(stringResource(R.string.labels_empty), style = MaterialTheme.typography.titleMedium)
+                                Spacer(Modifier.height(16.dp))
+                                FilledTonalButton(onClick = { editingLabel = null; showNameDialog = true }, enabled = !isSaving) {
+                                    Icon(Icons.Default.Add, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.labels_new))
+                                }
                             }
                         }
                     }
-                }
-            }
+                },
+            )
         }
 
     if (showNameDialog) {

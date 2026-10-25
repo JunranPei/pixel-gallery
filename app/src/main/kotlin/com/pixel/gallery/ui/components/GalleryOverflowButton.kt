@@ -20,12 +20,18 @@ import com.pixel.gallery.R
 fun GalleryOverflowButton(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    onSettings: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
         IconButton(onClick = { onExpandedChange(!expanded) }, modifier = Modifier.fillMaxSize()) {
             Icon(Icons.Default.MoreVert, stringResource(R.string.more), modifier = Modifier.size(24.dp))
         }
-        GalleryOverflowMenu(expanded, onDismissRequest = { onExpandedChange(false) }, content = content)
+        GalleryOverflowMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
+            onSettings = onSettings,
+            content = content,
+        )
     }
 }

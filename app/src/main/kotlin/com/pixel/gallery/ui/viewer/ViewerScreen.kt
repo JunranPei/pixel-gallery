@@ -4,6 +4,8 @@ import com.pixel.gallery.ui.GalleryHeader
 import com.pixel.gallery.ui.GalleryPage
 import com.pixel.gallery.ui.GalleryPageContent
 import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.GalleryMenuGroupSpacing
+import com.pixel.gallery.ui.components.LocalGallerySettingsAction
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
@@ -368,6 +370,7 @@ internal fun ViewerScreen(
     labelIdsForMedia: (Long) -> List<Long> = { emptyList() },
     onOpenLabel: (Long) -> Unit = {},
     allowLabels: Boolean = true,
+    isForeground: Boolean = true,
     reservedIds: Set<Long> = emptySet()
 ): GalleryPageContent {
     val context = LocalContext.current
@@ -410,15 +413,16 @@ internal fun ViewerScreen(
     val actionsFlingThresholdPx = with(actionDensity) { 600.dp.toPx() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var rotationLocked by remember { mutableStateOf(true) }
+    var requestedViewerOrientation by remember { mutableStateOf<Int?>(null) }
     var ultraHdrActive by remember { mutableStateOf(false) }
 
     val currentMedia = remember(pagerState.currentPage, photos) {
         photos.getOrNull(pagerState.currentPage)
     }
 
-    DisposableEffect(Unit) {
-        val taskWindow = ViewerGlideTaskCompression.enter()
-        onDispose { taskWindow.close() }
+    DisposableEffect(isForeground) {
+        val taskWindow = if (isForeground) ViewerGlideTaskCompression.enter() else null
+        onDispose { taskWindow?.close() }
     }
 
     DisposableEffect(entryId) {
@@ -615,9 +619,9 @@ internal fun ViewerScreen(
             UltraHdrTileSupport.clearAll()
         }
     }
-    DisposableEffect(context, enableUltraHdr, ultraHdrActive) {
+    DisposableEffect(context, isForeground, enableUltraHdr, ultraHdrActive) {
         val activity = context as? Activity
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && activity != null) {
+        if (isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && activity != null) {
             val powerManager = context.getSystemService(PowerManager::class.java)
             val enableHdr =
                 enableUltraHdr && ultraHdrActive && powerManager?.isPowerSaveMode != true
@@ -634,7 +638,7 @@ internal fun ViewerScreen(
             }
         }
         onDispose {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ViewerLoadMetrics.event(
                     "WINDOW_COLOR_MODE_DISPOSE",
                     "requested=DEFAULT",
@@ -702,20 +706,36 @@ internal fun ViewerScreen(
     val hasMotionPhoto = viewerPhotoMetadata?.hasMotionPhoto == true
 
     DisposableEffect(Unit) {
-        val activity = context as? Activity
         onDispose {
             motionVideoFile?.delete()
-            val window = activity?.window
-            if (window != null) {
-                WindowCompat.getInsetsController(window, window.decorView)
-                    .show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    DisposableEffect(context, isForeground) {
+        val activity = context as? Activity
+        onDispose {
+            if (isForeground) {
+                val window = activity?.window
+                if (window != null) {
+                    WindowCompat.getInsetsController(window, window.decorView)
+                        .show(WindowInsetsCompat.Type.systemBars())
+                }
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    LaunchedEffect(context, isForeground, requestedViewerOrientation) {
+        if (isForeground) {
+            requestedViewerOrientation?.let { orientation ->
+                (context as? Activity)?.requestedOrientation = orientation
+            }
         }
     }
 
     // Auto-hide UI timer
-    LaunchedEffect(showUI, showMenu, expandedBottomActions, bottomActionsReveal.dragging, pagerState.currentPage, isPlayingMotion) {
+    LaunchedEffect(isForeground, showUI, showMenu, expandedBottomActions, bottomActionsReveal.dragging, pagerState.currentPage, isPlayingMotion) {
+        if (!isForeground) return@LaunchedEffect
         ViewerLoadMetrics.event(
             "UI_AUTO_HIDE_SCHEDULE",
             "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
@@ -730,7 +750,8 @@ internal fun ViewerScreen(
     }
 
     // Immersive Mode
-    LaunchedEffect(showUI) {
+    LaunchedEffect(context, isForeground, showUI) {
+        if (!isForeground) return@LaunchedEffect
         val window = (context as? Activity)?.window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         ViewerLoadMetrics.event(
@@ -809,6 +830,7 @@ internal fun ViewerScreen(
                     }
                 },
                 actions = {
+                    val openSettings = LocalGallerySettingsAction.current
                     if (hasMotionPhoto || motionVideoFile != null) {
                         IconButton(
                             enabled = !isExtractingMotion,
@@ -927,6 +949,30 @@ internal fun ViewerScreen(
                                 },
                             )
                         }
+                        Spacer(Modifier.height(GalleryMenuGroupSpacing))
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.settings)) },
+                            enabled = openSettings != null,
+                            onClick = {
+                                showMenu = false
+                                openSettings?.invoke()
+                            },
+                            leadingIcon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Settings,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1014,6 +1060,7 @@ internal fun ViewerScreen(
                         firstFrameModel = firstFrameModel,
                         showUI = showUI, 
                         isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress,
+                        isForeground = isForeground,
                         shouldPrepare = shouldPrepareVideo,
                         onTap = { showUI = !showUI }
                     )
@@ -1452,6 +1499,8 @@ internal fun ViewerScreen(
                                 uri = Uri.fromFile(motionVideoFile!!).toString(),
                                 isMotionPhoto = true,
                                 isActive = true, 
+                                isForeground = isForeground,
+                                shouldPrepare = true,
                                 modifier = Modifier.fillMaxSize(),
                                 onTap = { isPlayingMotion = false }
                             )
@@ -1610,8 +1659,7 @@ internal fun ViewerScreen(
                             "Rotate",
                         ) {
                             rotationLocked = !rotationLocked
-                            val activity = context as? Activity
-                            activity?.requestedOrientation = if (rotationLocked) {
+                            requestedViewerOrientation = if (rotationLocked) {
                                 ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                             } else {
                                 ActivityInfo.SCREEN_ORIENTATION_SENSOR
@@ -1634,7 +1682,7 @@ internal fun ViewerScreen(
             }
         }
 
-        if (showInfo && currentMedia != null) {
+        if (isForeground && showInfo && currentMedia != null) {
             InfoBottomSheet(
                 media = currentMedia,
                 viewModel = viewModel,
@@ -1652,7 +1700,7 @@ internal fun ViewerScreen(
         }
 
         DeleteConfirmDialog(
-            visible = showDeleteConfirm && !isCurrentReserved,
+            visible = isForeground && showDeleteConfirm && !isCurrentReserved,
             onDismissRequest = { showDeleteConfirm = false },
             title = if (allowUnlockFromVault) "Delete permanently?" else "Move to Recycle Bin?",
             message = if (allowUnlockFromVault) "This action cannot be undone." else stringResource(R.string.dialog_restore),
@@ -1673,7 +1721,7 @@ internal fun ViewerScreen(
             }
         )
 
-        imageIndexAction?.let { action ->
+        imageIndexAction?.takeIf { isForeground }?.let { action ->
             val target = currentIndexTarget ?: return@let
             val formatName = target.format.displayName
             val isBuild = action == IndexedImageAction.BUILD
@@ -1826,7 +1874,7 @@ internal fun ViewerScreen(
             )
         }
 
-        unsupportedIndexFormat?.let { formatName ->
+        unsupportedIndexFormat?.takeIf { isForeground }?.let { formatName ->
             GalleryDialog(
                 onDismissRequest = { unsupportedIndexFormat = null },
                 title = { Text(stringResource(R.string.dialog_unsupported_title, formatName)) },
@@ -2009,6 +2057,7 @@ fun VideoPlayer(
     modifier: Modifier = Modifier,
     isMotionPhoto: Boolean = false,
     isActive: Boolean = true,
+    isForeground: Boolean = true,
     shouldPrepare: Boolean = isActive,
     showUI: Boolean = true,
     onTap: () -> Unit = {}
@@ -2019,6 +2068,9 @@ fun VideoPlayer(
     var nativeVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
     var hasRenderedFirstFrame by remember(uri) { mutableStateOf(false) }
     var hasPresentedVideoSurface by remember(uri) { mutableStateOf(false) }
+    var wasForeground by remember(uri) { mutableStateOf(isForeground) }
+    var resumePlaybackOnForeground by remember(uri) { mutableStateOf(isActive) }
+    val latestPlaybackAllowed by rememberUpdatedState(isActive && isForeground)
     val coroutineScope = rememberCoroutineScope()
 
     val minUserZoom = 0.333f
@@ -2091,7 +2143,7 @@ fun VideoPlayer(
                         }
                     })
                     prepare()
-                    playWhenReady = isActive
+                    playWhenReady = isActive && isForeground
                 }
         } else null
         
@@ -2104,15 +2156,24 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(exoPlayer, nativeVideoView, isActive, useNativeFallback) {
-        exoPlayer?.playWhenReady = isActive
+    LaunchedEffect(exoPlayer, nativeVideoView, isActive, isForeground, useNativeFallback) {
+        // A covered viewer keeps its player and playback position. Remember a
+        // manual pause as well, so returning from Settings does not start it.
+        if (!isForeground && wasForeground) {
+            resumePlaybackOnForeground = if (useNativeFallback && nativeVideoView != null) {
+                nativeVideoView?.isPlaying == true
+            } else exoPlayer?.playWhenReady ?: isActive
+        }
+        val shouldPlay = isForeground && isActive && (wasForeground || resumePlaybackOnForeground)
+        exoPlayer?.playWhenReady = shouldPlay
         nativeVideoView?.let { view ->
-            if (isActive) {
+            if (shouldPlay) {
                 if (!view.isPlaying) view.start()
             } else if (view.isPlaying) {
                 view.pause()
             }
         }
+        wasForeground = isForeground
     }
 
     LaunchedEffect(isActive, hasRenderedFirstFrame) {
@@ -2178,7 +2239,7 @@ fun VideoPlayer(
                                 setOnPreparedListener { mp ->
                                     mp.isLooping = !isMotionPhoto
                                     hasRenderedFirstFrame = true
-                                    if (isActive) mp.start()
+                                    if (latestPlaybackAllowed) mp.start()
                                 }
                                 setOnErrorListener { _, _, _ -> true }
                                 nativeVideoView = this
@@ -2186,6 +2247,7 @@ fun VideoPlayer(
                         },
                         update = { view ->
                             nativeVideoView = view
+                            view.keepScreenOn = isActive && isForeground
                         },
                         modifier = Modifier
                             .fillMaxSize()
@@ -2203,11 +2265,12 @@ fun VideoPlayer(
                                 player = exoPlayer
                                 useController = false
                                 resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                setKeepScreenOn(true)
+                                setKeepScreenOn(isActive && isForeground)
                                 setBackgroundColor(android.graphics.Color.BLACK)
                             }
                         },
                         update = { view ->
+                            view.keepScreenOn = isActive && isForeground
                             if (view.player != exoPlayer) {
                                 view.player = exoPlayer
                             }
@@ -2228,7 +2291,8 @@ fun VideoPlayer(
             VideoControls(
                 player = exoPlayer,
                 nativeVideoView = if (useNativeFallback) nativeVideoView else null,
-                isVisible = showUI,
+                isVisible = showUI && isForeground,
+                isForeground = isForeground,
                 currentZoom = currentZoom,
                 fallbackDurationMillis = fallbackDurationMillis,
                 modifier = Modifier.fillMaxSize()
@@ -2242,6 +2306,7 @@ fun VideoControls(
     player: Player?,
     nativeVideoView: android.widget.VideoView? = null,
     isVisible: Boolean,
+    isForeground: Boolean = true,
     currentZoom: Float = 1f,
     fallbackDurationMillis: Long = 0L,
     modifier: Modifier = Modifier
@@ -2254,7 +2319,8 @@ fun VideoControls(
     var duration by remember { mutableLongStateOf(0L) }
     var isDragging by remember { mutableStateOf(false) }
 
-    LaunchedEffect(player, nativeVideoView, isDragging, fallbackDurationMillis) {
+    LaunchedEffect(player, nativeVideoView, isDragging, fallbackDurationMillis, isForeground) {
+        if (!isForeground) return@LaunchedEffect
         while (true) {
             try {
                 if (nativeVideoView != null) {

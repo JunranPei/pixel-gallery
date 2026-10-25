@@ -18,7 +18,6 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
@@ -56,7 +55,7 @@ fun HomeOverflowMenu(
     mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     onMediaTypeChange: (MediaTypeFilter) -> Unit = {},
 ) {
-    GalleryOverflowButton(expanded, onExpandedChange) {
+    GalleryOverflowButton(expanded, onExpandedChange, onSettings = onSettings) {
         MediaTypeMenuSection(mediaType, onMediaTypeChange)
         if (showQuickSort) {
             GalleryMenuRow(
@@ -69,11 +68,9 @@ fun HomeOverflowMenu(
         GalleryMenuRow(sortLabel, Icons.AutoMirrored.Filled.Sort, accented = true, onClick = onSort)
         GalleryMenuRow(duplicateLabel, Icons.Outlined.FileCopy, accented = true,
             enabled = canFindDuplicates, onClick = onFindDuplicates)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(GalleryMenuGroupSpacing))
         GalleryMenuRow("Hidden albums", Icons.Outlined.VisibilityOff, onClick = onHiddenAlbums)
         GalleryMenuRow("Locked folder", Icons.Outlined.Lock, onClick = onLockedFolder)
-        Spacer(Modifier.height(8.dp))
-        GalleryMenuRow("Settings", Icons.Outlined.Settings, onClick = onSettings)
     }
 }
 
@@ -81,6 +78,7 @@ fun HomeOverflowMenu(
 fun GalleryOverflowMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
+    onSettings: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val menuWidth = minOf(
@@ -95,8 +93,10 @@ fun GalleryOverflowMenu(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 0.dp,
         shadowElevation = 6.dp,
-        content = content,
-    )
+    ) {
+        content()
+        GallerySettingsMenuEntry(onDismissRequest = onDismissRequest, onSettings = onSettings)
+    }
 }
 
 @Composable

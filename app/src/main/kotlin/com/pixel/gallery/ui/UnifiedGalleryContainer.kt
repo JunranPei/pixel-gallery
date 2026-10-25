@@ -1,7 +1,12 @@
 package com.pixel.gallery.ui
 
 import android.view.View
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,6 +17,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -19,6 +25,32 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
+import com.pixel.gallery.ui.gallery.shouldSwitchPhotoHeader
+
+internal class GallerySearchState(isSearchMode: Boolean) {
+    var isSearchMode by mutableStateOf(isSearchMode)
+    var dragOffsetPx by mutableFloatStateOf(0f)
+    var isAnimating by mutableStateOf(false)
+}
+
+/** Search is another content slot of the permanent toolbar, never another bar. */
+class GallerySearchSpec internal constructor(
+    internal val state: GallerySearchState,
+    internal val onSearchModeChange: (Boolean) -> Unit,
+    internal val enabled: Boolean,
+    internal val content: @Composable () -> Unit,
+)
+
+@Composable
+fun rememberGallerySearch(
+    isSearchMode: Boolean,
+    onSearchModeChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+): GallerySearchSpec {
+    val state = remember(isSearchMode) { GallerySearchState(isSearchMode) }
+    return GallerySearchSpec(state, onSearchModeChange, enabled, content)
+}
 
 /** Data only. Routes describe header slots; they cannot construct a toolbar. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,6 +63,7 @@ class GalleryHeaderSpec internal constructor(
     val modifier: Modifier,
     val visible: Boolean,
     val centerTitle: Boolean,
+    val search: GallerySearchSpec?,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,7 +80,8 @@ fun GalleryHeader(
     modifier: Modifier = Modifier,
     visible: Boolean = true,
     centerTitle: Boolean = false,
-): GalleryHeaderSpec = GalleryHeaderSpec(title, navigationIcon, actions, colors, fullWidth, modifier, visible, centerTitle)
+    search: GallerySearchSpec? = null,
+): GalleryHeaderSpec = GalleryHeaderSpec(title, navigationIcon, actions, colors, fullWidth, modifier, visible, centerTitle, search)
 
 class GalleryPageContent internal constructor(
     val header: GalleryHeaderSpec,
@@ -153,7 +187,7 @@ class UnifiedGalleryContainer private constructor() {
     }
 }
 
-/** The toolbar's three layout slots remain mounted across every header mode. */
+/** All four slots remain mounted; the ordinary slots move together during search. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PermanentGalleryToolbar(
@@ -161,9 +195,56 @@ private fun PermanentGalleryToolbar(
     statusBarHeightPx: Int,
     heightOffsetPx: Float,
 ) {
+    val search = header.search
+    val latestSearch by rememberUpdatedState(search)
+    var widthPx by remember { mutableFloatStateOf(0f) }
+    val dragState = rememberDraggableState { delta ->
+        search?.takeIf { it.enabled && !it.state.isAnimating && widthPx > 0f }?.let {
+            it.state.dragOffsetPx = (it.state.dragOffsetPx + delta).coerceIn(-widthPx, widthPx)
+        }
+    }
+    val fullWidth = header.fullWidth && search == null
+    val dragOffsetPx = search?.state?.dragOffsetPx ?: 0f
+    val isSearchMode = search?.state?.isSearchMode == true
+    val showNormalContent = !isSearchMode || dragOffsetPx != 0f
+    val showSearchContent = search != null && (isSearchMode || dragOffsetPx != 0f)
     Layout(
         modifier = header.modifier
             .fillMaxWidth()
+            .onSizeChanged { widthPx = it.width.toFloat() }
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Horizontal,
+                enabled = search?.let { it.enabled && !it.state.isAnimating } == true,
+                onDragStopped = { velocity ->
+                    val activeSearch = latestSearch ?: return@draggable
+                    val state = activeSearch.state
+                    if (widthPx <= 0f || state.dragOffsetPx == 0f) {
+                        state.dragOffsetPx = 0f
+                        return@draggable
+                    }
+                    val startingMode = state.isSearchMode
+                    val startingOffset = state.dragOffsetPx
+                    val switchPage = shouldSwitchPhotoHeader(startingOffset, widthPx, velocity)
+                    val direction = if (startingOffset > 0f) 1f else -1f
+                    val targetOffset = if (switchPage) direction * widthPx else 0f
+                    state.isAnimating = true
+                    try {
+                        Animatable(startingOffset).animateTo(targetOffset, tween(180)) {
+                            if (latestSearch?.state === state) state.dragOffsetPx = value
+                        }
+                        if (latestSearch?.state === state) {
+                            val nextMode = if (switchPage) !startingMode else startingMode
+                            state.isSearchMode = nextMode
+                            state.dragOffsetPx = 0f
+                            if (switchPage) latestSearch?.onSearchModeChange?.invoke(nextMode)
+                        }
+                    } finally {
+                        if (latestSearch?.state !== state) state.dragOffsetPx = 0f
+                        state.isAnimating = false
+                    }
+                },
+            )
             .background(header.colors.containerColor)
             .clipToBounds()
             .drawWithContent {
@@ -173,7 +254,7 @@ private fun PermanentGalleryToolbar(
         content = {
             Box(contentAlignment = Alignment.Center) {
                 CompositionLocalProvider(LocalContentColor provides header.colors.navigationIconContentColor) {
-                    if (!header.fullWidth) header.navigationIcon()
+                    if (!fullWidth) header.navigationIcon()
                 }
             }
             Box(contentAlignment = if (header.centerTitle) Alignment.Center else Alignment.CenterStart) {
@@ -183,7 +264,12 @@ private fun PermanentGalleryToolbar(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CompositionLocalProvider(LocalContentColor provides header.colors.actionIconContentColor) {
-                    if (!header.fullWidth) header.actions(this@Row)
+                    if (!fullWidth) header.actions(this@Row)
+                }
+            }
+            Box(contentAlignment = Alignment.Center) {
+                CompositionLocalProvider(LocalContentColor provides header.colors.titleContentColor) {
+                    if (showSearchContent) search?.content?.invoke()
                 }
             }
         },
@@ -198,12 +284,12 @@ private fun PermanentGalleryToolbar(
         )
         val navigation = measurables[0].measure(loose)
         val actions = measurables[2].measure(loose)
-        val titleLeft = if (header.fullWidth || header.centerTitle) {
+        val titleLeft = if (fullWidth || header.centerTitle) {
             titlePadding
         } else {
             maxOf(titlePadding, navigation.width + titlePadding)
         }
-        val titleRight = if (header.fullWidth || header.centerTitle) {
+        val titleRight = if (fullWidth || header.centerTitle) {
             width - titlePadding
         } else {
             width - actions.width - edgePadding
@@ -215,14 +301,29 @@ private fun PermanentGalleryToolbar(
                 maxHeight = toolbarHeight,
             ),
         )
+        val searchField = measurables[3].measure(
+            Constraints(
+                minWidth = (width - titlePadding * 2).coerceAtLeast(0),
+                maxWidth = (width - titlePadding * 2).coerceAtLeast(0),
+                maxHeight = toolbarHeight,
+            ),
+        )
+        val dragDirection = if (dragOffsetPx < 0f) -1f else 1f
+        val otherPageOffset = dragOffsetPx - dragDirection * width
+        val normalOffset = (if (isSearchMode) otherPageOffset else dragOffsetPx).roundToInt()
+        val searchOffset = (if (isSearchMode) dragOffsetPx else otherPageOffset).roundToInt()
         val offset = heightOffsetPx.roundToInt().coerceIn(-toolbarHeight, 0)
         val height = (statusBarHeightPx + toolbarHeight + offset).coerceAtLeast(0)
         layout(width, height) {
             fun childTop(childHeight: Int) = statusBarHeightPx + offset + (toolbarHeight - childHeight) / 2
-            navigation.placeRelative(edgePadding, childTop(navigation.height))
-            title.placeRelative(titleLeft, childTop(title.height))
-            // Actions are last both in drawing order and at the fixed trailing edge.
-            actions.placeRelative(width - edgePadding - actions.width, childTop(actions.height))
+            if (showNormalContent) {
+                navigation.placeRelative(edgePadding + normalOffset, childTop(navigation.height))
+                title.placeRelative(titleLeft + normalOffset, childTop(title.height))
+                actions.placeRelative(width - edgePadding - actions.width + normalOffset, childTop(actions.height))
+            }
+            if (showSearchContent) {
+                searchField.placeRelative(titlePadding + searchOffset, childTop(searchField.height))
+            }
         }
     }
 }

@@ -39,6 +39,7 @@ class SettingsRepository @Inject constructor(
     private val HANDEDNESS = stringPreferencesKey("handedness")
     private val EXCLUDED_FOLDERS = stringSetPreferencesKey("excluded_folders")
     private val HIDDEN_FOLDERS = stringSetPreferencesKey("hidden_folders")
+    private val HIDDEN_RENAME_PROTECTION = stringSetPreferencesKey("hidden_rename_protection")
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
     private val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
     private val PHOTO_SORT_ORDER = stringPreferencesKey("photo_sort_order")
@@ -70,7 +71,11 @@ class SettingsRepository @Inject constructor(
         context.dataStore.edit { it[QUICK_SORT_DOCK_TOP] = top }
     }
 
-    suspend fun remapAlbumPaths(source: String, target: String) {
+    suspend fun remapAlbumPaths(
+        source: String,
+        target: String,
+        renameProtectionPaths: Set<String> = emptySet(),
+    ) {
         context.dataStore.edit { preferences ->
             listOf(EXCLUDED_FOLDERS, HIDDEN_FOLDERS).forEach { key ->
                 preferences[key]?.let { paths ->
@@ -86,6 +91,37 @@ class SettingsRepository @Inject constructor(
                     displayName = java.io.File(path).name,
                 )
             })
+            // Remove this attempt's guard in the same edit that publishes the
+            // new user roots. Older guards follow the move and remain protected.
+            val protection = preferences[HIDDEN_RENAME_PROTECTION] ?: emptySet()
+            preferences[HIDDEN_RENAME_PROTECTION] = (protection - renameProtectionPaths)
+                .map { remapAlbumPath(it, source, target) }.toSet()
+        }
+    }
+
+    /** Keep both locations hidden until the media and settings paths have settled. */
+    internal suspend fun protectHiddenAlbumRename(source: String, target: String): Set<String> {
+        var addedPaths = emptySet<String>()
+        context.dataStore.edit { preferences ->
+            val roots = preferences[HIDDEN_FOLDERS] ?: emptySet()
+            val protection = preferences[HIDDEN_RENAME_PROTECTION] ?: emptySet()
+            val requiredPaths = (roots + protection).flatMap { path ->
+                val renamed = remapAlbumPath(path, source, target)
+                if (renamed == path) emptyList() else listOf(path, renamed)
+            }.toSet()
+            addedPaths = requiredPaths - protection
+            if (addedPaths.isNotEmpty()) {
+                preferences[HIDDEN_RENAME_PROTECTION] = protection + addedPaths
+            }
+        }
+        return addedPaths
+    }
+
+    internal suspend fun clearHiddenAlbumRenameProtection(paths: Set<String>) {
+        if (paths.isEmpty()) return
+        context.dataStore.edit { preferences ->
+            val protection = preferences[HIDDEN_RENAME_PROTECTION] ?: emptySet()
+            preferences[HIDDEN_RENAME_PROTECTION] = protection - paths
         }
     }
 
@@ -154,8 +190,14 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    val hiddenFolders: Flow<Set<String>> = context.dataStore.data
+    val hiddenFolderRoots: Flow<Set<String>> = context.dataStore.data
         .map { preferences -> preferences[HIDDEN_FOLDERS] ?: emptySet() }
+
+    /** Visibility includes in-flight protection; the Hidden grid uses saved roots only. */
+    val hiddenFolders: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+        (preferences[HIDDEN_FOLDERS] ?: emptySet()) +
+            (preferences[HIDDEN_RENAME_PROTECTION] ?: emptySet())
+    }
 
     suspend fun addHiddenFolder(path: String) {
         context.dataStore.edit { preferences ->
@@ -165,9 +207,13 @@ class SettingsRepository @Inject constructor(
     }
 
     suspend fun removeHiddenFolder(path: String) {
+        removeHiddenFolders(setOf(path))
+    }
+
+    suspend fun removeHiddenFolders(paths: Set<String>) {
         context.dataStore.edit { preferences ->
             val current = preferences[HIDDEN_FOLDERS] ?: emptySet()
-            preferences[HIDDEN_FOLDERS] = current - path
+            preferences[HIDDEN_FOLDERS] = current - paths
         }
     }
 

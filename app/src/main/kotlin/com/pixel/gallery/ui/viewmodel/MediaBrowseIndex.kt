@@ -5,6 +5,7 @@ import com.pixel.gallery.model.Album
 import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.model.MediaTypeFilter
 import com.pixel.gallery.model.chronologicalTimestamp
+import com.pixel.gallery.model.isInsideMediaFolder
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.utils.MimeTypes
 import java.text.SimpleDateFormat
@@ -26,6 +27,17 @@ internal class MediaBrowseIndex private constructor(
     private val byAlbum: Map<String, List<BrowseRecord>>,
 ) {
     private val albumCache = ConcurrentHashMap<String, MediaBrowseScope>()
+    private val hiddenFolderCache = ConcurrentHashMap<String, MediaBrowseScope>()
+
+    /** Saved hidden roots can contain descendant directories as well as files. */
+    fun hiddenFolder(path: String, checkCancelled: () -> Unit = {}): MediaBrowseScope =
+        hiddenFolderCache.computeIfAbsent(path) {
+            val entries = records.filterIndexed { index, row ->
+                if (index % 512 == 0) checkCancelled()
+                row.entry.path.isInsideMediaFolder(path)
+            }
+            MediaBrowseScope.build(entries, checkCancelled)
+        }
 
     fun album(name: String, checkCancelled: () -> Unit = {}): MediaBrowseScope =
         albumCache.computeIfAbsent(name) {

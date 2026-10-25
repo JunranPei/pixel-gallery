@@ -107,6 +107,13 @@ class PhotosViewModel @Inject constructor(
     val photos: StateFlow<List<MediaEntry>> = orderedMedia.map { it.entries }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    // Hidden browsing uses the original records without exposing them to normal
+    // library, label, favourite or transfer-destination lists.
+    val hiddenPhotos: StateFlow<List<MediaEntry>> = combine(allPhotos, hiddenFolders) { entries, hidden ->
+        entries.filter { entry -> hidden.any { entry.path.isInsideMediaFolder(it) } }
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     /** Keeps ordering and time headers on the same effective timestamp. */
     fun sortMedia(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> =
         sortMediaEntries(entries, sort)
@@ -254,6 +261,18 @@ class PhotosViewModel @Inject constructor(
         it.library[com.pixel.gallery.model.MediaTypeFilter.ALL].media.gridItems
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    internal val hiddenBrowsingIndex: StateFlow<MediaBrowseIndex> = combine(
+        hiddenPhotos, photoSortOrder, gridColumns.map { it >= 6 }.distinctUntilChanged(), browseTimeZone,
+    ) { entries, sort, monthly, zone ->
+        Triple(OrderedMedia(entries, sort), monthly, zone)
+    }.mapLatest { (media, monthly, zone) ->
+        withContext(Dispatchers.Default) {
+            val taskContext = coroutineContext
+            MediaBrowseIndex.build(sortMedia(media.entries, media.sort), if (monthly) 6 else 3, media.sort,
+                timeZone = java.util.TimeZone.getTimeZone(zone), checkCancelled = { taskContext.ensureActive() })
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, MediaBrowseIndex.Empty)
+
     val favourites: StateFlow<List<MediaEntry>> = resumedState.flatMapLatest { resumed ->
         if (resumed) repository.favourites else emptyFlow()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -339,7 +358,7 @@ class PhotosViewModel @Inject constructor(
 
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
-        hiddenFolders,
+        settingsRepository.hiddenFolderRoots,
         albumSortOrder
     ) { all, hidden, sort ->
         // Saved roots must remain manageable even when empty or not indexed.
@@ -650,6 +669,10 @@ class PhotosViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.removeHiddenFolder(path)
         }
+    }
+
+    fun removeHiddenFolders(paths: Set<String>) {
+        viewModelScope.launch { settingsRepository.removeHiddenFolders(paths) }
     }
 
     fun setGridColumns(value: Int) {

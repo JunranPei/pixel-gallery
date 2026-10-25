@@ -180,7 +180,7 @@ class MediaRepository @Inject constructor(
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
-            !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.startsWith(it) }
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.isInsideMediaFolder(it) }
         }
     }.stateIn(
         scope = repositoryScope,
@@ -193,7 +193,7 @@ class MediaRepository @Inject constructor(
         val excluded = settingsRepository.excludedFolders.first()
         mediaDao.getAllEntriesPaged().filter { entry ->
             !entry.path.contains("/PixelGallery-QuickSortUndo/") &&
-                !excluded.any { entry.path.startsWith(it) }
+                !excluded.any { entry.path.isInsideMediaFolder(it) }
         }
     }
 
@@ -249,9 +249,16 @@ class MediaRepository @Inject constructor(
                     val entries = (mediaDao.getAllEntriesPaged() + mediaDao.getTrashPaged()).filter {
                         it.path.startsWith("${source.absolutePath}/")
                     }
-                    if (!source.renameTo(target)) throw IOException("Could not rename this album folder")
+                    // Publish protection for the new path before either the file system or Room
+                    // can expose it. The existing source protection remains during the move.
+                    val temporaryHiddenPaths = settingsRepository.protectHiddenAlbumRename(
+                        source.absolutePath, target.absolutePath
+                    )
                     val indexed = mutableListOf<Pair<MediaEntry, MediaEntry>>()
+                    var directoryRenamed = false
                     try {
+                        if (!source.renameTo(target)) throw IOException("Could not rename this album folder")
+                        directoryRenamed = true
                         for (entry in entries) {
                             val newPath = remapAlbumPath(entry.path, source.absolutePath, target.absolutePath)
                             val uri = scanFile(File(newPath), entry.sourceMimeType)
@@ -265,20 +272,40 @@ class MediaRepository @Inject constructor(
                             relocatePersistentIndexes(old.path, updated.path)
                         }
                         mediaDao.reconcileMedia(indexed.map { it.second }, indexed.filter { it.first.contentId != it.second.contentId }.map { it.first.contentId })
-                        settingsRepository.remapAlbumPaths(source.absolutePath, target.absolutePath)
+                        settingsRepository.remapAlbumPaths(
+                            source.absolutePath, target.absolutePath, temporaryHiddenPaths
+                        )
                     } catch (error: Exception) {
-                        if (target.renameTo(source)) {
-                            for (entry in entries) {
-                                val restoredUri = scanFile(File(entry.path), entry.sourceMimeType) ?: continue
-                                val restoredId = restoredUri.lastPathSegment?.toLongOrNull() ?: continue
-                                val moved = indexed.find { it.first.contentId == entry.contentId }?.second
-                                mediaDao.remapMediaLabels(entry.contentId, restoredId)
-                                mediaDao.remapMediaLabels(moved?.contentId ?: entry.contentId, restoredId)
-                                moved?.let { relocatePersistentIndexes(it.path, entry.path) }
-                                mediaDao.reconcileMedia(listOf(entry.copy(contentId = restoredId, uri = restoredUri.toString())),
-                                    listOfNotNull(entry.contentId, moved?.contentId).distinct().filter { it != restoredId })
+                        try {
+                            if (!directoryRenamed) {
+                                settingsRepository.clearHiddenAlbumRenameProtection(temporaryHiddenPaths)
+                            } else if (target.renameTo(source)) {
+                                var restoredAllEntries = true
+                                for (entry in entries) {
+                                    val restoredUri = scanFile(File(entry.path), entry.sourceMimeType)
+                                    val restoredId = restoredUri?.lastPathSegment?.toLongOrNull()
+                                    if (restoredUri == null || restoredId == null) {
+                                        restoredAllEntries = false
+                                        continue
+                                    }
+                                    val moved = indexed.find { it.first.contentId == entry.contentId }?.second
+                                    mediaDao.remapMediaLabels(entry.contentId, restoredId)
+                                    mediaDao.remapMediaLabels(moved?.contentId ?: entry.contentId, restoredId)
+                                    moved?.let { relocatePersistentIndexes(it.path, entry.path) }
+                                    mediaDao.reconcileMedia(listOf(entry.copy(contentId = restoredId, uri = restoredUri.toString())),
+                                        listOfNotNull(entry.contentId, moved?.contentId).distinct().filter { it != restoredId })
+                                }
+                                // remapAlbumPaths is the final, atomic step in the try block;
+                                // on failure the original settings still point at the source.
+                                // Remove only paths introduced by this attempt, never an old
+                                // destination setting or another hidden album's protection.
+                                if (restoredAllEntries) {
+                                    settingsRepository.clearHiddenAlbumRenameProtection(temporaryHiddenPaths)
+                                }
                             }
-                            settingsRepository.remapAlbumPaths(target.absolutePath, source.absolutePath)
+                            // A failed/incomplete rollback retains both hidden locations.
+                        } catch (recoveryError: Exception) {
+                            error.addSuppressed(recoveryError)
                         }
                         throw error
                     }

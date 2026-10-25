@@ -1,5 +1,7 @@
 # Locked Folder and Bin toolbar work
 
+> Current scope is maintained in [current-gallery-task-list.md](current-gallery-task-list.md). The user's 2026-10-25 instructions cancel additional release/arm64 packages and assistant-run tests. The older delivery and acceptance notes below are historical.
+
 Active acceptance list. Mark an item complete only after its stated evidence exists.
 
 1. [ ] **Keep overflow controls fixed.** Main, album, Bin, and Locked Folder grids use the same right-aligned overflow position in normal and selected states; other actions do not move it.

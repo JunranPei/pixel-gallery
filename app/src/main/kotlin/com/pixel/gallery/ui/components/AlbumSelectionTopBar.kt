@@ -12,6 +12,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.FolderOff
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ fun AlbumSelectionTopBar(
     onDelete: (() -> Unit)? = null,
     canFindDuplicates: Boolean = true,
     onFindDuplicates: (() -> Unit)? = null,
+    onUnhide: (() -> Unit)? = null,
 ): GalleryHeaderSpec {
     var showMenu by remember { mutableStateOf(false) }
     return GalleryHeader(
@@ -58,6 +60,11 @@ fun AlbumSelectionTopBar(
                 onHide?.let { action ->
                     IconButton(enabled = enabled, onClick = action) {
                         Icon(Icons.Outlined.VisibilityOff, stringResource(R.string.hide_album))
+                    }
+                }
+                onUnhide?.let { action ->
+                    IconButton(enabled = enabled, onClick = action) {
+                        Icon(Icons.Outlined.Visibility, stringResource(R.string.unhide))
                     }
                 }
                 onExclude?.let { action ->

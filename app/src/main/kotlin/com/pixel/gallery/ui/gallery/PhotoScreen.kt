@@ -30,6 +30,7 @@ import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.filled.Sort
 import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
 import androidx.compose.foundation.clickable
@@ -109,9 +110,10 @@ fun PhotoScreen(
     initialMediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     isForeground: Boolean = true,
     selectionMode: Boolean = selectedIds.isNotEmpty(),
-    viewModel: PhotosViewModel = hiltViewModel()
+    viewModel: PhotosViewModel = hiltViewModel(),
+    isHiddenAlbum: Boolean = false,
 ): GalleryPageContent {
-    val browsingIndex by viewModel.browsingIndex.collectAsState()
+    val browsingIndex by (if (isHiddenAlbum) viewModel.hiddenBrowsingIndex else viewModel.browsingIndex).collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
@@ -123,10 +125,11 @@ fun PhotoScreen(
     var mediaType by rememberSaveable(albumName) { mutableStateOf(initialMediaType) }
     val scope = rememberCoroutineScope()
     
-    val albumScope by produceState<MediaBrowseScope?>(null, browsingIndex, albumName) {
+    val albumScope by produceState<MediaBrowseScope?>(null, browsingIndex, albumName, isHiddenAlbum) {
         value = withContext(Dispatchers.Default) {
             val taskContext = coroutineContext
-            browsingIndex.album(albumName) { taskContext.ensureActive() }
+            if (isHiddenAlbum) browsingIndex.hiddenFolder(albumName) { taskContext.ensureActive() }
+            else browsingIndex.album(albumName) { taskContext.ensureActive() }
         }
     }
     val albumResult by produceState(AlbumBrowseResult(), albumScope, mediaType, normalizedSearchQuery) {
@@ -154,8 +157,9 @@ fun PhotoScreen(
     val photoCount = displayedAlbumPhotos.size
 
     var showMenu by remember { mutableStateOf(false) }
-    val albumPath = remember(albumPhotos) {
-        albumPhotos.firstOrNull()?.path?.substringBeforeLast('/', "").orEmpty()
+    val albumPath = remember(albumName, albumPhotos) {
+        if (albumName.startsWith('/')) albumName
+        else albumPhotos.firstOrNull()?.path?.substringBeforeLast('/', "").orEmpty()
     }
 
 
@@ -163,24 +167,23 @@ fun PhotoScreen(
         topBar = {
 
                 GalleryHeader(
-                fullWidth = searchMode,
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    search = rememberAlbumSearch(
+                        isSearchMode = searchMode,
+                        onSearchModeChange = { enabled ->
+                            if (enabled && !searchMode) searchFocusRequested = true
+                            if (!enabled) searchFocusRequested = false
+                            searchMode = enabled
+                        },
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { searchQuery = it },
+                        searchPlaceholder = stringResource(R.string.album_search_files),
+                        clearSearchDescription = stringResource(R.string.album_clear_search),
+                        focusRequested = searchFocusRequested,
+                        onFocusRequestConsumed = { searchFocusRequested = false },
+                        backEnabled = isForeground,
+                    ),
                     title = {
-                        AlbumSearchTitle(
-                            isSearchMode = searchMode,
-                            onSearchModeChange = { enabled ->
-                                if (enabled && !searchMode) searchFocusRequested = true
-                                if (!enabled) searchFocusRequested = false
-                                searchMode = enabled
-                            },
-                            searchQuery = searchQuery,
-                            onSearchQueryChange = { searchQuery = it },
-                            searchPlaceholder = stringResource(R.string.album_search_files),
-                            clearSearchDescription = stringResource(R.string.album_clear_search),
-                            focusRequested = searchFocusRequested,
-                            onFocusRequestConsumed = { searchFocusRequested = false },
-                            backEnabled = isForeground,
-                            title = {
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Text(
                                     java.io.File(albumName).name,
@@ -201,8 +204,6 @@ fun PhotoScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            },
-                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -246,11 +247,14 @@ fun PhotoScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             GalleryMenuRow(
-                                label = "Hide Album",
-                                icon = Icons.Outlined.VisibilityOff,
+                                label = if (isHiddenAlbum) stringResource(R.string.unhide) else "Hide Album",
+                                icon = if (isHiddenAlbum) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
                                 onClick = {
                                     showMenu = false
-                                    if (albumPath.isNotEmpty()) {
+                                    if (isHiddenAlbum) {
+                                        viewModel.removeHiddenFolder(albumName)
+                                        onBack()
+                                    } else if (albumPath.isNotEmpty()) {
                                         viewModel.addHiddenFolder(albumPath)
                                         onBack()
                                     }

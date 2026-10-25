@@ -585,14 +585,30 @@ fun AlbumsScreen(
     showHeaderButtons: Boolean = true,
     emptyMessage: String? = null,
 ) {
-    AlbumGrid(
+    val entries = remember(albums) {
+        albums.map { album ->
+            AlbumCollectionItem(
+                key = album.path,
+                title = album.name,
+                subtitle = "${album.itemCount} items",
+                coverUri = album.coverUri.takeIf { it.isNotBlank() },
+                coverModifiedMillis = album.lastModified,
+            )
+        }
+    }
+    AlbumCollectionGrid.instance.Content(
+        entries = entries,
         columns = columns,
         onColumnsChange = onColumnsChange,
         state = gridState,
         modifier = Modifier.fillMaxSize(),
         bottomPadding = bottomPadding,
-        emptyMessage = if (albums.isEmpty()) emptyMessage else null,
-    ) {
+        emptyMessage = emptyMessage,
+        selectedKeys = selectedPaths,
+        selectionMode = selectionMode,
+        onOpen = onNavigateToAlbum,
+        onToggleSelection = onToggleAlbumSelection,
+        beforeItems = {
             if (showHeaderButtons) {
                 // Reuse the existing Favourites slot for Labels; keep the Bin slot unchanged.
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
@@ -617,53 +633,7 @@ fun AlbumsScreen(
                     }
                 }
             }
-
-            items(
-                count = albums.size,
-                key = { albums[it].path }
-            ) { index ->
-                val album = albums[index]
-                val onAlbumExclude = remember(album.path) { { onExclude(album.path) } }
-                val onAlbumHide = remember(album.path) { { onHide(album.path) } }
-                AlbumCard(
-                    album = album,
-                    onClick = {
-                        if (selectionMode) onToggleAlbumSelection(album.path)
-                        else onNavigateToAlbum(album.path)
-                    },
-                    onExclude = onAlbumExclude,
-                    onHide = onAlbumHide,
-                    selected = album.path in selectedPaths,
-                    selectionMode = selectionMode,
-                    onLongClick = { onToggleAlbumSelection(album.path) },
-                    columns = columns
-                )
-            }
-    }
-}
-
-@OptIn(ExperimentalGlideComposeApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-fun AlbumCard(
-    album: Album,
-    onClick: () -> Unit,
-    onExclude: () -> Unit,
-    onHide: () -> Unit,
-    selected: Boolean = false,
-    selectionMode: Boolean = false,
-    onLongClick: (() -> Unit)? = null,
-    columns: Int = 2
-) {
-    AlbumCoverCard(
-        title = album.name,
-        subtitle = "${album.itemCount} items",
-        coverUri = album.coverUri.takeIf { it.isNotBlank() },
-        coverModifiedMillis = album.lastModified,
-        onClick = onClick,
-        onLongClick = onLongClick,
-        selected = selected,
-        selectionMode = selectionMode,
-        columns = columns,
+        },
     )
 }
 

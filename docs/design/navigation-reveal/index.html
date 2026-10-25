@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pixel Gallery · 导航拖出交互提案</title>
+<style>
+  :root{color-scheme:light;--ink:#30323d;--muted:#626878;--surface:#f6f4fc;--dock:#efedf7;--selected:#b6c5fa;--accent:#405b9c;--line:#dedfe8}
+  *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f9f9fc;color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.6}
+  button,input{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,a:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:3px solid #536eae;outline-offset:4px}
+  .page{max-width:1060px;margin:auto;padding:32px 36px 48px}.heading{display:flex;justify-content:space-between;gap:24px;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:20px}
+  h1{font-size:27px;letter-spacing:-.7px;line-height:1.3;margin:0 0 8px;font-weight:650}.heading p{margin:0;color:var(--muted);max-width:640px}.tag{white-space:nowrap;font-size:12px;color:var(--muted)}
+  .workbench{display:grid;grid-template-columns:minmax(340px,1fr) minmax(300px,.95fr);gap:58px;padding-top:30px;align-items:start}.stage{display:flex;align-items:center;flex-direction:column}
+  .phone{width:376px;max-width:100%;height:650px;position:relative;border:1px solid #d4d6e1;border-radius:31px;background:var(--surface);overflow:hidden;box-shadow:0 14px 40px #30323d0c;user-select:none}
+  .statusbar{height:31px;padding:8px 21px 0;display:flex;justify-content:space-between;font-size:11px;font-weight:650;align-items:center}.system-icons{display:flex;align-items:center;gap:6px}.battery{width:19px;height:9px;border-radius:3px;background:#30323d;display:inline-block}
+  .appbar{height:65px;display:flex;align-items:center;justify-content:center;position:relative}.app-title{font-size:24px;font-weight:700}.top-btn{border:0;background:none;padding:12px;position:absolute;right:10px;width:48px;height:48px;display:grid;place-items:center}.back{left:6px;right:auto}.icon{width:24px;height:24px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .content{position:absolute;top:96px;left:0;right:0;bottom:20px;border-radius:25px 25px 0 0;background:white;overflow:auto;scrollbar-width:none;padding:20px 12px 110px;touch-action:pan-y}.content::-webkit-scrollbar{display:none}.date{font-size:13px;font-weight:650;color:#566887;margin:0 5px 14px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.tile{border:0;min-width:0;padding:0;background:none;text-align:left}.thumb{height:110px;border-radius:12px;position:relative;overflow:hidden;background:#b9c9cc}.thumb::before{content:"";position:absolute;width:160%;height:75%;background:#6d8d83;left:-35%;top:52%;border-radius:45%;transform:rotate(-20deg)}.thumb::after{content:"";position:absolute;width:28px;height:28px;background:#fff5d9;right:20%;top:16%;border-radius:50%}.tile:nth-child(4n+2) .thumb{background:#d7c5b8}.tile:nth-child(4n+2) .thumb::before{background:#a78978;transform:rotate(23deg)}.tile:nth-child(4n+3) .thumb{background:#aebdd1}.tile:nth-child(4n+3) .thumb::before{background:#5d7494}.tile:nth-child(4n) .thumb{background:#d2d1b5}.tile:nth-child(4n) .thumb::before{background:#8b9673}.caption{display:none;text-align:center;font-size:13px;margin-top:9px;font-weight:600}.count{display:block;font-size:11px;color:var(--muted);font-weight:400}.content.albums .grid{grid-template-columns:repeat(2,1fr);gap:21px 15px}.content.albums .thumb{height:143px;border-radius:23px}.content.albums .caption{display:block}.content.private .thumb{filter:saturate(.65)}.content-note{font-size:11px;color:#818698;text-align:center;margin:24px 0 0}.system-line{position:absolute;bottom:8px;height:4px;width:108px;border-radius:4px;background:#60636a;left:50%;transform:translateX(-50%)}
+  .dock{position:absolute;bottom:38px;left:50%;height:64px;width:200px;border-radius:35px;background:var(--dock);overflow:hidden;touch-action:pan-y;cursor:grab;will-change:width,transform;box-shadow:0 1px 0 #ffffffb8 inset;isolation:isolate}
+  .dock.dragging{cursor:grabbing}.dock:focus-visible{outline-offset:5px}.pill{position:absolute;top:8px;height:48px;border-radius:27px;background:var(--selected);pointer-events:none;will-change:transform,width}
+  .nav-item{position:absolute;top:8px;height:48px;border:0;border-radius:28px;background:none;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:0;gap:8px;white-space:nowrap;will-change:transform,width;color:#4f566b;touch-action:pan-y;cursor:inherit}
+  .nav-item .icon{width:23px;height:23px}.nav-label{width:0;opacity:0;overflow:hidden;font-size:14px;font-weight:600;flex-shrink:0;text-align:left}.nav-item[aria-selected="true"]{color:#263d72}.nav-item:hover{background:#ffffff35}.nav-item[aria-selected="true"]:hover{background:transparent}
+  .gesture-spot{position:absolute;bottom:53px;left:50%;width:36px;height:36px;border:2px solid #597db3;background:#729cd32c;border-radius:50%;pointer-events:none;display:none;z-index:4}.phone-tip{position:absolute;bottom:119px;left:25px;right:25px;margin:auto;text-align:center;font-size:11px;color:#5e6784;pointer-events:none;background:#ffffffdc;border-radius:9px;padding:5px 8px;opacity:0;transition:opacity .15s}.phone-tip.show{opacity:1}.menu{position:absolute;right:13px;top:83px;z-index:6;background:#efedf7;border-radius:20px;padding:12px 18px;box-shadow:0 4px 20px #20263420;font-size:13px;width:168px;display:none}.menu p{margin:8px 0}.menu .settings{border-top:1px solid #d5d5df;margin-top:13px;padding-top:13px}
+  .under-phone{font-size:12px;color:var(--muted);text-align:center;margin:15px 0 0;line-height:1.8}.under-phone strong{font-weight:600;color:var(--ink)}
+  .controls{padding-top:4px}.controls h2{font-size:20px;line-height:1.4;margin:0 0 12px;font-weight:650}.controls p{color:var(--muted);margin:0 0 20px;max-width:410px}.buttons{display:flex;flex-wrap:wrap;gap:8px}.control{border:1px solid #d8dce7;background:#fff;border-radius:11px;min-height:43px;padding:9px 14px;font-size:13px;font-weight:550}.control.primary{background:#e3e9fb;color:#304e8c;border-color:#d7e0f7}.control:hover{background:#edf0f8}.control.small{min-height:36px;padding:6px 11px;font-size:12px}.readout{margin-top:24px;border-top:1px solid var(--line);padding-top:21px}.readout-head{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:6px}.readout-head strong{font-size:15px}.readout-head span{font-size:12px;color:var(--muted)}.progress{height:4px;background:#e5e8ef;border-radius:4px;overflow:hidden;margin:13px 0}.progress>div{height:100%;background:#879dcc;width:0}.readout p{font-size:13px;line-height:1.75;min-height:48px;margin-bottom:10px}
+  .steps{padding-left:0;list-style:none;font-size:13px;margin:18px 0 22px}.steps li{display:flex;gap:12px;align-items:baseline;padding:8px 0;color:var(--muted)}.step-num{font-variant-numeric:tabular-nums;font-size:12px;color:#8c93a3;width:14px;flex:none}.steps li.active{color:#304e8c;font-weight:650}.options{border-top:1px solid var(--line);padding-top:18px}.option{display:flex;align-items:center;justify-content:space-between;gap:15px;font-size:13px;margin:0 0 14px}.option input[type=checkbox]{accent-color:#5974ad;width:16px;height:16px}.range-labels{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:1px}input[type=range]{width:100%;accent-color:#718ac0}.subtle{font-size:12px!important;margin:13px 0 0!important;line-height:1.8}.comparison{border-top:1px solid var(--line);margin-top:34px;padding-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.comparison h3{font-size:15px;margin:0 0 9px}.comparison p{font-size:13px;color:var(--muted);margin:7px 0;line-height:1.8}.layout-line{font-size:13px;word-spacing:7px;color:#405782;margin-top:8px}.footer{margin-top:30px;font-size:12px;color:var(--muted)}a{color:#405b9c}
+  @media(max-width:800px){.page{padding:22px 18px 36px}.heading{display:block}.tag{display:block;margin-top:9px}.workbench{grid-template-columns:1fr;gap:28px}.controls{max-width:480px;width:100%;margin:auto}.phone{height:620px}.comparison{grid-template-columns:1fr;gap:19px}h1{font-size:24px}}
+  @media(prefers-reduced-motion:reduce){.phone-tip{transition:none}}
+</style>
+</head>
+<body>
+<svg aria-hidden="true" width="0" height="0" style="position:absolute"><defs>
+<symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.2" cy="8" r="1.5"/><path d="m3 16 5-5 4 4 3-3 6 6"/></symbol>
+<symbol id="i-album" viewBox="0 0 24 24"><rect x="5" y="3" width="15" height="18" rx="2"/><path d="M2 6v15M14 3v8l-2.5-2L9 11V3"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+<symbol id="i-hidden" viewBox="0 0 24 24"><path d="M3 5h6l2 2h10v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5ZM8 14a5 5 0 0 1 8 0 5 5 0 0 1-8 0Z"/><path d="m8 10 8 8"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="m13 5-7 7 7 7M6 12h14"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+</defs></svg>
+<main class="page">
+ <header class="heading"><div><h1>把两侧入口拉出来</h1><p>保留熟悉的两个按钮。向右拖出 Lock，向左拖出 Hidden；松手停靠，点击进入。</p></div><span class="tag">Pixel Gallery · 交互提案</span></header>
+ <div class="workbench">
+  <section class="stage" aria-label="手机交互原型">
+   <div class="phone" id="phone">
+    <div class="statusbar"><span>9:41</span><span class="system-icons">▂▄▆ <span class="battery"></span></span></div>
+    <header class="appbar"><button class="top-btn back" id="back" aria-label="返回" hidden><svg class="icon"><use href="#i-back"/></svg></button><span class="app-title" id="appTitle">Pixel Gallery</span><button class="top-btn" id="more" aria-label="更多"><svg class="icon"><use href="#i-more"/></svg></button></header>
+    <div class="menu" id="menu"><p>Sort</p><p>Find duplicates</p><p class="settings">Settings</p></div>
+    <div class="content" id="content"><p class="date" id="date">October 25, 2026</p><div class="grid" id="grid"></div><p class="content-note">示意内容 · 不连接真实相册</p></div>
+    <p class="phone-tip" id="tip" role="status"></p>
+    <div class="dock" id="dock" role="tablist" aria-label="图库导航，可向右拖出 Lock、向左拖出 Hidden" tabindex="0">
+     <div class="pill" id="pill"></div>
+     <button class="nav-item" id="lock" role="tab" aria-label="Lock"><svg class="icon"><use href="#i-lock"/></svg><span class="nav-label">Lock</span></button>
+     <button class="nav-item" id="photos" role="tab" aria-label="Photos"><svg class="icon"><use href="#i-photo"/></svg><span class="nav-label">Photos</span></button>
+     <button class="nav-item" id="albums" role="tab" aria-label="Albums"><svg class="icon"><use href="#i-album"/></svg><span class="nav-label">Albums</span></button>
+     <button class="nav-item" id="hidden" role="tab" aria-label="Hidden"><svg class="icon"><use href="#i-hidden"/></svg><span class="nav-label">Hidden</span></button>
+    </div>
+    <div class="gesture-spot" id="spot"></div><div class="system-line"></div>
+   </div>
+   <p class="under-phone"><strong>直接拖动底部胶囊体验。</strong><br>主体和顶栏固定；拖动只改变导航。方向键展开，Esc 收起或返回。</p>
+  </section>
+  <section class="controls" aria-label="演示控制">
+   <h2>单侧展开，三项停靠</h2>
+   <p>原来的 Photos、Albums 始终保留。只拉出手势对应的一侧，不让另一侧跟着冒出来。</p>
+   <div class="buttons"><button class="control primary" id="demoLock">演示向右拉出 Lock</button><button class="control primary" id="demoHidden">演示向左拉出 Hidden</button></div>
+   <div class="buttons" style="margin-top:9px"><button class="control small" id="close">收回入口</button><button class="control small" id="return">模拟系统返回</button><button class="control small" id="reset">重置</button></div>
+   <div class="readout"><div class="readout-head"><strong id="state">常态 · Photos</strong><span id="percent">0%</span></div><div class="progress"><div id="progress"></div></div><p id="explain">Lock 和 Hidden 完全藏起；Photos、Albums 按原来的方式点击切换。</p></div>
+   <ol class="steps"><li data-step="0" class="active"><span class="step-num">1</span>常态只有两个按钮</li><li data-step="1"><span class="step-num">2</span>跟手露出，越拉阻力越明显</li><li data-step="2"><span class="step-num">3</span>松手停靠，不自动切页</li><li data-step="3"><span class="step-num">4</span>点击入口，选中胶囊移过去</li><li data-step="4"><span class="step-num">5</span>返回普通页面，入口收回</li></ol>
+   <div class="options"><label class="option" for="bodyClose"><span>操作主体时收起额外入口</span><input type="checkbox" id="bodyClose" checked></label><label class="option" for="slow"><span>慢放松手与选中动画</span><input type="checkbox" id="slow"></label><label class="option" for="reduced"><span>减少动态效果</span><input type="checkbox" id="reduced"></label><label for="damping" style="font-size:13px">松手的回弹手感</label><input type="range" id="damping" min="0.74" max="1.1" value="0.9" step="0.02" aria-label="松手阻尼"><div class="range-labels"><span>轻微弹性</span><span>稳定落定</span></div></div>
+   <p class="subtle">进入 Lock / Hidden 后，当前入口保持可见。点普通标签或系统返回再收起；不设自动消失倒计时。原型中的私有页面仅示意布局，正式版本沿用原认证和数据规则。</p>
+  </section>
+ </div>
+ <section class="comparison"><div><h3>默认排列</h3><div class="layout-line">Lock · [Photos] · Albums</div><div class="layout-line">Photos · [Albums] · Hidden</div><p>一次只露出一个入口。未选中项实际只显示图标，选中项才显示文字。</p></div><div><h3>还可以比较的取舍</h3><p>若希望展开后一直保留，可关闭“操作主体时收起”，只靠反向拖动、普通标签和返回收回。</p><p>同时展开四项也可做，但会让未拖动的一侧一起出现，导航占宽也更大，因此本稿先采用三项。</p></div></section>
+ <footer class="footer">独立设计演示，未修改或安装应用。<a href="interaction-plan.md">完整状态、动画与边界说明</a> · 使用 <a href="https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md">frontend-design skill</a></footer>
+</main>
+<script>
+(() => {
+ 'use strict';
+ const $=id=>document.getElementById(id), keys=['lock','photos','albums','hidden'];
+ const buttons=Object.fromEntries(keys.map(k=>[k,$(k)]));
+ const weights={lock:0,photos:1,albums:0,hidden:0}, wv={lock:0,photos:0,albums:0,hidden:0};
+ const names={lock:'Lock',photos:'Photos',albums:'Albums',hidden:'Hidden'};
+ let selected='photos', origin='photos', q=0, qv=0, goal=0, drift=0, dv=0, driftGoal=0;
+ let pointer=null, raf=0, previous=0, replayToken=0, replaying=false, hintTimer=0, returning=false, menuOpen=false;
+ const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+ const privatePage=()=>selected==='lock'||selected==='hidden';
+ const reduced=()=>$('reduced').checked;
+ $('reduced').checked=matchMedia('(prefers-reduced-motion: reduce)').matches;
+ const titles=['Camera','Weekend','Trips','Screenshots','Notes','Archive','Friends','Garden','Morning','Artwork','Outdoors','Collection'];
+ for(let i=0;i<18;i++){
+   const b=document.createElement('button'); b.className='tile';b.type='button';b.setAttribute('aria-label','示意内容 '+(i+1));
+   const thumb=document.createElement('div');thumb.className='thumb';const caption=document.createElement('div');caption.className='caption';caption.textContent=titles[i%titles.length];
+   const count=document.createElement('span');count.className='count';count.textContent=(18+i*7)+' items';caption.append(count);b.append(thumb,caption);$('grid').append(b);
+ }
+ function tip(text){clearTimeout(hintTimer);$('tip').textContent=text;$('tip').classList.add('show');hintTimer=setTimeout(()=>$('tip').classList.remove('show'),2300)}
+ function stopReplay(){replayToken++;replaying=false;$('spot').style.display='none'}
+ function page(k){
+   selected=k;$('content').classList.toggle('albums',k==='albums'||k==='hidden');$('content').classList.toggle('private',privatePage());
+   $('appTitle').textContent=k==='lock'?'Locked Folder':k==='hidden'?'Hidden Albums':'Pixel Gallery';
+   $('appTitle').style.fontSize=privatePage()?'21px':'24px';$('back').hidden=!privatePage();
+   $('date').textContent=k==='albums'?'Albums':k==='hidden'?'Hidden albums · 页面示意':k==='lock'?'Locked media · 页面示意':'October 25, 2026';
+ }
+ function select(k){
+   if((k==='lock'&&q<.995)||(k==='hidden'&&q>-.995)||pointer?.dragging)return;
+   stopReplay();returning=false;
+   if(k==='lock'||k==='hidden'){
+     if(!privatePage())origin=selected;goal=k==='lock'?1:-1;page(k);tip('页面示意；正式版本沿用原认证与内容');
+   }else{const wasPrivate=privatePage();page(k);goal=0;returning=wasPrivate}
+   driftGoal=0;schedule();render();
+ }
+ function back(){stopReplay();if(privatePage()){page(origin);returning=true;goal=0}else if(Math.abs(q)>.001){goal=0;returning=true}else tip('已在普通页面，导航已收起');driftGoal=0;schedule()}
+ function close(){stopReplay();if(privatePage()){tip('当前入口保持可见；点 Photos / Albums 或返回后收起');return}goal=0;driftGoal=0;returning=true;schedule()}
+ function reset(k='photos'){stopReplay();pointer=null;q=qv=goal=drift=dv=driftGoal=0;origin=k;page(k);returning=false;keys.forEach(x=>{weights[x]=x===k?1:0;wv[x]=0});$('content').scrollTop=0;render()}
+ function render(){
+   const p=clamp(Math.abs(q),0,1), positive=q>=0, width={};keys.forEach(k=>width[k]=56+64*weights[k]);
+   const extension=(positive?width.lock:width.hidden)+8;
+   const base=16+width.photos+8+width.albums;
+   const total=base+extension*p;
+   const pos={};pos.photos=8+(positive?extension*p:0);pos.lock=pos.photos-width.lock-8;pos.albums=pos.photos+width.photos+8;pos.hidden=pos.albums+width.albums+8;
+   $('dock').style.width=total+'px';$('dock').style.transform=`translateX(calc(-50% + ${drift}px))`;
+   $('dock').classList.toggle('dragging',!!pointer?.dragging||replaying);
+   let px=0,pw=0;keys.forEach(k=>{px+=pos[k]*weights[k];pw+=width[k]*weights[k]});
+   $('pill').style.transform=`translateX(${px}px)`;$('pill').style.width=pw+'px';
+   keys.forEach(k=>{
+     const b=buttons[k], side=k==='lock'||k==='hidden';
+     const onSide=k==='lock'?q>0:k==='hidden'?q<0:true;
+     const shown=!side||(onSide&&p>.001);
+     const available=!side||(onSide&&p>.995&&!pointer?.dragging&&!replaying);
+     b.style.transform=`translateX(${pos[k]}px)`;b.style.width=width[k]+'px';b.style.opacity=side?(onSide?clamp((p-.04)/.7,0,1):0):1;
+     b.style.visibility=shown?'visible':'hidden';b.style.pointerEvents=available?'auto':'none';b.tabIndex=available?0:-1;
+     b.setAttribute('aria-hidden',String(!available));b.setAttribute('aria-selected',String(selected===k));
+     const label=b.querySelector('.nav-label');label.style.width=(names[k].length*8*weights[k])+'px';label.style.opacity=clamp((weights[k]-.1)/.8,0,1);
+     b.style.gap=(8*weights[k])+'px';
+   });
+   $('percent').textContent=Math.round(p*100)+'%';$('progress').style.width=(p*100)+'%';
+   let step=0,title='常态 · '+names[selected],desc='Lock 和 Hidden 完全藏起；Photos、Albums 按原来的方式点击切换。';
+   if(privatePage()){step=3;title='当前页面 · '+names[selected];desc='当前入口保持可见。点击 Photos / Albums 或返回，选中状态移回普通页面，侧入口一并收起。'}
+   else if(pointer?.dragging||replaying){step=1;title='跟手拖出 · '+(q>=0?'Lock':'Hidden');desc='胶囊和原有按钮一起让位，图标不拉伸。松手不足就回弹；达到阈值才停靠，不自动进入页面。'}
+   else if(returning&&p>.003){step=4;title='收回入口';desc='沿当前运动方向收敛，恢复原来的两个按钮；顶栏和主体位置保持不动。'}
+   else if(p>.99&&Math.abs(qv)<.1){step=2;title='已展开 · '+(q>=0?'Lock':'Hidden');desc='现在可点击新入口。三项会停在这里，不定时消失；反向拖动，或点普通标签可收起。'}
+   else if(p>.003){step=1;title=goal===0?'回弹收起':'松手停靠';desc='接续松手速度，自然收敛到最终位置。随时再按下，可以接管当前动画。'}
+   $('state').textContent=title;$('explain').textContent=desc;document.querySelectorAll('[data-step]').forEach(el=>el.classList.toggle('active',+el.dataset.step===step));
+ }
+ function schedule(){if(!raf){previous=performance.now();raf=requestAnimationFrame(tick)}}
+ function tick(now){
+   raf=0;let dt=clamp((now-previous)/1000,.001,.034);previous=now;if($('slow').checked)dt*=.35;
+   const z=reduced()?1:+$('damping').value,k=reduced()?1050:520,c=2*z*Math.sqrt(k),sub=3,h=dt/sub;
+   for(let j=0;j<sub;j++){
+     if(!pointer?.dragging&&!replaying){qv+=(-k*(q-goal)-c*qv)*h;q+=qv*h;dv+=(-k*(drift-driftGoal)-c*dv)*h;drift+=dv*h;}
+     keys.forEach(x=>{wv[x]+=(-k*(weights[x]-(selected===x?1:0))-c*wv[x])*h;weights[x]+=wv[x]*h;});
+   }
+   if(!pointer?.dragging&&!replaying&&Math.abs(q-goal)<.0005&&Math.abs(qv)<.008){q=goal;qv=0}
+   if(Math.abs(drift-driftGoal)<.02&&Math.abs(dv)<.1){drift=driftGoal;dv=0}
+   let moving=Math.abs(q-goal)>.0005||Math.abs(qv)>.008||Math.abs(drift-driftGoal)>.02||Math.abs(dv)>.1;
+   keys.forEach(x=>{if(Math.abs(weights[x]-(selected===x?1:0))<.0005&&Math.abs(wv[x])<.008){weights[x]=selected===x?1:0;wv[x]=0}else moving=true});
+   render();if(moving&&!pointer?.dragging&&!replaying){raf=requestAnimationFrame(tick)}
+ }
+ function revealProgress(distance){const u=clamp(distance/112,0,1);return .8*u+.2*(2*u-u*u)}
+ function release(velocity){
+   if(privatePage()){goal=selected==='lock'?1:-1;driftGoal=0;qv=0;schedule();return}
+   const start=pointer?.startQ||0, dx=pointer?.dx||0, s=Math.sign(q)||Math.sign(start)||1;
+   if(Math.abs(start)<.02){const fling=Math.abs(dx)>24&&Math.sign(velocity)===s&&Math.abs(velocity)>700;goal=Math.abs(q)>=.55||fling?s:0}
+   else{const closing=Math.sign(velocity)===-Math.sign(start)&&Math.abs(velocity)>700&&Math.abs(dx)>24;goal=Math.abs(q)<.45||closing?0:Math.sign(start)}
+   qv=clamp(velocity/112,-4,4);driftGoal=0;returning=goal===0;schedule();
+ }
+ $('dock').addEventListener('pointerdown',e=>{
+   if(!e.isPrimary||e.button!==0)return;stopReplay();menuOpen=false;$('menu').style.display='none';
+   pointer={id:e.pointerId,x:e.clientX,y:e.clientY,dx:0,startQ:clamp(q,-1,1),priorGoal:goal,startDrift:drift,dragging:false,samples:[{t:performance.now(),x:e.clientX}],button:e.target.closest('.nav-item')?.id};
+   goal=q;qv=0;driftGoal=drift;dv=0;$('dock').setPointerCapture(e.pointerId);
+ });
+ $('dock').addEventListener('pointermove',e=>{
+   if(!pointer||pointer.id!==e.pointerId)return;const dx=e.clientX-pointer.x,dy=e.clientY-pointer.y;
+   if(!pointer.dragging){if(Math.abs(dy)>8&&Math.abs(dy)>Math.abs(dx)){cancelPointer();return}if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy)*1.2)return;pointer.dragging=true;returning=false}
+   pointer.dx=dx;const t=performance.now();pointer.samples.push({t,x:e.clientX});pointer.samples=pointer.samples.filter(s=>t-s.t<110);
+   if(privatePage())drift=pointer.startDrift+10*Math.tanh(dx/70);
+   else if(Math.abs(pointer.startQ)<.02){q=Math.sign(dx)*revealProgress(Math.abs(dx));drift=12*q+Math.sign(dx)*8*(1-Math.exp(-Math.max(0,Math.abs(dx)-112)/75));}
+   else{q=pointer.startQ>0?clamp(pointer.startQ+dx/112,0,1):clamp(pointer.startQ+dx/112,-1,0);drift=pointer.startDrift+10*Math.tanh(dx/100)}
+   goal=q;driftGoal=drift;render();
+ });
+ function cancelPointer(){if(!pointer)return;goal=pointer.priorGoal;driftGoal=0;pointer=null;schedule()}
+ $('dock').addEventListener('pointerup',e=>{
+   if(!pointer||pointer.id!==e.pointerId)return;const p=pointer;
+   if(p.dragging){const t=performance.now(),last=p.samples[p.samples.length-1],first=p.samples[0];const velocity=t-last.t<85&&last.t>first.t?(last.x-first.x)*1000/(last.t-first.t):0;release(velocity);if(privatePage())tip('当前页面的入口保持可见；点击普通标签或返回');}
+   else{goal=p.priorGoal;driftGoal=0}
+   pointer=null;render();schedule();if(!p.dragging&&p.button)select(p.button);
+ });
+ $('dock').addEventListener('pointercancel',cancelPointer);$('dock').addEventListener('lostpointercapture',()=>{if(pointer)cancelPointer()});
+ keys.forEach(k=>buttons[k].addEventListener('click',e=>{if(e.detail===0)select(k);else e.preventDefault()}));
+ $('dock').addEventListener('keydown',e=>{
+   if(e.key==='Escape'){e.preventDefault();back()}else if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();if(privatePage()){tip('点击普通标签或返回后收起');return}stopReplay();const sign=e.key==='ArrowRight'?1:-1;goal=Math.abs(q)>.1&&Math.sign(q)!==sign?0:sign;driftGoal=0;schedule()}
+ });
+ $('content').addEventListener('click',()=>{if($('bodyClose').checked&&!privatePage()&&Math.abs(q)>.001)close();tip('主体操作仍然响应；这里只展示导航变化')});
+ let lastScroll=0;$('content').addEventListener('scroll',()=>{if(Math.abs($('content').scrollTop-lastScroll)>4&&$('bodyClose').checked&&!privatePage())close();lastScroll=$('content').scrollTop},{passive:true});
+ $('more').addEventListener('click',()=>{if(!privatePage())close();menuOpen=!menuOpen;$('menu').style.display=menuOpen?'block':'none'});
+ $('back').addEventListener('click',back);$('close').addEventListener('click',close);$('return').addEventListener('click',back);$('reset').addEventListener('click',()=>reset());
+ function replay(side){
+   reset(side==='lock'?'photos':'albums');const token=++replayToken,sign=side==='lock'?1:-1;replaying=true;const start=performance.now(),duration=$('slow').checked?1600:850;$('spot').style.display='block';
+   const advance=now=>{if(token!==replayToken)return;const t=clamp((now-start)/duration,0,1),distance=126*(t*t*(3-2*t));q=sign*revealProgress(distance);goal=q;drift=12*q+sign*8*(1-Math.exp(-Math.max(0,distance-112)/75));driftGoal=drift;$('spot').style.transform=`translateX(${sign*distance-18}px)`;render();if(t<1)requestAnimationFrame(advance);else{replaying=false;$('spot').style.display='none';goal=sign;qv=0;driftGoal=0;schedule()}};requestAnimationFrame(advance);
+ }
+ $('demoLock').addEventListener('click',()=>replay('lock'));$('demoHidden').addEventListener('click',()=>replay('hidden'));
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){stopReplay();cancelPointer();goal=privatePage()?(selected==='lock'?1:-1):0;driftGoal=0;schedule()}});
+ render();
+})();
+</script>
+</body>
+</html>
