@@ -46,6 +46,7 @@ class VideoPlaybackSession(
     var native by mutableStateOf<NativeVideoPlayback?>(null)
         private set
     var surface: SurfaceView? = null
+    var onPresentationCheckpoint: (() -> Unit)? = null
     var captureBusy by mutableStateOf(false)
     var error by mutableStateOf(false)
     private var released = false
@@ -189,6 +190,7 @@ class VideoPlaybackSession(
         val host = activity ?: return false
         if (!pipSupported || motionPhoto || !active || !routeVisible || !firstFrame) return false
         checkpoint()
+        onPresentationCheckpoint?.invoke()
         pipEntering = true
         val entered = runCatching { host.enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
         if (!entered) pipEntering = false
@@ -196,6 +198,7 @@ class VideoPlaybackSession(
     }
 
     fun onUserLeaveHint() {
+        if (active && routeVisible) onPresentationCheckpoint?.invoke()
         if (settings.backgroundAction == VideoBackgroundAction.PIP && wantsPlay && active && routeVisible && firstFrame) {
             pipEntering = true
             if (Build.VERSION.SDK_INT < 31) enterPip()
@@ -230,6 +233,8 @@ class VideoPlaybackSession(
 
     fun release() {
         checkpoint()
+        onPresentationCheckpoint?.invoke()
+        onPresentationCheckpoint = null
         released = true
         VideoPlaybackService.drop(appContext, id)
         native?.release()

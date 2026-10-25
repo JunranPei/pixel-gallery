@@ -36,7 +36,7 @@ fun VideoSettingsGroup(viewModel: VideoSettingsViewModel = hiltViewModel()) {
             }.onFailure { directoryError = true }
         }
     }
-    SettingsGroup(itemCount = 7, title = stringResource(R.string.video_settings_title)) { index ->
+    SettingsGroup(itemCount = 10, title = stringResource(R.string.video_settings_title)) { index ->
         when (index) {
             0 -> SettingsToggleItem(stringResource(R.string.video_autoplay), icon = Icons.Outlined.PlayCircle,
                 checked = settings.autoplay, onCheckedChange = { value -> viewModel.update { it.copy(autoplay = value) } })
@@ -57,7 +57,11 @@ fun VideoSettingsGroup(viewModel: VideoSettingsViewModel = hiltViewModel()) {
             4 -> SettingsToggleItem(stringResource(R.string.video_remember_speed),
                 description = stringResource(R.string.video_remember_speed_description), icon = Icons.Outlined.Speed,
                 checked = settings.rememberSpeed, onCheckedChange = { value -> viewModel.update { it.copy(rememberSpeed = value) } })
-            5 -> Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            in 5..7 -> ViewerPresentationSetting(index - 5, settings.screenDirection, settings.rememberDirection, settings.rememberZoom,
+                onDirection = { value -> viewModel.update { it.copy(screenDirection = value) } },
+                onRememberDirection = { value -> viewModel.update { it.copy(rememberDirection = value) } },
+                onRememberZoom = { value -> viewModel.update { it.copy(rememberZoom = value) } })
+            8 -> Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.video_background), style = EmphasizedTypography.LabelLarge)
                 SettingsOptionControl(
                     options = listOf(VideoBackgroundAction.PAUSE to stringResource(R.string.video_background_pause),
@@ -67,7 +71,7 @@ fun VideoSettingsGroup(viewModel: VideoSettingsViewModel = hiltViewModel()) {
                     onSelected = { value -> viewModel.update { it.copy(backgroundAction = value) } },
                 )
             }
-            6 -> Column {
+            9 -> Column {
                 SettingsClickItem(stringResource(R.string.video_capture_directory),
                     description = if (settings.captureTree.isBlank()) "Pictures/Video captures" else
                         Uri.decode(settings.captureTree.substringAfterLast('/')),

@@ -170,4 +170,15 @@
     <string name="video_speed_failed">This video does not support that speed.</string>
     <string name="video_pip_failed">Picture-in-picture is unavailable. Check system permissions.</string>
     <string name="video_background_pip">PiP</string>
+    <string name="image_settings_title">Images</string>
+    <string name="viewer_screen_direction">Default screen orientation</string>
+    <string name="viewer_direction_system">Follow system</string>
+    <string name="viewer_direction_locked">Lock current</string>
+    <string name="viewer_direction_landscape">Landscape</string>
+    <string name="viewer_direction_portrait">Portrait</string>
+    <string name="viewer_direction_description">Used when opening media without a remembered orientation. Twist with two fingers and release to switch.</string>
+    <string name="viewer_remember_direction">Remember orientation</string>
+    <string name="viewer_remember_direction_description">Restore the last screen orientation when reopening the same item.</string>
+    <string name="viewer_remember_zoom">Remember zoom and position</string>
+    <string name="viewer_remember_zoom_description">Restore the same item’s zoom and viewed area. When off, reopen fitted to the screen.</string>
 </resources>

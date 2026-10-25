@@ -58,12 +58,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.content.res.Configuration
 import androidx.core.view.WindowCompat
@@ -111,6 +111,7 @@ import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
@@ -147,6 +148,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ScaleFactor
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 
 
@@ -383,6 +385,17 @@ internal fun ViewerScreen(
 ): GalleryPageContent {
     val context = LocalContext.current
     val messages = LocalGalleryMessages.current
+    val presentationModel: VideoSettingsViewModel = hiltViewModel()
+    val videoPreferences by presentationModel.settings.collectAsState()
+    val imagePreferences by presentationModel.imageSettings.collectAsState()
+    val rememberImageZoom = imagePreferences?.rememberZoom == true
+    val imageTransforms = remember(presentationModel.repository, rememberImageZoom) {
+        if (rememberImageZoom) rememberedImageTransforms(presentationModel.repository, transformStateStore)
+        else ViewerTransformStateStore()
+    }
+    LaunchedEffect(rememberImageZoom, imagePreferences != null) {
+        if (imagePreferences != null && !rememberImageZoom) transformStateStore.clear()
+    }
     var toolbarVideo by remember { mutableStateOf<VideoPlaybackSession?>(null) }
     var autoplayNextId by remember { mutableStateOf<Long?>(null) }
     var videoOptionsOpen by remember { mutableStateOf(false) }
@@ -420,17 +433,43 @@ internal fun ViewerScreen(
     var expandedBottomActions by remember { mutableStateOf(false) }
     val bottomActionsReveal = rememberVerticalRevealState(expandedBottomActions) { expandedBottomActions = it }
     val actionDensity = LocalDensity.current
+    var bottomActionsHeightPx by remember { mutableIntStateOf(0) }
+    val videoControlsBottomPadding = with(actionDensity) { bottomActionsHeightPx.toDp() }
     var actionLabelsHeight by remember { mutableIntStateOf(0) }
     var secondaryActionsHeight by remember { mutableIntStateOf(0) }
     val actionsRangePx = (actionLabelsHeight + secondaryActionsHeight).toFloat().coerceAtLeast(with(actionDensity) { 80.dp.toPx() })
     val actionsFlingThresholdPx = with(actionDensity) { 600.dp.toPx() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var rotationLocked by remember { mutableStateOf(true) }
     var requestedViewerOrientation by remember { mutableStateOf<Int?>(null) }
     var ultraHdrActive by remember { mutableStateOf(false) }
 
     val currentMedia = remember(pagerState.currentPage, photos) {
         photos.getOrNull(pagerState.currentPage)
+    }
+    val imageVisit = remember(pagerState.settledPage, isForeground) { Any() }
+    val directionMedia = photos.getOrNull(pagerState.settledPage)
+    val directionIsVideo = directionMedia?.sourceMimeType?.startsWith("video/") == true
+    val directionKey = directionMedia?.let { "${it.uri}:${it.dateModifiedMillis}" }
+    val screenDirection = if (directionIsVideo) videoPreferences?.screenDirection else imagePreferences?.screenDirection
+    val rememberDirection = if (directionIsVideo) videoPreferences?.rememberDirection == true else imagePreferences?.rememberDirection == true
+    LaunchedEffect(directionKey, screenDirection, rememberDirection) {
+        if (screenDirection != null && directionKey != null) {
+            snapshotFlow { !pagerState.isScrollInProgress }.first { it }
+            requestedViewerOrientation = (if (rememberDirection) presentationModel.repository.direction(directionIsVideo, directionKey) else null)
+                ?: screenDirection.requestedOrientation()
+        }
+    }
+    val viewerLifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(directionKey, directionIsVideo, isForeground, imageTransforms, viewerLifecycle) {
+        fun checkpoint() {
+            imageTransforms.checkpoint()
+            if (isForeground && directionKey != null) (context as? Activity)?.takeUnless { it.isInPictureInPictureMode }?.let {
+                presentationModel.repository.saveDirection(directionIsVideo, directionKey, it.visibleViewerOrientation())
+            }
+        }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) checkpoint() }
+        viewerLifecycle.addObserver(observer)
+        onDispose { viewerLifecycle.removeObserver(observer); checkpoint() }
     }
 
     DisposableEffect(isForeground) {
@@ -726,6 +765,7 @@ internal fun ViewerScreen(
 
     DisposableEffect(context, isForeground) {
         val activity = context as? Activity
+        val previousOrientation = activity?.requestedOrientation
         onDispose {
             if (isForeground) {
                 val window = activity?.window
@@ -733,7 +773,7 @@ internal fun ViewerScreen(
                     WindowCompat.getInsetsController(window, window.decorView)
                         .show(WindowInsetsCompat.Type.systemBars())
                 }
-                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                previousOrientation?.let { activity?.requestedOrientation = it }
             }
         }
     }
@@ -822,10 +862,22 @@ internal fun ViewerScreen(
         animationSpec = tween(durationMillis = 150),
         label = "ViewerHeaderVisibility",
     )
+    val rotationGesture = rememberViewerRotationGesture(
+        isForeground = isForeground,
+        enabled = isForeground && !inVideoPip && !showInfo && !showMenu &&
+            !showDeleteConfirm && !videoOptionsOpen && imageIndexAction == null &&
+            !pagerState.isScrollInProgress && !pagerReturningToSettledPage,
+    ) {
+        val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        requestedViewerOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        directionKey?.let { presentationModel.repository.saveDirection(directionIsVideo, it, requestedViewerOrientation!!) }
+    }
     return GalleryPage(
+        modifier = Modifier.background(Color.Black),
         topBar = {
             GalleryHeader(
                 modifier = Modifier
+                    .viewerRotationArea(rotationGesture.takeIf { showUI || headerVisibility > 0f }, excluded = true)
                     .graphicsLayer {
                         alpha = headerVisibility
                         translationY = -size.height * (1f - headerVisibility)
@@ -1002,12 +1054,13 @@ internal fun ViewerScreen(
     ) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().viewerRotationArea(rotationGesture),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
             userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage,
             key = { photos[it].contentId }
         ) { page ->
+            if (videoPreferences == null || imagePreferences == null) return@HorizontalPager
             val media = photos[page]
             val pageKey = remember(media.contentId, media.dateModifiedMillis) {
                 media.viewerCacheKey()
@@ -1069,6 +1122,8 @@ internal fun ViewerScreen(
                     }
                     VideoPlayer(
                         uri = media.uri, 
+                        controlsBottomPadding = videoControlsBottomPadding,
+                        rotationGesture = rotationGesture,
                         filePath = media.path,
                         fallbackDurationMillis = media.durationMillis ?: 0L,
                         firstFrameModel = firstFrameModel,
@@ -1092,6 +1147,8 @@ internal fun ViewerScreen(
                         onTap = { showUI = !showUI }
                     )
                 } else {
+                    key(rememberImageZoom, if (rememberImageZoom) null else imageVisit) {
+                    val pageImageTransforms = if (rememberImageZoom) imageTransforms else remember { ViewerTransformStateStore() }
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val isActivePage = pagerState.settledPage == page
                         val isPagerIdle = !pagerState.isScrollInProgress
@@ -1389,6 +1446,7 @@ internal fun ViewerScreen(
                             }
                             if (renderPlan is ViewerRenderPlan.PreviewOnly) {
                                 GlideViewerFallback(
+                                    transformStateStore = pageImageTransforms,
                                     imagePath = media.path.ifEmpty { media.uri },
                                     width = media.width,
                                     height = media.height,
@@ -1412,7 +1470,7 @@ internal fun ViewerScreen(
                                     rawIndexReady = imageIndexReady == true &&
                                         currentIndexTarget?.format == IndexedImageFormat.RAW &&
                                         currentIndexTarget.path == media.path,
-                                    transformStateStore = transformStateStore,
+                                    transformStateStore = pageImageTransforms,
                                     modifier = Modifier.fillMaxSize(),
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick,
@@ -1436,6 +1494,7 @@ internal fun ViewerScreen(
                                     currentIndexTarget.path == media.path
                                 if (!rareIndexReady) {
                                     GlideViewerFallback(
+                                        transformStateStore = pageImageTransforms,
                                         imagePath = media.path.ifEmpty { media.uri },
                                         width = media.width,
                                         height = media.height,
@@ -1462,7 +1521,7 @@ internal fun ViewerScreen(
                                         previewModel = media.path.ifEmpty { media.uri },
                                         intermediatePreviewModel = swipeThumbnailModel,
                                         regionDecoderKind = indexedRegionKind,
-                                        transformStateStore = transformStateStore,
+                                        transformStateStore = pageImageTransforms,
                                         onContentReadyChanged = { fullPreviewReady = it },
                                         modifier = Modifier.fillMaxSize(),
                                         onClick = onImageClick,
@@ -1503,7 +1562,7 @@ internal fun ViewerScreen(
                                         "preview=${tiledPlan.previewKind} decoder=${tiledPlan.regionDecoderKind} " +
                                         "motionPending=$metadataPending",
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
-                                    transformStateStore = transformStateStore,
+                                    transformStateStore = pageImageTransforms,
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onUltraHdrAvailabilityChanged = { available ->
                                         ViewerLoadMetrics.event(
@@ -1533,6 +1592,7 @@ internal fun ViewerScreen(
                             )
                         }
                     }
+                    } // Image renderer lifetime, reset on a new visit only when memory is off.
                 }
             }
         }
@@ -1542,11 +1602,12 @@ internal fun ViewerScreen(
             visible = showUI && !inVideoPip,
             enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { it },
             exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { it },
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier.align(Alignment.BottomCenter).viewerRotationArea(rotationGesture, excluded = true)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .onSizeChanged { bottomActionsHeightPx = it.height }
                     .background(
                         Brush.verticalGradient(
                             listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
@@ -1636,16 +1697,16 @@ internal fun ViewerScreen(
                         }
                     }
                 }
-                Box(Modifier.revealHeight(bottomActionsReveal.fraction) { height ->
+                BoxWithConstraints(Modifier.fillMaxWidth().revealHeight(bottomActionsReveal.fraction) { height ->
                     if (secondaryActionsHeight != height) secondaryActionsHeight = height
                 }) {
                     Row(
                         modifier = Modifier
-                            .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
+                            .widthIn(min = maxWidth)
                             .padding(horizontal = 12.dp)
                             .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (allowTransfer) {
@@ -1679,17 +1740,6 @@ internal fun ViewerScreen(
                                 val intent = WallpaperManager.getInstance(context)
                                     .getCropAndSetWallpaperIntent(Uri.parse(media.uri))
                                 context.startActivity(intent)
-                            }
-                        }
-                        ViewerSecondaryAction(
-                            if (rotationLocked) Icons.Outlined.ScreenLockRotation else Icons.Outlined.ScreenRotation,
-                            "Rotate",
-                        ) {
-                            rotationLocked = !rotationLocked
-                            requestedViewerOrientation = if (rotationLocked) {
-                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            } else {
-                                ActivityInfo.SCREEN_ORIENTATION_SENSOR
                             }
                         }
                         ViewerSecondaryAction(Icons.AutoMirrored.Outlined.OpenInNew, "Open with") {
@@ -2091,6 +2141,8 @@ fun VideoPlayer(
     startOnOpen: Boolean = false,
     onSession: (VideoPlaybackSession?) -> Unit = {},
     onEnded: () -> Unit = {},
+    rotationGesture: ViewerRotationGesture? = null,
+    controlsBottomPadding: Dp = 96.dp,
     videoViewModel: VideoSettingsViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -2145,6 +2197,11 @@ fun VideoPlayer(
         )
     }
 
+    var videoViewport by remember(uri) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    LaunchedEffect(videoViewport, session) { session?.updatePipParams() }
+    if (!isMotionPhoto) VideoZoomMemory(zoomableState, videoViewModel.repository, settings,
+        "$uri:$sourceVersion", isActive && isForeground, videoViewport, session)
+
     DisposableEffect(shouldPrepare, uri, sourceVersion, settings != null) {
         hasPresentedVideoSurface = false
         val value = if (shouldPrepare && settings != null) VideoPlaybackSession(
@@ -2189,6 +2246,7 @@ fun VideoPlayer(
 
     Box(
         modifier = modifier
+            .onSizeChanged { videoViewport = it }
             .zoomable(
                 state = zoomableState,
                 onClick = { _ -> onTap() },
@@ -2295,6 +2353,7 @@ fun VideoPlayer(
             val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
             VideoControls(
                 player = exoPlayer,
+                rotationGesture = rotationGesture,
                 nativeVideoView = if (useNativeFallback) nativeVideoView else null,
                 isVisible = showUI && isForeground && !inPip,
                 isForeground = isForeground && activityVisible && isActive && !inPip,
@@ -2302,6 +2361,7 @@ fun VideoPlayer(
                 onSeekFinished = { session?.checkpoint() },
                 currentZoom = currentZoom,
                 fallbackDurationMillis = fallbackDurationMillis,
+                bottomPadding = controlsBottomPadding,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -2311,6 +2371,7 @@ fun VideoPlayer(
 @Composable
 fun VideoControls(
     player: Player?,
+    rotationGesture: ViewerRotationGesture? = null,
     nativeVideoView: NativeVideoPlayback? = null,
     isVisible: Boolean,
     isForeground: Boolean = true,
@@ -2318,11 +2379,9 @@ fun VideoControls(
     onSeekFinished: () -> Unit = {},
     currentZoom: Float = 1f,
     fallbackDurationMillis: Long = 0L,
+    bottomPadding: Dp = 96.dp,
     modifier: Modifier = Modifier
 ) {
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -2395,6 +2454,7 @@ fun VideoControls(
                         scaleY = pauseButtonScale
                     }
                     .size(64.dp)
+                    .viewerRotationArea(rotationGesture, excluded = true)
                     .background(Color.Black.copy(alpha = 0.4f), CircleShape)
             ) {
                 Icon(
@@ -2408,9 +2468,10 @@ fun VideoControls(
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (isLandscape) 48.dp else 96.dp)
+                    .padding(bottom = bottomPadding)
                     .padding(horizontal = 24.dp)
                     .fillMaxWidth()
+                    .viewerRotationArea(rotationGesture, excluded = true)
             ) {
                 val progressColors = SliderDefaults.colors(
                     thumbColor = Color.White,

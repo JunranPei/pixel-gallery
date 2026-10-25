@@ -133,7 +133,10 @@ private fun prioritizedTileExecutor(priority: Int): Executor = Executor { runnab
 private val tileDecodeExecutor = prioritizedTileExecutor(VISIBLE_TILE_TASK_PRIORITY)
 private val tileCacheWriteExecutor = prioritizedTileExecutor(CACHE_WRITE_TASK_PRIORITY)
 
-internal class ViewerTransformStateStore {
+internal class ViewerTransformStateStore(
+    private val readSaved: ((String) -> SubsamplingScaleImageView.ViewState?)? = null,
+    private val writeSaved: ((String, SubsamplingScaleImageView.ViewState) -> Unit)? = null,
+) {
     private data class StoredState(
         val state: SubsamplingScaleImageView.ViewState,
         val revision: Int,
@@ -142,7 +145,15 @@ internal class ViewerTransformStateStore {
     private val states = LinkedHashMap<String, StoredState>(16, 0.75f, true)
 
     @Synchronized
-    fun get(key: String): SubsamplingScaleImageView.ViewState? = states[key]?.state
+    fun get(key: String): SubsamplingScaleImageView.ViewState? = states[key]?.state ?: readSaved?.invoke(key)?.also {
+        states[key] = StoredState(it, 1)
+    }
+
+    @Synchronized
+    fun clear() { states.clear() }
+
+    @Synchronized
+    fun checkpoint() { states.forEach { (key, stored) -> writeSaved?.invoke(key, stored.state) } }
 
     @Synchronized
     fun revision(key: String): Int = states[key]?.revision ?: 0
@@ -170,6 +181,7 @@ internal class ViewerTransformStateStore {
                 "rotation=${state.rotationRadians}",
             imageKey = key,
         )
+        if (reason == "page-inactive" || reason == "composition-dispose") writeSaved?.invoke(key, state)
     }
 
     @Synchronized
@@ -1325,7 +1337,9 @@ internal fun SimpleSubsamplingImageView(
                 taskExecutor = tileDecodeExecutor
                 cacheTaskExecutor = tileCacheWriteExecutor
                 setActiveTileMemoryCache(isActivePage)
-                rotationEnabled = true
+                // Two-finger rotation belongs to the viewer's release-to-rotate
+                // screen gesture, never to continuous bitmap/tile rotation.
+                rotationEnabled = false
                 doubleTapReturnsToFit = true
                 // Direct fit-preview gestures already clamp at their configured minimum.
                 // Keep the deferred tile renderer on that same rule so crossing into SSIV does

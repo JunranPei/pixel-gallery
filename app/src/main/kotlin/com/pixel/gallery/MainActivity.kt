@@ -36,6 +36,12 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
+    var viewerRotationGesture: com.pixel.gallery.ui.viewer.ViewerRotationGesture? = null
+
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean =
+        viewerRotationGesture?.dispatch(event) { super.dispatchTouchEvent(it) }
+            ?: super.dispatchTouchEvent(event)
+
     var videoSession: com.pixel.gallery.ui.viewer.VideoPlaybackSession? = null
     var isVideoPip by androidx.compose.runtime.mutableStateOf(false)
         private set

@@ -94,4 +94,15 @@
     <string name="video_speed_failed">此视频不支持该倍速。</string>
     <string name="video_pip_failed">画中画不可用，请检查系统权限。</string>
     <string name="video_background_pip">画中画</string>
+    <string name="image_settings_title">图片</string>
+    <string name="viewer_screen_direction">默认屏幕方向</string>
+    <string name="viewer_direction_system">跟随系统</string>
+    <string name="viewer_direction_locked">锁定当前</string>
+    <string name="viewer_direction_landscape">横屏</string>
+    <string name="viewer_direction_portrait">竖屏</string>
+    <string name="viewer_direction_description">没有方向记忆时按此选项打开。双指明显转动后松手可切换方向。</string>
+    <string name="viewer_remember_direction">记忆方向</string>
+    <string name="viewer_remember_direction_description">重新打开同一项时，恢复上次查看的屏幕方向。</string>
+    <string name="viewer_remember_zoom">记忆缩放和位置</string>
+    <string name="viewer_remember_zoom_description">重新打开同一项时，恢复缩放比例和观看位置。关闭后以适屏状态打开。</string>
 </resources>

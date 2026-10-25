@@ -40,6 +40,10 @@ internal fun shouldDoubleTapReturnToFit(
     currentRenderedScale: Float,
 ): Boolean = zoomedIntent || abs(currentRenderedScale - 1f) > 0.01f
 
+internal fun previewScaleAfterResize(userScale: Float, oldOriginalScale: Float, newOriginalScale: Float): Float =
+    if (userScale <= 1.02f || oldOriginalScale <= 0f || newOriginalScale <= 0f) userScale
+    else userScale * newOriginalScale / oldOriginalScale
+
 /**
  * Custom zoom/pan container for the image viewer.
  *
@@ -178,6 +182,29 @@ fun ZoomableContainer(
         val maxX = (w * imageFitScaleX * scale - w).coerceAtLeast(0f) / 2f
         val maxY = (h * imageFitScaleY * scale - h).coerceAtLeast(0f) / 2f
         return rawX.coerceIn(-maxX, maxX) to rawY.coerceIn(-maxY, maxY)
+    }
+
+    var previousViewport by remember(diagnosticsKey) { mutableStateOf<Pair<IntSize, Float>?>(null) }
+    LaunchedEffect(containerSize, scaleToOriginal, enabled) {
+        if (containerSize == IntSize.Zero) return@LaunchedEffect
+        val geometry = containerSize to scaleToOriginal
+        val old = previousViewport
+        previousViewport = geometry
+        if (!enabled || old == null || old == geometry) return@LaunchedEffect
+        // Resizing changes fit scale, not the source-pixel scale of a zoomed image.
+        // Keep fit/under-fit relative to the new viewport and clamp its pan bounds.
+        val runningAnimation = animationJob
+        runningAnimation?.cancelAndJoin()
+        if (animationJob === runningAnimation) animationJob = null
+        val resizedScale = previewScaleAfterResize(renderScale, old.second, scaleToOriginal)
+            .coerceIn(safeMinScale, safeMaxScale)
+        val (x, y) = clampOffset(resizedScale, renderOffsetX, renderOffsetY)
+        gestureScale = resizedScale
+        gestureOffsetX = x
+        gestureOffsetY = y
+        doubleTapZoomedIntent = resizedScale > 1.01f
+        renderFrame(resizedScale, x, y)
+        onTransformChanged(resizedScale, x, y)
     }
 
     Box(

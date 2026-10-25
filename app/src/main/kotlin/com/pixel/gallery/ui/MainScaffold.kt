@@ -1776,6 +1776,10 @@ private fun MainScaffoldContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = baseRouteTopInset)
+                    .drawWithContent {
+                        // Hide the route decorations together with its content.
+                        if (visibleViewer == null && reviewPage == null) drawContent()
+                    }
                     .galleryContentEdge()
                     .pointerInput(navigationReveal, currentScreen) {
                         awaitEachGesture {
@@ -1783,9 +1787,6 @@ private fun MainScaffoldContent(
                             // Observe only: the original click, long press and scroll still receive this event.
                             if (currentScreen == Screen.Home && navigationReveal.expanded) navigationReveal.settle(0)
                         }
-                    }
-                    .drawWithContent {
-                        if (visibleViewer == null && reviewPage == null) drawContent()
                     }
             ) {
                 navigationStack.forEachIndexed { screenIndex, screen ->

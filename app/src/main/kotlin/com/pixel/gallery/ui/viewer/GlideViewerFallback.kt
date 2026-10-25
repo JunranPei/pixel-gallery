@@ -18,7 +18,7 @@ import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
 
 @Composable
-fun GlideViewerFallback(
+internal fun GlideViewerFallback(
     imagePath: String,
     width: Int,
     height: Int,
@@ -27,8 +27,15 @@ fun GlideViewerFallback(
     isVisiblePage: Boolean,
     modifier: Modifier = Modifier,
     onContentReadyChanged: (Boolean) -> Unit = {},
+    transformStateStore: ViewerTransformStateStore? = null,
     onClick: () -> Unit = {}
 ) {
+    val memoryKey = "fallback:$imagePath:$dateModifiedMillis"
+    val initialTransform = remember(memoryKey, transformStateStore) { transformStateStore?.get(memoryKey) }
+    var lastTransform by remember(memoryKey, transformStateStore) { mutableStateOf(initialTransform) }
+    DisposableEffect(memoryKey, transformStateStore) {
+        onDispose { lastTransform?.let { transformStateStore?.save(memoryKey, it, "composition-dispose") } }
+    }
     BoxWithConstraints(modifier = modifier) {
         val containerWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val containerHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
@@ -96,9 +103,22 @@ fun GlideViewerFallback(
             minScale = minScale,
             maxScale = maxScale,
             scaleToOriginal = scaleToOriginal,
+            initialScale = initialTransform?.let {
+                if (it.scale <= it.baseFitScale * 1.02f) it.scale / it.baseFitScale else it.scale / fitScale
+            } ?: 1f,
+            initialOffsetX = initialTransform?.let { (it.sourceWidth / 2f - it.sourceCenter.x) * it.scale } ?: 0f,
+            initialOffsetY = initialTransform?.let { (it.sourceHeight / 2f - it.sourceCenter.y) * it.scale } ?: 0f,
             imageFitScaleX = fitWidthFraction,
             imageFitScaleY = fitHeightFraction,
-            onTap = onClick
+            onTap = onClick,
+            onTransformChanged = { scale, x, y ->
+                val actualScale = scale * fitScale
+                val state = com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.ViewState(
+                    actualScale, fitScale, android.graphics.PointF(imageWidth / 2f - x / actualScale, imageHeight / 2f - y / actualScale),
+                    imageWidth.toInt(), imageHeight.toInt(), 0.0)
+                lastTransform = state
+                transformStateStore?.save(memoryKey, state, "preview-gesture")
+            },
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),

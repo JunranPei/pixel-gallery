@@ -428,10 +428,18 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        val sCenter = getCenter()
+        // width/height already contain the NEW bounds here. Sampling getCenter()
+        // would treat the new viewport centre as the old one and jump the image.
+        val sCenter = if (oldw > 0 && oldh > 0) viewToSourceCoord(PointF(oldw / 2f, oldh / 2f)) else getCenter()
         if (isReady && sCenter != null) {
             anim = null
-            pendingScale = scale
+            val oldFit = min(oldw / sWidth().toFloat(), oldh / sHeight().toFloat())
+            val newFit = min(w / sWidth().toFloat(), h / sHeight().toFloat())
+            // Fit stays fit across a screen rotation. Deep zoom keeps its actual
+            // pixel scale and source centre, reusing the same decoder and tiles.
+            pendingScale = if (oldFit > 0f && scale <= oldFit * 1.02f && abs(imageRotation) < 0.001) {
+                newFit * (scale / oldFit)
+            } else scale
             sPendingCenter = sCenter
         }
     }
