@@ -22,7 +22,8 @@ internal class RotationGestureTracker(
     private var startX = 0f
     private var startY = 0f
     private var lastAngle = 0f
-    private var angle = 0f
+    var angle = 0f
+        private set
     private var pairReleased = false
 
     fun begin(first: RotationPointer, second: RotationPointer) {
@@ -57,7 +58,7 @@ internal class RotationGestureTracker(
         val pinch = abs(span - startSpan) / 2f
         val pan = hypot((first.x + second.x) / 2f - startX, (first.y + second.y) / 2f - startY)
         val translation = max(pinch, pan)
-        if (abs(angle) >= 12f && arc > touchSlop && arc > translation * 1.2f) {
+        if (arc > touchSlop && arc > translation * 1.2f) {
             intent = Intent.ROTATION
         } else if (translation > touchSlop && (translation > arc || translation > touchSlop * 2f)) {
             // Once a pinch/pan wins, later finger drift cannot turn it into a rotation.
@@ -68,7 +69,13 @@ internal class RotationGestureTracker(
     fun releasePair() { pairReleased = true }
 
     fun finish(): Boolean {
-        val rotate = intent == Intent.ROTATION && abs(angle) >= 35f
+        return finishQuarterTurn() != 0
+    }
+
+    fun finishQuarterTurn(): Int {
+        val rotate = if (intent == Intent.ROTATION && abs(angle) >= 35f) {
+            if (angle > 0f) 1 else -1
+        } else 0
         cancel()
         return rotate
     }

@@ -35,9 +35,14 @@ internal fun ViewerDismissImageEligibility(bounds: () -> Rect? = { null }, canDi
     val gesture = LocalViewerDismissGesture.current
     val current by rememberUpdatedState(canDismiss)
     val currentBounds by rememberUpdatedState(bounds)
-    DisposableEffect(gesture) {
+    val rotationGeometry = LocalRotationLayerGeometry.current
+    DisposableEffect(gesture, rotationGeometry) {
         val token = Any()
-        gesture?.imageEligibility?.put(token) { if (current()) currentBounds() else null }
+        gesture?.imageEligibility?.put(token) {
+            if (current() && rotationGeometry?.rotation?.busy != true) {
+                currentBounds()?.let { rotationGeometry?.map(it) ?: it }
+            } else null
+        }
         onDispose { gesture?.imageEligibility?.remove(token) }
     }
 }
@@ -53,6 +58,7 @@ internal class ViewerDismissGesture(
     val imageEligibility = mutableMapOf<Any, () -> Rect?>()
     var onReveal: () -> Unit = {}
     var findTarget: () -> ViewerThumbnailTarget? = { null }
+    var canUseThumbnailTarget: () -> Boolean = { true }
     var windowOrigin = Offset.Zero
     var visual by mutableStateOf(ViewerDismissVisual())
         private set
@@ -98,7 +104,7 @@ internal class ViewerDismissGesture(
         val source = sourceBounds ?: return
         val start = visual
         if (!isRevealing) return
-        val target = if (dismiss) findTarget() else null
+        val target = if (dismiss && canUseThumbnailTarget()) findTarget() else null
         ViewerLoadMetrics.event("VIEWER_DISMISS_SETTLE",
             "dismiss=$dismiss target=${target?.bounds} source=$source")
         settling = true

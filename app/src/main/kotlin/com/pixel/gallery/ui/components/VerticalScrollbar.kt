@@ -50,6 +50,7 @@ private val HandleWidth = 26.dp
 private val HandleHeight = 40.dp
 private val HandleStartPadding = 12.dp
 private val HandleEndPadding = 4.dp
+private val HandleTouchSize = 48.dp
 
 @Composable
 fun GalleryScrollbar(
@@ -61,6 +62,7 @@ fun GalleryScrollbar(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val handleHeightPx = with(density) { HandleHeight.toPx() }
+    val touchHeightPx = with(density) { HandleTouchSize.toPx() }
     var parentHeightPx by remember { mutableFloatStateOf(0f) }
     val trackLengthPx = (parentHeightPx - handleHeightPx).coerceAtLeast(0f)
 
@@ -103,10 +105,12 @@ fun GalleryScrollbar(
     }
     val sliderOffsetPx = (if (engaged || labelVisible) positionFraction else scrollFraction) * trackLengthPx
     val currentSliderOffsetPx by rememberUpdatedState(sliderOffsetPx)
+    val touchTopPx = (sliderOffsetPx - (touchHeightPx - handleHeightPx) / 2f)
+        .coerceIn(0f, (parentHeightPx - touchHeightPx).coerceAtLeast(0f))
+    val currentTouchTopPx by rememberUpdatedState(touchTopPx)
     val currentCanScroll by rememberUpdatedState(canScroll)
     val currentOnDragStateChanged by rememberUpdatedState(onDragStateChanged)
 
-    LaunchedEffect(engaged) { currentOnDragStateChanged(engaged) }
     DisposableEffect(Unit) {
         onDispose { currentOnDragStateChanged(false) }
     }
@@ -122,7 +126,7 @@ fun GalleryScrollbar(
         }
         lastScrollPosition = position
         if (canScroll && !engaged && !lazyGridState.isScrollInProgress) {
-            delay(1000)
+            delay(2000)
             scrollbarVisible = false
         }
     }
@@ -135,14 +139,15 @@ fun GalleryScrollbar(
     // Simple Gallery engages on DOWN, with the finger at the handle's centre.
     // Retain our additional track drag, but require vertical slop there so a tap
     // on the track does not jump the grid.
-    val gestures = if (scrollbarVisible && canScroll) {
-        Modifier.pointerInput(lazyGridState, trackLengthPx, handleHeightPx) {
+    fun dragGestures(handleOnly: Boolean): Modifier = if (scrollbarVisible && canScroll) {
+        Modifier.pointerInput(lazyGridState, trackLengthPx, handleHeightPx, handleOnly) {
+            var grabOffset = 0f
             fun seek(pointerY: Float) {
                 if (trackLengthPx <= 0f || !currentCanScroll) return
                 val info = lazyGridState.layoutInfo
                 val count = info.totalItemsCount
                 if (count <= 0) return
-                positionFraction = ((pointerY - handleHeightPx / 2f) / trackLengthPx).coerceIn(0f, 1f)
+                positionFraction = ((pointerY - grabOffset - handleHeightPx / 2f) / trackLengthPx).coerceIn(0f, 1f)
                 // Map to the scrollable range, as Simple Gallery does, so release
                 // does not shift the handle by the number of visible items.
                 val range = (count - info.visibleItemsInfo.size).coerceAtLeast(0)
@@ -161,7 +166,11 @@ fun GalleryScrollbar(
                 if (down.position.x !in 0f..size.width.toFloat() || trackLengthPx <= 0f) {
                     return@awaitEachGesture
                 }
-                val onHandle = down.position.y in currentSliderOffsetPx..(currentSliderOffsetPx + handleHeightPx)
+                // Convert local coordinates back to the track as the target moves.
+                fun trackY(localY: Float) = localY + if (handleOnly) currentTouchTopPx else 0f
+                val downY = trackY(down.position.y)
+                val onHandle = handleOnly || downY in currentSliderOffsetPx..(currentSliderOffsetPx + handleHeightPx)
+                grabOffset = if (onHandle) downY - currentSliderOffsetPx - handleHeightPx / 2f else 0f
                 val start = if (onHandle) {
                     down.consume()
                     down
@@ -170,16 +179,20 @@ fun GalleryScrollbar(
                         ?: return@awaitEachGesture
                 }
                 labelJob?.cancel()
+                positionFraction = (currentSliderOffsetPx / trackLengthPx).coerceIn(0f, 1f)
+                positionItemIndex = lazyGridState.firstVisibleItemIndex
                 engaged = true
+                currentOnDragStateChanged(true)
                 labelVisible = true
                 try {
-                    seek(start.position.y)
+                    if (!onHandle) seek(trackY(start.position.y))
                     verticalDrag(start.id) { change ->
-                        seek(change.position.y)
+                        seek(trackY(change.position.y))
                         change.consume()
                     }
                 } finally {
                     engaged = false
+                    currentOnDragStateChanged(false)
                     labelJob = scope.launch {
                         // Keep the longer reading time of our track position hint.
                         delay(if (onHandle) 200L else 1000L)
@@ -198,7 +211,7 @@ fun GalleryScrollbar(
     Box(
         modifier = layoutModifier
             .fillMaxHeight()
-            .width(if (positionLabelProvider == null) HandleWidth else 180.dp)
+            .width(if (positionLabelProvider == null) HandleTouchSize else 180.dp)
             .onSizeChanged { parentHeightPx = it.height.toFloat() }
     ) {
         if (canScroll && labelVisible && !label.isNullOrBlank()) {
@@ -220,7 +233,7 @@ fun GalleryScrollbar(
             }
         }
         Box(
-            modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().width(HandleWidth).then(gestures)
+            modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().width(HandleWidth).then(dragGestures(false))
         ) {
             Box(
                 modifier = Modifier.align(Alignment.TopEnd)
@@ -231,5 +244,10 @@ fun GalleryScrollbar(
                     .clip(RoundedCornerShape(24.dp)).background(color)
             )
         }
+        // A separate short target enlarges the handle without taking over the
+        // entire 48 dp edge strip from photo clicks and quick-sort gestures.
+        Box(Modifier.align(Alignment.TopEnd)
+            .offset { IntOffset(0, touchTopPx.roundToInt()) }
+            .width(HandleTouchSize).height(HandleTouchSize).then(dragGestures(true)))
     }
 }

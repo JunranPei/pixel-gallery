@@ -1774,6 +1774,14 @@ private fun MainScaffoldContent(
             GalleryMessageHost()
         },
         header = reviewPage?.header ?: viewerPage?.takeIf { visibleViewer != null }?.header ?: selectionHeader ?: routePages.getValue(baseScreenIndex).header,
+        underlayHeader = (selectionHeader ?: routePages.getValue(baseScreenIndex).header).takeIf {
+            visibleViewer != null && reviewPage == null
+        },
+        underlayScrollBehavior = homeTopBarScrollBehavior.takeIf { baseScreen == Screen.Home },
+        underlayVisible = { viewerTransitions.revealing },
+        underlayAlpha = {
+            1f - (viewerTransitions.active?.gesture?.visual?.backdropAlpha ?: 1f)
+        },
             content = { innerPadding ->
         Box(
             modifier = Modifier
@@ -1792,7 +1800,7 @@ private fun MainScaffoldContent(
                         // Hide the route decorations together with its content.
                         if ((visibleViewer == null || viewerTransitions.revealing) && reviewPage == null) drawContent()
                     }
-                    .galleryContentEdge()
+                    .then(if (visibleViewer == null) Modifier.galleryContentEdge() else Modifier)
                     .pointerInput(navigationReveal, currentScreen) {
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)

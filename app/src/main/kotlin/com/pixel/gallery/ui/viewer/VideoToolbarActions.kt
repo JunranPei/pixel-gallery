@@ -1,9 +1,14 @@
 package com.pixel.gallery.ui.viewer
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.PictureInPictureAlt
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,13 +20,24 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
 import com.pixel.gallery.data.repository.VideoPlaybackSpeeds
-import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.LocalGalleryMessages
-import com.pixel.gallery.ui.components.SettingsOptionControl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -46,29 +62,49 @@ private val FrameIcon = ImageVector.Builder("Capture frame", 24.dp, 24.dp, 24f, 
 internal fun speedLabel(value: Float) = "${value.toString().removeSuffix(".0")}×"
 
 @Composable
-fun VideoToolbarActions(session: VideoPlaybackSession, onBusyChanged: (Boolean) -> Unit = {}) {
+fun VideoToolbarActions(session: VideoPlaybackSession, onRotateScreen: () -> Unit,
+    onBusyChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val messages = LocalGalleryMessages.current
     val scope = rememberCoroutineScope()
     var showSpeed by remember(session) { mutableStateOf(false) }
-    var selection by remember(session, showSpeed) { mutableFloatStateOf(session.speed) }
+    var stripBusy by remember(session) { mutableStateOf(false) }
     val latestBusyChanged by rememberUpdatedState(onBusyChanged)
-    DisposableEffect(showSpeed, session.captureBusy) {
-        latestBusyChanged(showSpeed || session.captureBusy)
+    DisposableEffect(showSpeed, session.captureBusy, stripBusy) {
+        latestBusyChanged(showSpeed || session.captureBusy || stripBusy)
         onDispose { latestBusyChanged(false) }
     }
+    VideoActionStrip(session, onBusyChanged = { stripBusy = it }) { visibleActions ->
     IconButton(onClick = session::toggleMute, modifier = Modifier.size(48.dp)) {
         Icon(if (session.muted) MutedIcon else Icons.AutoMirrored.Outlined.VolumeUp,
             stringResource(if (session.muted) R.string.video_unmute else R.string.video_mute), tint = Color.White)
     }
-    IconButton(enabled = session.firstFrame && !session.captureBusy, modifier = Modifier.size(48.dp), onClick = {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+    IconButton(onClick = onRotateScreen, enabled = visibleActions >= 2,
+        modifier = Modifier.size(48.dp).then(if (visibleActions < 2) Modifier.clearAndSetSemantics {} else Modifier)) {
+        Icon(Icons.Outlined.ScreenRotation, stringResource(R.string.video_rotate_screen), tint = Color.White)
+    }
+    Box(Modifier.then(if (visibleActions < 3) Modifier.clearAndSetSemantics {} else Modifier)) {
+    IconButton(onClick = { showSpeed = !showSpeed }, enabled = visibleActions >= 3,
+        modifier = Modifier.width(64.dp).height(48.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Speed, stringResource(R.string.video_speed), tint = Color.White, modifier = Modifier.size(20.dp))
+            Text(speedLabel(session.speed), style = MaterialTheme.typography.labelSmall, color = Color.White)
+        }
+    }
+    if (showSpeed) InlineSpeedChoices(session.speed, onDismiss = { showSpeed = false }) { speed ->
+        if (!session.setSpeed(speed)) scope.launch { messages.show(context.getString(R.string.video_speed_failed)) }
+        showSpeed = false
+    }
+    }
+    IconButton(enabled = visibleActions >= 4 && session.firstFrame && !session.captureBusy,
+        modifier = Modifier.size(48.dp).then(if (visibleActions < 4) Modifier.clearAndSetSemantics {} else Modifier), onClick = {
         session.captureBusy = true
         scope.launch {
             try {
-                val surface = session.surface ?: error("Video surface unavailable")
                 val width = session.native?.width ?: session.player.videoSize.width
                 val height = session.native?.height ?: session.player.videoSize.height
-                val bitmap = captureVideoFrame(surface, width, height)
+                val bitmap = captureSessionFrame(session, width, height)
                 try { saveVideoFrame(context, bitmap, session.settings.captureTree) } finally { bitmap.recycle() }
                 messages.show(context.getString(R.string.video_capture_saved))
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -78,31 +114,51 @@ fun VideoToolbarActions(session: VideoPlaybackSession, onBusyChanged: (Boolean) 
     }) {
         Icon(FrameIcon, stringResource(R.string.video_capture), tint = Color.White.copy(alpha = if (session.firstFrame && !session.captureBusy) 1f else .38f))
     }
-    IconButton(onClick = { showSpeed = true }, modifier = Modifier.width(64.dp).height(48.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Speed, stringResource(R.string.video_speed), tint = Color.White, modifier = Modifier.size(20.dp))
-            Text(speedLabel(session.speed), style = MaterialTheme.typography.labelSmall, color = Color.White)
-        }
-    }
-    IconButton(enabled = session.pipSupported && session.firstFrame, modifier = Modifier.size(48.dp), onClick = {
+    IconButton(enabled = visibleActions >= 5 && session.pipSupported && session.firstFrame,
+        modifier = Modifier.size(48.dp).then(if (visibleActions < 5) Modifier.clearAndSetSemantics {} else Modifier), onClick = {
         if (!session.enterPip()) scope.launch { messages.show(context.getString(R.string.video_pip_failed)) }
     }) {
         Icon(Icons.Outlined.PictureInPictureAlt, stringResource(R.string.video_pip), tint = Color.White.copy(alpha = if (session.pipSupported && session.firstFrame) 1f else .38f))
     }
-    if (showSpeed) GalleryDialog(
-        onDismissRequest = { showSpeed = false },
-        title = { Text(stringResource(R.string.video_speed)) },
-        icon = Icons.Outlined.Speed,
-        text = {
-            VideoPlaybackSpeeds.chunked(2).forEach { row ->
-                SettingsOptionControl(row.map { it to speedLabel(it) }, selection, { selection = it },
-                    unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
+    }
+    }
+}
+
+@Composable
+private fun InlineSpeedChoices(speed: Float, onDismiss: () -> Unit, onSelect: (Float) -> Unit) {
+    val margin = with(LocalDensity.current) { 8.dp.roundToPx() }
+    val position = remember(margin) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize,
+                layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset = IntOffset(
+                (anchorBounds.right - popupContentSize.width).coerceIn(margin,
+                    (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)),
+                (anchorBounds.bottom + margin).coerceAtMost(
+                    (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)),
+            )
+        }
+    }
+    val rowState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (VideoPlaybackSpeeds.indexOf(speed) - 3).coerceAtLeast(0))
+    val width = (LocalConfiguration.current.screenWidthDp.dp - 16.dp).coerceAtMost(416.dp)
+    Popup(popupPositionProvider = position, onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true)) {
+        Surface(color = Color(0xF0202020), shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.width(width)) {
+            LazyRow(state = rowState, contentPadding = PaddingValues(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                items(VideoPlaybackSpeeds) { value ->
+                    val active = value == speed
+                    Surface(onClick = { onSelect(value) }, color = if (active) Color.White else Color.Transparent,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.size(48.dp).semantics { selected = active }) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(speedLabel(value), color = if (active) Color.Black else Color.White,
+                                style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
             }
-        },
-        confirmButton = { Button(onClick = {
-            if (!session.setSpeed(selection)) scope.launch { messages.show(context.getString(R.string.video_speed_failed)) }
-            showSpeed = false
-        }) { Text(stringResource(android.R.string.ok)) } },
-        dismissButton = { TextButton(onClick = { showSpeed = false }) { Text(stringResource(R.string.dialog_cancel)) } },
-    )
+        }
+    }
 }

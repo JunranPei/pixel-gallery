@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.input.pointer.pointerInput
@@ -28,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
 import com.pixel.gallery.ui.gallery.shouldSwitchPhotoHeader
+import com.pixel.gallery.ui.components.galleryContentEdge
+import com.pixel.gallery.ui.theme.ExpressiveShapes
 
 internal class GallerySearchState(isSearchMode: Boolean) {
     var isSearchMode by mutableStateOf(isSearchMode)
@@ -138,6 +141,10 @@ class UnifiedGalleryContainer private constructor() {
         modifier: Modifier = Modifier,
         containerColor: Color,
         header: GalleryHeaderSpec,
+        underlayHeader: GalleryHeaderSpec? = null,
+        underlayScrollBehavior: TopAppBarScrollBehavior? = null,
+        underlayVisible: () -> Boolean = { false },
+        underlayAlpha: () -> Float = { 0f },
         showHeader: Boolean = true,
         scrollBehavior: TopAppBarScrollBehavior? = null,
         snackbarHost: @Composable () -> Unit,
@@ -173,6 +180,28 @@ class UnifiedGalleryContainer private constructor() {
             Layout(
                 modifier = Modifier.align(Alignment.TopCenter).clipToBounds(),
                 content = {
+                    // Prepare the covered route's real toolbar before reveal. It stays in
+                    // this single toolbar root and is only placed while the viewer fades.
+                    if (underlayHeader != null) {
+                        Column(Modifier.graphicsLayer { alpha = underlayAlpha() }
+                            .clearAndSetSemantics {}
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                                }
+                            }) {
+                            PermanentGalleryToolbar(
+                                header = underlayHeader,
+                                statusBarHeightPx = statusBarHeightPx,
+                                heightOffsetPx = (underlayScrollBehavior?.state?.heightOffset ?: 0f)
+                                    .coerceIn(-toolbarHeightPx, 0f),
+                            )
+                            // The concave lower corners belong to the revealing header,
+                            // above the viewer layer, just like its title and background.
+                            Box(Modifier.fillMaxWidth().height(ExpressiveShapes.GridCornerRadius)
+                                .galleryContentEdge())
+                        }
+                    }
                     PermanentGalleryToolbar(
                         header = header,
                         statusBarHeightPx = statusBarHeightPx,
@@ -180,8 +209,12 @@ class UnifiedGalleryContainer private constructor() {
                     )
                 },
             ) { measurables, constraints ->
-                val bar = measurables.single().measure(constraints)
-                layout(bar.width, bar.height) {
+                val underlay = if (underlayHeader != null) measurables.first().measure(constraints) else null
+                val bar = measurables.last().measure(constraints)
+                layout(bar.width, maxOf(bar.height, underlay?.height ?: 0)) {
+                    if (underlay != null && underlayVisible() && underlayHeader?.visible == true) {
+                        underlay.placeRelative(0, 0)
+                    }
                     if (showHeader && header.visible) bar.placeRelative(0, 0)
                 }
             }

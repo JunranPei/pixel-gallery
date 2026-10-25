@@ -50,7 +50,6 @@ internal fun VideoZoomMemory(
     DisposableEffect(source, active, rememberZoom, lifecycle, state, session) {
         fun save() {
             if (!active || !restored || host?.isInPictureInPictureMode == true) return
-            host?.let { repository.saveDirection(true, source, it.visibleViewerOrientation()) }
             if (rememberZoom != true) return
             val bounds = state.transformedContentBounds
             val transform = state.contentTransformation

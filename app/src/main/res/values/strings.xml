@@ -162,6 +162,9 @@
     <string name="video_capture_default_directory">Use default folder</string>
     <string name="video_directory_error">Cannot access this folder. Choose another folder.</string>
     <string name="video_mute">Mute</string>
+    <string name="video_rotate_screen">Rotate screen</string>
+    <string name="video_show_actions">Show playback controls</string>
+    <string name="video_hide_actions">Hide playback controls</string>
     <string name="video_unmute">Unmute</string>
     <string name="video_capture">Capture frame</string>
     <string name="video_capture_saved">Frame saved</string>
@@ -177,8 +180,8 @@
     <string name="viewer_direction_landscape">Landscape</string>
     <string name="viewer_direction_portrait">Portrait</string>
     <string name="viewer_direction_description">Used when opening media without a remembered orientation. Twist with two fingers and release to switch.</string>
-    <string name="viewer_remember_direction">Remember orientation</string>
-    <string name="viewer_remember_direction_description">Restore the last screen orientation when reopening the same item.</string>
+    <string name="viewer_remember_direction">Remember picture rotation</string>
+    <string name="viewer_remember_direction_description">Restore the picture rotation when reopening the same item. Screen orientation is set separately.</string>
     <string name="viewer_remember_zoom">Remember zoom and position</string>
     <string name="viewer_remember_zoom_description">Restore the same item’s zoom and viewed area. When off, reopen fitted to the screen.</string>
 </resources>

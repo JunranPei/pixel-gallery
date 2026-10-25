@@ -24,6 +24,14 @@ import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+suspend fun captureSessionFrame(session: VideoPlaybackSession, width: Int, height: Int): Bitmap {
+    val texture = session.texture
+    return if (texture != null) {
+        require(texture.isAvailable && width > 0 && height > 0)
+        texture.getBitmap(width, height) ?: throw IOException("Frame unavailable")
+    } else captureVideoFrame(session.surface ?: throw IOException("Video surface unavailable"), width, height)
+}
+
 /** Copies the rendered video surface, excluding controls, zoom and other application chrome. */
 suspend fun captureVideoFrame(view: SurfaceView, width: Int, height: Int): Bitmap {
     require(view.holder.surface.isValid && width > 0 && height > 0)

@@ -78,7 +78,7 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
         scope.launch { store.edit {
             val value = transform(decode(it[key]))
             videoMemoryPolicy = value.rememberDirection to value.rememberZoom
-            if (!value.rememberDirection) clearMemory("video:direction:")
+            if (!value.rememberDirection) { clearMemory("video:direction:"); clearMemory("video:rotation:") }
             if (!value.rememberZoom) clearMemory("video:zoom:")
             it[key] = gson.toJson(value)
         } }
@@ -88,7 +88,7 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
         scope.launch { store.edit {
             val value = transform(decodeImage(it[imageKey]))
             imageMemoryPolicy = value.rememberDirection to value.rememberZoom
-            if (!value.rememberDirection) clearMemory("image:direction:")
+            if (!value.rememberDirection) { clearMemory("image:direction:"); clearMemory("image:rotation:") }
             if (!value.rememberZoom) clearMemory("image:zoom:")
             it[imageKey] = gson.toJson(value)
         } }
@@ -100,12 +100,15 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
         if (keys.isNotEmpty()) viewerHistory.edit().also { edit -> keys.forEach(edit::remove) }.apply()
     }
 
-    fun direction(isVideo: Boolean, source: String): Int? =
-        viewerHistory.getString("${if (isVideo) "video" else "image"}:direction:$source", null)?.toIntOrNull().takeIf { it in listOf(0, 1, 8, 9) }
+    // Separate namespace: old ActivityInfo values must never become content angles.
+    fun contentRotation(isVideo: Boolean, source: String): Int =
+        viewerHistory.getString("${if (isVideo) "video" else "image"}:rotation:$source", null)
+            ?.toIntOrNull()?.takeIf { it in listOf(0, 90, 180, 270) } ?: 0
 
-    fun saveDirection(isVideo: Boolean, source: String, orientation: Int) {
-        val allowed = if (isVideo) settings.value?.rememberDirection == true else imageSettings.value?.rememberDirection == true
-        if (allowed) writeMemory("${if (isVideo) "video" else "image"}:direction:$source", orientation.toString())
+    fun saveContentRotation(isVideo: Boolean, source: String, degrees: Int) {
+        if (degrees in listOf(0, 90, 180, 270)) {
+            writeMemory("${if (isVideo) "video" else "image"}:rotation:$source", degrees.toString())
+        }
     }
 
     fun zoom(isVideo: Boolean, source: String): SavedViewerZoom? = runCatching {
@@ -123,7 +126,7 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
         val policy = (if (video) videoMemoryPolicy else imageMemoryPolicy)
             ?: if (video) ((settings.value?.rememberDirection == true) to (settings.value?.rememberZoom == true))
             else ((imageSettings.value?.rememberDirection == true) to (imageSettings.value?.rememberZoom == true))
-        val directionRecord = key.startsWith("${if (video) "video" else "image"}:direction:")
+        val directionRecord = key.contains(":direction:") || key.contains(":rotation:")
         if (if (directionRecord) !policy.first else !policy.second) return
         if (viewerHistory.getString(key, null) == value) return
         val edit = viewerHistory.edit()

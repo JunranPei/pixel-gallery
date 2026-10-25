@@ -28,6 +28,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -454,20 +456,22 @@ internal fun ViewerScreen(
     val directionKey = directionMedia?.let { "${it.uri}:${it.dateModifiedMillis}" }
     val screenDirection = if (directionIsVideo) videoPreferences?.screenDirection else imagePreferences?.screenDirection
     val rememberDirection = if (directionIsVideo) videoPreferences?.rememberDirection == true else imagePreferences?.rememberDirection == true
-    LaunchedEffect(directionKey, screenDirection, rememberDirection) {
+    val rotationScope = rememberCoroutineScope()
+    val contentRotation = remember(directionKey, screenDirection != null) {
+        ViewerContentRotation(if (rememberDirection && directionKey != null)
+            presentationModel.repository.contentRotation(directionIsVideo, directionKey) else 0, rotationScope)
+    }
+    DisposableEffect(contentRotation) { onDispose { contentRotation.cancel() } }
+    LaunchedEffect(directionKey, screenDirection) {
         if (screenDirection != null && directionKey != null) {
             snapshotFlow { !pagerState.isScrollInProgress }.first { it }
-            requestedViewerOrientation = (if (rememberDirection) presentationModel.repository.direction(directionIsVideo, directionKey) else null)
-                ?: screenDirection.requestedOrientation()
+            requestedViewerOrientation = screenDirection.requestedOrientation()
         }
     }
     val viewerLifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(directionKey, directionIsVideo, isForeground, imageTransforms, viewerLifecycle) {
         fun checkpoint() {
             imageTransforms.checkpoint()
-            if (isForeground && directionKey != null) (context as? Activity)?.takeUnless { it.isInPictureInPictureMode }?.let {
-                presentationModel.repository.saveDirection(directionIsVideo, directionKey, it.visibleViewerOrientation())
-            }
         }
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) checkpoint() }
         viewerLifecycle.addObserver(observer)
@@ -870,17 +874,18 @@ internal fun ViewerScreen(
     val dismissGesture = rememberViewerDismissGesture(
         key = currentMedia?.viewerTransitionKey(),
         isForeground = isForeground,
-        enabled = viewerGesturesEnabled && currentMedia != null && !currentMedia.sourceMimeType.startsWith("video/") && !isPlayingMotion,
+        enabled = viewerGesturesEnabled && currentMedia != null && !isPlayingMotion,
         onDismiss = onBack,
     )
     val rotationGesture = rememberViewerRotationGesture(
         isForeground = isForeground,
         enabled = viewerGesturesEnabled,
-    ) {
-        val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        requestedViewerOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        directionKey?.let { presentationModel.repository.saveDirection(directionIsVideo, it, requestedViewerOrientation!!) }
-    }
+        onProgress = { contentRotation.drag(it) },
+        onFinish = { step -> contentRotation.finish(step) { degrees ->
+            directionKey?.let { presentationModel.repository.saveContentRotation(directionIsVideo, it, degrees) }
+        } },
+    )
+    SideEffect { dismissGesture.canUseThumbnailTarget = { contentRotation.settledDegrees == 0 } }
     DisposableEffect(rotationGesture, dismissGesture) {
         rotationGesture.dismissGesture = dismissGesture
         onDispose { if (rotationGesture.dismissGesture === dismissGesture) rotationGesture.dismissGesture = null }
@@ -911,7 +916,13 @@ internal fun ViewerScreen(
                 },
                 actions = {
                     val openSettings = LocalGallerySettingsAction.current
-                    toolbarVideo?.takeIf { it.uri == currentMedia?.uri }?.let { VideoToolbarActions(it, onBusyChanged = { busy -> videoOptionsOpen = busy }) }
+                    toolbarVideo?.takeIf { it.uri == currentMedia?.uri }?.let { session ->
+                        VideoToolbarActions(session, onRotateScreen = {
+                            val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                            requestedViewerOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        }, onBusyChanged = { busy -> videoOptionsOpen = busy })
+                    }
                     if (hasMotionPhoto || motionVideoFile != null) {
                         IconButton(
                             enabled = !isExtractingMotion,
@@ -1117,7 +1128,7 @@ internal fun ViewerScreen(
                     media.path.endsWith(".gif", ignoreCase = true)
             }
             CompositionLocalProvider(LocalViewerDismissGesture provides
-                dismissGesture.takeIf { !isVideo && pagerState.settledPage == page && !pagerState.isScrollInProgress }) {
+                dismissGesture.takeIf { pagerState.settledPage == page && !pagerState.isScrollInProgress }) {
             Box(
                 modifier = Modifier.fillMaxSize().then(
                     if (!isVideo && pagerState.settledPage == page) Modifier.viewerDismissMotion(dismissGesture)
@@ -1143,6 +1154,7 @@ internal fun ViewerScreen(
                         uri = media.uri, 
                         controlsBottomPadding = videoControlsBottomPadding,
                         rotationGesture = rotationGesture,
+                        contentRotation = contentRotation.takeIf { pagerState.settledPage == page },
                         filePath = media.path,
                         fallbackDurationMillis = media.durationMillis ?: 0L,
                         firstFrameModel = firstFrameModel,
@@ -1166,6 +1178,10 @@ internal fun ViewerScreen(
                         onTap = { showUI = !showUI }
                     )
                 } else {
+                    val rawRatio = if (media.width > 0 && media.height > 0) media.width.toFloat() / media.height else 1f
+                    val displayRatio = if (media.sourceRotationDegrees % 180 != 0) 1f / rawRatio else rawRatio
+                    RotatingMediaLayer(contentRotation.takeIf { pagerState.settledPage == page }, displayRatio,
+                        Modifier.fillMaxSize()) {
                     key(rememberImageZoom, if (rememberImageZoom) null else imageVisit) {
                     val pageImageTransforms = if (rememberImageZoom) imageTransforms else remember { ViewerTransformStateStore() }
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -1612,6 +1628,7 @@ internal fun ViewerScreen(
                         }
                     }
                     } // Image renderer lifetime, reset on a new visit only when memory is off.
+                    } // Content rotation never includes viewer chrome.
                 }
             }
             }
@@ -2147,7 +2164,7 @@ fun InfoRow(
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-fun VideoPlayer(
+internal fun VideoPlayer(
     uri: String, 
     filePath: String = "",
     fallbackDurationMillis: Long = 0L,
@@ -2164,6 +2181,7 @@ fun VideoPlayer(
     onSession: (VideoPlaybackSession?) -> Unit = {},
     onEnded: () -> Unit = {},
     rotationGesture: ViewerRotationGesture? = null,
+    contentRotation: ViewerContentRotation? = null,
     controlsBottomPadding: Dp = 96.dp,
     videoViewModel: VideoSettingsViewModel = hiltViewModel(),
 ) {
@@ -2221,8 +2239,10 @@ fun VideoPlayer(
 
     var videoViewport by remember(uri) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     LaunchedEffect(videoViewport, session) { session?.updatePipParams() }
+    val zoomViewport = if ((contentRotation?.settledDegrees ?: 0) % 180 != 0)
+        androidx.compose.ui.unit.IntSize(videoViewport.height, videoViewport.width) else videoViewport
     if (!isMotionPhoto) VideoZoomMemory(zoomableState, videoViewModel.repository, settings,
-        "$uri:$sourceVersion", isActive && isForeground, videoViewport, session)
+        "$uri:$sourceVersion", isActive && isForeground, zoomViewport, session)
 
     DisposableEffect(shouldPrepare, uri, sourceVersion, settings != null) {
         hasPresentedVideoSurface = false
@@ -2265,11 +2285,49 @@ fun VideoPlayer(
     }
 
     val showVideoSurface = hasRenderedFirstFrame && hasPresentedVideoSurface
+    val videoRatio = session?.let {
+        val w = it.native?.width ?: it.player.videoSize.width
+        val h = it.native?.height ?: it.player.videoSize.height
+        if (w > 0 && h > 0) w.toFloat() * (if (it.native == null) it.player.videoSize.pixelWidthHeightRatio else 1f) / h else 16f / 9f
+    } ?: (16f / 9f)
+    val rotatedOutput = contentRotation?.let { it.busy || it.settledDegrees != 0 } == true
+    LaunchedEffect(session, contentRotation?.settledDegrees) {
+        session?.contentRotationDegrees = contentRotation?.settledDegrees ?: 0
+        session?.updatePipParams()
+    }
+    val videoDismiss = LocalViewerDismissGesture.current
+    val dismissFrame = rememberVideoDismissFrame(session, videoDismiss?.isRevealing == true)
+    ViewerDismissImageEligibility(bounds = {
+        val width = videoViewport.width.toFloat()
+        val height = videoViewport.height.toFloat()
+        val sourceWidth = nativeVideoView?.width ?: exoPlayer?.videoSize?.width ?: 0
+        val sourceHeight = nativeVideoView?.height ?: exoPlayer?.videoSize?.height ?: 0
+        if (width <= 0f || height <= 0f || sourceWidth <= 0 || sourceHeight <= 0) null else {
+            val pixelRatio = exoPlayer?.videoSize?.pixelWidthHeightRatio ?: 1f
+            val rawRatio = sourceWidth.toFloat() * pixelRatio / sourceHeight
+            val ratio = if ((contentRotation?.settledDegrees ?: 0) % 180 != 0) 1f / rawRatio else rawRatio
+            val fitWidth = minOf(width, height * ratio)
+            val fitHeight = fitWidth / ratio
+            androidx.compose.ui.geometry.Rect((width - fitWidth) / 2f, (height - fitHeight) / 2f,
+                (width + fitWidth) / 2f, (height + fitHeight) / 2f)
+        }
+    }) {
+        val transform = zoomableState.contentTransformation
+        isActive && isForeground && !inPip && !isMotionPhoto && showVideoSurface && contentRotation?.busy != true &&
+            (!transform.isSpecified || kotlin.math.abs(transform.scaleMetadata.userZoom - 1f) < .02f)
+    }
 
     Box(
         modifier = modifier
             .onSizeChanged { videoViewport = it }
-            .zoomable(
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (videoDismiss != null) Modifier.viewerDismissMotion(videoDismiss) else Modifier)
+        ) {
+        RotatingMediaLayer(contentRotation, videoRatio, Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().zoomable(
                 state = zoomableState,
                 onClick = { _ -> onTap() },
                 onDoubleClick = DoubleClickToZoomListener { state, centroid ->
@@ -2280,11 +2338,8 @@ fun VideoPlayer(
                         state.resetZoom()
                     }
                 }
-            )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
+            )) {
+        Box(Modifier.fillMaxSize()
                 .graphicsLayer {
                     val transformation = zoomableState.contentTransformation
                     scaleX = transformation.scale.scaleX
@@ -2292,7 +2347,7 @@ fun VideoPlayer(
                     translationX = transformation.offset.x
                     translationY = transformation.offset.y
                     transformOrigin = transformation.transformOrigin
-                }
+                }.graphicsLayer { alpha = if (dismissFrame != null) 0f else 1f }
         ) {
             if (firstFrameModel != null && !showVideoSurface) {
                 GlideImage(
@@ -2311,7 +2366,12 @@ fun VideoPlayer(
             }
 
             if (exoPlayer != null) {
-                if (useNativeFallback) {
+                if (rotatedOutput && session != null) {
+                    key(session, nativeVideoView) {
+                        RotatableVideoSurface(session!!, videoRatio,
+                            isActive && isForeground && activityVisible, Modifier.fillMaxSize())
+                    }
+                } else if (useNativeFallback) {
                     BoxWithConstraints(Modifier.fillMaxSize()) {
                         val ratio = if (nativeVideoView != null && nativeVideoView.width > 0 && nativeVideoView.height > 0)
                             nativeVideoView.width.toFloat() / nativeVideoView.height else 16f / 9f
@@ -2321,9 +2381,15 @@ fun VideoPlayer(
                             factory = { ctx ->
                                 android.view.SurfaceView(ctx).apply {
                                     holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                                        override fun surfaceCreated(holder: android.view.SurfaceHolder) { nativeVideoView?.setSurface(holder.surface) }
+                                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                                            session?.surface = this@apply
+                                            session?.texture = null
+                                            nativeVideoView?.setSurface(holder.surface)
+                                        }
                                         override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
-                                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) { nativeVideoView?.setSurface(null) }
+                                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                                            if (session?.surface === this@apply) nativeVideoView?.setSurface(null)
+                                        }
                                     })
                                     session?.surface = this
                                 }
@@ -2332,7 +2398,7 @@ fun VideoPlayer(
                                 session?.surface = view
                                 view.keepScreenOn = isActive && isForeground && activityVisible
                             },
-                            onRelease = { nativeVideoView?.setSurface(null) },
+                            onRelease = { view -> if (session?.surface === view) nativeVideoView?.setSurface(null) },
                             modifier = Modifier.align(Alignment.Center).size(videoWidth, videoHeight)
                                 .alpha(if (showVideoSurface) 1f else 0f),
                         )
@@ -2350,12 +2416,14 @@ fun VideoPlayer(
                                 useController = false
                                 resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 setKeepScreenOn(isActive && isForeground && activityVisible)
-                                setBackgroundColor(android.graphics.Color.BLACK)
+                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                             }
                         },
                         update = { view ->
                             view.keepScreenOn = isActive && isForeground && activityVisible
                             session?.surface = view.videoSurfaceView as? android.view.SurfaceView
+                            session?.texture = null
                             if (view.player != exoPlayer) {
                                 view.player = exoPlayer
                             }
@@ -2369,6 +2437,13 @@ fun VideoPlayer(
                     )
                 }
             }
+        }
+        dismissFrame?.let { bitmap ->
+            Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize())
+        }
+        }
+        }
         }
 
         if (!isMotionPhoto) {
@@ -2384,7 +2459,9 @@ fun VideoPlayer(
                 currentZoom = currentZoom,
                 fallbackDurationMillis = fallbackDurationMillis,
                 bottomPadding = controlsBottomPadding,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    alpha = videoDismiss?.visual?.chromeAlpha ?: 1f
+                }
             )
         }
     }

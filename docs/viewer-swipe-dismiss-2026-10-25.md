@@ -20,6 +20,8 @@ Visible photo tiles register their URI/version, route scope and window coordinat
 
 One final frame is allowed to present before navigation removes the viewer. The covered grid retains its base route's bottom padding to avoid a second layout shift when returning. Runtime fallback images with missing metadata use the decoded drawable's intrinsic dimensions for their fit geometry.
 
+Follow-up: the covered route's header is prepared within the shell's toolbar root while the viewer is open. During dismissal it fades in with the grid backdrop, using the destination header and its saved scroll offset. It is not placed at rest and cannot receive input or accessibility focus while covered. This fixes the interval where the grid was visible but the toolbar stayed blank until navigation completed. The revised debug build passed (`scratch/viewer-header-reveal-final-build.log`); visual acceptance remains with the user.
+
 ## Power and index boundaries
 
 The image's native layout, decoder, index identity, tile geometry and saved zoom transform stay unchanged. GPU scale/translation and clip changes transform the existing display output; they do not invoke image zoom APIs. There is no screenshot capture, bitmap copy, blur, decoder replacement or index rebuild. The image fade uses ModulateAlpha rather than requesting a full-window offscreen alpha buffer.

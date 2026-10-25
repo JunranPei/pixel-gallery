@@ -46,6 +46,8 @@ class VideoPlaybackSession(
     var native by mutableStateOf<NativeVideoPlayback?>(null)
         private set
     var surface: SurfaceView? = null
+    var texture: android.view.TextureView? = null
+    var contentRotationDegrees: Int = 0
     var onPresentationCheckpoint: (() -> Unit)? = null
     var captureBusy by mutableStateOf(false)
     var error by mutableStateOf(false)
@@ -208,9 +210,10 @@ class VideoPlaybackSession(
     private fun pipParams(): PictureInPictureParams {
         val width = native?.width ?: player.videoSize.width
         val height = native?.height ?: player.videoSize.height
-        val ratio = if (width > 0 && height > 0) (width.toFloat() / height).coerceIn(1f / 2.39f, 2.39f) else 16f / 9f
+        val rawRatio = if (width > 0 && height > 0) width.toFloat() / height else 16f / 9f
+        val ratio = (if (contentRotationDegrees % 180 != 0) 1f / rawRatio else rawRatio).coerceIn(1f / 2.39f, 2.39f)
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational((ratio * 10000).toInt(), 10000))
-        surface?.let { view -> Rect().also { if (view.getGlobalVisibleRect(it)) builder.setSourceRectHint(it) } }
+        (texture ?: surface)?.let { view -> Rect().also { if (view.getGlobalVisibleRect(it)) builder.setSourceRectHint(it) } }
         if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(
             !motionPhoto && active && routeVisible && wantsPlay && firstFrame && settings.backgroundAction == VideoBackgroundAction.PIP)
         return builder.build()

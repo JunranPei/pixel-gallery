@@ -86,6 +86,9 @@
     <string name="video_capture_default_directory">使用默认文件夹</string>
     <string name="video_directory_error">无法访问此文件夹，请重新选择。</string>
     <string name="video_mute">静音</string>
+    <string name="video_rotate_screen">切换屏幕方向</string>
+    <string name="video_show_actions">展开播放操作</string>
+    <string name="video_hide_actions">收起播放操作</string>
     <string name="video_unmute">取消静音</string>
     <string name="video_capture">截取当前帧</string>
     <string name="video_capture_saved">当前帧已保存</string>
@@ -101,8 +104,8 @@
     <string name="viewer_direction_landscape">横屏</string>
     <string name="viewer_direction_portrait">竖屏</string>
     <string name="viewer_direction_description">没有方向记忆时按此选项打开。双指明显转动后松手可切换方向。</string>
-    <string name="viewer_remember_direction">记忆方向</string>
-    <string name="viewer_remember_direction_description">重新打开同一项时，恢复上次查看的屏幕方向。</string>
+    <string name="viewer_remember_direction">记忆画面旋转</string>
+    <string name="viewer_remember_direction_description">重新打开同一项时恢复画面角度，屏幕方向单独设置。</string>
     <string name="viewer_remember_zoom">记忆缩放和位置</string>
     <string name="viewer_remember_zoom_description">重新打开同一项时，恢复缩放比例和观看位置。关闭后以适屏状态打开。</string>
 </resources>

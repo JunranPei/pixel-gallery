@@ -41,6 +41,31 @@ class RotationGestureTrackerTest {
         }
     }
 
+    @Test fun previewTracksMoveBeforeReleaseAndRetainsItsSign() {
+        val tracker = start()
+        tracker.sample(-10f)
+        assertEquals(RotationGestureTracker.Intent.ROTATION, tracker.intent)
+        assertEquals(-10f, tracker.angle, .001f)
+        tracker.sample(-51f)
+        assertEquals(-51f, tracker.angle, .001f)
+        assertEquals(-1, tracker.finishQuarterTurn())
+        assertEquals(0, tracker.finishQuarterTurn())
+    }
+
+    @Test fun fitDoesNotJumpWhenQuarterTurnSwapsChildConstraints() {
+        val before = rotationFitScale(400f, 800f, 400f, 800f, 2f, 90f)
+        val after = rotationFitScale(400f, 800f, 800f, 400f, 2f, 90f)
+        assertEquals(400f * before, 800f * after, .001f)
+        assertEquals(2f, before, .001f)
+        assertEquals(1f, after, .001f)
+    }
+
+    @Test fun obliqueFitKeepsAllCornersInsideViewport() {
+        val scale = rotationFitScale(400f, 800f, 400f, 800f, 2f, 45f)
+        val diagonalWidth = (400f + 200f) * kotlin.math.sqrt(.5f) * scale
+        assertEquals(400f, diagonalWidth, .001f)
+    }
+
     @Test fun returningBelowThresholdBeforeReleaseCancelsRotation() {
         val tracker = start()
         tracker.sample(50f)

@@ -19,12 +19,13 @@ import kotlin.math.hypot
 
 /**
  * Arbitrate before either Compose or AndroidView receives MOVE. Both renderers get
- * one CANCEL when rotation wins, so no image tiles or video transforms follow the
- * fingers. Only an all-fingers-up event can request a screen orientation change.
+ * one CANCEL when rotation wins. MOVE drives the content layer directly; release
+ * snaps that layer to a quarter turn. Activity orientation is never changed here.
  */
 class ViewerRotationGesture internal constructor(private val touchSlop: Float, minimumSpan: Float) {
     internal var enabled: () -> Boolean = { false }
-    internal var onRotate: () -> Unit = {}
+    internal var onProgress: (Float) -> Unit = {}
+    internal var onFinish: (Int) -> Unit = {}
     internal var dismissGesture: ViewerDismissGesture? = null
     private val tracker = RotationGestureTracker(touchSlop, minimumSpan)
     private val areas = mutableMapOf<Any, Pair<LayoutCoordinates, Boolean>>()
@@ -116,14 +117,17 @@ class ViewerRotationGesture internal constructor(private val touchSlop: Float, m
             pairEnded = true
             tracker.releasePair()
         }
+        if (claimed && eligible && tracker.intent == RotationGestureTracker.Intent.ROTATION) {
+            onProgress(tracker.angle)
+        }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             val consume = claimed
-            val rotate = eligible && action == MotionEvent.ACTION_UP && tracker.finish()
+            val step = if (eligible && action == MotionEvent.ACTION_UP) tracker.finishQuarterTurn() else 0
             tracker.cancel()
             eligible = false
             claimed = false
             val handled = if (consume) true else toContent(event)
-            if (rotate) onRotate()
+            if (consume) onFinish(step)
             return handled
         }
         if (claimed) return true
@@ -141,17 +145,20 @@ class ViewerRotationGesture internal constructor(private val touchSlop: Float, m
 internal fun rememberViewerRotationGesture(
     isForeground: Boolean,
     enabled: Boolean,
-    onRotate: () -> Unit,
+    onProgress: (Float) -> Unit,
+    onFinish: (Int) -> Unit,
 ): ViewerRotationGesture {
     val context = LocalContext.current
     val host = context as? MainActivity
     val currentEnabled by rememberUpdatedState(enabled)
-    val currentRotate by rememberUpdatedState(onRotate)
+    val currentProgress by rememberUpdatedState(onProgress)
+    val currentFinish by rememberUpdatedState(onFinish)
     val gesture = remember(context) {
         ViewerRotationGesture(ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
             48f * context.resources.displayMetrics.density).apply {
             this.enabled = { currentEnabled && host?.hasWindowFocus() == true && !host.isInPictureInPictureMode && !host.isInMultiWindowMode }
-            this.onRotate = { currentRotate() }
+            this.onProgress = { currentProgress(it) }
+            this.onFinish = { currentFinish(it) }
         }
     }
     DisposableEffect(host, isForeground, gesture) {
