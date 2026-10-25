@@ -110,7 +110,15 @@ fun ZoomableContainer(
     }
     var animationGeneration by remember(diagnosticsKey) { mutableIntStateOf(0) }
     var zoomLifecycleOpen by remember(diagnosticsKey) { mutableStateOf(false) }
-    ViewerDismissImageEligibility {
+    ViewerDismissImageEligibility(bounds = {
+        val width = containerSize.width.toFloat()
+        val height = containerSize.height.toFloat()
+        val halfWidth = width * imageFitScaleX * renderScale / 2f
+        val halfHeight = height * imageFitScaleY * renderScale / 2f
+        androidx.compose.ui.geometry.Rect(width / 2f + renderOffsetX - halfWidth,
+            height / 2f + renderOffsetY - halfHeight, width / 2f + renderOffsetX + halfWidth,
+            height / 2f + renderOffsetY + halfHeight)
+    }) {
         enabled && !zoomLifecycleOpen && animationJob?.isActive != true && renderScale <= 1.02f
     }
 

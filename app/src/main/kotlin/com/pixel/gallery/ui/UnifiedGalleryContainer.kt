@@ -17,6 +17,8 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -104,10 +106,14 @@ fun GalleryPage(
 
 /** Keep route content alive without placing hidden nodes or exposing hit targets. */
 @Composable
-internal fun RetainedGalleryLayer(visible: Boolean, content: @Composable () -> Unit) {
+internal fun RetainedGalleryLayer(visible: Boolean, interactive: Boolean = visible, content: @Composable () -> Unit) {
     Layout(
         modifier = Modifier.fillMaxSize().then(
-            if (visible) Modifier else Modifier.clearAndSetSemantics {},
+            if (interactive) Modifier else Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                }
+            },
         ),
         content = content,
     ) { measurables, constraints ->

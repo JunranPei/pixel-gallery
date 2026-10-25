@@ -54,6 +54,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -866,7 +868,7 @@ internal fun ViewerScreen(
         !showDeleteConfirm && !videoOptionsOpen && imageIndexAction == null &&
         !pagerState.isScrollInProgress && !pagerReturningToSettledPage
     val dismissGesture = rememberViewerDismissGesture(
-        key = currentMediaCacheKey,
+        key = currentMedia?.viewerTransitionKey(),
         isForeground = isForeground,
         enabled = viewerGesturesEnabled && currentMedia != null && !currentMedia.sourceMimeType.startsWith("video/") && !isPlayingMotion,
         onDismiss = onBack,
@@ -884,15 +886,15 @@ internal fun ViewerScreen(
         onDispose { if (rotationGesture.dismissGesture === dismissGesture) rotationGesture.dismissGesture = null }
     }
     return GalleryPage(
-        modifier = Modifier.viewerDismissMotion(dismissGesture)
-            .onSizeChanged { dismissGesture.resize(it.width, it.height) }.background(Color.Black),
+        modifier = Modifier.onSizeChanged { dismissGesture.resize(it.width, it.height) }
+            .onGloballyPositioned { dismissGesture.windowOrigin = it.localToWindow(Offset.Zero) }
+            .drawBehind { drawRect(Color.Black.copy(alpha = dismissGesture.visual.backdropAlpha)) },
         topBar = {
             GalleryHeader(
                 modifier = Modifier
-                    .viewerDismissMotion(dismissGesture)
                     .viewerRotationArea(rotationGesture.takeIf { showUI || headerVisibility > 0f }, excluded = true)
                     .graphicsLayer {
-                        alpha = headerVisibility
+                        alpha = headerVisibility * dismissGesture.visual.chromeAlpha
                         translationY = -size.height * (1f - headerVisibility)
                     }
                     .background(
@@ -1117,7 +1119,9 @@ internal fun ViewerScreen(
             CompositionLocalProvider(LocalViewerDismissGesture provides
                 dismissGesture.takeIf { !isVideo && pagerState.settledPage == page && !pagerState.isScrollInProgress }) {
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().then(
+                    if (!isVideo && pagerState.settledPage == page) Modifier.viewerDismissMotion(dismissGesture)
+                    else Modifier),
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideo) {
@@ -1618,7 +1622,9 @@ internal fun ViewerScreen(
             visible = showUI && !inVideoPip,
             enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { it },
             exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { it },
-            modifier = Modifier.align(Alignment.BottomCenter).viewerRotationArea(rotationGesture, excluded = true)
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .graphicsLayer { alpha = dismissGesture.visual.chromeAlpha }
+                .viewerRotationArea(rotationGesture, excluded = true)
         ) {
             Column(
                 modifier = Modifier

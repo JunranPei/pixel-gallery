@@ -70,6 +70,8 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.R
+import com.pixel.gallery.ui.viewer.viewerThumbnailAnchor
+import com.pixel.gallery.ui.viewer.viewerTransitionKey
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.quicksort.QuickSortGestureState
 import com.pixel.gallery.ui.quicksort.QuickSortDock
@@ -348,6 +350,7 @@ fun PhotoTile(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
 ) {
+    val thumbnailAnchor = Modifier.viewerThumbnailAnchor(media.viewerTransitionKey(), ExpressiveShapes.GridCornerRadius)
     val isVideo = remember(media.sourceMimeType) { media.sourceMimeType.startsWith("video/") }
     val context = LocalContext.current
     val model = remember(media.uri, media.sourceMimeType, media.sizeBytes, isFastScrolling) {
@@ -425,6 +428,7 @@ fun PhotoTile(
         }
 
         PhotoTileContent(
+            modifier = thumbnailAnchor,
             model = model,
             isVideo = isVideo,
             formattedDuration = formattedDuration,
@@ -439,6 +443,7 @@ fun PhotoTile(
         )
     } else {
         PhotoTileContent(
+            modifier = thumbnailAnchor,
             model = model,
             isVideo = isVideo,
             formattedDuration = formattedDuration,
@@ -467,10 +472,11 @@ fun PhotoTileContent(
     isSelectionMode: Boolean,
     transform: (com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable>) -> com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable>,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)?
+    onLongClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
             .graphicsLayer {
                 scaleX = scale

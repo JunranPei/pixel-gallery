@@ -33,6 +33,7 @@ internal fun GlideViewerFallback(
     val memoryKey = "fallback:$imagePath:$dateModifiedMillis"
     val initialTransform = remember(memoryKey, transformStateStore) { transformStateStore?.get(memoryKey) }
     var lastTransform by remember(memoryKey, transformStateStore) { mutableStateOf(initialTransform) }
+    var decodedSize by remember(memoryKey) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     DisposableEffect(memoryKey, transformStateStore) {
         onDispose { lastTransform?.let { transformStateStore?.save(memoryKey, it, "composition-dispose") } }
     }
@@ -40,8 +41,10 @@ internal fun GlideViewerFallback(
         val containerWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val containerHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
         val swapped = orientationDegrees == 90 || orientationDegrees == 270
-        val imageWidth = (if (swapped) height else width).toFloat().coerceAtLeast(1f)
-        val imageHeight = (if (swapped) width else height).toFloat().coerceAtLeast(1f)
+        val imageWidth = (if (width > 0 && height > 0) { if (swapped) height else width }
+            else decodedSize.width).toFloat().coerceAtLeast(1f)
+        val imageHeight = (if (width > 0 && height > 0) { if (swapped) width else height }
+            else decodedSize.height).toFloat().coerceAtLeast(1f)
         val fitScale = minOf(containerWidth / imageWidth, containerHeight / imageHeight)
             .coerceAtLeast(0.0001f)
         val scaleToOriginal = 1f / fitScale
@@ -79,6 +82,8 @@ internal fun GlideViewerFallback(
                             dataSource: com.bumptech.glide.load.DataSource,
                             isFirstResource: Boolean,
                         ): Boolean {
+                            decodedSize = androidx.compose.ui.unit.IntSize(resource.intrinsicWidth.coerceAtLeast(1),
+                                resource.intrinsicHeight.coerceAtLeast(1))
                             currentOnContentReadyChanged(true)
                             return false
                         }

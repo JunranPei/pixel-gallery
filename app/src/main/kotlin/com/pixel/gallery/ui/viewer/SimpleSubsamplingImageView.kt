@@ -558,7 +558,14 @@ internal fun SimpleSubsamplingImageView(
     val currentPreviewUserScale by rememberUpdatedState(previewUserScale)
     val currentPreviewOffsetX by rememberUpdatedState(previewOffsetX)
     val currentPreviewOffsetY by rememberUpdatedState(previewOffsetY)
-    ViewerDismissImageEligibility {
+    ViewerDismissImageEligibility(bounds = {
+        ssivView?.let { view -> view.snapshotViewState()?.let { state ->
+            val left = view.width / 2f - state.sourceCenter.x * state.scale
+            val top = view.height / 2f - state.sourceCenter.y * state.scale
+            androidx.compose.ui.geometry.Rect(left, top, left + state.sourceWidth * state.scale,
+                top + state.sourceHeight * state.scale)
+        } }
+    }) {
         isActivePage && subsamplingReady && !previewOwnsTransform && !previewTakeoverPending &&
             ssivView?.isAtRestWithinFit() == true
     }

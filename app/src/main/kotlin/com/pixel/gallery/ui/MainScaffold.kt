@@ -45,6 +45,9 @@ import com.pixel.gallery.ui.locked.LockedFolderScreen
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import com.pixel.gallery.ui.viewer.ViewerScreen
 import com.pixel.gallery.ui.viewer.ViewerTransformStateStore
+import com.pixel.gallery.ui.viewer.ViewerTransitionRegistry
+import com.pixel.gallery.ui.viewer.LocalViewerTransitions
+import com.pixel.gallery.ui.viewer.LocalViewerGridScope
 import com.pixel.gallery.ui.settings.ExcludedFoldersScreen
 import com.pixel.gallery.ui.settings.LicensesScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
@@ -309,8 +312,11 @@ fun MainScaffold(
     initialHomeTab: Int = -1,
     photosViewModel: PhotosViewModel = hiltViewModel()
 ) {
-    GalleryMessageProvider {
-        MainScaffoldContent(initialScreen, initialHomeTab, photosViewModel)
+    val transitions = remember { ViewerTransitionRegistry() }
+    CompositionLocalProvider(LocalViewerTransitions provides transitions) {
+        GalleryMessageProvider {
+            MainScaffoldContent(initialScreen, initialHomeTab, photosViewModel)
+        }
     }
 }
 
@@ -853,9 +859,12 @@ private fun MainScaffoldContent(
     // Window Insets
     val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val contentPaddingScreen = navigationStack.lastOrNull {
+        it !is Screen.Viewer && it !is Screen.TransferDestination
+    } ?: currentScreen
     val contentBottomPadding = if (quickSortEnabled) {
         navBarPadding
-    } else if (currentScreen == Screen.Home || currentScreen == Screen.HiddenAlbums || currentScreen == Screen.LockedFolder) {
+    } else if (contentPaddingScreen == Screen.Home || contentPaddingScreen == Screen.HiddenAlbums || contentPaddingScreen == Screen.LockedFolder) {
         FloatingBarHeight + 16.dp + navBarPadding
     } else {
         navBarPadding + 16.dp
@@ -1010,6 +1019,8 @@ private fun MainScaffoldContent(
         it !is Screen.Viewer && it !is Screen.TransferDestination
     }.coerceAtLeast(0)
     val baseScreen = navigationStack[baseScreenIndex]
+    val viewerTransitions = LocalViewerTransitions.current!!
+    SideEffect { viewerTransitions.destinationScope = baseScreen }
     val routePages = mutableMapOf<Int, GalleryPageContent>()
     navigationStack.forEachIndexed { screenIndex, screen ->
         if (screen !is Screen.Viewer && screen !is Screen.TransferDestination) {
@@ -1711,7 +1722,8 @@ private fun MainScaffoldContent(
                         },
                     )
                 } else {
-                    GalleryPage(topBar = { GalleryHeader(title = {}, visible = false) }) { _ -> }
+                    GalleryPage(modifier = Modifier.background(Color.Black),
+                        topBar = { GalleryHeader(title = {}, visible = false) }) { _ -> }
 
                 }
             }
@@ -1751,7 +1763,7 @@ private fun MainScaffoldContent(
         if (currentScreen != Screen.Settings) navigateToStack(navigationStack + Screen.Settings)
     }) {
         UnifiedGalleryContainer.instance.Shell(
-            containerColor = if (visibleViewer != null && reviewPage == null) Color.Black else appShellColor,
+            containerColor = appShellColor,
             modifier = Modifier.nestedScroll(scrollBehavior).then(
                 if (currentScreen == Screen.Home && reviewPage == null && !isHomeSearchMode && !quickSortEnabled) {
                     Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
@@ -1778,7 +1790,7 @@ private fun MainScaffoldContent(
                     .padding(top = baseRouteTopInset)
                     .drawWithContent {
                         // Hide the route decorations together with its content.
-                        if (visibleViewer == null && reviewPage == null) drawContent()
+                        if ((visibleViewer == null || viewerTransitions.revealing) && reviewPage == null) drawContent()
                     }
                     .galleryContentEdge()
                     .pointerInput(navigationReveal, currentScreen) {
@@ -1793,8 +1805,13 @@ private fun MainScaffoldContent(
                     if (screen !is Screen.Viewer && screen !is Screen.TransferDestination) {
                         key(screenIndex, screen) {
                             val isActiveRoute = screenIndex == baseScreenIndex
-                            RetainedGalleryLayer(visible = isActiveRoute && visibleViewer == null && reviewPage == null) {
-                                routePages.getValue(screenIndex).content()
+                            RetainedGalleryLayer(
+                                visible = isActiveRoute && (visibleViewer == null || viewerTransitions.revealing) && reviewPage == null,
+                                interactive = isActiveRoute && visibleViewer == null && reviewPage == null,
+                            ) {
+                                CompositionLocalProvider(LocalViewerGridScope provides screen) {
+                                    routePages.getValue(screenIndex).content()
+                                }
                             }
                         }
                     }
