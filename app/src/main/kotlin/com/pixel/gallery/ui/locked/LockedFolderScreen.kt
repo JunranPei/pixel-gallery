@@ -17,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -33,6 +36,9 @@ fun LockedFolderScreen(
     onBack: () -> Unit,
     onNavigateToViewer: (Long) -> Unit,
     onSort: () -> Unit = {},
+    onAuthenticationCancelled: () -> Unit = onBack,
+    bottomPadding: Dp = 0.dp,
+    gridState: LazyGridState = rememberLazyGridState(),
     isForeground: Boolean = true,
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
@@ -44,6 +50,8 @@ fun LockedFolderScreen(
     val context = LocalContext.current
     var isAuthenticated by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
+    val foregroundNow by rememberUpdatedState(isForeground)
+    val cancelAuthentication by rememberUpdatedState(onAuthenticationCancelled)
 
     val biometricManager = remember { BiometricManager.from(context) }
     val canAuthenticate = remember {
@@ -64,6 +72,9 @@ fun LockedFolderScreen(
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
                     authError = errString.toString()
+                    if (foregroundNow && errorCode in setOf(BiometricPrompt.ERROR_USER_CANCELED, BiometricPrompt.ERROR_NEGATIVE_BUTTON)) {
+                        cancelAuthentication()
+                    }
                 }
             }
         )
@@ -158,6 +169,8 @@ fun LockedFolderScreen(
             Box(modifier = Modifier.padding(innerPadding)) {
                 PhotosScreen(
                     items = items,
+                    state = gridState,
+                    bottomPadding = bottomPadding,
                     onNavigateToViewer = onNavigateToViewer,
                     selectedIds = selectedIds,
                     onSelectionChange = onSelectionChange,

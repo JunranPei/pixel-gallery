@@ -7,7 +7,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.outlined.FileCopy
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -40,7 +39,6 @@ fun HiddenAlbumsScreen(
     onNavigateToAlbum: (String) -> Unit,
     onSort: () -> Unit,
     onDeduplicate: () -> Unit,
-    onLockedFolder: () -> Unit,
     columns: Int = 2,
     onColumnsChange: (Int) -> Unit = {},
     gridState: LazyGridState = rememberLazyGridState(),
@@ -123,11 +121,6 @@ fun HiddenAlbumsScreen(
                                 onDeduplicate()
                             },
                         )
-                        Spacer(Modifier.height(8.dp))
-                        GalleryMenuRow("Locked folder", Icons.Outlined.Lock, onClick = {
-                            showMenu = false
-                            onLockedFolder()
-                        })
                     }
                 },
             )

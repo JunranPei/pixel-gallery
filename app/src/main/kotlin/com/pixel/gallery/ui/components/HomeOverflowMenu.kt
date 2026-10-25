@@ -17,8 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FileCopy
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,8 +47,6 @@ fun HomeOverflowMenu(
     onQuickSort: () -> Unit,
     onSort: () -> Unit,
     onFindDuplicates: () -> Unit,
-    onHiddenAlbums: () -> Unit,
-    onLockedFolder: () -> Unit,
     onSettings: () -> Unit,
     mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     onMediaTypeChange: (MediaTypeFilter) -> Unit = {},
@@ -68,9 +64,6 @@ fun HomeOverflowMenu(
         GalleryMenuRow(sortLabel, Icons.AutoMirrored.Filled.Sort, accented = true, onClick = onSort)
         GalleryMenuRow(duplicateLabel, Icons.Outlined.FileCopy, accented = true,
             enabled = canFindDuplicates, onClick = onFindDuplicates)
-        Spacer(Modifier.height(GalleryMenuGroupSpacing))
-        GalleryMenuRow("Hidden albums", Icons.Outlined.VisibilityOff, onClick = onHiddenAlbums)
-        GalleryMenuRow("Locked folder", Icons.Outlined.Lock, onClick = onLockedFolder)
     }
 }
 

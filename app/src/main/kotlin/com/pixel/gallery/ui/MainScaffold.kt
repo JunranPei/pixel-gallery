@@ -8,10 +8,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material.icons.filled.PhotoAlbum
-import androidx.compose.material.icons.outlined.Photo
-import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingToolbarDefaults
@@ -25,7 +21,6 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
@@ -54,6 +49,13 @@ import com.pixel.gallery.ui.settings.ExcludedFoldersScreen
 import com.pixel.gallery.ui.settings.LicensesScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.components.DeleteConfirmDialog
+import com.pixel.gallery.ui.components.GalleryNavigationState
+import com.pixel.gallery.ui.components.GalleryNavigationTab
+import com.pixel.gallery.ui.components.RevealGalleryNavigation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import com.pixel.gallery.ui.components.HomeOverflowMenu
 import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.settings.PerformanceSettingsScreen
@@ -566,6 +568,8 @@ fun MainScaffold(
     var homeHeaderTransition by remember { mutableStateOf(HomeHeaderTransitionState()) }
     val isHomeSearchMode = homeHeaderTransition.isSearchMode
     val scope = rememberCoroutineScope()
+    val navigationReveal = remember { GalleryNavigationState(scope) }
+    val navigationExpanded by remember { derivedStateOf { navigationReveal.expanded } }
     val snackbarHostState = remember { SnackbarHostState() }
     val searchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -770,6 +774,9 @@ fun MainScaffold(
     LaunchedEffect(isHomeSearchMode) {
         if (isHomeSearchMode) showMenu = false
     }
+    LaunchedEffect(showMenu) {
+        if (showMenu) navigationReveal.settle(0)
+    }
 
     // System back button handling
     BackHandler(
@@ -777,7 +784,7 @@ fun MainScaffold(
             quickSortEnabled ||
             albumSelectionMode ||
             selectionMode ||
-            (currentScreen == Screen.Home && isHomeSearchMode)
+            (currentScreen == Screen.Home && (isHomeSearchMode || navigationExpanded))
     ) {
         if (currentScreen is Screen.Viewer || currentScreen is Screen.TransferDestination) {
             navigateToStack(navigationStack.dropLast(1))
@@ -791,7 +798,10 @@ fun MainScaffold(
             showQuickTargets = false
         } else if (currentScreen == Screen.Home && isHomeSearchMode) {
             homeHeaderTransition = HomeHeaderTransitionState()
+        } else if (currentScreen == Screen.Home && navigationExpanded) {
+            navigationReveal.settle(0)
         } else {
+            if (currentScreen == Screen.LockedFolder || currentScreen == Screen.HiddenAlbums) navigationReveal.settle(0)
             navigateToStack(navigationStack.dropLast(1))
         }
     }
@@ -830,7 +840,7 @@ fun MainScaffold(
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val contentBottomPadding = if (quickSortEnabled) {
         navBarPadding
-    } else if (currentScreen == Screen.Home) {
+    } else if (currentScreen == Screen.Home || currentScreen == Screen.HiddenAlbums || currentScreen == Screen.LockedFolder) {
         FloatingBarHeight + 16.dp + navBarPadding
     } else {
         navBarPadding + 16.dp
@@ -840,6 +850,7 @@ fun MainScaffold(
     val appShellColor = colorScheme.surface
     val headerColor = colorScheme.surfaceContainerLow
     val navigateBack: () -> Unit = {
+        if (currentScreen == Screen.LockedFolder || currentScreen == Screen.HiddenAlbums) navigationReveal.settle(0)
         if (navigationStack.size > 1) {
             navigateToStack(navigationStack.dropLast(1))
         } else {
@@ -970,14 +981,6 @@ fun MainScaffold(
                                 if (isPhotosPage) R.string.duplicate_scope_all else R.string.duplicate_scope_each_album,
                             ),
                         )
-                    },
-                    onHiddenAlbums = {
-                        showMenu = false
-                        navigateToStack(navigationStack + Screen.HiddenAlbums)
-                    },
-                    onLockedFolder = {
-                        showMenu = false
-                        navigateToStack(navigationStack + Screen.LockedFolder)
                     },
                     onSettings = {
                         showMenu = false
@@ -1199,7 +1202,6 @@ fun MainScaffold(
                         duplicateViewModel.start(hiddenTypePhotos, DeduplicationScope.WITHIN_ALBUMS,
                             context.getString(R.string.duplicate_scope_each_album))
                     },
-                    onLockedFolder = { navigateToStack(navigationStack + Screen.LockedFolder) },
                     mediaType = hiddenMediaType,
                     onMediaTypeChange = { type ->
                         if (type != hiddenMediaType) {
@@ -1223,6 +1225,14 @@ fun MainScaffold(
                 )
                 Screen.LockedFolder -> LockedFolderScreen(
                     onBack = navigateBack,
+                    onAuthenticationCancelled = {
+                        if (currentScreen == Screen.LockedFolder) {
+                            navigationReveal.settle(1)
+                            navigateToStack(navigationStack.dropLast(1))
+                        }
+                    },
+                    bottomPadding = contentBottomPadding,
+                    gridState = vaultGridState,
                     onSort = { showPhotoSortDialog = true },
                     isForeground = isActiveRoute && currentScreen == screen,
                     onNavigateToViewer = { id ->
@@ -1698,6 +1708,20 @@ fun MainScaffold(
         onToggle = duplicateViewModel::toggle,
         onConfirm = duplicateViewModel::confirm,
     )
+    val rootNavigationTab = when {
+        Screen.LockedFolder in navigationStack -> GalleryNavigationTab.Lock
+        Screen.HiddenAlbums in navigationStack -> GalleryNavigationTab.Hidden
+        else -> if (homePagerState.currentPage == 0) GalleryNavigationTab.Photos else GalleryNavigationTab.Albums
+    }
+    val showRootNavigation = (currentScreen == Screen.Home || currentScreen == Screen.LockedFolder || currentScreen == Screen.HiddenAlbums) &&
+        !quickSortEnabled && !albumSelectionMode && !selectionMode && reviewPage == null
+    LaunchedEffect(currentScreen, showRootNavigation) {
+        if (!showRootNavigation) navigationReveal.reset(rootNavigationTab.side)
+        else if (rootNavigationTab.side != 0 && navigationReveal.anchor != rootNavigationTab.side) {
+            navigationReveal.settle(rootNavigationTab.side)
+        }
+        if (showRootNavigation) scrollBehavior.state.offset = 0f
+    }
     val homeHeaderOwnsShell = baseScreen == Screen.Home && visibleViewer == null && reviewPage == null
     val density = LocalDensity.current
     val baseRouteTopInset = 64.dp +
@@ -1739,6 +1763,13 @@ fun MainScaffold(
                     .fillMaxSize()
                     .padding(top = baseRouteTopInset)
                     .galleryContentEdge()
+                    .pointerInput(navigationReveal, currentScreen) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            // Observe only: the original click, long press and scroll still receive this event.
+                            if (currentScreen == Screen.Home && navigationReveal.expanded) navigationReveal.settle(0)
+                        }
+                    }
                     .drawWithContent {
                         if (visibleViewer == null && reviewPage == null) drawContent()
                     }
@@ -1802,59 +1833,39 @@ fun MainScaffold(
 
 
 
-            // Only show the floating bar on the Home screen
-            if (currentScreen == Screen.Home && !quickSortEnabled && !albumSelectionMode && reviewPage == null) {
-                HorizontalFloatingToolbar(
+            if (showRootNavigation) {
+                RevealGalleryNavigation(
+                    selected = rootNavigationTab,
+                    state = navigationReveal,
+                    scrollBehavior = scrollBehavior,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(bottom = 16.dp),
-                    expanded = true,
-                    scrollBehavior = scrollBehavior,
-                    colors = FloatingToolbarDefaults.standardFloatingToolbarColors(),
-                    content = {
-                        val tabs = listOf(
-                            NavTab("Photos", Icons.Filled.Photo, Icons.Outlined.Photo),
-                            NavTab("Albums", Icons.Filled.PhotoAlbum, Icons.Outlined.PhotoAlbum)
-                        )
-
-                        tabs.forEachIndexed { index, tab ->
-                            val isSelected = homePagerState.currentPage == index
-
-                            // Using a pill-shaped item that shows a label when selected
-                            Surface(
-                                onClick = {
+                    onSelect = { tab ->
+                        showMenu = false
+                        when (tab) {
+                            GalleryNavigationTab.Lock, GalleryNavigationTab.Hidden -> {
+                                if (tab != rootNavigationTab) {
+                                    navigationReveal.settle(tab.side)
+                                    navigateToStack(listOf(Screen.Home, if (tab == GalleryNavigationTab.Lock) Screen.LockedFolder else Screen.HiddenAlbums))
+                                }
+                            }
+                            GalleryNavigationTab.Photos, GalleryNavigationTab.Albums -> {
+                                navigationReveal.settle(0)
+                                val page = if (tab == GalleryNavigationTab.Photos) 0 else 1
+                                if (currentScreen == Screen.Home) {
+                                    scope.launch { homePagerState.animateScrollToPage(page) }
+                                } else {
                                     scope.launch {
-                                        homePagerState.animateScrollToPage(index)
-                                    }
-                                },
-                                shape = FloatingToolbarDefaults.ContainerShape,
-                                color = if (isSelected) colorScheme.primaryContainer else colorScheme.surface,
-                                contentColor = if (isSelected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 4.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
-                                        contentDescription = tab.label,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    AnimatedVisibility(visible = isSelected) {
-                                        Text(
-                                            text = tab.label,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            modifier = Modifier.padding(start = 8.dp)
-                                        )
+                                        // Set the retained home page before exposing it; no intermediate wrong tab.
+                                        homePagerState.scrollToPage(page)
+                                        navigateToStack(listOf(Screen.Home))
                                     }
                                 }
                             }
                         }
-                    }
+                    },
                 )
             }
             reviewPage?.let { page ->
@@ -2051,8 +2062,3 @@ fun MainScaffold(
     }
 }
 
-private data class NavTab(
-    val label: String,
-    val selectedIcon: ImageVector,
-    val unselectedIcon: ImageVector
-)
