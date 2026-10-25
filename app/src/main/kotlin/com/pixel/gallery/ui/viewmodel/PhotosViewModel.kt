@@ -209,7 +209,6 @@ class PhotosViewModel @Inject constructor(
                     _transferUiState.value = TransferUiState(isRunning = true, progress = progress)
                 }
                 _transferUiState.value = TransferUiState(summary = summary)
-                if (summary.completedAny) refresh()
             } catch (error: Exception) {
                 _transferUiState.value = TransferUiState(error = error.message ?: "Transfer failed")
             }

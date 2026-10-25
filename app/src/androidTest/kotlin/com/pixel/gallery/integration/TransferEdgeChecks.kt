@@ -29,6 +29,7 @@ internal class TransferEdgeChecks(private val context: Context, private val filt
         val isolated = object : ContextWrapper(context) {
             override fun getFilesDir() = File(context.filesDir, "transfer-edge/$token/files").apply { mkdirs() }
             override fun getCacheDir() = File(context.cacheDir, "transfer-edge/$token/cache").apply { mkdirs() }
+            override fun getNoBackupFilesDir() = File(context.filesDir, "transfer-edge/$token/no-backup").apply { mkdirs() }
             override fun getApplicationContext(): Context = this
         }
         val db = Room.inMemoryDatabaseBuilder(isolated, GalleryDatabase::class.java).addCallback(LABEL_DATABASE_CALLBACK).build()
@@ -307,6 +308,150 @@ internal class TransferEdgeChecks(private val context: Context, private val filt
                 recovery.transferMedia(emptyList(),destination("RecoveryMissingEmpty"),TransferMode.COPY,ConflictPolicy.SKIP) {}
                 check(target.exists() && target.readText()=="remaining-target") { "Missing backup recovery deleted remaining target" }
                 check(source.readText()=="source-bytes" && journal.exists())
+            }
+            case("U02 both move entry points publish only affected rows without a full library scan") {
+                for (quick in listOf(false, true)) {
+                    val source = fixture("Delta-$quick")
+                    val memberships = addTags(source)
+                    val before = fingerprintMediaFile(File(source.path))
+                    val indexStore = io.github.indexedpng.IndexedPngStore(isolated)
+                    indexStore.build(source.path)
+                    val dest = destination("DeltaTarget-$quick")
+                    val unrelated = source.copy(contentId = Long.MAX_VALUE - 100,
+                        path = File(root, "unrelated-not-in-provider.png").path)
+                    db.mediaDao().insertAll(listOf(unrelated))
+                    try {
+                        if (quick) repo.moveForQuickSort(source, dest, "delta-$token") {}
+                        else check(transfer(listOf(source), dest, TransferMode.MOVE).succeeded == 1)
+                        val target = File(dest.path, File(source.path).name)
+                        verifyMediaFile(target, before, verifyTime = true)
+                        check(!File(source.path).exists())
+                        val indexed = targetEntry(target)
+                        check(indexed.path == target.path && labels(indexed) == memberships)
+                        check(indexStore.status(target.path) is io.github.indexedpng.IndexedPngStatus.Ready) {
+                            "Move lost the existing PNG viewing index"
+                        }
+                        check(db.mediaDao().getEntriesByIds(listOf(unrelated.contentId)).singleOrNull() == unrelated) {
+                            "Successful move performed unrelated full-library reconciliation"
+                        }
+                    } finally { db.mediaDao().deleteByIds(listOf(unrelated.contentId)) }
+                }
+            }
+            case("U05 ordinary committed journal repairs rows before startup cleanup and replay is idempotent") {
+                val source = fixture("JournalSource")
+                val memberships = addTags(source)
+                val fingerprint = fingerprintMediaFile(File(source.path))
+                val dest = destination("JournalTarget")
+                val target = File(dest.path, File(source.path).name)
+                val childContext = object : ContextWrapper(isolated) {
+                    override fun getFilesDir() = File(isolated.filesDir, "move-recovery").apply { mkdirs() }
+                    override fun getApplicationContext(): Context = this
+                }
+                val checkpoint = QuickMoveCheckpoint(source, target.path, null,
+                    fingerprint.modifiedMillis, fingerprint.bytes, fingerprint.sha256)
+                val journal = File(childContext.filesDir, "media-move-journal/test.json").apply { parentFile!!.mkdirs() }
+                journal.writeText(com.google.gson.Gson().toJson(checkpoint))
+                check(resolver.update(Uri.parse(source.uri), ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relative + "JournalTarget/")
+                }, null, null) == 1)
+                restoreMediaModifiedTime(target, fingerprint.modifiedMillis)
+                repeat(2) {
+                    val recovered = MediaRepository(childContext, db.mediaDao(), SettingsRepository(childContext))
+                    recovered.transferMedia(emptyList(), dest, TransferMode.MOVE, ConflictPolicy.SKIP) {}
+                    check(!journal.exists()) { "Committed ordinary move was not recovered" }
+                    val indexed = targetEntry(target)
+                    check(indexed.path == target.path && labels(indexed) == memberships)
+                    verifyMediaFile(target, fingerprint, verifyTime = true)
+                }
+            }
+            case("U05 database commit failure keeps the verified file and startup repairs the journal") {
+                val source = fixture("DatabaseFailure")
+                val memberships = addTags(source)
+                val before = fingerprintMediaFile(File(source.path))
+                val dest = destination("DatabaseFailureTarget")
+                val target = File(dest.path, File(source.path).name)
+                db.openHelper.writableDatabase.execSQL("""
+                    CREATE TRIGGER fail_transfer_publish BEFORE INSERT ON media_entries
+                    WHEN NEW.path = '${target.path}'
+                    BEGIN SELECT RAISE(ABORT, 'injected transfer publish failure'); END
+                """.trimIndent())
+                try {
+                    val result = transfer(listOf(source), dest, TransferMode.MOVE)
+                    check(result.failed == 1 && result.succeeded == 0)
+                    verifyMediaFile(target, before, verifyTime = true)
+                    check(!File(source.path).exists())
+                    check(File(isolated.filesDir, "media-move-journal").listFiles().orEmpty().isNotEmpty())
+                } finally {
+                    db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_transfer_publish")
+                }
+                val recovered = MediaRepository(isolated, db.mediaDao(), SettingsRepository(isolated))
+                recovered.transferMedia(emptyList(), dest, TransferMode.MOVE, ConflictPolicy.SKIP) {}
+                val indexed = targetEntry(target)
+                check(indexed.path == target.path && labels(indexed) == memberships)
+                check(File(isolated.filesDir, "media-move-journal").listFiles().orEmpty().isEmpty())
+                verifyMediaFile(target, before, verifyTime = true)
+            }
+            case("U05 ambiguous ordinary journal keeps both files and the recovery record") {
+                val source = fixture("AmbiguousSource")
+                val before = fingerprintMediaFile(File(source.path))
+                val dest = destination("AmbiguousTarget")
+                val target = File(dest.path, File(source.path).name)
+                File(source.path).copyTo(target)
+                restoreMediaModifiedTime(target, before.modifiedMillis)
+                val childContext = object : ContextWrapper(isolated) {
+                    override fun getFilesDir() = File(isolated.filesDir, "ambiguous-recovery").apply { mkdirs() }
+                    override fun getApplicationContext(): Context = this
+                }
+                val checkpoint = QuickMoveCheckpoint(source, target.path, null, before.modifiedMillis, before.bytes, before.sha256,
+                    QuickMoveStage.TargetReady)
+                val journal = File(childContext.filesDir, "media-move-journal/test.json").apply { parentFile!!.mkdirs() }
+                journal.writeText(com.google.gson.Gson().toJson(checkpoint))
+                val recovered = MediaRepository(childContext, db.mediaDao(), SettingsRepository(childContext))
+                recovered.transferMedia(emptyList(), dest, TransferMode.MOVE, ConflictPolicy.SKIP) {}
+                check(journal.isFile)
+                verifyMediaFile(File(source.path), before, verifyTime = true)
+                verifyMediaFile(target, before, verifyTime = true)
+            }
+            case("U06 concurrent ordinary and quick moves keep both names and publish consistent rows") {
+                val a = fixture("ConcurrentA", "same.png")
+                val b = fixture("ConcurrentB", "same.png")
+                val fingerprints = listOf(a, b).map { fingerprintMediaFile(File(it.path)) }
+                val dest = destination("ConcurrentTarget")
+                withTimeout(30_000) {
+                    val ordinary = async(Dispatchers.IO) { transfer(listOf(a), dest, TransferMode.MOVE) }
+                    val quick = async(Dispatchers.IO) { repo.moveForQuickSort(b, dest, "concurrent-$token") {} }
+                    check(ordinary.await().succeeded == 1)
+                    quick.await()
+                }
+                val targets = File(dest.path).listFiles()!!.filter { it.isFile }
+                check(targets.size == 2 && targets.map(::hash).toSet() == fingerprints.map { it.sha256 }.toSet())
+                check(!File(a.path).exists() && !File(b.path).exists())
+                targets.forEach { check(targetEntry(it).path == it.path) }
+            }
+            case("U06 stale ordinary move path resolves current source and leaves no successful journal") {
+                val source = fixture("StaleMove")
+                val before = fingerprintMediaFile(File(source.path))
+                val dest = destination("StaleMoveTarget")
+                val stale = source.copy(path = File(root, "outdated-source.png").path)
+                check(transfer(listOf(stale), dest, TransferMode.MOVE).succeeded == 1)
+                val target = File(dest.path, File(source.path).name)
+                verifyMediaFile(target, before, verifyTime = true)
+                check(targetEntry(target).path == target.path)
+                check(File(isolated.filesDir, "media-move-journal").listFiles().orEmpty().isEmpty())
+            }
+            case("U06 destination appears after planning and must never be overwritten") {
+                val source = fixture("RaceSource")
+                val before = fingerprintMediaFile(File(source.path))
+                val dest = destination("RaceTarget")
+                val target = File(dest.path, File(source.path).name)
+                val result = runCatching {
+                    repo.moveForQuickSort(source, dest, "race-$token") {
+                        if (it.stage == QuickMoveStage.Planned) target.writeText("external-writer")
+                    }
+                }
+                check(result.isFailure)
+                verifyMediaFile(File(source.path), before, verifyTime = true)
+                check(target.readText() == "external-writer")
             }
             check(failures==0) { report.joinToString("\n") }
             report.joinToString("\n")

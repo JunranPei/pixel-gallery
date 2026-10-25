@@ -326,7 +326,7 @@ internal fun GalleryPageCheckHost(
         containerColor = containerColor,
         header = header,
         showHeader = page != null,
-        snackbarHost = { page?.snackbarHost?.invoke() },
+        snackbarHost = {},
     ) { padding ->
         Box(
             Modifier.fillMaxSize().then(

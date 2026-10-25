@@ -52,6 +52,13 @@ interface MediaDao {
         if (obsoleteIds.isNotEmpty()) deleteByIds(obsoleteIds)
     }
 
+    @Transaction
+    suspend fun commitTransferredMedia(sourceId: Long, target: MediaEntry) {
+        if (sourceId != target.contentId) remapMediaLabels(sourceId, target.contentId)
+        insertAll(listOf(target))
+        if (sourceId != target.contentId) deleteByIds(listOf(sourceId))
+    }
+
     // --- Favourites ---
     @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 0 AND contentId IN (SELECT contentId FROM media_labels WHERE labelId = 1)")
     fun observeFavouritesChanges(): Flow<Int>

@@ -327,8 +327,6 @@ class QuickSortQueueRepository @Inject constructor(
         ready.await()
         if (state.value.error != null) return@withLock
         mutex.withLock { mutableState.value = state.value.copy(serviceActive = true) }
-        var changesSinceSync = 0
-        var lastSync = System.currentTimeMillis()
         val transientRetries = mutableSetOf<String>()
         try {
             while (!pauseRequested && currentCoroutineContext().isActive) {
@@ -369,7 +367,6 @@ class QuickSortQueueRepository @Inject constructor(
                 val itemIndex = job.items.indexOfFirst { it.status == QuickSortItemStatus.Queued }
                 if (itemIndex < 0) {
                     mutex.withLock { updateJob(job.id) { it.copy(status = if (it.cancelRequested) QuickSortJobStatus.Cancelled else QuickSortJobStatus.Completed) } }
-                    if (changesSinceSync > 0) { runCatching { media.syncWhenMediaMutationsIdle(force = true) }; changesSinceSync = 0 }
                     continue
                 }
                 val entry = job.items[itemIndex].entry
@@ -394,7 +391,6 @@ class QuickSortQueueRepository @Inject constructor(
                                 mutex.withLock { updateItem(job.id, itemIndex) { it.copy(checkpoint = checkpoint) } }
                             }
                             mutex.withLock { updateItem(job.id, itemIndex) { it.copy(status = QuickSortItemStatus.Succeeded, receipt = receipt) } }
-                            changesSinceSync++
                         }
                     } catch (error: QuickSortNameConflictException) {
                         val rollbackError = if (job.conflictPolicy == ConflictPolicy.SKIP) restoreFailedReplacement(job.id, itemIndex) else null
@@ -424,15 +420,9 @@ class QuickSortQueueRepository @Inject constructor(
                     delay(250L)
                     continue
                 }
-                if (changesSinceSync >= 20 || (changesSinceSync > 0 && System.currentTimeMillis() - lastSync >= 2_000)) {
-                    runCatching { media.syncWhenMediaMutationsIdle(force = true) }
-                    changesSinceSync = 0
-                    lastSync = System.currentTimeMillis()
-                }
             }
         } finally {
             withContext(NonCancellable) {
-                if (changesSinceSync > 0) runCatching { media.syncWhenMediaMutationsIdle(force = true) }
                 mutex.withLock {
                     val jobs = state.value.jobs.map { job ->
                         if (job.status == QuickSortJobStatus.Running) job.copy(status = when {
