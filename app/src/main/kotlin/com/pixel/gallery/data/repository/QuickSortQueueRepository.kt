@@ -124,7 +124,7 @@ class QuickSortQueueRepository @Inject constructor(
         }
     }
 
-    suspend fun enqueue(entries: List<MediaEntry>, destination: TransferDestination, sessionId: String? = null): QuickSortEnqueueResult = withContext(Dispatchers.IO) {
+    suspend fun enqueue(entries: List<MediaEntry>, destination: TransferDestination, sessionId: String? = null, conflictPolicy: com.pixel.gallery.model.ConflictPolicy? = null): QuickSortEnqueueResult = withContext(Dispatchers.IO) {
         ready.await()
         mutex.withLock {
             state.value.error?.let { return@withLock QuickSortEnqueueResult.Rejected(it) }
@@ -141,7 +141,7 @@ class QuickSortQueueRepository @Inject constructor(
             }
             val id = UUID.randomUUID().toString()
             val job = QuickSortJob(id, destination, accepted.map { QuickSortQueueItem(it) }, System.currentTimeMillis(),
-                sessionId = sessionId, sessionProcessId = processSessionId)
+                sessionId = sessionId, sessionProcessId = processSessionId, conflictPolicy = conflictPolicy)
             try {
                 persist(trimHistory(state.value.jobs) + job)
                 QuickSortEnqueueResult.Accepted(id, accepted.size, entries.size - accepted.size, accepted.mapTo(mutableSetOf()) { it.contentId })

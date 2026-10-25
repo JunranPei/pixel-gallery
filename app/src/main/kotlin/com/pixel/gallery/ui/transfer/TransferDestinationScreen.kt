@@ -1,5 +1,7 @@
 package com.pixel.gallery.ui.transfer
 
+import com.pixel.gallery.ui.components.CreateAlbumFromQuery
+import com.pixel.gallery.model.canCreateAlbumFromQuery
 import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
@@ -41,6 +43,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -119,6 +122,10 @@ fun TransferDestinationScreen(
     entries: List<MediaEntry>,
     onBack: () -> Unit,
     onFinished: (TransferSummary) -> Unit,
+    moveSessionId: String? = null,
+    onMoveAccepted: (Set<Long>) -> Unit = {},
+    onTransferStarted: (Set<Long>) -> Unit = {},
+    onPanelHeightChange: (androidx.compose.ui.unit.Dp) -> Unit = {},
     columns: Int = 3,
     onColumnsChange: (Int) -> Unit = {},
     viewModel: PhotosViewModel = hiltViewModel(),
@@ -129,6 +136,13 @@ fun TransferDestinationScreen(
     val handedness by viewModel.handedness.collectAsState()
     val quickQueue by quickSortViewModel.state.collectAsState()
     val transferState by viewModel.transferUiState.collectAsState()
+    val ownSession = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    val sessionId = moveSessionId ?: ownSession
+    DisposableEffect(sessionId) {
+        onDispose { if (moveSessionId == null) quickSortViewModel.finishSession(sessionId) }
+    }
+    val undoableJob = com.pixel.gallery.model.latestUndoableQuickSortJob(quickQueue, sessionId)
+    var enqueueing by remember { mutableStateOf(false) }
     var lastTransferMode by rememberSaveable { mutableStateOf(TransferMode.MOVE) }
     BackHandler(enabled = transferState.isRunning) {}
     val messages = LocalGalleryMessages.current
@@ -136,8 +150,6 @@ fun TransferDestinationScreen(
     val createdDestinations = remember { mutableStateListOf<TransferDestination>() }
     var query by remember { mutableStateOf("") }
     var selectedDestination by remember { mutableStateOf<TransferDestination?>(null) }
-    var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var folderName by remember { mutableStateOf("") }
     var folderNameError by remember { mutableStateOf<String?>(null) }
     var confirmation by remember { mutableStateOf<PendingTransfer?>(null) }
     var confirmedDestination by remember { mutableStateOf<TransferDestination?>(null) }
@@ -215,6 +227,18 @@ fun TransferDestinationScreen(
     ) {
         val destination = confirmedDestination ?: return
         lastTransferMode = mode
+        if (mode == TransferMode.MOVE && destination.documentUri == null) {
+            enqueueing = true
+            quickSortViewModel.enqueue(transferEntries, destination, { result ->
+                enqueueing = false
+                when (result) {
+                    is com.pixel.gallery.model.QuickSortEnqueueResult.Accepted -> onMoveAccepted(result.acceptedIds)
+                    is com.pixel.gallery.model.QuickSortEnqueueResult.Rejected -> messages.show(result.reason)
+                }
+            }, sessionId, policy)
+            return
+        }
+        onTransferStarted(transferEntries.mapTo(mutableSetOf()) { it.contentId })
         viewModel.requestTransfer(
             entries = transferEntries,
             destination = destination,
@@ -226,7 +250,9 @@ fun TransferDestinationScreen(
 
     fun reviewTransfer(mode: TransferMode) {
         val destination = selectedDestination ?: return
-        val transferEntries = entries.filterNot { isSameTransferDirectory(it.path, destination.path) }
+        val transferEntries = entries.filterNot {
+            it.contentId in quickQueue.reservedIds || isSameTransferDirectory(it.path, destination.path)
+        }
         if (transferEntries.isEmpty()) {
             messages.show(context.getString(R.string.transfer_already_in_album))
             return
@@ -248,25 +274,55 @@ fun TransferDestinationScreen(
         }
     }
 
+    val createParent = selectedDestination ?: remember {
+        TransferDestination("default-pictures", Environment.DIRECTORY_PICTURES,
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).absolutePath)
+    }
+    val canCreate = canCreateAlbumFromQuery(query, createParent, allDestinations)
+
+    var panelHeight by remember { mutableStateOf(0.dp) }
+    Box(Modifier.fillMaxSize()) {
     SelectionBottomSheet(
         title = stringResource(R.string.transfer_title),
-        onDismiss = { if (!transferState.isRunning) onBack() },
-        confirmDismiss = { !transferState.isRunning },
+        showBackButton = false,
+        centerTitle = true,
+        onPanelHeightChange = { panelHeight = it; onPanelHeightChange(it) },
+        onDismiss = { if (!transferState.isRunning && !isCreating && !enqueueing) onBack() },
+        confirmDismiss = { !transferState.isRunning && !isCreating && !enqueueing },
+
     ) {
         TransferDestinationContent(
             destinations = filteredDestinations,
             albumUses = quickQueue.albumUses,
             query = query,
             selectedDestination = selectedDestination,
-            isRunning = transferState.isRunning,
+            isRunning = transferState.isRunning || enqueueing,
+            hasSelection = entries.any { it.contentId !in quickQueue.reservedIds },
+            isCreating = isCreating,
+            canCreate = canCreate,
+            createError = folderNameError,
             progress = transferState.progress?.let { if (it.total == 0) 0f else it.completed.toFloat() / it.total },
             progressLabel = transferState.progress?.let {
                 val action = if (it.mode == TransferMode.MOVE) "Moving" else "Copying"
                 "$action ${it.completed} / ${it.total}"
             },
-            onQueryChange = { query = it },
+            onQueryChange = { query = it; folderNameError = null },
             onSelect = { selectedDestination = it },
-            onNewAlbum = { showCreateFolderDialog = true },
+            onNewAlbum = {
+                if (canCreate && !isCreating && !transferState.isRunning) {
+                    isCreating = true
+                    folderNameError = null
+                    viewModel.createTransferFolder(createParent, query.trim()) { result ->
+                        isCreating = false
+                        result.onSuccess { destination ->
+                            createdDestinations.removeAll { it.stableKey == destination.stableKey }
+                            createdDestinations.add(0, destination)
+                            selectedDestination = destination
+                            query = ""
+                        }.onFailure { folderNameError = it.message ?: "Could not create folder" }
+                    }
+                }
+            },
             onOtherFolders = { directoryPickerLauncher.launch(null) },
             onCopy = { reviewTransfer(TransferMode.COPY) },
             onMove = { reviewTransfer(TransferMode.MOVE) },
@@ -275,6 +331,21 @@ fun TransferDestinationScreen(
             onColumnsChange = onColumnsChange,
             modifier = Modifier.fillMaxSize(),
         )
+    }
+
+    if (panelHeight > 0.dp) {
+        com.pixel.gallery.ui.components.TransferUndoButton(
+            available = undoableJob != null,
+            description = stringResource(R.string.transfer_undo),
+            unavailableDescription = stringResource(R.string.transfer_undo_unavailable),
+            onClick = {
+                undoableJob?.let { job -> quickSortViewModel.undo(job.id, sessionId) { error ->
+                    if (error != null) messages.show(error)
+                } }
+            },
+            modifier = Modifier.align(handedness.actionBottomAlignment).padding(bottom = panelHeight + 16.dp),
+        )
+    }
     }
 
     TransferResultFeedback(
@@ -292,68 +363,6 @@ fun TransferDestinationScreen(
             itemCount = plan.entries.size,
             onDismiss = { confirmation = null },
             onConfirm = { confirmation = null; startTransfer(plan) },
-        )
-    }
-
-    if (showCreateFolderDialog) {
-        GalleryDialog(
-            onDismissRequest = {
-                if (isCreating) return@GalleryDialog
-                showCreateFolderDialog = false
-                folderName = ""
-                folderNameError = null
-            },
-            title = { Text(stringResource(R.string.transfer_new_album)) },
-            icon = Icons.Default.CreateNewFolder,
-            dismissEnabled = !isCreating,
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = folderName,
-                        onValueChange = {
-                            folderName = it
-                            folderNameError = null
-                        },
-                        label = { Text(stringResource(R.string.transfer_album_name)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isCreating,
-                        singleLine = true,
-                        isError = folderNameError != null,
-                        supportingText = folderNameError?.let { { Text(it) } }
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val parent = selectedDestination ?: TransferDestination(
-                            stableKey = "default-pictures",
-                            displayName = Environment.DIRECTORY_PICTURES,
-                            path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).absolutePath
-                        )
-                        isCreating = true
-                        viewModel.createTransferFolder(parent, folderName.trim()) { result ->
-                            isCreating = false
-                            result.onSuccess { destination ->
-                                createdDestinations.add(0, destination)
-                                selectedDestination = destination
-                                showCreateFolderDialog = false
-                                folderName = ""
-                            }.onFailure {
-                                folderNameError = it.message ?: "Could not create folder"
-                            }
-                        }
-                    },
-                    enabled = folderName.isNotBlank() && !isCreating
-                ) {
-                    Text(stringResource(R.string.transfer_create))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateFolderDialog = false }, enabled = !isCreating) {
-                    Text(stringResource(R.string.dialog_cancel))
-                }
-            }
         )
     }
 
@@ -527,6 +536,10 @@ fun TransferDestinationContent(
     onColumnsChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
     handedness: Handedness = Handedness.RIGHT,
+    isCreating: Boolean = false,
+    canCreate: Boolean = false,
+    createError: String? = null,
+    hasSelection: Boolean = true,
 ) {
     val frequent = if (query.isBlank()) frequentQuickSortAlbums(destinations, albumUses, System.currentTimeMillis()) else emptyList()
     val duplicateNames = destinations.groupBy { it.displayName.lowercase() }.filterValues { it.size > 1 }.keys
@@ -537,13 +550,8 @@ fun TransferDestinationContent(
             query = query,
             onQueryChange = onQueryChange,
             placeholder = stringResource(R.string.transfer_search),
-            enabled = !isRunning,
-        ) {
-            androidx.compose.material3.FilledTonalIconButton(
-                onClick = onNewAlbum, enabled = !isRunning,
-                modifier = Modifier.size(48.dp), shape = ExpressiveShapes.LargeIncreased,
-            ) { Icon(Icons.Default.CreateNewFolder, stringResource(R.string.transfer_new_album)) }
-        }
+            enabled = !isRunning && !isCreating,
+        )
         Box(Modifier.weight(1f).fillMaxWidth()) {
             SelectionGrid(
                 columns = gridColumns,
@@ -552,13 +560,21 @@ fun TransferDestinationContent(
                 bottomPadding = 180.dp,
                 modifier = Modifier.fillMaxSize(),
             ) {
+                if (canCreate) item(key = "create-album", span = { GridItemSpan(maxLineSpan) }) {
+                    CreateAlbumFromQuery(query, !isRunning && !isCreating, onNewAlbum)
+                }
+                createError?.let { error ->
+                    item(key = "create-error", span = { GridItemSpan(maxLineSpan) }) {
+                        Text(error, color = MaterialTheme.colorScheme.error)
+                    }
+                }
                 if (frequent.isNotEmpty()) {
                     item(key = "frequent-heading", span = { GridItemSpan(maxLineSpan) }) {
                         Text(stringResource(R.string.qs_targets_frequent), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(4.dp))
                     }
                     items(frequent, key = { "frequent-${it.stableKey}" }) { destination ->
                         TransferDestinationCard(destination, destination.stableKey == selectedDestination?.stableKey,
-                            destination.displayName.lowercase() in duplicateNames, columns = gridColumns, enabled = !isRunning, onClick = { if (!isRunning) onSelect(destination) })
+                            destination.displayName.lowercase() in duplicateNames, columns = gridColumns, enabled = !isRunning && !isCreating, onClick = { if (!isRunning && !isCreating) onSelect(destination) })
                     }
                 }
                 item(key = "albums-heading", span = { GridItemSpan(maxLineSpan) }) {
@@ -570,10 +586,10 @@ fun TransferDestinationContent(
                 }
                 items(destinations, key = { it.stableKey }) { destination ->
                     TransferDestinationCard(destination, destination.stableKey == selectedDestination?.stableKey,
-                        destination.displayName.lowercase() in duplicateNames, columns = gridColumns, enabled = !isRunning, onClick = { if (!isRunning) onSelect(destination) })
+                        destination.displayName.lowercase() in duplicateNames, columns = gridColumns, enabled = !isRunning && !isCreating, onClick = { if (!isRunning && !isCreating) onSelect(destination) })
                 }
                 item(key = "other-folders", span = { GridItemSpan(maxLineSpan) }) {
-                    TextButton(onClick = onOtherFolders, enabled = !isRunning) {
+                    TextButton(onClick = onOtherFolders, enabled = !isRunning && !isCreating) {
                         Icon(Icons.Default.FolderOpen, null); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.transfer_other_folders))
                     }
                 }
@@ -592,7 +608,7 @@ fun TransferDestinationContent(
                 }
             } else {
                 Column(Modifier.align(handedness.actionBottomAlignment).navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val enabled = selectedDestination != null
+                    val enabled = selectedDestination != null && !isCreating && hasSelection
                     Surface(onClick = onCopy, enabled = enabled, shape = CircleShape, shadowElevation = 1.dp,
                         color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.size(56.dp)) {

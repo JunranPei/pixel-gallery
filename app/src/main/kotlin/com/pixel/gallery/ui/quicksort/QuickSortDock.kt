@@ -10,8 +10,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridS
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.HistoryToggleOff
-import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +29,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -133,21 +130,11 @@ internal fun QuickSortDock(
 
     Column(modifier.onGloballyPositioned { onMeasuredHeight(it.size.height) },
         horizontalAlignment = config.handedness.actionHorizontalAlignment) {
-        val undoEnabled = config.undoAvailable && !gestures.busy
-        val noUndoDescription = stringResource(R.string.qs_undo_unavailable)
-        Surface(onClick = config.onUndo, enabled = undoEnabled,
-            shape = CircleShape, shadowElevation = 1.dp,
-            color = if (undoEnabled) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceContainerHighest,
-            contentColor = if (undoEnabled) MaterialTheme.colorScheme.onPrimaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp).size(56.dp)
-                .semantics { if (!config.undoAvailable) stateDescription = noUndoDescription }) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(if (config.undoAvailable) Icons.AutoMirrored.Outlined.Undo else Icons.Outlined.HistoryToggleOff,
-                    stringResource(R.string.qs_undo))
-            }
-        }
+        com.pixel.gallery.ui.components.TransferUndoButton(
+            available = config.undoAvailable,
+            busy = gestures.busy,
+            onClick = config.onUndo,
+        )
         if (previewTargets.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

@@ -1,6 +1,8 @@
 package com.pixel.gallery.ui.quicksort
 
-import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.CreateAlbumFromQuery
+import com.pixel.gallery.model.canCreateAlbumFromQuery
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.os.Environment
@@ -92,8 +94,6 @@ fun QuickSortTargetsSheet(
     val albumGridState = rememberLazyGridState()
     LaunchedEffect(activeTab, query) { albumGridState.scrollToItem(0) }
     var createdTargets by remember { mutableStateOf(emptyList<TransferDestination>()) }
-    var showCreateAlbum by remember { mutableStateOf(false) }
-    var albumName by remember { mutableStateOf("") }
     var albumNameError by remember { mutableStateOf<String?>(null) }
     var isCreating by remember { mutableStateOf(false) }
     // A multi-selection has no single parent; use the same Pictures fallback as Copy/Move.
@@ -124,6 +124,27 @@ fun QuickSortTargetsSheet(
         source.filter { search.isEmpty() || it.displayName.contains(search, ignoreCase = true) ||
             matchesTransferDestinationQuery(it, search) }
     }
+    val canCreate = canCreateAlbumFromQuery(query, createParent, available)
+    fun createAlbum() {
+        if (isCreating || !canCreate) return
+        isCreating = true
+        albumNameError = null
+        try {
+            onCreateAlbum(createParent, query.trim()) { result ->
+                isCreating = false
+                result.onSuccess { target ->
+                    createdTargets = listOf(target) + createdTargets.filterNot { it.stableKey == target.stableKey }
+                    val next = (draft + target).distinctBy { it.stableKey }
+                    draft = next
+                    onTargetsChange(next)
+                    query = ""
+                }.onFailure { albumNameError = it.message ?: context.getString(R.string.qs_targets_create_error) }
+            }
+        } catch (error: Exception) {
+            isCreating = false
+            albumNameError = error.message ?: context.getString(R.string.qs_targets_create_error)
+        }
+    }
     val selectionIndices = remember(draft) { draft.mapIndexed { index, target -> target.stableKey to index }.toMap() }
     val gridColumns = columns.coerceIn(2, 6)
     SelectionBottomSheet(
@@ -148,19 +169,10 @@ fun QuickSortTargetsSheet(
     ) {
         SelectionSearchField(
             query = query,
-            onQueryChange = { query = it },
+            onQueryChange = { query = it; albumNameError = null },
             placeholder = stringResource(R.string.qs_search_albums),
             enabled = !isCreating,
-        ) {
-            FilledTonalIconButton(
-                onClick = { albumName = ""; albumNameError = null; showCreateAlbum = true },
-                enabled = !isCreating,
-                modifier = Modifier.size(48.dp),
-                shape = ExpressiveShapes.LargeIncreased,
-            ) {
-                Icon(Icons.Outlined.CreateNewFolder, stringResource(R.string.qs_targets_new_album))
-            }
-        }
+        )
         Row(
             Modifier.fillMaxWidth().padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -177,15 +189,10 @@ fun QuickSortTargetsSheet(
                 enabled = !isCreating,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(
-                onClick = { draft = emptyList(); onTargetsChange(emptyList()) },
-                enabled = draft.isNotEmpty() && !isCreating,
-            ) {
-                Icon(Icons.Outlined.Close, stringResource(R.string.qs_targets_clear_selection))
-            }
+
         }
         Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
-            if (filtered.isEmpty()) {
+            if (filtered.isEmpty() && !canCreate && albumNameError == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         stringResource(when {
@@ -201,11 +208,20 @@ fun QuickSortTargetsSheet(
                 }
             } else {
                 SelectionGrid(
+                    cornerRadius = ExpressiveShapes.GridCornerRadius,
                     columns = gridColumns,
                     onColumnsChange = onColumnsChange,
                     state = albumGridState,
                     modifier = Modifier.fillMaxSize(),
                 ) {
+                    if (canCreate) item(key = "create-album", span = { GridItemSpan(maxLineSpan) }) {
+                        CreateAlbumFromQuery(query, !isCreating, ::createAlbum)
+                    }
+                    albumNameError?.let { error ->
+                        item(key = "create-error", span = { GridItemSpan(maxLineSpan) }) {
+                            Text(error, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                     items(filtered, key = { it.stableKey }) { target ->
                         val index = selectionIndices[target.stableKey] ?: -1
                         QuickSortTargetAlbumCard(
@@ -230,80 +246,7 @@ fun QuickSortTargetsSheet(
         }
     }
 
-    if (showCreateAlbum) {
-        GalleryDialog(
-            onDismissRequest = { if (!isCreating) showCreateAlbum = false },
-            dismissEnabled = !isCreating,
-            icon = Icons.Outlined.CreateNewFolder,
-            title = { Text(stringResource(R.string.qs_targets_new_album)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        stringResource(R.string.qs_targets_create_in, createParent.displayName),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = albumName,
-                        onValueChange = {
-                            albumName = it
-                            albumNameError = null
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(stringResource(R.string.qs_targets_album_name)) },
-                        singleLine = true,
-                        enabled = !isCreating,
-                        isError = albumNameError != null,
-                        supportingText = albumNameError?.let { { Text(it) } },
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    enabled = albumName.isNotBlank() && !isCreating,
-                    onClick = {
-                        isCreating = true
-                        albumNameError = null
-                        try {
-                            onCreateAlbum(createParent, albumName.trim()) { result ->
-                                isCreating = false
-                                result.onSuccess { target ->
-                                    createdTargets = listOf(target) + createdTargets.filterNot {
-                                        it.stableKey == target.stableKey
-                                    }
-                                    // Add the new album without changing existing target order.
-                                    val next = (draft + target).distinctBy { it.stableKey }
-                                    draft = next
-                                    onTargetsChange(next)
-                                    query = ""
-                                    showCreateAlbum = false
-                                    albumName = ""
-                                }.onFailure { error ->
-                                    albumNameError = error.message
-                                        ?: context.getString(R.string.qs_targets_create_error)
-                                }
-                            }
-                        } catch (error: Exception) {
-                            isCreating = false
-                            albumNameError = error.message
-                                ?: context.getString(R.string.qs_targets_create_error)
-                        }
-                    },
-                ) {
-                    if (isCreating) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(stringResource(if (isCreating) R.string.qs_targets_creating else R.string.qs_targets_create))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateAlbum = false }, enabled = !isCreating) {
-                    Text(stringResource(R.string.qs_cancel))
-                }
-            },
-        )
-    }
+
 }
 
 @Composable
@@ -337,7 +280,7 @@ private fun QuickSortTargetAlbumCard(
         AlbumCoverCard(title = target.displayName,
             subtitle = pluralStringResource(R.plurals.qs_targets_item_count, target.itemCount, target.itemCount),
             coverUri = target.coverUri?.takeIf { it.isNotBlank() }, coverModifiedMillis = target.lastModified,
-            onClick = onToggle, columns = columns, enabled = enabled, coverShape = ExpressiveShapes.LargeIncreased, titleMaxLines = 1) {
+            onClick = onToggle, columns = columns, enabled = enabled, coverShape = ExpressiveShapes.LargeIncreased) {
             if (parentLabel != null) Text(parentLabel, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 4.dp, top = 2.dp))

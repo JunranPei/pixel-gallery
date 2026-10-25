@@ -17,24 +17,21 @@ import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
 import com.pixel.gallery.data.local.entity.LabelEntry
 import com.pixel.gallery.data.local.entity.MediaLabelEntry
 import com.pixel.gallery.model.LabelSummary
+import com.pixel.gallery.model.commonLabelIds
 import com.pixel.gallery.model.LabelEditRequest
-import com.pixel.gallery.model.LabelSelection
 import com.pixel.gallery.model.isValidLabelName
-import com.pixel.gallery.model.labelSelection
 import com.pixel.gallery.model.normalizeLabelName
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
@@ -56,28 +53,21 @@ fun LabelEditorSheet(
     columns: Int = 2,
     onColumnsChange: (Int) -> Unit = {},
     onDismiss: () -> Unit,
-    onApply: (LabelEditRequest) -> Unit,
+    onApply: (LabelEditRequest, () -> Unit) -> Unit,
     onReorderLabels: (List<Long>) -> Unit = {},
     isSaving: Boolean = false,
-    errorMessage: String? = null
+    errorMessage: String? = null,
+    onPanelHeightChange: (androidx.compose.ui.unit.Dp) -> Unit = {},
 ) {
-    var query by rememberSaveable(selectedIds) { mutableStateOf("") }
-    var changes by rememberSaveable(selectedIds, stateSaver = LabelEditsSaver) {
-        mutableStateOf<Map<Long, Boolean>>(emptyMap())
-    }
-    var newNames by rememberSaveable(selectedIds) { mutableStateOf<List<String>>(emptyList()) }
+    var query by rememberSaveable { mutableStateOf("") }
     val gridColumns = columns.coerceIn(2, 6)
     val favouriteName = stringResource(R.string.labels_favourites)
     val normalizedQuery = normalizeLabelName(query)
     val matchingLabels = labels.filter {
         normalizeLabelName(if (it.isSystem) favouriteName else it.name).contains(normalizedQuery)
     }
-    // Keep the selected section complete while the lower album grid follows
-    // the search query. A search must never make an already selected label
-    // disappear from the reorder/remove area.
-    val selectedLabels = labels.filter { label ->
-        changes[label.id] ?: (labelSelection(label.id, selectedIds, memberships) != LabelSelection.NONE)
-    }
+    val sharedIds = remember(selectedIds, memberships) { commonLabelIds(selectedIds, memberships) }
+    val selectedLabels = labels.filter { it.id in sharedIds }
     var selectedOrder by rememberSaveable(selectedIds) { mutableStateOf(selectedLabels.map { it.id }) }
     LaunchedEffect(selectedLabels.map { it.id }) {
         val ids = selectedLabels.map { it.id }
@@ -87,14 +77,12 @@ fun LabelEditorSheet(
     val summariesById = labelSummaries.associateBy { it.label.id }
     val orderedSelectedLabels = selectedOrder.mapNotNull(selectedById::get)
     val allLabels = matchingLabels
-    val matchingDrafts = newNames.filter { normalizeLabelName(it).contains(normalizedQuery) }
     val canCreate = isValidLabelName(query) && labels.none {
         it.normalizedName == normalizedQuery || (it.isSystem && normalizeLabelName(favouriteName) == normalizedQuery)
-    } && newNames.none { normalizeLabelName(it) == normalizedQuery }
-    val finishEditing = rememberUpdatedState<() -> Unit> {
-        if (!isSaving) {
-            if (changes.isEmpty() && newNames.isEmpty()) onDismiss()
-            else onApply(LabelEditRequest(changes, newNames))
+    }
+    fun applyLabel(labelId: Long, add: Boolean) {
+        if (!isSaving && selectedIds.isNotEmpty()) {
+            onApply(LabelEditRequest(changes = mapOf(labelId to add))) {}
         }
     }
     val gridState = rememberLazyGridState()
@@ -114,12 +102,12 @@ fun LabelEditorSheet(
 
     SelectionBottomSheet(
         title = stringResource(R.string.label_edit),
+        showBackButton = false,
+        centerTitle = true,
+        onPanelHeightChange = onPanelHeightChange,
         subtitle = stringResource(R.string.labels_selection_count, selectedIds.size),
-        onDismiss = { finishEditing.value() },
-        confirmDismiss = {
-            if (!isSaving) finishEditing.value()
-            false
-        },
+        onDismiss = onDismiss,
+        confirmDismiss = { !isSaving },
     ) {
         if (isSaving) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -128,26 +116,15 @@ fun LabelEditorSheet(
                 query = query,
                 onQueryChange = { query = it },
                 placeholder = stringResource(R.string.labels_search),
-                enabled = !isSaving,
+                enabled = !isSaving && selectedIds.isNotEmpty(),
             )
-            if (orderedSelectedLabels.isNotEmpty() || newNames.isNotEmpty()) {
+            if (orderedSelectedLabels.isNotEmpty()) {
                 Text(stringResource(R.string.labels_selected), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    newNames.forEach { name ->
-                        AssistChip(
-                            onClick = {},
-                            label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            trailingIcon = {
-                                IconButton(onClick = { newNames = newNames - name }, enabled = !isSaving, modifier = Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Close, stringResource(R.string.labels_remove_from), modifier = Modifier.size(16.dp))
-                                }
-                            },
-                        )
-                    }
                     orderedSelectedLabels.forEach { label ->
                         val title = if (label.isSystem) favouriteName else label.name
                         AssistChip(
@@ -155,8 +132,8 @@ fun LabelEditorSheet(
                             label = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             trailingIcon = {
                                 IconButton(onClick = {
-                                    if (!isSaving) changes = changes + (label.id to false)
-                                }, enabled = !isSaving, modifier = Modifier.size(24.dp)) {
+                                    applyLabel(label.id, false)
+                                }, enabled = !isSaving && selectedIds.isNotEmpty(), modifier = Modifier.size(24.dp)) {
                                     Icon(Icons.Default.Close, stringResource(R.string.labels_remove_from), modifier = Modifier.size(16.dp))
                                 }
                             },
@@ -186,14 +163,8 @@ fun LabelEditorSheet(
                     Text(stringResource(R.string.labels_all), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(vertical = 8.dp))
                 }
                 items(allLabels, key = { it.id }) { label ->
-                    val initial = labelSelection(label.id, selectedIds, memberships)
-                    val state = changes[label.id]?.let { if (it) ToggleableState.On else ToggleableState.Off }
-                        ?: when (initial) {
-                            LabelSelection.NONE -> ToggleableState.Off
-                            LabelSelection.SOME -> ToggleableState.Indeterminate
-                            LabelSelection.ALL -> ToggleableState.On
-                        }
-                    val onToggle = { changes = changes + (label.id to (state != ToggleableState.On)) }
+                    val isShared = label.id in sharedIds
+                    val onToggle = { applyLabel(label.id, !isShared) }
                     val summary = summariesById[label.id]
                     AlbumCoverCard(
                         title = if (label.isSystem) favouriteName else label.name,
@@ -204,28 +175,20 @@ fun LabelEditorSheet(
                         coverSizeBytes = summary?.cover?.sizeBytes,
                         coverRotationDegrees = summary?.cover?.sourceRotationDegrees ?: 0,
                         columns = gridColumns,
-                        selected = state != ToggleableState.Off,
-                        enabled = !isSaving,
+                        selected = isShared,
+                        enabled = !isSaving && selectedIds.isNotEmpty(),
                         onClick = onToggle,
                         emptyIcon = if (label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
                     )
                 }
-                items(matchingDrafts, key = { "draft:$it" }) { name ->
-                    AlbumCoverCard(
-                        title = name,
-                        subtitle = stringResource(R.string.labels_pending),
-                        coverUri = null,
-                        coverModifiedMillis = 0L,
-                        columns = gridColumns,
-                        selected = true,
-                        enabled = !isSaving,
-                        onClick = { newNames = newNames - name },
-                        emptyIcon = Icons.Outlined.Label,
-                    )
-                }
                 if (canCreate) {
                     item(key = "create", span = { GridItemSpan(maxLineSpan) }) {
-                        TextButton(onClick = { newNames = newNames + query.trim(); query = "" }, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = {
+                            val submittedQuery = query
+                            onApply(LabelEditRequest(newLabelNames = listOf(submittedQuery.trim()))) {
+                                if (query == submittedQuery) query = ""
+                            }
+                        }, enabled = !isSaving && selectedIds.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.Add, null)
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.labels_new_from_query, query.trim()), maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -236,23 +199,10 @@ fun LabelEditorSheet(
                     item(key = "error", span = { GridItemSpan(maxLineSpan) }) {
                         Column {
                             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
-                            TextButton(
-                                onClick = {
-                                    changes = emptyMap()
-                                    newNames = emptyList()
-                                    onDismiss()
-                                },
-                                enabled = !isSaving,
-                                modifier = Modifier.align(Alignment.End)
-                            ) { Text(stringResource(R.string.labels_discard_changes)) }
+
                         }
                     }
                 }
             }
     }
 }
-
-private val LabelEditsSaver = mapSaver<Map<Long, Boolean>>(
-    save = { edits -> edits.mapKeys { it.key.toString() } },
-    restore = { saved -> saved.entries.associate { it.key.toLong() to (it.value as Boolean) } }
-)

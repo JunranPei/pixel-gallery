@@ -2,6 +2,10 @@ package com.pixel.gallery.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -72,6 +76,7 @@ import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.R
 import com.pixel.gallery.ui.viewer.viewerThumbnailAnchor
 import com.pixel.gallery.ui.viewer.viewerTransitionKey
+import com.pixel.gallery.ui.quicksort.quickSortGridPresentation
 import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
 import com.pixel.gallery.ui.quicksort.QuickSortGestureState
 import com.pixel.gallery.ui.quicksort.QuickSortDock
@@ -97,20 +102,43 @@ fun PhotosScreen(
     quickSort: QuickSortUiConfig? = null,
     positionLabels: List<String?>? = null,
     selectionMode: Boolean = selectedIds.isNotEmpty(),
+    gridContextKey: Any? = null,
 ) {
+    val ordinaryMove = com.pixel.gallery.ui.quicksort.LocalMoveGridPresentation.current
+    val retainedSelectionMode = com.pixel.gallery.ui.quicksort.LocalMediaSelectionMode.current
+    val presentationSession = quickSort?.sessionKey ?: ordinaryMove?.sessionKey
+    val holdBatches = quickSort != null || ordinaryMove != null
+    var sessionSlots by remember(presentationSession, holdBatches, gridContextKey) { mutableStateOf(items) }
+    SideEffect { if (holdBatches && sessionSlots.isEmpty() && items.isNotEmpty()) sessionSlots = items }
     var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
+    var gridTouchActive by remember { mutableStateOf(false) }
     val quickSortGestures = remember { QuickSortGestureState() }
+    var removedPaths by remember(presentationSession) { mutableStateOf(emptySet<String>()) }
+    val completedPaths = quickSort?.completedBatchPaths ?: ordinaryMove?.completedBatchPaths.orEmpty()
+    LaunchedEffect(completedPaths, gridTouchActive, quickSortGestures.busy, state.isScrollInProgress) {
+        if (!gridTouchActive && !quickSortGestures.busy && !state.isScrollInProgress) removedPaths = completedPaths
+    }
+    val presentation = remember(sessionSlots, items, holdBatches, removedPaths) {
+        if (holdBatches) quickSortGridPresentation(sessionSlots, items, removedPaths) else null
+    }
+    val displayedItems = presentation?.items ?: items
+    val unavailableIds = presentation?.unavailableIds.orEmpty()
+    LaunchedEffect(unavailableIds) {
+        if (selectedIds.any { it in unavailableIds }) onSelectionChange(selectedIds - unavailableIds)
+    }
     var gridOriginInWindow by remember { mutableStateOf(Offset.Zero) }
     var dockHeightPx by remember { mutableIntStateOf(0) }
     val dockHeight = with(LocalDensity.current) { dockHeightPx.toDp() }
-    val effectiveBottomPadding = bottomPadding + (quickSort?.dockBottomInset ?: 0.dp)
+    val effectiveBottomPadding = bottomPadding + (quickSort?.dockBottomInset ?: 0.dp) +
+        com.pixel.gallery.ui.quicksort.LocalSelectionPanelInset.current
     val gridSidePadding = 4.dp
     val gridSidePaddingPx = with(LocalDensity.current) { gridSidePadding.roundToPx().toFloat() }
-    val reservedIds = quickSort?.reservedIds.orEmpty()
+    val movingIds = quickSort?.reservedIds ?: ordinaryMove?.reservedIds.orEmpty()
+    val reservedIds = movingIds + unavailableIds
     val quickSortBusy = quickSort != null && quickSortGestures.busy
-    val idsByIndex = remember(items, quickSort != null) {
-        if (quickSort != null) items.map { (it as? GridItem.Photo)?.entry?.contentId } else emptyList()
+    val idsByIndex = remember(displayedItems, quickSort != null) {
+        if (quickSort != null) displayedItems.map { (it as? GridItem.Photo)?.entry?.contentId } else emptyList()
     }
     SideEffect { quickSortGestures.scrollbarDragging = isScrollbarDragging }
 
@@ -138,10 +166,10 @@ fun PhotosScreen(
         }
     }
 
-    val scrollbarPositionLabels = positionLabels ?: remember(items) {
+    val scrollbarPositionLabels = positionLabels?.takeIf { !holdBatches } ?: remember(displayedItems) {
         var currentDateLabel: String? = null
-        List(items.size) { index ->
-            when (val item = items[index]) {
+        List(displayedItems.size) { index ->
+            when (val item = displayedItems[index]) {
                 is GridItem.Header -> {
                     currentDateLabel = item.title
                     item.title
@@ -157,6 +185,17 @@ fun PhotosScreen(
     Box(modifier = Modifier.fillMaxSize()
         .then(if (quickSort != null) Modifier.clipToBounds() else Modifier)
         .then(if (quickSort != null) Modifier.quickSortGestureArbitration(quickSortGestures) else Modifier)
+        .then(if (holdBatches) Modifier.pointerInput(presentationSession) {
+            try {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    gridTouchActive = true
+                    do { val event = awaitPointerEvent(PointerEventPass.Final) }
+                    while (event.changes.any { it.pressed })
+                    gridTouchActive = false
+                }
+            } finally { gridTouchActive = false }
+        } else Modifier)
         .onGloballyPositioned { quickSortGestures.containerBounds = it.boundsInWindow() }
     ) {
         LazyVerticalGrid(
@@ -171,11 +210,11 @@ fun PhotosScreen(
                     if (quickSort == null) {
                         Modifier.photoGridDragSelect(
                             gridState = state,
-                            items = items,
+                            items = displayedItems,
                             selectedIds = selectedIds,
                             onSelectionChange = onSelectionChange,
-                            isPhoto = { index -> items[index] is GridItem.Photo },
-                            getPhotoId = { index -> (items[index] as GridItem.Photo).entry.contentId },
+                            isPhoto = { index -> displayedItems[index] is GridItem.Photo },
+                            getPhotoId = { index -> (displayedItems[index] as GridItem.Photo).entry.contentId },
                             leftContentPaddingPx = gridSidePaddingPx,
                         )
                     } else {
@@ -184,7 +223,7 @@ fun PhotosScreen(
                             idsByIndex = idsByIndex,
                             selectedIds = selectedIds,
                             onSelectionChange = onSelectionChange,
-                            config = quickSort,
+                            config = quickSort.copy(reservedIds = reservedIds),
                             gestures = quickSortGestures,
                             gridOriginInWindow = gridOriginInWindow,
                             scrollbarDragging = isScrollbarDragging,
@@ -213,26 +252,26 @@ fun PhotosScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(
-                count = items.size,
+                count = displayedItems.size,
                 key = { index ->
-                    when (val item = items[index]) {
+                    when (val item = displayedItems[index]) {
                         is GridItem.Header -> "header_${item.title}_${item.timestamp}"
-                        is GridItem.Photo -> item.entry.contentId
+                        is GridItem.Photo -> if (presentation != null) "photo_${item.entry.path}" else item.entry.contentId
                     }
                 },
                 span = { index ->
-                    when (items[index]) {
+                    when (displayedItems[index]) {
                         is GridItem.Header -> androidx.compose.foundation.lazy.grid.GridItemSpan(columns)
                         is GridItem.Photo -> androidx.compose.foundation.lazy.grid.GridItemSpan(1)
                     }
                 }
             ) { index ->
-                when (val item = items[index]) {
+                when (val item = displayedItems[index]) {
                     is GridItem.Header -> {
-                        val headerPhotos = remember(item, items) {
+                        val headerPhotos = remember(item, displayedItems) {
                             val photos = mutableListOf<Long>()
-                            for (i in index + 1 until items.size) {
-                                val nextItem = items[i]
+                            for (i in index + 1 until displayedItems.size) {
+                                val nextItem = displayedItems[i]
                                 if (nextItem is GridItem.Header) break
                                 if (nextItem is GridItem.Photo) photos.add(nextItem.entry.contentId)
                             }
@@ -240,7 +279,7 @@ fun PhotosScreen(
                         }
                         val selectableHeaderPhotos = headerPhotos.filterNot { it in reservedIds }
                         val isHeaderSelected = selectableHeaderPhotos.isNotEmpty() && selectableHeaderPhotos.all { selectedIds.contains(it) }
-                        val isSelectionMode = selectionMode || quickSort != null
+                        val isSelectionMode = selectionMode || retainedSelectionMode || quickSort != null
                         val onHeaderClick = remember(isHeaderSelected, selectedIds, selectableHeaderPhotos, quickSortBusy, reservedIds) {
                             {
                                 if (!quickSortBusy) {
@@ -263,7 +302,7 @@ fun PhotosScreen(
                     is GridItem.Photo -> {
                         val media = item.entry
                         val isSelected = selectedIds.contains(media.contentId)
-                        val isSelectionMode = selectionMode || quickSort != null
+                        val isSelectionMode = selectionMode || retainedSelectionMode || quickSort != null
                         val isReserved = media.contentId in reservedIds
                         val onPhotoClick: () -> Unit = {
                             if (!isReserved && !quickSortBusy) {
@@ -276,7 +315,15 @@ fun PhotosScreen(
                         }
                         
                         Box(Modifier.fillMaxWidth()) {
-                            PhotoTile(
+                            if (media.contentId in unavailableIds) {
+                                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(ExpressiveShapes.LargeIncreased)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                                    val pending = media.contentId in movingIds
+                                    Icon(if (pending) Icons.Outlined.HourglassEmpty else Icons.Outlined.CheckCircle,
+                                        stringResource(if (pending) R.string.qs_pending else R.string.qs_processed),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else PhotoTile(
                                 media = media,
                                 isSelected = isSelected,
                                 isSelectionMode = isSelectionMode,
@@ -284,7 +331,7 @@ fun PhotosScreen(
                                 onClick = onPhotoClick,
                                 onLongClick = null,
                             )
-                            if (isReserved) {
+                            if (isReserved && media.contentId !in unavailableIds) {
                                 Box(
                                     Modifier.matchParentSize().clip(ExpressiveShapes.LargeIncreased)
                                         .background(MaterialTheme.colorScheme.surface.copy(alpha = .55f)),
@@ -300,7 +347,7 @@ fun PhotosScreen(
             }
         }
 
-        if (items.isEmpty() && emptyMessage != null) {
+        if (displayedItems.isEmpty() && emptyMessage != null) {
             Text(
                 text = emptyMessage,
                 style = MaterialTheme.typography.bodyLarge,
@@ -323,7 +370,7 @@ fun PhotosScreen(
 
         if (quickSort != null) {
             QuickSortDock(
-                config = quickSort,
+                config = quickSort.copy(reservedIds = reservedIds),
                 gestures = quickSortGestures,
                 selectedIds = selectedIds,
                 modifier = Modifier.align(if (quickSort.dockTop) Alignment.TopCenter else Alignment.BottomCenter)

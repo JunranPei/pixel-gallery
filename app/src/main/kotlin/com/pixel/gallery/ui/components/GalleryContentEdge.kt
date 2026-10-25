@@ -9,14 +9,18 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 
 /** Keeps the concave header edge fixed while grid content scrolls underneath. */
 @Composable
-fun Modifier.galleryContentEdge(): Modifier {
-    val headerColor = MaterialTheme.colorScheme.surfaceContainerLow
+fun Modifier.galleryContentEdge(
+    cornerRadius: Dp = ExpressiveShapes.GridCornerRadius,
+    headerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+): Modifier {
     return drawWithCache {
-        val radius = ExpressiveShapes.GridCornerRadius.toPx().coerceAtMost(size.width / 2f)
+        val radius = cornerRadius.toPx().coerceAtMost(size.width / 2f)
         val strip = Path().apply { addRect(Rect(0f, 0f, size.width, radius)) }
         val rounded = Path().apply {
             addRoundRect(RoundRect(Rect(0f, 0f, size.width, radius * 2f), CornerRadius(radius)))

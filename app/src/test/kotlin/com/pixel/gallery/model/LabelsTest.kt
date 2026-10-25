@@ -11,6 +11,15 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LabelsTest {
+    @Test fun `multi selection exposes only shared labels and recomputes for each group`() {
+        val links = listOf(MediaLabelEntry(1, 10), MediaLabelEntry(2, 10), MediaLabelEntry(1, 20),
+            MediaLabelEntry(3, 99), MediaLabelEntry(2, 10))
+        assertEquals(setOf(1L), commonLabelIds(setOf(10L, 20L), links))
+        assertEquals(setOf(1L, 2L), commonLabelIds(setOf(10L), links))
+        assertEquals(setOf(1L), commonLabelIds(setOf(20L), links))
+        assertTrue(commonLabelIds(emptySet(), links).isEmpty())
+        assertTrue(commonLabelIds(setOf(10L, 88L), links).isEmpty())
+    }
     @Test
     fun `selection distinguishes none some and all without unrelated files`() {
         val links = listOf(

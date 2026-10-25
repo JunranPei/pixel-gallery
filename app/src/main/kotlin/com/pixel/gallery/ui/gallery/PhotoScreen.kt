@@ -284,6 +284,7 @@ fun PhotoScreen(
                 quickSort = quickSort,
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
                 items = displayedAlbumItems,
+                gridContextKey = Triple(normalizedSearchQuery, mediaType, photoSortOrder),
                 positionLabels = visibleMedia.positionLabels,
                 onNavigateToViewer = { id ->
                     // Publish this exact displayed snapshot before the parent opens its viewer.

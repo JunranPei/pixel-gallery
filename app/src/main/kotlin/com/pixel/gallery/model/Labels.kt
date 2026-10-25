@@ -43,6 +43,14 @@ data class LabelEditRequest(
 
 enum class LabelSelection { NONE, SOME, ALL }
 
+fun commonLabelIds(selectedIds: Set<Long>, memberships: List<MediaLabelEntry>): Set<Long> {
+    if (selectedIds.isEmpty()) return emptySet()
+    return memberships.asSequence().filter { it.contentId in selectedIds }
+        .groupBy { it.labelId }
+        .filterValues { links -> links.mapTo(hashSetOf()) { it.contentId }.size == selectedIds.size }
+        .keys
+}
+
 fun labelSelection(
     labelId: Long,
     selectedIds: Set<Long>,

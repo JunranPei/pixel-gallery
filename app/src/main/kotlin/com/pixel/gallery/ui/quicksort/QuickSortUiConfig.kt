@@ -25,6 +25,8 @@ data class QuickSortUiConfig(
     val handedness: com.pixel.gallery.model.Handedness = com.pixel.gallery.model.Handedness.RIGHT,
     val undoAvailable: Boolean = false,
     val onUndo: () -> Unit = {},
+    val sessionKey: String? = null,
+    val completedBatchPaths: Set<String> = emptySet(),
 )
 
 internal enum class QuickSortInteraction { Idle, Selecting, Moving, Dock, Reordering }

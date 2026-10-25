@@ -45,6 +45,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var duplicateSuite = false
     private var undoHandednessSuite = false
     private var labelBackupSuite = false
+    private var labelMultiSelectionSuite = false
     private var quickSortHeaderSuite = false
     private var labelDesignSuite = false
     private var settingsSelectionSuite = false
@@ -75,6 +76,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         duplicateSuite = arguments?.getString("suite") == "duplicates"
         undoHandednessSuite = arguments?.getString("suite") == "undo-handedness"
         labelBackupSuite = arguments?.getString("suite") == "label-backup"
+        labelMultiSelectionSuite = arguments?.getString("suite") == "label-multi-selection"
         quickSortHeaderSuite = arguments?.getString("suite") == "quick-sort-header"
         labelDesignSuite = arguments?.getString("suite") == "label-designs"
         settingsSelectionSuite = arguments?.getString("suite") == "settings-selection"
@@ -102,6 +104,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                labelMultiSelectionSuite -> LabelMultiSelectionChecks(targetContext).exercise()
                 albumSelectionSuite -> AlbumSelectionChecks(this).exercise()
                 albumRenameSuite -> AlbumRenameChecks(targetContext).exercise()
                 viewerCompressionSuite -> ViewerCompressionDeviceChecks(targetContext).exercise()

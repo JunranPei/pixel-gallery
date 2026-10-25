@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingToolbarDefaults
@@ -341,8 +342,6 @@ private fun MainScaffoldContent(
     }
     val labelsSaving by labelsViewModel.isSaving.collectAsState()
     val labelsError by labelsViewModel.errorMessage.collectAsState()
-    val labelSaveGeneration by labelsViewModel.editorSaveGeneration.collectAsState()
-    var observedLabelSaveGeneration by rememberSaveable { mutableLongStateOf(0L) }
     val quickQueue by quickSortViewModel.state.collectAsState()
     val quickReceipts = remember(quickQueue.jobs) { quickQueue.jobs.flatMap { job ->
         job.items.flatMap { listOfNotNull(it.replacementReceipt, it.receipt, it.replacementRestoreReceipt) }
@@ -352,14 +351,14 @@ private fun MainScaffoldContent(
     var editingLabelIds by rememberSaveable(stateSaver = listSaver(
         save = { ids: Set<Long> -> ids.toList() }, restore = { it.toSet() },
     )) { mutableStateOf<Set<Long>>(emptySet()) }
-    LaunchedEffect(labelSaveGeneration) {
-        if (labelSaveGeneration > observedLabelSaveGeneration) editingLabelIds = emptySet()
-        observedLabelSaveGeneration = labelSaveGeneration
-    }
     var quickSortEnabled by rememberSaveable { mutableStateOf(false) }
     var quickSortOwner by rememberSaveable { mutableStateOf<Screen?>(null) }
     val quickSortSessionId = remember(quickSortEnabled) {
         if (quickSortEnabled) java.util.UUID.randomUUID().toString() else null
+    }
+    val batchVisibility = remember(quickSortSessionId) { com.pixel.gallery.ui.quicksort.QuickSortBatchVisibility() }
+    val completedBatchPaths = remember(quickQueue.jobs, quickSortSessionId) {
+        batchVisibility.update(quickQueue.jobs, quickSortSessionId)
     }
     DisposableEffect(quickSortSessionId) {
         onDispose { quickSortSessionId?.let(quickSortViewModel::finishSession) }
@@ -469,8 +468,17 @@ private fun MainScaffoldContent(
 
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
     var selectedAlbumPaths by remember { mutableStateOf(emptySet<String>()) }
-    var retainEmptyAlbumSelection by remember { mutableStateOf(false) }
-
+    var showLabelEditor by rememberSaveable { mutableStateOf(false) }
+    var labelEditorFromGrid by rememberSaveable { mutableStateOf(false) }
+    var gridTransferSession by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectionPanelHeight by remember { mutableStateOf(0.dp) }
+    var pickerGridColumns by rememberSaveable { mutableIntStateOf(gridColumns) }
+    var ordinaryTransferIds by remember { mutableStateOf(emptySet<Long>()) }
+    val moveVisibility = remember(gridTransferSession) { com.pixel.gallery.ui.quicksort.QuickSortBatchVisibility() }
+    val movedBatchPaths = remember(quickQueue.jobs, gridTransferSession) { moveVisibility.update(quickQueue.jobs, gridTransferSession) }
+    DisposableEffect(gridTransferSession) {
+        onDispose { gridTransferSession?.let(quickSortViewModel::finishSession) }
+    }
     // Simple navigation stack
     var navigationStack by rememberSaveable {
         mutableStateOf(
@@ -496,8 +504,10 @@ private fun MainScaffoldContent(
             navigationStack.getOrNull(previousBaseIndex) != nextStack.getOrNull(nextBaseIndex)
         ) {
             selectedIds = emptySet()
+            showLabelEditor = false
+            labelEditorFromGrid = false
+            gridTransferSession = null
             selectedAlbumPaths = emptySet()
-            retainEmptyAlbumSelection = false
             showSelectionMenu = false
         }
         navigationStack = nextStack
@@ -686,12 +696,20 @@ private fun MainScaffoldContent(
     val toggleAlbumPath: (String) -> Unit = { path ->
         selectedAlbumPaths = if (path in selectedAlbumPaths) selectedAlbumPaths - path else selectedAlbumPaths + path
     }
-    val selectionMode = selectedIds.isNotEmpty() ||
-        (currentScreen is Screen.Photo && retainEmptyAlbumSelection)
+    val hasOpenSelectionSheet = (showLabelEditor && labelEditorFromGrid) ||
+        gridTransferSession != null || currentScreen is Screen.TransferDestination ||
+        (showQuickTargets && quickSortEnabled && quickSortOwner == quickSortScope)
+    val selectionMode = selectedIds.isNotEmpty() || hasOpenSelectionSheet
     LaunchedEffect(quickQueue.reservedIds) { selectedIds = selectedIds - quickQueue.reservedIds }
     val openLabelEditor: (Set<Long>) -> Unit = { ids ->
         labelsViewModel.clearError()
         editingLabelIds = ids - quickQueue.reservedIds
+        labelEditorFromGrid = currentScreen !is Screen.Viewer
+        gridTransferSession = null
+        quickSortEnabled = false
+        showQuickTargets = false
+        selectionPanelHeight = 0.dp
+        showLabelEditor = true
     }
     val onQuickEnqueued: (QuickSortEnqueueResult) -> Unit = { result ->
         when (result) {
@@ -706,6 +724,8 @@ private fun MainScaffoldContent(
     val toggleQuickSort: () -> Unit = {
         quickSortEnabled = !quickSortEnabled
         if (quickSortEnabled) {
+            showLabelEditor = false
+            gridTransferSession = null
             quickTargetsPanelHeight = 0.dp
             quickSortOwner = quickSortScope
             photosViewModel.setQuickSortDockTop(false)
@@ -720,6 +740,8 @@ private fun MainScaffoldContent(
         quickPreferences.targets.map { currentAlbums[it.stableKey] ?: it }
     }
     val quickSortConfig = if (quickSortEnabled && quickSortOwner == quickSortScope) QuickSortUiConfig(
+        sessionKey = quickSortSessionId,
+        completedBatchPaths = completedBatchPaths,
         targets = quickSortTargets,
         dockTop = false,
         onDockTopChange = {},
@@ -750,8 +772,6 @@ private fun MainScaffoldContent(
             }
         },
         onExit = {
-            selectedIds = emptySet()
-            retainEmptyAlbumSelection = false
             quickSortEnabled = false
             showQuickTargets = false
         },
@@ -777,7 +797,6 @@ private fun MainScaffoldContent(
     }
 
     val toggleSelection = { id: Long ->
-        retainEmptyAlbumSelection = false
         selectedIds = if (selectedIds.contains(id)) {
             selectedIds - id
         } else {
@@ -786,7 +805,6 @@ private fun MainScaffoldContent(
     }
 
     val updateSelection = { ids: Set<Long> ->
-        retainEmptyAlbumSelection = false
         selectedIds = ids - quickQueue.reservedIds
     }
 
@@ -812,7 +830,6 @@ private fun MainScaffoldContent(
         } else if (albumSelectionMode) {
             selectedAlbumPaths = emptySet()
         } else if (selectionMode) {
-            retainEmptyAlbumSelection = false
             selectedIds = emptySet()
         } else if (quickSortEnabled && currentScreen !is Screen.Viewer) {
             quickSortEnabled = false
@@ -1038,12 +1055,13 @@ private fun MainScaffoldContent(
                         HorizontalPager(
                         state = homePagerState,
                         modifier = Modifier.fillMaxSize(),
-                        userScrollEnabled = selectedIds.isEmpty() && !albumSelectionMode && !quickSortEnabled
+                        userScrollEnabled = !selectionMode && !albumSelectionMode && !quickSortEnabled
                     ) { page ->
                         when (page) {
                             0 -> PhotosScreen(
                                 quickSort = quickSortConfig,
                                 items = searchedPhotoGridItems,
+                                gridContextKey = Triple(photoSearchResult.photoQuery, homeMediaType, photoSortOrder),
                                 positionLabels = searchedPositionLabels,
                                 onNavigateToViewer = { id ->
                                     val isSearchActive = normalizedPhotoSearchQuery.isNotEmpty() && photoSearchResult.photoQuery.isNotEmpty()
@@ -1069,6 +1087,7 @@ private fun MainScaffoldContent(
                                     ))
                                 },
                                 selectedIds = selectedIds,
+                                selectionMode = selectionMode,
                                 onSelectionChange = updateSelection,
                                 onToggleSelection = toggleSelection,
                                 columns = gridColumns,
@@ -1168,7 +1187,7 @@ private fun MainScaffoldContent(
                     }
                     LabelPhotosScreen(
                         label = labelEntries.find { it.id == labelId }, items = routeGroupedLabelPhotos,
-                        selectedIds = selectedIds, columns = gridColumns, gridState = labelState,
+                        selectedIds = selectedIds, selectionMode = selectionMode, columns = gridColumns, gridState = labelState,
                         onBack = navigateBack,
                         onNavigateToViewer = { id -> navigateToStack(navigationStack + Screen.Viewer(id, Screen.ViewerSource.Label, labelId = labelId)) },
                         onSelectionChange = updateSelection, onToggleSelection = toggleSelection,
@@ -1375,7 +1394,6 @@ private fun MainScaffoldContent(
                                 enabled = currentMediaIds.isNotEmpty(),
                                 onClick = {
                                     updateSelection(if (allSelected) emptySet() else currentMediaIds)
-                                    retainEmptyAlbumSelection = selectedIds.isEmpty()
                                 },
                             ),
                         )
@@ -1450,7 +1468,14 @@ private fun MainScaffoldContent(
                     }
                     MediaCollectionSelectionTopBar(
                         count = selectedIds.size,
-                        onClear = { selectedIds = emptySet(); retainEmptyAlbumSelection = false },
+                        onClear = {
+                            selectedIds = emptySet()
+                            quickSortEnabled = false
+                            showQuickTargets = false
+                            showLabelEditor = false
+                            labelEditorFromGrid = false
+                            gridTransferSession = null
+                        },
                         actions = collectionActions,
                         overflowExpanded = showSelectionMenu,
                         onOverflowExpandedChange = { showSelectionMenu = it },
@@ -1472,7 +1497,14 @@ private fun MainScaffoldContent(
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = headerColor),
                         title = { com.pixel.gallery.ui.components.SelectedCountBadge(selectedIds.size) },
                         navigationIcon = {
-                            IconButton(onClick = { selectedIds = emptySet(); retainEmptyAlbumSelection = false }) {
+                            IconButton(onClick = {
+                            selectedIds = emptySet()
+                            quickSortEnabled = false
+                            showQuickTargets = false
+                            showLabelEditor = false
+                            labelEditorFromGrid = false
+                            gridTransferSession = null
+                        }) {
                                 Icon(Icons.Default.Close, contentDescription = "Clear selection")
                             }
                         },
@@ -1496,7 +1528,6 @@ private fun MainScaffoldContent(
                                     enabled = currentMediaIds.isNotEmpty(),
                                     onClick = {
                                         updateSelection(if (isAlbumFullySelected) emptySet() else currentMediaIds)
-                                        retainEmptyAlbumSelection = selectedIds.isEmpty()
                                     },
                                 ) {
                                     Icon(
@@ -1522,6 +1553,10 @@ private fun MainScaffoldContent(
                                     expanded = showSelectionMenu,
                                     onExpandedChange = { showSelectionMenu = it },
                                 ) {
+                                    if (!quickSortEnabled) GalleryMenuRow(
+                                        stringResource(R.string.qs_start), Icons.AutoMirrored.Outlined.DriveFileMove, accented = true,
+                                        onClick = { showSelectionMenu = false; toggleQuickSort() },
+                                    )
                                     GalleryMenuRow("Sort Photos", Icons.AutoMirrored.Filled.Sort, accented = true, onClick = {
                                         showSelectionMenu = false
                                         showPhotoSortDialog = true
@@ -1536,10 +1571,11 @@ private fun MainScaffoldContent(
 
                                 IconButton(enabled = selectedEntries.isNotEmpty(), onClick = {
                                     photosViewModel.clearTransferState()
-                                    navigateToStack(navigationStack + Screen.TransferDestination(
-                                        selectedEntries.map { it.contentId }.toLongArray(),
-                                        Screen.TransferOrigin.Grid
-                                    ))
+                                    showLabelEditor = false
+                                    quickSortEnabled = false
+                                    showQuickTargets = false
+                                    selectionPanelHeight = 0.dp
+                                    if (gridTransferSession == null) gridTransferSession = java.util.UUID.randomUUID().toString()
                                 }) {
                                     Icon(
                                         painter = painterResource(R.drawable.ic_transfer_to_folder),
@@ -1557,6 +1593,10 @@ private fun MainScaffoldContent(
                                     expanded = showSelectionMenu,
                                     onExpandedChange = { showSelectionMenu = it },
                                 ) {
+                                    if (!quickSortEnabled && (baseScreen == Screen.Home || baseScreen is Screen.Photo)) GalleryMenuRow(
+                                        stringResource(R.string.qs_start), Icons.AutoMirrored.Outlined.DriveFileMove, accented = true,
+                                        onClick = { showSelectionMenu = false; toggleQuickSort() },
+                                    )
                                     GalleryMenuRow(
                                         stringResource(R.string.label_edit),
                                         Icons.Outlined.Label,
@@ -1764,11 +1804,7 @@ private fun MainScaffoldContent(
     }) {
         UnifiedGalleryContainer.instance.Shell(
             containerColor = appShellColor,
-            modifier = Modifier.nestedScroll(scrollBehavior).then(
-                if (currentScreen == Screen.Home && reviewPage == null && !isHomeSearchMode && !quickSortEnabled) {
-                    Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
-                } else Modifier,
-            ),
+            modifier = Modifier,
             scrollBehavior = if (homeHeaderOwnsShell) homeTopBarScrollBehavior else null,
         snackbarHost = {
             GalleryMessageHost()
@@ -1796,6 +1832,10 @@ private fun MainScaffoldContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = baseRouteTopInset)
+                    .nestedScroll(scrollBehavior)
+                    .then(if (currentScreen == Screen.Home && reviewPage == null && !isHomeSearchMode && !quickSortEnabled) {
+                        Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
+                    } else Modifier)
                     .drawWithContent {
                         // Hide the route decorations together with its content.
                         if ((visibleViewer == null || viewerTransitions.revealing) && reviewPage == null) drawContent()
@@ -1817,7 +1857,15 @@ private fun MainScaffoldContent(
                                 visible = isActiveRoute && (visibleViewer == null || viewerTransitions.revealing) && reviewPage == null,
                                 interactive = isActiveRoute && visibleViewer == null && reviewPage == null,
                             ) {
-                                CompositionLocalProvider(LocalViewerGridScope provides screen) {
+                                CompositionLocalProvider(
+                                    LocalViewerGridScope provides screen,
+                                    com.pixel.gallery.ui.quicksort.LocalMediaSelectionMode provides selectionMode,
+                                    com.pixel.gallery.ui.quicksort.LocalSelectionPanelInset provides
+                                        (if (showLabelEditor || gridTransferSession != null) selectionPanelHeight else 0.dp),
+                                    com.pixel.gallery.ui.quicksort.LocalMoveGridPresentation provides gridTransferSession?.let {
+                                        com.pixel.gallery.ui.quicksort.MoveGridPresentation(it, movedBatchPaths, quickQueue.reservedIds)
+                                    },
+                                ) {
                                     routePages.getValue(screenIndex).content()
                                 }
                             }
@@ -1832,20 +1880,26 @@ private fun MainScaffoldContent(
             }
 
 
-            if (currentScreen is Screen.TransferDestination) {
-                val transferScreen = currentScreen
-                val transferableEntries = remember(transferScreen, allPhotos, hiddenPhotos, favourites) {
+            if (currentScreen is Screen.TransferDestination || gridTransferSession != null) {
+                val transferScreen = currentScreen as? Screen.TransferDestination
+                val transferIds = if (transferScreen == null) selectedIds else transferScreen.entryIds.toSet()
+                val transferableEntries = remember(transferIds, allPhotos, hiddenPhotos, favourites) {
                     val byId = (allPhotos + hiddenPhotos + favourites).associateBy { it.contentId }
-                    transferScreen.entryIds.toList().mapNotNull(byId::get)
+                    transferIds.toList().mapNotNull(byId::get)
                 }
                 TransferDestinationScreen(
                     entries = transferableEntries,
+                    moveSessionId = gridTransferSession,
+                    onPanelHeightChange = { selectionPanelHeight = it },
+                    onTransferStarted = { ordinaryTransferIds = it },
+                    onMoveAccepted = { ids -> selectedIds = selectedIds - ids },
                     onBack = {
                         photosViewModel.clearTransferState()
-                        navigateToStack(navigationStack.dropLast(1))
+                        if (transferScreen == null) gridTransferSession = null
+                        else navigateToStack(navigationStack.dropLast(1))
                     },
-                    columns = gridColumns,
-                    onColumnsChange = photosViewModel::setGridColumns,
+                    columns = pickerGridColumns,
+                    onColumnsChange = { pickerGridColumns = it },
                     onFinished = { summary ->
                         val action = if (summary.mode == TransferMode.MOVE) "Moved" else "Copied"
                         val message = buildString {
@@ -1855,17 +1909,9 @@ private fun MainScaffoldContent(
                             if (summary.skipped > 0) append("; ${summary.skipped} skipped")
                         }
                         if (summary.failed == 0) messages.show(message)
-                        selectedIds = emptySet()
-                        navigateToStack(
-                            if (
-                                transferScreen.origin == Screen.TransferOrigin.Viewer &&
-                                summary.mode == TransferMode.MOVE
-                            ) {
-                                navigationStack.dropLast(2)
-                            } else {
-                                navigationStack.dropLast(1)
-                            },
-                        )
+                        if (transferScreen == null) {
+                            selectedIds = selectedIds - (ordinaryTransferIds - summary.failures.map { it.entry.contentId }.toSet())
+                        }
                         photosViewModel.clearTransferState()
                     }
                 )
@@ -1915,13 +1961,22 @@ private fun MainScaffoldContent(
             }
             }
 
-    if (editingLabelIds.isNotEmpty()) {
+    if (showLabelEditor) {
+        val labelBatchIds = if (labelEditorFromGrid) selectedIds else editingLabelIds
         LabelEditorSheet(
-            labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = editingLabelIds, recentLabelIds = recentLabelIds,
-            columns = gridColumns,
-            onColumnsChange = photosViewModel::setGridColumns,
-            onDismiss = { editingLabelIds = emptySet(); labelsViewModel.clearError() },
-            onApply = { edits -> labelsViewModel.applyEdits(editingLabelIds, edits) { editingLabelIds = emptySet() } },
+            labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = labelBatchIds, recentLabelIds = recentLabelIds,
+            columns = pickerGridColumns,
+            onColumnsChange = { pickerGridColumns = it },
+            onDismiss = {
+                showLabelEditor = false
+                editingLabelIds = emptySet()
+                labelsViewModel.clearError()
+            },
+            onPanelHeightChange = { selectionPanelHeight = it },
+            onApply = { edits, onSaved ->
+                // Capture the recipients now; later grid selection belongs to another operation.
+                labelsViewModel.applyEdits(labelBatchIds.toSet(), edits, onSaved)
+            },
             onReorderLabels = labelsViewModel::reorderLabels,
             isSaving = labelsSaving, errorMessage = labelsError,
         )
@@ -1935,11 +1990,14 @@ private fun MainScaffoldContent(
             onDockTopChange = photosViewModel::setQuickSortDockTop,
             onApply = { photosViewModel.setQuickSortTargets(it) },
             onPanelHeightChange = { quickTargetsPanelHeight = it },
-            onDismiss = { showQuickTargets = false; quickSortEnabled = false; selectedIds = emptySet() },
+            onDismiss = {
+                showQuickTargets = false
+                quickSortEnabled = false
+            },
             onTargetsChange = photosViewModel::setQuickSortTargets,
             onCreateAlbum = { parent, name, onResult -> photosViewModel.createTransferFolder(parent, name, onResult) },
-            columns = gridColumns,
-            onColumnsChange = photosViewModel::setGridColumns,
+            columns = pickerGridColumns,
+            onColumnsChange = { pickerGridColumns = it },
         )
     }
 

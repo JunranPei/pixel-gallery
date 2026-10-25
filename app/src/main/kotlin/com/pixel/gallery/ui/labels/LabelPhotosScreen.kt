@@ -42,6 +42,7 @@ fun LabelPhotosScreen(
     onRemoveFromLabel: (Set<Long>) -> Unit = {},
     onEditLabel: () -> Unit = {},
     isForeground: Boolean = true,
+    selectionMode: Boolean = selectedIds.isNotEmpty(),
 ): GalleryPageContent {
     var showMenu by remember { mutableStateOf(false) }
     var searchMode by rememberSaveable(label?.id) { mutableStateOf(false) }
@@ -111,7 +112,7 @@ fun LabelPhotosScreen(
             })
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            PhotosScreen(items = displayedItems, onNavigateToViewer = onNavigateToViewer, selectedIds = selectedIds,
+            PhotosScreen(items = displayedItems, gridContextKey = searchQuery to mediaType, onNavigateToViewer = onNavigateToViewer, selectedIds = selectedIds, selectionMode = selectionMode,
                 onSelectionChange = onSelectionChange, onToggleSelection = onToggleSelection,
                 columns = columns, onColumnsChange = onColumnsChange, state = gridState,
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,

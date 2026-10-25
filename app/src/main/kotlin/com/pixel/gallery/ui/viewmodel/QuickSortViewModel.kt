@@ -24,9 +24,9 @@ class QuickSortViewModel @Inject constructor(private val repository: QuickSortQu
     val permissionRequest = _permissionRequest.asStateFlow()
     private var requestingPermission = false
     private var cleared = false
-    fun enqueue(entries: List<MediaEntry>, destination: TransferDestination, onResult: (QuickSortEnqueueResult) -> Unit, sessionId: String? = null) {
+    fun enqueue(entries: List<MediaEntry>, destination: TransferDestination, onResult: (QuickSortEnqueueResult) -> Unit, sessionId: String? = null, conflictPolicy: com.pixel.gallery.model.ConflictPolicy? = null) {
         viewModelScope.launch {
-            val result = repository.enqueue(entries, destination, sessionId)
+            val result = repository.enqueue(entries, destination, sessionId, conflictPolicy)
             if (result is QuickSortEnqueueResult.Accepted) repository.startFromForeground()
             onResult(result)
         }

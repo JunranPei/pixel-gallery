@@ -163,20 +163,27 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         check(findText("Successful batches in the last 30 days") == null && findText("按近 30 天成功批次排序") == null)
         snapshot("quicksort-frequent")
         report += "Frequent tab shows the album with a successful fixture batch and excludes unused albums."
-        val newAlbum = boundsForTextEither("New album", "新建相册")
-        tap(newAlbum.centerX().toFloat(), newAlbum.centerY().toFloat())
-        settle(250)
-        check(findText("Album name") != null || findText("相册名称") != null) { "New album action was lost" }
-        val cancelCreate = boundsForTextEither("Cancel", "取消")
-        tap(cancelCreate.centerX().toFloat(), cancelCreate.centerY().toFloat())
-        settle(250)
+        check(findText("New album") == null && findText("新建相册") == null) { "Separate create icon is still present" }
+        val search = checkNotNull(findEditable(instrumentation.uiAutomation.rootInActiveWindow))
+        fun setQuery(text: String) {
+            check(search.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, android.os.Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }))
+            settle(250)
+        }
+        setQuery("New fixture album")
+        check(findText("Create “New fixture album”") != null || findText("新建“New fixture album”") != null) {
+            "Inline create action is missing"
+        }
+        check(findText("Album name") == null && findText("相册名称") == null) { "A create dialog is still present" }
+        setQuery("")
         val clear = boundsForTextEither("3 selected", "已选 3 个")
         tap(clear.centerX().toFloat(), clear.centerY().toFloat())
         settle(250)
         check(selected.value.isEmpty()) { "Count-chip clear did not clear all album targets" }
         check(findText("0 selected") != null || findText("已选 0 个") != null)
         snapshot("quicksort-cleared")
-        report += "Default stays collapsed; swipe opens chooser; full short title and clear chip share one header row; New album is retained and opens its dialog; clear applies immediately."
+        report += "Default stays collapsed; swipe opens chooser; full short title and clear chip share one header row; New album is an inline query action without a dialog; clear applies immediately."
         if (quickSortOnly) {
             instrumentation.runOnMainSync { dark.value = true }
             settle(250)
@@ -267,6 +274,13 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         report += "Production viewer: first-row actions move continuously during upward/downward MOVE; release reveals secondary actions; CANCEL is handled."
         instrumentation.runOnMainSync { activity.finish() }
         return report.joinToString("\n") + "\nScreenshots: ${output.absolutePath}"
+    }
+
+    private fun findEditable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null || !node.isVisibleToUser) return null
+        if (node.isEditable) return node
+        for (index in 0 until node.childCount) findEditable(node.getChild(index))?.let { return it }
+        return null
     }
 
     private fun findText(text: String): AccessibilityNodeInfo? {
