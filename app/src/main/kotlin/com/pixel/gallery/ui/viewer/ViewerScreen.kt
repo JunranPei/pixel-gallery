@@ -12,6 +12,11 @@ import com.pixel.gallery.ui.components.LocalGallerySettingsAction
 import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
+import com.pixel.gallery.MainActivity
+import com.pixel.gallery.data.repository.VideoSettingsViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.app.WallpaperManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -378,6 +383,10 @@ internal fun ViewerScreen(
 ): GalleryPageContent {
     val context = LocalContext.current
     val messages = LocalGalleryMessages.current
+    var toolbarVideo by remember { mutableStateOf<VideoPlaybackSession?>(null) }
+    var autoplayNextId by remember { mutableStateOf<Long?>(null) }
+    var videoOptionsOpen by remember { mutableStateOf(false) }
+    val inVideoPip = (context as? MainActivity)?.isVideoPip == true
     val initialIndex = remember(initialId, photos) {
         val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
         photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0).also { index ->
@@ -738,7 +747,7 @@ internal fun ViewerScreen(
     }
 
     // Auto-hide UI timer
-    LaunchedEffect(isForeground, showUI, showMenu, expandedBottomActions, bottomActionsReveal.dragging, pagerState.currentPage, isPlayingMotion) {
+    LaunchedEffect(isForeground, showUI, showMenu, videoOptionsOpen, expandedBottomActions, bottomActionsReveal.dragging, pagerState.currentPage, isPlayingMotion) {
         if (!isForeground) return@LaunchedEffect
         ViewerLoadMetrics.event(
             "UI_AUTO_HIDE_SCHEDULE",
@@ -746,7 +755,7 @@ internal fun ViewerScreen(
         )
         // A menu is anchored to the top bar. Keep both bars present while it
         // is open so the menu cannot disappear before the user taps an item.
-        if (showUI && !showMenu && !expandedBottomActions && !bottomActionsReveal.dragging && !isPlayingMotion) {
+        if (showUI && !showMenu && !videoOptionsOpen && !expandedBottomActions && !bottomActionsReveal.dragging && !isPlayingMotion) {
             delay(3000)
             showUI = false
             ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
@@ -809,7 +818,7 @@ internal fun ViewerScreen(
     }
     
     val headerVisibility by animateFloatAsState(
-        targetValue = if (showUI) 1f else 0f,
+        targetValue = if (showUI && !inVideoPip) 1f else 0f,
         animationSpec = tween(durationMillis = 150),
         label = "ViewerHeaderVisibility",
     )
@@ -826,7 +835,7 @@ internal fun ViewerScreen(
                             listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
                         )
                     ),
-                visible = showUI || headerVisibility > 0f,
+                visible = !inVideoPip && (showUI || headerVisibility > 0f),
                 title = {},
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -835,6 +844,7 @@ internal fun ViewerScreen(
                 },
                 actions = {
                     val openSettings = LocalGallerySettingsAction.current
+                    toolbarVideo?.takeIf { it.uri == currentMedia?.uri }?.let { VideoToolbarActions(it, onBusyChanged = { busy -> videoOptionsOpen = busy }) }
                     if (hasMotionPhoto || motionVideoFile != null) {
                         IconButton(
                             enabled = !isExtractingMotion,
@@ -1066,6 +1076,19 @@ internal fun ViewerScreen(
                         isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress,
                         isForeground = isForeground,
                         shouldPrepare = shouldPrepareVideo,
+                        sourceVersion = media.dateModifiedMillis,
+                        startOnOpen = autoplayNextId == media.contentId,
+                        onSession = {
+                            toolbarVideo = it
+                            if (it != null && autoplayNextId == media.contentId) autoplayNextId = null
+                        },
+                        onEnded = {
+                            val next = ((page + 1)..photos.lastIndex).firstOrNull { photos[it].sourceMimeType.startsWith("video/") }
+                            if (next != null) {
+                                autoplayNextId = photos[next].contentId
+                                viewerScope.launch { pagerState.scrollToPage(next) }
+                            }
+                        },
                         onTap = { showUI = !showUI }
                     )
                 } else {
@@ -1516,7 +1539,7 @@ internal fun ViewerScreen(
 
         // Bottom Overlay
         AnimatedVisibility(
-            visible = showUI,
+            visible = showUI && !inVideoPip,
             enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { it },
             exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { it },
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -2063,18 +2086,34 @@ fun VideoPlayer(
     isForeground: Boolean = true,
     shouldPrepare: Boolean = isActive,
     showUI: Boolean = true,
-    onTap: () -> Unit = {}
+    onTap: () -> Unit = {},
+    sourceVersion: Long = 0L,
+    startOnOpen: Boolean = false,
+    onSession: (VideoPlaybackSession?) -> Unit = {},
+    onEnded: () -> Unit = {},
+    videoViewModel: VideoSettingsViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
-    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
-    var useNativeFallback by remember(uri) { mutableStateOf(false) }
-    var nativeVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
-    var hasRenderedFirstFrame by remember(uri) { mutableStateOf(false) }
+    val settings by videoViewModel.settings.collectAsState()
+    var session by remember(uri) { mutableStateOf<VideoPlaybackSession?>(null) }
+    val exoPlayer = session?.player
+    val nativeVideoView = session?.native
+    val useNativeFallback = nativeVideoView != null
+    val hasRenderedFirstFrame = session?.firstFrame == true
     var hasPresentedVideoSurface by remember(uri) { mutableStateOf(false) }
-    var wasForeground by remember(uri) { mutableStateOf(isForeground) }
-    var resumePlaybackOnForeground by remember(uri) { mutableStateOf(isActive) }
-    val latestPlaybackAllowed by rememberUpdatedState(isActive && isForeground)
-    val coroutineScope = rememberCoroutineScope()
+    val host = context as? MainActivity
+    val inPip = host?.isVideoPip == true
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var activityVisible by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
+    val latestEnded by rememberUpdatedState(onEnded)
+    val latestSessionCallback by rememberUpdatedState(onSession)
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ ->
+            activityVisible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     val minUserZoom = 0.333f
     val maxUserZoom = 10f
@@ -2106,77 +2145,35 @@ fun VideoPlayer(
         )
     }
 
-    DisposableEffect(shouldPrepare, uri, filePath) {
-        hasRenderedFirstFrame = false
+    DisposableEffect(shouldPrepare, uri, sourceVersion, settings != null) {
         hasPresentedVideoSurface = false
-        val player = if (shouldPrepare) {
-            val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
-                .setEnableDecoderFallback(true)
-
-            val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory()
-                .setConstantBitrateSeekingEnabled(true)
-                .setMp4ExtractorFlags(
-                    androidx.media3.extractor.mp4.Mp4Extractor.FLAG_READ_MOTION_PHOTO_METADATA
-                )
-
-            val primaryUri = Uri.parse(uri)
-            val fallbackUri = try {
-                val file = java.io.File(filePath)
-                if (filePath.isNotEmpty() && file.exists() && file.canRead()) Uri.fromFile(file) else null
-            } catch (e: Exception) {
-                null
-            }
-
-            val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context, extractorsFactory)
-
-            ExoPlayer.Builder(context, renderersFactory)
-                .setMediaSourceFactory(mediaSourceFactory)
-                .build()
-                .apply {
-                    setMediaItem(MediaItem.fromUri(primaryUri))
-                    repeatMode = if (isMotionPhoto) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-                    addListener(object : Player.Listener {
-                        override fun onRenderedFirstFrame() {
-                            hasRenderedFirstFrame = true
-                        }
-
-                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            hasRenderedFirstFrame = false
-                            useNativeFallback = true
-                        }
-                    })
-                    prepare()
-                    playWhenReady = isActive && isForeground
-                }
-        } else null
-        
-        exoPlayer = player
-        
+        val value = if (shouldPrepare && settings != null) VideoPlaybackSession(
+            host, context, uri, "$uri:$sourceVersion", videoViewModel.repository,
+            settings!!.copy(autoplay = settings!!.autoplay || startOnOpen), isMotionPhoto, { latestEnded() },
+        ) else null
+        session = value
+        onDispose { value?.release(); if (session === value) session = null }
+    }
+    DisposableEffect(session, isActive, isForeground) {
+        val value = session
+        if (value != null && isActive && isForeground && !isMotionPhoto) {
+            host?.videoSession = value
+            latestSessionCallback(value)
+            value.updatePipParams()
+        }
         onDispose {
-            exoPlayer = null
-            player?.stop()
-            player?.release()
+            if (host?.videoSession === value) {
+                host?.videoSession = null
+                if (Build.VERSION.SDK_INT >= 31 && host?.packageManager?.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE) == true) {
+                    host.setPictureInPictureParams(android.app.PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
+                }
+                latestSessionCallback(null)
+            }
         }
     }
-
-    LaunchedEffect(exoPlayer, nativeVideoView, isActive, isForeground, useNativeFallback) {
-        // A covered viewer keeps its player and playback position. Remember a
-        // manual pause as well, so returning from Settings does not start it.
-        if (!isForeground && wasForeground) {
-            resumePlaybackOnForeground = if (useNativeFallback && nativeVideoView != null) {
-                nativeVideoView?.isPlaying == true
-            } else exoPlayer?.playWhenReady ?: isActive
-        }
-        val shouldPlay = isForeground && isActive && (wasForeground || resumePlaybackOnForeground)
-        exoPlayer?.playWhenReady = shouldPlay
-        nativeVideoView?.let { view ->
-            if (shouldPlay) {
-                if (!view.isPlaying) view.start()
-            } else if (view.isPlaying) {
-                view.pause()
-            }
-        }
-        wasForeground = isForeground
+    LaunchedEffect(session, settings, isActive, isForeground, activityVisible, inPip) {
+        settings?.let { session?.updateSettings(it) }
+        session?.updateVisibility(isActive, isForeground, activityVisible, inPip)
     }
 
     LaunchedEffect(isActive, hasRenderedFirstFrame) {
@@ -2235,27 +2232,31 @@ fun VideoPlayer(
 
             if (exoPlayer != null) {
                 if (useNativeFallback) {
-                    AndroidView(
-                        factory = { ctx ->
-                            android.widget.VideoView(ctx).apply {
-                                setVideoURI(Uri.parse(uri))
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = !isMotionPhoto
-                                    hasRenderedFirstFrame = true
-                                    if (latestPlaybackAllowed) mp.start()
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        val ratio = if (nativeVideoView != null && nativeVideoView.width > 0 && nativeVideoView.height > 0)
+                            nativeVideoView.width.toFloat() / nativeVideoView.height else 16f / 9f
+                        val videoWidth = minOf(maxWidth, maxHeight * ratio)
+                        val videoHeight = videoWidth / ratio
+                        AndroidView(
+                            factory = { ctx ->
+                                android.view.SurfaceView(ctx).apply {
+                                    holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                                        override fun surfaceCreated(holder: android.view.SurfaceHolder) { nativeVideoView?.setSurface(holder.surface) }
+                                        override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
+                                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) { nativeVideoView?.setSurface(null) }
+                                    })
+                                    session?.surface = this
                                 }
-                                setOnErrorListener { _, _, _ -> true }
-                                nativeVideoView = this
-                            }
-                        },
-                        update = { view ->
-                            nativeVideoView = view
-                            view.keepScreenOn = isActive && isForeground
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(if (showVideoSurface) 1f else 0f)
-                    )
+                            },
+                            update = { view ->
+                                session?.surface = view
+                                view.keepScreenOn = isActive && isForeground && activityVisible
+                            },
+                            onRelease = { nativeVideoView?.setSurface(null) },
+                            modifier = Modifier.align(Alignment.Center).size(videoWidth, videoHeight)
+                                .alpha(if (showVideoSurface) 1f else 0f),
+                        )
+                    }
                 } else {
                     AndroidView(
                         factory = { ctx ->
@@ -2268,12 +2269,13 @@ fun VideoPlayer(
                                 player = exoPlayer
                                 useController = false
                                 resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                setKeepScreenOn(isActive && isForeground)
+                                setKeepScreenOn(isActive && isForeground && activityVisible)
                                 setBackgroundColor(android.graphics.Color.BLACK)
                             }
                         },
                         update = { view ->
-                            view.keepScreenOn = isActive && isForeground
+                            view.keepScreenOn = isActive && isForeground && activityVisible
+                            session?.surface = view.videoSurfaceView as? android.view.SurfaceView
                             if (view.player != exoPlayer) {
                                 view.player = exoPlayer
                             }
@@ -2294,8 +2296,10 @@ fun VideoPlayer(
             VideoControls(
                 player = exoPlayer,
                 nativeVideoView = if (useNativeFallback) nativeVideoView else null,
-                isVisible = showUI && isForeground,
-                isForeground = isForeground,
+                isVisible = showUI && isForeground && !inPip,
+                isForeground = isForeground && activityVisible && isActive && !inPip,
+                onPlayPause = { session?.togglePlay() },
+                onSeekFinished = { session?.checkpoint() },
                 currentZoom = currentZoom,
                 fallbackDurationMillis = fallbackDurationMillis,
                 modifier = Modifier.fillMaxSize()
@@ -2307,9 +2311,11 @@ fun VideoPlayer(
 @Composable
 fun VideoControls(
     player: Player?,
-    nativeVideoView: android.widget.VideoView? = null,
+    nativeVideoView: NativeVideoPlayback? = null,
     isVisible: Boolean,
     isForeground: Boolean = true,
+    onPlayPause: (() -> Unit)? = null,
+    onSeekFinished: () -> Unit = {},
     currentZoom: Float = 1f,
     fallbackDurationMillis: Long = 0L,
     modifier: Modifier = Modifier
@@ -2322,8 +2328,8 @@ fun VideoControls(
     var duration by remember { mutableLongStateOf(0L) }
     var isDragging by remember { mutableStateOf(false) }
 
-    LaunchedEffect(player, nativeVideoView, isDragging, fallbackDurationMillis, isForeground) {
-        if (!isForeground) return@LaunchedEffect
+    LaunchedEffect(player, nativeVideoView, isDragging, fallbackDurationMillis, isForeground, isVisible) {
+        if (!isForeground || !isVisible) return@LaunchedEffect
         while (true) {
             try {
                 if (nativeVideoView != null) {
@@ -2358,7 +2364,9 @@ fun VideoControls(
             IconButton(
                 onClick = { 
                     try {
-                        if (nativeVideoView != null) {
+                        if (onPlayPause != null) {
+                            onPlayPause()
+                        } else if (nativeVideoView != null) {
                             if (nativeVideoView.isPlaying) {
                                 nativeVideoView.pause()
                             } else {
@@ -2423,6 +2431,7 @@ fun VideoControls(
                             } else {
                                 player?.seekTo(currentPosition)
                             }
+                            onSeekFinished()
                         } catch (e: Exception) {}
                     },
                     valueRange = 0f..duration.toFloat().coerceAtLeast(1f),

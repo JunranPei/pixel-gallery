@@ -294,3 +294,14 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
 }
+
+// The focused player suite can run independently of legacy instrumentation hosts.
+if (providers.gradleProperty("playerChecksOnly").orNull == "true") {
+    android.defaultConfig.testInstrumentationRunner = "com.pixel.gallery.integration.VideoPlayerInstrumentation"
+    android.sourceSets.getByName("androidTest").apply {
+        java.setSrcDirs(emptyList<String>())
+        assets.setSrcDirs(listOf("src/playerTest/assets"))
+        manifest.srcFile("src/playerTest/AndroidManifest.xml")
+    }
+    kotlin.sourceSets.getByName("androidTest").kotlin.setSrcDirs(listOf("src/playerTest/kotlin"))
+}
