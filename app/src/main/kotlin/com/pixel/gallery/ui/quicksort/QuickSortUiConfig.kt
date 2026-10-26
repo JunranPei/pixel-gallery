@@ -26,7 +26,10 @@ data class QuickSortUiConfig(
     val undoAvailable: Boolean = false,
     val onUndo: () -> Unit = {},
     val sessionKey: String? = null,
+    val albumRows: Int = 2,
+    val relocatedEntries: Map<Pair<Long, String>, com.pixel.gallery.data.local.entity.MediaEntry> = emptyMap(),
     val completedBatchPaths: Set<String> = emptySet(),
+    val heldItems: com.pixel.gallery.model.QuickSortBatchHold = com.pixel.gallery.model.QuickSortBatchHold(),
 )
 
 internal enum class QuickSortInteraction { Idle, Selecting, Moving, Dock, Reordering }

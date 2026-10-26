@@ -83,6 +83,10 @@ import com.pixel.gallery.ui.quicksort.QuickSortDock
 import com.pixel.gallery.ui.quicksort.QuickSortPhotoDragPreview
 import com.pixel.gallery.ui.quicksort.quickSortPhotoGestures
 import com.pixel.gallery.ui.quicksort.quickSortGestureArbitration
+import com.pixel.gallery.ui.quicksort.QuickSortGridPresentation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 
 
 
@@ -103,6 +107,7 @@ fun PhotosScreen(
     positionLabels: List<String?>? = null,
     selectionMode: Boolean = selectedIds.isNotEmpty(),
     gridContextKey: Any? = null,
+    retainMovedItems: Boolean = false,
 ) {
     val ordinaryMove = com.pixel.gallery.ui.quicksort.LocalMoveGridPresentation.current
     val retainedSelectionMode = com.pixel.gallery.ui.quicksort.LocalMediaSelectionMode.current
@@ -116,17 +121,39 @@ fun PhotosScreen(
     val quickSortGestures = remember { QuickSortGestureState() }
     var removedPaths by remember(presentationSession) { mutableStateOf(emptySet<String>()) }
     val completedPaths = quickSort?.completedBatchPaths ?: ordinaryMove?.completedBatchPaths.orEmpty()
+    val relocatedEntries = quickSort?.relocatedEntries ?: ordinaryMove?.relocatedEntries.orEmpty()
     LaunchedEffect(completedPaths, gridTouchActive, quickSortGestures.busy, state.isScrollInProgress) {
         if (!gridTouchActive && !quickSortGestures.busy && !state.isScrollInProgress) removedPaths = completedPaths
     }
-    val presentation = remember(sessionSlots, items, holdBatches, removedPaths) {
-        if (holdBatches) quickSortGridPresentation(sessionSlots, items, removedPaths) else null
+    val heldItems = quickSort?.heldItems ?: ordinaryMove?.heldItems ?: com.pixel.gallery.model.QuickSortBatchHold()
+    val heldPaths = remember(heldItems.paths, completedPaths, removedPaths) {
+        heldItems.paths + (completedPaths - removedPaths)
     }
-    val displayedItems = presentation?.items ?: items
-    val unavailableIds = presentation?.unavailableIds.orEmpty()
-    LaunchedEffect(unavailableIds) {
-        if (selectedIds.any { it in unavailableIds }) onSelectionChange(selectedIds - unavailableIds)
+    var presentation by remember(presentationSession, holdBatches, gridContextKey) {
+        mutableStateOf(if (holdBatches) QuickSortGridPresentation(sessionSlots, emptySet()) else null,
+            referentialEqualityPolicy())
     }
+    LaunchedEffect(sessionSlots, items, holdBatches, removedPaths, heldPaths, retainMovedItems, relocatedEntries) {
+        if (!holdBatches) {
+            presentation = null
+            return@LaunchedEffect
+        }
+        val before = presentation
+        val next = withContext(Dispatchers.Default) {
+            quickSortGridPresentation(sessionSlots, items, removedPaths, heldPaths,
+                retainMovedItems, relocatedEntries).let {
+                if (it == before) before else it
+            }
+        }
+        if (next !== before) {
+            // Mapping a large library may finish after another stroke has begun.
+            snapshotFlow { !gridTouchActive && !quickSortGestures.busy && !state.isScrollInProgress }.first { it }
+            presentation = next
+        }
+    }
+    val displayedPresentation = presentation
+    val displayedItems = displayedPresentation?.items ?: items
+    val unavailableIds = displayedPresentation?.unavailableIds.orEmpty()
     var gridOriginInWindow by remember { mutableStateOf(Offset.Zero) }
     var dockHeightPx by remember { mutableIntStateOf(0) }
     val dockHeight = with(LocalDensity.current) { dockHeightPx.toDp() }
@@ -134,8 +161,11 @@ fun PhotosScreen(
         com.pixel.gallery.ui.quicksort.LocalSelectionPanelInset.current
     val gridSidePadding = 4.dp
     val gridSidePaddingPx = with(LocalDensity.current) { gridSidePadding.roundToPx().toFloat() }
-    val movingIds = quickSort?.reservedIds ?: ordinaryMove?.reservedIds.orEmpty()
-    val reservedIds = movingIds + unavailableIds
+    val movingIds = remember(heldItems.ids, presentation?.pendingIds) { heldItems.ids + presentation?.pendingIds.orEmpty() }
+    val reservedIds = remember(movingIds, unavailableIds) { movingIds + unavailableIds }
+    LaunchedEffect(reservedIds) {
+        if (selectedIds.any { it in reservedIds }) onSelectionChange(selectedIds - reservedIds)
+    }
     val quickSortBusy = quickSort != null && quickSortGestures.busy
     val idsByIndex = remember(displayedItems, quickSort != null) {
         if (quickSort != null) displayedItems.map { (it as? GridItem.Photo)?.entry?.contentId } else emptyList()
@@ -212,7 +242,7 @@ fun PhotosScreen(
                             gridState = state,
                             items = displayedItems,
                             selectedIds = selectedIds,
-                            onSelectionChange = onSelectionChange,
+                            onSelectionChange = { onSelectionChange(it - reservedIds) },
                             isPhoto = { index -> displayedItems[index] is GridItem.Photo },
                             getPhotoId = { index -> (displayedItems[index] as GridItem.Photo).entry.contentId },
                             leftContentPaddingPx = gridSidePaddingPx,
@@ -256,9 +286,11 @@ fun PhotosScreen(
                 key = { index ->
                     when (val item = displayedItems[index]) {
                         is GridItem.Header -> "header_${item.title}_${item.timestamp}"
-                        is GridItem.Photo -> if (presentation != null) "photo_${item.entry.path}" else item.entry.contentId
+                        is GridItem.Photo -> displayedPresentation?.let { it.keys?.get(index) ?: "photo_${item.entry.path}" }
+                            ?: item.entry.contentId
                     }
                 },
+                contentType = { index -> if (displayedItems[index] is GridItem.Header) "header" else "photo" },
                 span = { index ->
                     when (displayedItems[index]) {
                         is GridItem.Header -> androidx.compose.foundation.lazy.grid.GridItemSpan(columns)
@@ -400,7 +432,8 @@ fun PhotoTile(
     val thumbnailAnchor = Modifier.viewerThumbnailAnchor(media.viewerTransitionKey(), ExpressiveShapes.GridCornerRadius)
     val isVideo = remember(media.sourceMimeType) { media.sourceMimeType.startsWith("video/") }
     val context = LocalContext.current
-    val model = remember(media.uri, media.sourceMimeType, media.sizeBytes, isFastScrolling) {
+    val model = remember(media.uri, media.sourceMimeType, media.sizeBytes,
+        media.sourceRotationDegrees, media.dateModifiedMillis, isFastScrolling) {
         if (isFastScrolling) null
         else AvesAppGlideModule.getModel(
             context = context,
@@ -427,7 +460,6 @@ fun PhotoTile(
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)
                 .override(200)
-                .thumbnail(requestBuilder.clone().sizeMultiplier(0.1f))
         }
     }
     val formattedDuration = remember(media.durationMillis) {

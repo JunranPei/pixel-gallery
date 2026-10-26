@@ -91,7 +91,8 @@ import javax.inject.Singleton
 class MediaRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val mediaDao: MediaDao,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    internal val readRefreshes: MediaReadRefreshCoordinator = MediaReadRefreshCoordinator(),
 ) {
     data class VaultRestoreResult(
         val restoredIds: List<Long>,
@@ -138,13 +139,14 @@ class MediaRepository @Inject constructor(
         private val QUICK_MOVE_SETTLE_DELAYS = longArrayOf(80L, 160L, 320L)
     }
 
-    internal suspend fun <T> withMediaMutation(block: suspend () -> T): T =
+    internal suspend fun <T> withMediaMutation(refreshOnFinish: Boolean = true, block: suspend () -> T): T =
         mediaMutationMutex.withLock {
             mediaMutationInProgress = true
             try {
                 block()
             } finally {
                 mediaMutationInProgress = false
+                if (refreshOnFinish) readRefreshes.publish()
             }
         }
 
@@ -179,7 +181,7 @@ class MediaRepository @Inject constructor(
     }
 
     val allEntries: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.observeAllEntriesChanges().map { mediaDao.getAllEntriesPaged() },
+        readRefreshes.refreshes(mediaDao.observeAllEntriesChanges()).coalesceMediaInvalidations().map { mediaDao.getAllEntriesPaged() },
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
@@ -201,7 +203,7 @@ class MediaRepository @Inject constructor(
     }
 
     val favourites: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.observeFavouritesChanges().map { mediaDao.getFavouritesPaged() },
+        readRefreshes.refreshes(mediaDao.observeFavouritesChanges()).coalesceMediaInvalidations().map { mediaDao.getFavouritesPaged() },
         settingsRepository.excludedFolders,
         settingsRepository.hiddenFolders,
     ) { entries, excluded, hidden ->
@@ -217,7 +219,7 @@ class MediaRepository @Inject constructor(
         initialValue = emptyList()
     )
 
-    val trash: StateFlow<List<MediaEntry>> = mediaDao.observeTrashChanges().map {
+    val trash: StateFlow<List<MediaEntry>> = readRefreshes.refreshes(mediaDao.observeTrashChanges()).coalesceMediaInvalidations().map {
         mediaDao.getTrashPaged()
     }.stateIn(
         scope = repositoryScope,
@@ -857,10 +859,20 @@ class MediaRepository @Inject constructor(
         return TransferOutcome.COMPLETED
     }
 
-    fun isMediaMutationInProgress(): Boolean = mediaMutationInProgress
+    fun isMediaMutationInProgress(): Boolean = mediaMutationInProgress || readRefreshes.isHeld
 
-    suspend fun syncWhenMediaMutationsIdle(force: Boolean = false) =
-        mediaMutationMutex.withLock { syncWithMediaStore(force) }
+    suspend fun syncWhenMediaMutationsIdle(force: Boolean = false, fromTransferWorker: Boolean = false) {
+        while (true) {
+            if (!fromTransferWorker) readRefreshes.awaitIdle()
+            val synced = mediaMutationMutex.withLock {
+                if (!fromTransferWorker && readRefreshes.isHeld) false else {
+                    syncWithMediaStore(force)
+                    true
+                }
+            }
+            if (synced) return
+        }
+    }
 
     private data class SafChild(
         val uri: Uri,
@@ -1237,7 +1249,7 @@ class MediaRepository @Inject constructor(
             }
     }
 
-    suspend fun releaseQuickSortReplacementBackup(item: com.pixel.gallery.model.QuickSortQueueItem): Boolean = withMediaMutation {
+    suspend fun releaseQuickSortReplacementBackup(item: com.pixel.gallery.model.QuickSortQueueItem): Boolean = withMediaMutation(refreshOnFinish = false) {
         withContext(Dispatchers.IO) {
             val checkpoint = item.replacementCheckpoint ?: return@withContext true
             val receipt = item.replacementReceipt ?: return@withContext false
@@ -1266,7 +1278,7 @@ class MediaRepository @Inject constructor(
         restoreCheckpoint: QuickMoveCheckpoint? = null,
         conflictPolicy: ConflictPolicy? = ConflictPolicy.KEEP_BOTH,
         onCheckpoint: suspend (QuickMoveCheckpoint) -> Unit,
-    ): TransferReceipt = withMediaMutation {
+    ): TransferReceipt = withMediaMutation(refreshOnFinish = false) {
         replacementRecoveryComplete.await()
         currentCoroutineContext().ensureActive()
         withContext(NonCancellable) {
@@ -1424,7 +1436,7 @@ class MediaRepository @Inject constructor(
     }
 
     /** Recovery never deletes an original. Both copies present is an explicit review state. */
-    suspend fun recoverQuickMove(checkpoint: QuickMoveCheckpoint): TransferReceipt = withMediaMutation {
+    suspend fun recoverQuickMove(checkpoint: QuickMoveCheckpoint): TransferReceipt = withMediaMutation(refreshOnFinish = false) {
         replacementRecoveryComplete.await()
         withContext(Dispatchers.IO + NonCancellable) { recoverLocalMove(checkpoint) }
     }

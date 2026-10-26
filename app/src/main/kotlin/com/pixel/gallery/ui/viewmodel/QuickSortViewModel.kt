@@ -12,12 +12,27 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.Dispatchers
+import com.pixel.gallery.model.sameQuickSortUiState
+import com.pixel.gallery.model.prepareForUi
 import com.pixel.gallery.model.QuickSortPermissionRequest
 import javax.inject.Inject
 
 @HiltViewModel
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class QuickSortViewModel @Inject constructor(private val repository: QuickSortQueueRepository) : ViewModel() {
     val state = repository.state
+        .distinctUntilChanged(::sameQuickSortUiState)
+        .sample(150L)
+        .map { it.prepareForUi() }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), repository.state.value)
     val failure = repository.failure
     fun dismissFailure(failure: com.pixel.gallery.model.QuickSortMoveFailure) = repository.dismissFailure(failure)
     private val _permissionRequest = MutableStateFlow<QuickSortPermissionRequest?>(null)

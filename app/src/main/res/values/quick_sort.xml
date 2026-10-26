@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="qs_album_rows">Album capsule rows</string>
     <string name="qs_labels_title">Labels</string>
     <string name="qs_move_to">Move to</string>
     <string name="qs_move_dock">Drag to the top or bottom; tap to switch edge</string>

@@ -31,6 +31,27 @@ class QuickSortQueueRepository @Inject constructor(
     private val executionMutex = Mutex()
     private val gson = Gson()
     private val journal = AtomicFile(File(context.filesDir, "quick-sort-queue.json"))
+    private val journalStore = QuickSortJournalStore(
+        File(context.filesDir, "quick-sort-queue.deltas"),
+        readSnapshot = {
+            if (journal.baseFile.exists() || File(journal.baseFile.path + ".bak").exists()) {
+                journal.openRead().bufferedReader().use { gson.fromJson(it, QuickSortQueueJournal::class.java) }
+                    ?: error("Queue journal is empty")
+            } else QuickSortQueueJournal()
+        },
+        writeSnapshot = { snapshot ->
+            val output = journal.startWrite()
+            try {
+                val writer = output.bufferedWriter(Charsets.UTF_8)
+                gson.toJson(snapshot, writer)
+                writer.flush()
+                journal.finishWrite(output)
+            } catch (error: Exception) {
+                journal.failWrite(output)
+                throw error
+            }
+        },
+    )
     private val ready = CompletableDeferred<Unit>()
     private val mutableState = MutableStateFlow(QuickSortQueueState())
     val state: StateFlow<QuickSortQueueState> = mutableState.asStateFlow()
@@ -55,10 +76,7 @@ class QuickSortQueueRepository @Inject constructor(
     init {
         scope.launch {
             try {
-                val persisted = if (journal.baseFile.exists() || File(journal.baseFile.path + ".bak").exists()) {
-                    journal.openRead().bufferedReader().use { gson.fromJson(it, QuickSortQueueJournal::class.java) }
-                        ?: error("Queue journal is empty")
-                } else QuickSortQueueJournal()
+                val persisted = journalStore.load()
                 require(persisted.version == 1) { "Unsupported queue journal version" }
                 mutableState.value = state.value.copy(albumUses = persisted.albumUses.orEmpty())
                 var recoveredJobs = persisted.jobs
@@ -327,6 +345,9 @@ class QuickSortQueueRepository @Inject constructor(
         ready.await()
         if (state.value.error != null) return@withLock
         mutex.withLock { mutableState.value = state.value.copy(serviceActive = true) }
+        val refreshWindow = media.readRefreshes.hold()
+        var processedFile = false
+        var announcedJob: String? = null
         val transientRetries = mutableSetOf<String>()
         try {
             while (!pauseRequested && currentCoroutineContext().isActive) {
@@ -365,11 +386,16 @@ class QuickSortQueueRepository @Inject constructor(
                     break
                 }
                 val itemIndex = job.items.indexOfFirst { it.status == QuickSortItemStatus.Queued }
+                if (announcedJob != job.id) {
+                    announcedJob = job.id
+                    com.pixel.gallery.utils.AppLogger.log("QuickSortQueue", "batch=${job.id} total=${job.total} started")
+                }
                 if (itemIndex < 0) {
                     mutex.withLock { updateJob(job.id) { it.copy(status = if (it.cancelRequested) QuickSortJobStatus.Cancelled else QuickSortJobStatus.Completed) } }
                     continue
                 }
                 val entry = job.items[itemIndex].entry
+                processedFile = true
                 mutex.withLock { updateItem(job.id, itemIndex) { it.copy(status = QuickSortItemStatus.Running) } }
                 var retryTransientFailure = false
                 // Cancellation and FGS shutdown stop at the next file boundary, never halfway through source deletion.
@@ -416,25 +442,32 @@ class QuickSortQueueRepository @Inject constructor(
                     }
                 }
                 if (retryTransientFailure) {
-                    runCatching { media.syncWhenMediaMutationsIdle(force = true) }
+                    runCatching { media.syncWhenMediaMutationsIdle(force = true, fromTransferWorker = true) }
                     delay(250L)
                     continue
                 }
             }
         } finally {
             withContext(NonCancellable) {
-                mutex.withLock {
-                    val jobs = state.value.jobs.map { job ->
-                        if (job.status == QuickSortJobStatus.Running) job.copy(status = when {
-                            job.cancelRequested -> QuickSortJobStatus.Cancelled
-                            job.items.none { it.status == QuickSortItemStatus.Queued } -> QuickSortJobStatus.Completed
-                            else -> QuickSortJobStatus.Paused
-                        }) else job
+                try {
+                    mutex.withLock {
+                        val jobs = state.value.jobs.map { job ->
+                            if (job.status == QuickSortJobStatus.Running) job.copy(status = when {
+                                job.cancelRequested -> QuickSortJobStatus.Cancelled
+                                job.items.none { it.status == QuickSortItemStatus.Queued } -> QuickSortJobStatus.Completed
+                                else -> QuickSortJobStatus.Paused
+                            }) else job
+                        }
+                        persist(jobs)
+                        mutableState.value = state.value.copy(serviceActive = false)
                     }
-                    persist(jobs)
-                    mutableState.value = state.value.copy(serviceActive = false)
-                }
-                cleanupClosedSessionBackups()
+                    cleanupClosedSessionBackups()
+                    if (processedFile) runCatching {
+                        com.pixel.gallery.utils.AppLogger.log("QuickSortQueue", "queue finished; library sync starting")
+                        media.syncWhenMediaMutationsIdle(force = true, fromTransferWorker = true)
+                        com.pixel.gallery.utils.AppLogger.log("QuickSortQueue", "library sync finished")
+                    }.onFailure { android.util.Log.w("QuickSortQueue", "Post-transfer library sync deferred", it) }
+                } finally { refreshWindow.close() }
             }
         }
     }
@@ -464,7 +497,7 @@ class QuickSortQueueRepository @Inject constructor(
                     .takeIf { items.any { it.status == QuickSortItemStatus.Succeeded } })
             }
         }
-        persist(trimHistory(resolveQuickSortRetrySuccess(jobs, jobId, index)))
+        persist(trimHistory(resolveQuickSortRetrySuccess(jobs, jobId, index)), jobId to index)
     }
 
     private fun updateJob(jobId: String, change: (QuickSortJob) -> QuickSortJob) =
@@ -477,22 +510,40 @@ class QuickSortQueueRepository @Inject constructor(
     }
 
     /** Commit to disk before publishing. Call only while holding mutex. */
-    private fun persist(jobs: List<QuickSortJob>) {
+    private fun persist(jobs: List<QuickSortJob>, changedItem: Pair<String, Int>? = null) {
+        val previous = state.value
+        if (previous.loaded && jobs == previous.jobs) return
         val albumUses = quickSortAlbumUses(state.value.albumUses, jobs, System.currentTimeMillis())
-        val output = journal.startWrite()
         try {
             // Persist only unfinished moves, current-session undo, and incomplete
             // recovery checkpoints. Finished failures have no saved task history.
-            val savedJobs = quickSortJobsToSave(jobs)
-            output.write(gson.toJson(QuickSortQueueJournal(jobs = savedJobs, albumUses = albumUses)).toByteArray(Charsets.UTF_8))
-            journal.finishWrite(output)
+            val changedIndex = changedItem?.let { change -> jobs.indexOfFirst { it.id == change.first } } ?: -1
+            val old = previous.jobs.getOrNull(changedIndex)
+            val updated = jobs.getOrNull(changedIndex)
+            val canAppend = changedItem != null && !journalStore.needsCompaction &&
+                old != null && updated != null && !old.isTerminal && !updated.isTerminal &&
+                old.id == updated.id && old.items.size == updated.items.size &&
+                previous.jobs.size == jobs.size && jobs.indices.all { index ->
+                    index == changedIndex || jobs[index] === previous.jobs[index]
+                } && updated.items.indices.all { index ->
+                    index == changedItem.second || updated.items[index] === old.items[index]
+                } && updated.copy(items = old.items, firstSucceededAt = old.firstSucceededAt) == old
+            if (canAppend) {
+                journalStore.saveItem(updated!!, changedItem!!.second, albumUses.takeUnless { it == previous.albumUses })
+            } else {
+                journalStore.saveSnapshot(QuickSortQueueJournal(jobs = quickSortJobsToSave(jobs), albumUses = albumUses))
+            }
         } catch (error: Exception) {
-            journal.failWrite(output)
             mutableState.value = state.value.copy(error = "Could not persist queue; execution stopped: ${error.message}")
             throw error
         }
         reportFinishedFailures(state.value.jobs, jobs)
         mutableState.value = state.value.copy(jobs = trimHistory(jobs), albumUses = albumUses, loaded = true)
+        if (jobs.any { job -> job.isTerminal && previous.jobs.any { it.id == job.id && !it.isTerminal } }) {
+            val runtime = Runtime.getRuntime()
+            com.pixel.gallery.utils.AppLogger.log("QuickSortQueue", "batch terminal; heapBytes=${runtime.totalMemory() - runtime.freeMemory()} heapMax=${runtime.maxMemory()}")
+            media.readRefreshes.publish()
+        }
     }
 
     companion object {

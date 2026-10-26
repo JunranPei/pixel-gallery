@@ -134,6 +134,10 @@ class PhotosViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setQuickSortDockTop(top) }
     }
 
+    fun setQuickSortAlbumRows(rows: Int) {
+        viewModelScope.launch { settingsRepository.setQuickSortAlbumRows(rows) }
+    }
+
     private val _transferUiState = MutableStateFlow(TransferUiState())
     val transferUiState: StateFlow<TransferUiState> = _transferUiState.asStateFlow()
     private var pendingTransfer: PendingTransfer? = null

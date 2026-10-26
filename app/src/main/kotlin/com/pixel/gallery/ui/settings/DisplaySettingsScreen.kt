@@ -115,6 +115,7 @@ fun DisplaySettingsScreen(
             }
             item { ImageSettingsGroup() }
             item { VideoSettingsGroup() }
+            item { QuickSortSettingsGroup(viewModel) }
         }
     }
 }

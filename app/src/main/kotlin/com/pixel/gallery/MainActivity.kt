@@ -37,6 +37,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
     var viewerRotationGesture: com.pixel.gallery.ui.viewer.ViewerRotationGesture? = null
+    internal val viewerGestureExclusions = com.pixel.gallery.ui.viewer.ViewerGestureExclusions()
 
     override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean =
         viewerRotationGesture?.dispatch(event) { super.dispatchTouchEvent(it) }

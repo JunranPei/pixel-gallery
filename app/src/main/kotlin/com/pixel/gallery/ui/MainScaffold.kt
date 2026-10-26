@@ -343,9 +343,7 @@ private fun MainScaffoldContent(
     val labelsSaving by labelsViewModel.isSaving.collectAsState()
     val labelsError by labelsViewModel.errorMessage.collectAsState()
     val quickQueue by quickSortViewModel.state.collectAsState()
-    val quickReceipts = remember(quickQueue.jobs) { quickQueue.jobs.flatMap { job ->
-        job.items.flatMap { listOfNotNull(it.replacementReceipt, it.receipt, it.replacementRestoreReceipt) }
-    } }
+    val quickReceipts = quickQueue.moveReceipts
     val quickPreferences by photosViewModel.quickSortPreferences.collectAsState()
     val transferTargets by photosViewModel.transferDestinations.collectAsState()
     var editingLabelIds by rememberSaveable(stateSaver = listSaver(
@@ -742,6 +740,8 @@ private fun MainScaffoldContent(
     val quickSortConfig = if (quickSortEnabled && quickSortOwner == quickSortScope) QuickSortUiConfig(
         sessionKey = quickSortSessionId,
         completedBatchPaths = completedBatchPaths,
+        relocatedEntries = batchVisibility.relocatedEntries,
+        albumRows = quickPreferences.albumRows,
         targets = quickSortTargets,
         dockTop = false,
         onDockTopChange = {},
@@ -760,6 +760,7 @@ private fun MainScaffoldContent(
             else 68.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         } else 0.dp,
         reservedIds = quickQueue.reservedIds,
+        heldItems = quickQueue.heldItems,
         handedness = handedness,
         undoAvailable = undoableQuickJob != null,
         onUndo = {
@@ -900,7 +901,8 @@ private fun MainScaffoldContent(
     }
 
     val selectedEntries = remember(selectedIds, allPhotos, hiddenPhotos, trash, vault) {
-        (allPhotos + hiddenPhotos + trash + vault).filter { selectedIds.contains(it.contentId) }
+        if (selectedIds.isEmpty()) emptyList() else
+            (allPhotos + hiddenPhotos + trash + vault).filter { selectedIds.contains(it.contentId) }
     }
     val selectedTrashEntries = remember(selectedIds, trash) { trash.filter { it.contentId in selectedIds } }
     val selectedVaultEntries = remember(selectedIds, vault) { vault.filter { it.contentId in selectedIds } }
@@ -1059,6 +1061,7 @@ private fun MainScaffoldContent(
                     ) { page ->
                         when (page) {
                             0 -> PhotosScreen(
+                                retainMovedItems = true,
                                 quickSort = quickSortConfig,
                                 items = searchedPhotoGridItems,
                                 gridContextKey = Triple(photoSearchResult.photoQuery, homeMediaType, photoSortOrder),
@@ -1741,7 +1744,16 @@ private fun MainScaffoldContent(
                         initialId = viewer.initialId,
                         photos = photosForViewer,
                         transformStateStore = viewerTransformStateStore,
-                        onBack = { navigateToStack(navigationStack.dropLast(1)) },
+                        onBack = {
+                            val viewerIndex = navigationStack.indexOf(viewer)
+                            if (viewerIndex > 0) {
+                                if (showLabelEditor && !labelEditorFromGrid) {
+                                    showLabelEditor = false
+                                    editingLabelIds = emptySet()
+                                }
+                                navigateToStack(navigationStack.take(viewerIndex))
+                            }
+                        },
                         allowTransfer = viewer.source !in setOf(
                             Screen.ViewerSource.Trash,
                             Screen.ViewerSource.Vault,
@@ -1863,7 +1875,8 @@ private fun MainScaffoldContent(
                                     com.pixel.gallery.ui.quicksort.LocalSelectionPanelInset provides
                                         (if (showLabelEditor || gridTransferSession != null) selectionPanelHeight else 0.dp),
                                     com.pixel.gallery.ui.quicksort.LocalMoveGridPresentation provides gridTransferSession?.let {
-                                        com.pixel.gallery.ui.quicksort.MoveGridPresentation(it, movedBatchPaths, quickQueue.reservedIds)
+                                        com.pixel.gallery.ui.quicksort.MoveGridPresentation(it, movedBatchPaths,
+                                            quickQueue.heldItems, moveVisibility.relocatedEntries)
                                     },
                                 ) {
                                     routePages.getValue(screenIndex).content()
@@ -1884,8 +1897,10 @@ private fun MainScaffoldContent(
                 val transferScreen = currentScreen as? Screen.TransferDestination
                 val transferIds = if (transferScreen == null) selectedIds else transferScreen.entryIds.toSet()
                 val transferableEntries = remember(transferIds, allPhotos, hiddenPhotos, favourites) {
-                    val byId = (allPhotos + hiddenPhotos + favourites).associateBy { it.contentId }
-                    transferIds.toList().mapNotNull(byId::get)
+                    if (transferIds.isEmpty()) emptyList() else {
+                        val byId = (allPhotos + hiddenPhotos + favourites).associateBy { it.contentId }
+                        transferIds.toList().mapNotNull(byId::get)
+                    }
                 }
                 TransferDestinationScreen(
                     entries = transferableEntries,

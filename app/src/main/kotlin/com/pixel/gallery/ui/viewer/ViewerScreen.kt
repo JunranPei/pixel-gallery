@@ -55,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
@@ -2301,7 +2302,10 @@ internal fun VideoPlayer(
                 .fillMaxSize()
                 .then(if (videoDismiss != null) Modifier.viewerDismissMotion(videoDismiss) else Modifier)
         ) {
-        RotatingMediaLayer(contentRotation, videoRatio, Modifier.fillMaxSize()) {
+        RotatingMediaLayer(
+            if (rotatedOutput || surfaceTransition.cover != null) contentRotation else null,
+            videoRatio, Modifier.fillMaxSize()
+        ) {
         Box(Modifier.fillMaxSize().zoomable(
                 state = zoomableState,
                 onClick = { _ -> onTap() },
@@ -2340,93 +2344,19 @@ internal fun VideoPlayer(
                 )
             }
 
-            if (exoPlayer != null) {
-                if (rotatedOutput && session != null) {
-                    key(session, nativeVideoView) {
-                        RotatableVideoSurface(session!!, videoRatio,
-                            isActive && isForeground && activityVisible, Modifier.fillMaxSize())
-                    }
-                } else if (useNativeFallback) {
-                    BoxWithConstraints(Modifier.fillMaxSize()) {
-                        val ratio = if (nativeVideoView != null && nativeVideoView.width > 0 && nativeVideoView.height > 0)
-                            nativeVideoView.width.toFloat() / nativeVideoView.height else 16f / 9f
-                        val videoWidth = minOf(maxWidth, maxHeight * ratio)
-                        val videoHeight = videoWidth / ratio
-                        AndroidView(
-                            factory = { ctx ->
-                                android.view.SurfaceView(ctx).apply {
-                                    holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                                            session?.surface = this@apply
-                                            session?.texture = null
-                                            nativeVideoView?.setSurface(holder.surface)
-                                            session?.nativeSurfaceBound(this@apply)
-                                        }
-                                        override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
-                                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
-                                            if (session?.surface === this@apply) nativeVideoView?.setSurface(null)
-                                        }
-                                    })
-                                    session?.surface = this
-                                }
-                            },
-                            update = { view ->
-                                session?.surface = view
-                                view.keepScreenOn = isActive && isForeground && activityVisible
-                            },
-                            onRelease = { view -> if (session?.surface === view) nativeVideoView?.setSurface(null) },
-                            modifier = Modifier.align(Alignment.Center).size(videoWidth, videoHeight)
-                                .alpha(if (showVideoSurface) 1f else 0f),
-                        )
-                    }
-                } else {
-                    AndroidView(
-                        factory = { ctx ->
-                            object : PlayerView(ctx) {
-                                override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
-                                    return false
-                                }
-                            }.apply {
-                                setEnableComposeSurfaceSyncWorkaround(true)
-                                (videoSurfaceView as? android.view.SurfaceView)?.let { outputView ->
-                                    session?.surface = outputView
-                                    session?.texture = null
-                                    outputView.holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                                            session?.outputReadiness?.bind(holder.surface, texture = false)
-                                        }
-                                        override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
-                                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {}
-                                    })
-                                }
-                                player = exoPlayer
-                                useController = false
-                                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                setKeepScreenOn(isActive && isForeground && activityVisible)
-                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            }
-                        },
-                        update = { view ->
-                            view.keepScreenOn = isActive && isForeground && activityVisible
-                            session?.surface = view.videoSurfaceView as? android.view.SurfaceView
-                            session?.texture = null
-                            if (view.player != exoPlayer) {
-                                view.player = exoPlayer
-                            }
-                        },
-                        onRelease = { view ->
-                            view.player = null
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(if (showVideoSurface) 1f else 0f)
-                    )
+            session?.let { playback ->
+                key(playback, nativeVideoView) {
+                    VideoOutputSurface(playback, videoRatio, rotatedOutput,
+                        isActive && isForeground && activityVisible,
+                        Modifier.fillMaxSize().alpha(if (showVideoSurface) 1f else 0f))
                 }
             }
             surfaceTransition.cover?.let { bitmap ->
                 Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize())
+                    modifier = Modifier.fillMaxSize().drawWithContent {
+                        drawContent()
+                        surfaceTransition.drawnCover = bitmap
+                    })
             }
         }
         dismissFrame?.let { bitmap ->

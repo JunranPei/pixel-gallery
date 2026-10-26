@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.pixel.gallery.R
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
+import com.pixel.gallery.ui.viewer.excludeViewerGestures
 
 /** Shared half-page selection surface for Label, Move/Copy and Quick Sort. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,12 +52,10 @@ fun SelectionBottomSheet(
         if (expanded || panel.fraction > 0f) expanded = false
         else if (confirmDismiss()) onDismiss()
     }
-    BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+    BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding()) {
         val navigationPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val collapsed = 68.dp + navigationPadding
-        val imeOpen = WindowInsets.ime.getBottom(density) > 0
-        val open = (if (imeOpen) maxHeight else maxHeight - 240.dp).coerceAtLeast(collapsed)
-        LaunchedEffect(imeOpen) { if (imeOpen) expanded = true }
+        val open = (maxHeight - 240.dp).coerceAtLeast(collapsed)
         val range = with(density) { (open - collapsed).toPx() }
         val threshold = with(density) { 600.dp.toPx() }
         val headerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -64,6 +63,7 @@ fun SelectionBottomSheet(
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .height(collapsed + (open - collapsed) * panel.fraction)
                 .graphicsLayer { translationY = pullOffset }
+                .excludeViewerGestures()
                 .pointerInput(Unit) {
                     // Own blank areas too; child controls still receive the complete gesture.
                     awaitPointerEventScope { while (true) awaitPointerEvent() }
@@ -105,6 +105,7 @@ fun SelectionBottomSheet(
                 if (panel.fraction > 0f || panel.dragging) {
                     Column(
                         Modifier.fillMaxWidth().weight(1f)
+                            .imePadding()
                             .padding(horizontal = 20.dp, vertical = 8.dp),
                         content = content,
                     )

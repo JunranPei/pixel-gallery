@@ -27,6 +27,7 @@ class ViewerRotationGesture internal constructor(private val touchSlop: Float, m
     internal var onProgress: (Float) -> Unit = {}
     internal var onFinish: (Int) -> Unit = {}
     internal var dismissGesture: ViewerDismissGesture? = null
+    internal var isObscured: (Float, Float) -> Boolean = { _, _ -> false }
     private val tracker = RotationGestureTracker(touchSlop, minimumSpan)
     private val areas = mutableMapOf<Any, Pair<LayoutCoordinates, Boolean>>()
     private var eligible = false
@@ -43,6 +44,7 @@ class ViewerRotationGesture internal constructor(private val touchSlop: Float, m
     }
     internal fun removeArea(key: Any) { areas.remove(key) }
     private fun inMedia(x: Float, y: Float): Boolean {
+        if (isObscured(x, y)) return false
         val point = Offset(x, y)
         var inside = false
         for ((coordinates, excluded) in areas.values) {
@@ -157,6 +159,7 @@ internal fun rememberViewerRotationGesture(
         ViewerRotationGesture(ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
             48f * context.resources.displayMetrics.density).apply {
             this.enabled = { currentEnabled && host?.hasWindowFocus() == true && !host.isInPictureInPictureMode && !host.isInMultiWindowMode }
+            this.isObscured = { x, y -> host?.viewerGestureExclusions?.contains(x, y) == true }
             this.onProgress = { currentProgress(it) }
             this.onFinish = { currentFinish(it) }
         }

@@ -1,0 +1,5 @@
+<resources>
+    <string name="diagnostics_export">Export diagnostics</string>
+    <string name="diagnostics_saved">Diagnostics saved</string>
+    <string name="diagnostics_failed">Could not save diagnostics</string>
+</resources>

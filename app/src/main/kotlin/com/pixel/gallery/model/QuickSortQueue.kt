@@ -72,9 +72,12 @@ data class QuickSortJob(
     val sessionClosed: Boolean = false,
     val sessionProcessId: String? = null,
 ) {
-    val completed: Int get() = items.count { it.status == QuickSortItemStatus.Succeeded }
-    val failed: Int get() = items.count { it.status == QuickSortItemStatus.Failed }
-    val resolved: Int get() = items.count { it.status == QuickSortItemStatus.Resolved }
+    @Transient private var completedCache: Int? = null
+    @Transient private var failedCache: Int? = null
+    @Transient private var resolvedCache: Int? = null
+    val completed: Int get() = completedCache ?: items.count { it.status == QuickSortItemStatus.Succeeded }.also { completedCache = it }
+    val failed: Int get() = failedCache ?: items.count { it.status == QuickSortItemStatus.Failed }.also { failedCache = it }
+    val resolved: Int get() = resolvedCache ?: items.count { it.status == QuickSortItemStatus.Resolved }.also { resolvedCache = it }
     val total: Int get() = items.size
     val isTerminal: Boolean get() = status == QuickSortJobStatus.Completed || status == QuickSortJobStatus.Cancelled
 }
@@ -129,14 +132,27 @@ data class QuickSortQueueState(
     val permissionRevision: Long = 0,
     val albumUses: List<QuickSortAlbumUse> = emptyList(),
 ) {
-    val reservedIds: Set<Long> get() = jobs.filterNot { it.isTerminal }.flatMap { it.items }
+    @Transient private var reservedCache: Set<Long>? = null
+    @Transient private var heldCache: QuickSortBatchHold? = null
+    @Transient private var receiptsCache: List<TransferReceipt>? = null
+    val reservedIds: Set<Long> get() = reservedCache ?: jobs.filterNot { it.isTerminal }.flatMap { it.items }
         .filter { it.status == QuickSortItemStatus.Queued || it.status == QuickSortItemStatus.Running }
-        .mapTo(mutableSetOf()) { it.entry.contentId }
+        .mapTo(mutableSetOf()) { it.entry.contentId }.also { reservedCache = it }
+    val heldItems: QuickSortBatchHold get() = heldCache ?: jobs.asSequence().filterNot { it.isTerminal }
+        .flatMap { it.items.asSequence() }.map { it.entry }.toList().let { entries ->
+            QuickSortBatchHold(entries.mapTo(mutableSetOf()) { it.contentId }, entries.mapTo(mutableSetOf()) { it.path })
+        }.also { heldCache = it }
+    val moveReceipts: List<TransferReceipt> get() = receiptsCache ?: jobs.flatMap { job ->
+        job.items.flatMap { listOfNotNull(it.replacementReceipt, it.receipt, it.replacementRestoreReceipt) }
+    }.also { receiptsCache = it }
     val isRunning: Boolean get() = jobs.any { it.status == QuickSortJobStatus.Running }
     val needsPermission: QuickSortJob? get() = jobs.firstOrNull { it.status == QuickSortJobStatus.NeedsPermission }
     val needsConflictDecision: QuickSortJob? get() = jobs.firstOrNull { it.status == QuickSortJobStatus.NeedsConflictDecision }
     val pendingCount: Int get() = reservedIds.size
 }
+
+/** A batch keeps the same visible pending cells until completion, including its finished files. */
+data class QuickSortBatchHold(val ids: Set<Long> = emptySet(), val paths: Set<String> = emptySet())
 
 /** Undo belongs to the current quick-sort session; reverse jobs are never undo candidates. */
 fun latestUndoableQuickSortJob(state: QuickSortQueueState, sessionId: String?): QuickSortJob? {
@@ -175,6 +191,7 @@ data class QuickSortPermissionRequest(val jobId: String, val token: String, val 
 
 data class QuickSortQueueJournal(
     val version: Int = 1,
+    val revision: Long = 0,
     val jobs: List<QuickSortJob> = emptyList(),
     val albumUses: List<QuickSortAlbumUse>? = emptyList(),
 )

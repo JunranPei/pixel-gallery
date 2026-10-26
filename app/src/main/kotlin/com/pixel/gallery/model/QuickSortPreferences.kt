@@ -4,4 +4,8 @@ package com.pixel.gallery.model
 data class QuickSortPreferences(
     val targets: List<TransferDestination> = emptyList(),
     val dockTop: Boolean = false,
+    val albumRows: Int = 2,
 )
+
+internal fun quickSortAlbumRows(requestedRows: Int, targetCount: Int): Int =
+    requestedRows.coerceIn(1, 4).coerceAtMost(targetCount.coerceAtLeast(1))

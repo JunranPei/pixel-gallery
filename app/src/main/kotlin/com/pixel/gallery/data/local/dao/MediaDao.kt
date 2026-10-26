@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.Flow
 interface MediaDao {
 
     // --- All Media ---
-    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 0")
+    // The value is an invalidation token, not a count. Avoid scanning tables on every commit.
+    @Query("SELECT EXISTS(SELECT 1 FROM media_entries)")
     fun observeAllEntriesChanges(): Flow<Int>
 
     @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId > :afterContentId ORDER BY contentId LIMIT :limit")
@@ -60,7 +61,7 @@ interface MediaDao {
     }
 
     // --- Favourites ---
-    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 0 AND contentId IN (SELECT contentId FROM media_labels WHERE labelId = 1)")
+    @Query("SELECT EXISTS(SELECT 1 FROM media_entries) + EXISTS(SELECT 1 FROM media_labels)")
     fun observeFavouritesChanges(): Flow<Int>
 
     @Query("SELECT * FROM media_entries WHERE isTrashed = 0 AND contentId > :afterContentId AND contentId IN (SELECT contentId FROM media_labels WHERE labelId = 1) ORDER BY contentId LIMIT :limit")
@@ -96,7 +97,7 @@ interface MediaDao {
     }
 
     // --- Trash ---
-    @Query("SELECT COUNT(*) FROM media_entries WHERE isTrashed = 1")
+    @Query("SELECT EXISTS(SELECT 1 FROM media_entries)")
     fun observeTrashChanges(): Flow<Int>
 
     @Query("SELECT * FROM media_entries WHERE isTrashed = 1 AND contentId > :afterContentId ORDER BY contentId LIMIT :limit")

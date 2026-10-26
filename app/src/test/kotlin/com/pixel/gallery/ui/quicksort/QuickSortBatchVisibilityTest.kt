@@ -49,4 +49,44 @@ class QuickSortBatchVisibilityTest {
         val result = quickSortGridPresentation(slots, slots, setOf("/source/1.jpg", "/source/2.jpg"))
         assertEquals(listOf(GridItem.Header("B", 2), GridItem.Photo(entry(3))), result.items)
     }
+
+    @Test fun `overview relocation survives queue trimming subsequent moves and undo`() {
+        val tracker = QuickSortBatchVisibility()
+        val first = item(1)
+        tracker.update(listOf(job("first", listOf(first))), "session")
+        val moved = tracker.relocatedEntries.getValue(1L to "/source/1.jpg")
+        assertEquals(101L, moved.contentId)
+        assertEquals("/target/1.jpg", moved.path)
+        val second = first.copy(entry = moved, receipt = first.receipt!!.copy(
+            sourceId = 101, sourceUri = moved.uri, sourcePath = moved.path,
+            targetId = 201, targetUri = "content://media/201", targetPath = "/next/1.jpg"))
+        val running = job("second", listOf(second), QuickSortJobStatus.Running)
+        tracker.update(listOf(running), "session")
+        assertEquals(moved, tracker.relocatedEntries.getValue(1L to "/source/1.jpg"))
+        tracker.update(listOf(running.copy(status = QuickSortJobStatus.Completed)), "session")
+        val twiceMoved = tracker.relocatedEntries.getValue(1L to "/source/1.jpg")
+        assertEquals(201L, twiceMoved.contentId)
+        assertEquals("/next/1.jpg", twiceMoved.path)
+        assertEquals(twiceMoved, tracker.relocatedEntries[101L to "/target/1.jpg"])
+        assertNull(tracker.relocatedEntries[90L to "/target/1.jpg"])
+        val reverse = second.copy(entry = twiceMoved, receipt = second.receipt!!.copy(
+            sourceId = 201, sourceUri = twiceMoved.uri, sourcePath = twiceMoved.path,
+            targetId = 301, targetUri = "content://media/301", targetPath = "/target/1.jpg"))
+        tracker.update(listOf(job("undo", listOf(reverse)).copy(undoOfJobId = "second")), "session")
+        val restored = tracker.relocatedEntries.getValue(1L to "/source/1.jpg")
+        assertEquals(301L, restored.contentId)
+        assertEquals("/target/1.jpg", restored.path)
+        val result = quickSortGridPresentation(listOf(GridItem.Photo(entry(1))), emptyList(),
+            retainMovedItems = true, relocatedEntries = tracker.relocatedEntries)
+        assertEquals(listOf(GridItem.Photo(restored)), result.items)
+        assertTrue(result.unavailableIds.isEmpty())
+    }
+
+    @Test fun `failed cancelled and foreign-session moves do not remap overview photos`() {
+        val tracker = QuickSortBatchVisibility()
+        tracker.update(listOf(job("failed", listOf(item(1, QuickSortItemStatus.Failed),
+            item(2, QuickSortItemStatus.Cancelled)))), "session")
+        tracker.update(listOf(job("foreign", listOf(item(3)))), "other")
+        assertTrue(tracker.relocatedEntries.isEmpty())
+    }
 }

@@ -82,7 +82,10 @@ class VideoPlaybackSession(
         player.addAnalyticsListener(object : AnalyticsListener {
             override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
                 // TextureView confirms latching in onSurfaceTextureUpdated instead.
-                if (!outputReadiness.texture) outputReadiness.rendered(output)
+                if (!outputReadiness.texture && outputReadiness.owns(output)) {
+                    outputReadiness.rendered(output)
+                    surface?.takeIf { it.holder.surface === output }?.let { confirmSurfaceBuffer(it) }
+                }
             }
         })
         player.addListener(object : Player.Listener {
@@ -133,18 +136,24 @@ class VideoPlaybackSession(
         val output = view.holder.surface
         outputReadiness.bind(output, texture = false)
         native?.refreshPausedFrame()
+        confirmSurfaceBuffer(view, nativeOutput = true)
+    }
+
+    private fun confirmSurfaceBuffer(view: SurfaceView, nativeOutput: Boolean = false) {
+        val output = view.holder.surface
+        val generation = outputReadiness.generation
         outputScope.launch {
-            // MediaPlayer has no per-output first-frame callback. Probe only this handoff,
-            // stopping as soon as a buffer exists; there is no steady-playback polling.
+            // Check the new surface only until a buffer exists, never during steady playback.
             repeat(12) {
-                if (!outputReadiness.owns(output) || released) return@launch
+                if (!outputReadiness.owns(output, generation) || released) return@launch
                 val copied = try {
                     withTimeoutOrNull(100) { captureVideoFrame(view, 1, 1) }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { null }
                 if (copied != null) {
                     copied.recycle()
-                    outputReadiness.rendered(output)
+                    outputReadiness.bufferAvailable(output, generation)
+                    if (nativeOutput && outputReadiness.owns(output, generation)) outputReadiness.rendered(output)
                     return@launch
                 }
                 delay(32)

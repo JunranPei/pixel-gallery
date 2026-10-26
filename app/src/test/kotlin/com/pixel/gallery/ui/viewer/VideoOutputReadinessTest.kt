@@ -15,6 +15,8 @@ class VideoOutputReadinessTest {
         readiness.rendered(texture)
         assertFalse(readiness.readyAfter(previous, false))
         readiness.rendered(surface)
+        assertFalse(readiness.readyAfter(previous, false))
+        readiness.bufferAvailable(surface, readiness.generation)
         assertTrue(readiness.readyAfter(previous, false))
     }
 
@@ -49,8 +51,48 @@ class VideoOutputReadinessTest {
         val output = Any()
         readiness.bind(output, false)
         readiness.rendered(output)
+        readiness.bufferAvailable(output, readiness.generation)
         readiness.bind(output, false)
         assertEquals(1, readiness.generation)
         assertTrue(readiness.readyAfter(0, false))
+    }
+
+    @Test fun bufferAloneDoesNotReplaceDecoderReadiness() {
+        val readiness = VideoOutputReadiness()
+        val output = Any()
+        readiness.bind(output, false)
+        readiness.bufferAvailable(output, readiness.generation)
+        assertFalse(readiness.readyAfter(0, false))
+        readiness.rendered(output)
+        assertTrue(readiness.readyAfter(0, false))
+    }
+
+    @Test fun destroyedOutputCannotUncoverOrAcceptALateProbe() {
+        val readiness = VideoOutputReadiness()
+        val output = Any()
+        readiness.bind(output, false)
+        val oldGeneration = readiness.generation
+        readiness.rendered(output)
+        readiness.unbind(output)
+        readiness.bufferAvailable(output, oldGeneration)
+        assertFalse(readiness.readyAfter(0, false))
+        readiness.bind(output, false)
+        readiness.rendered(output)
+        readiness.bufferAvailable(output, oldGeneration)
+        assertFalse(readiness.readyAfter(0, false))
+        readiness.bufferAvailable(output, readiness.generation)
+        assertTrue(readiness.readyAfter(oldGeneration, false))
+    }
+
+    @Test fun lateOldViewDestructionCannotInvalidateTheNewOutput() {
+        val readiness = VideoOutputReadiness()
+        val old = Any()
+        val current = Any()
+        readiness.bind(old, false)
+        val previous = readiness.generation
+        readiness.bind(current, true)
+        readiness.rendered(current)
+        readiness.unbind(old)
+        assertTrue(readiness.readyAfter(previous, true))
     }
 }

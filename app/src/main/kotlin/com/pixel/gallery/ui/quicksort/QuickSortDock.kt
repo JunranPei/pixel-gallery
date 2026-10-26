@@ -122,7 +122,8 @@ internal fun QuickSortDock(
         }
     }
 
-    val duplicateNames = previewTargets.groupingBy { it.displayName }.eachCount()
+    val rows = com.pixel.gallery.model.quickSortAlbumRows(config.albumRows, previewTargets.size)
+    val duplicateNames = remember(previewTargets) { previewTargets.groupingBy { it.displayName }.eachCount() }
     fun label(target: TransferDestination) =
         if ((duplicateNames[target.displayName] ?: 0) > 1)
             "${target.displayName} · ${quickSortPathSuffix(target, previewTargets)}"
@@ -141,7 +142,7 @@ internal fun QuickSortDock(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (previewTargets.size == 1) 68.dp else 132.dp)
+                .height((rows * 56 + (rows - 1) * 8 + 12).dp)
                 .onGloballyPositioned {
                     dockOrigin = it.positionInWindow()
                     gestures.dockBounds = it.boundsInWindow()
@@ -199,7 +200,7 @@ internal fun QuickSortDock(
                 ),
         ) {
             LazyHorizontalStaggeredGrid(
-                rows = StaggeredGridCells.Fixed(if (previewTargets.size == 1) 1 else 2),
+                rows = StaggeredGridCells.Fixed(rows),
                 state = scrollState,
                 reverseLayout = alignRight != isRtl,
                 modifier = Modifier.fillMaxSize(),

@@ -51,6 +51,7 @@ class SettingsRepository @Inject constructor(
     private val GLIDE_CACHE_SIZE = intPreferencesKey("glide_cache_size")
     private val QUICK_SORT_TARGETS = stringPreferencesKey("quick_sort_targets")
     private val QUICK_SORT_DOCK_TOP = booleanPreferencesKey("quick_sort_dock_top")
+    private val QUICK_SORT_ALBUM_ROWS = intPreferencesKey("quick_sort_album_rows")
 
     val quickSortPreferences: Flow<QuickSortPreferences> = context.dataStore.data.map { preferences ->
         val targets = runCatching {
@@ -58,7 +59,8 @@ class SettingsRepository @Inject constructor(
                 .orEmpty().filter { it.path.isNotBlank() && it.stableKey.isNotBlank() }
                 .distinctBy { it.stableKey }
         }.getOrDefault(emptyList())
-        QuickSortPreferences(targets, preferences[QUICK_SORT_DOCK_TOP] ?: false)
+        QuickSortPreferences(targets, preferences[QUICK_SORT_DOCK_TOP] ?: false,
+            (preferences[QUICK_SORT_ALBUM_ROWS] ?: 2).coerceIn(1, 4))
     }
 
     suspend fun setQuickSortTargets(targets: List<TransferDestination>) {
@@ -69,6 +71,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setQuickSortDockTop(top: Boolean) {
         context.dataStore.edit { it[QUICK_SORT_DOCK_TOP] = top }
+    }
+
+    suspend fun setQuickSortAlbumRows(rows: Int) {
+        context.dataStore.edit { it[QUICK_SORT_ALBUM_ROWS] = rows.coerceIn(1, 4) }
     }
 
     suspend fun remapAlbumPaths(

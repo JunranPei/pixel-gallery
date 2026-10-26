@@ -12,6 +12,15 @@ import java.text.SimpleDateFormat
 import java.time.Instant
 import java.util.Locale
 import java.util.TimeZone
+import com.pixel.gallery.data.repository.MediaReadRefreshCoordinator
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collect
 
 class MediaBrowseIndexTest {
     private val zone = TimeZone.getTimeZone("America/New_York")
@@ -22,6 +31,40 @@ class MediaBrowseIndexTest {
         media(4, "B/raw.dng", "image/dng", "2026-10-01T03:30:00Z"),
         media(5, "C/unknown", "application/octet-stream", "2026-09-30T22:30:00Z"),
     )
+
+    @Test fun transferBatchDoesNotRebuildTwentyThousandMediaForEachOfAThousandCommits() = runBlocking {
+        val gate = MediaReadRefreshCoordinator()
+        val database = MutableList(20_000) { index -> entries[0].copy(
+            contentId = index.toLong() + 1, uri = "content://media/${index + 1}", path = "/Pictures/Source/$index.jpg") }
+        val changes = MutableSharedFlow<Int>(replay = 1).apply { emit(0) }
+        val indexes = Channel<MediaBrowseIndex>(Channel.UNLIMITED)
+        var builds = 0
+        val collector = launch {
+            gate.refreshes(changes).collect {
+                builds++
+                indexes.send(MediaBrowseIndex.build(database.toList(), 3, PhotoSortOrder.DATE_DESC, zone))
+            }
+        }
+        try {
+            assertEquals(20_000, withTimeout(5000) { indexes.receive() }.library[MediaTypeFilter.ALL].media.photos.size)
+            val batch = gate.hold()
+            try {
+                repeat(1000) { index ->
+                    database[index] = database[index].copy(path = "/Pictures/Destination/$index.jpg")
+                    changes.emit(index + 1)
+                    repeat(3) { yield() }
+                }
+                assertEquals(1, builds)
+                gate.publish()
+                val finalIndex = withTimeout(5000) { indexes.receive() }
+                assertEquals(2, builds)
+                assertEquals(1000, finalIndex.album("/Pictures/Destination")[MediaTypeFilter.ALL].media.photos.size)
+                assertEquals(19_000, finalIndex.album("/Pictures/Source")[MediaTypeFilter.ALL].media.photos.size)
+                assertEquals(20_000, finalIndex.library[MediaTypeFilter.ALL].media.photos.map { it.contentId }.toSet().size)
+                println("BATCH_INDEX: media=20000; commits=1000; initial builds=1; intermediate builds=0; boundary builds=1")
+            } finally { batch.close() }
+        } finally { collector.cancelAndJoin() }
+    }
 
     @Test
     fun categorySwitchesReuseResultsAndMediaObjects() {

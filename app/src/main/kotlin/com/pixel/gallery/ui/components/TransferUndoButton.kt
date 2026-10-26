@@ -14,6 +14,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
+import com.pixel.gallery.ui.viewer.excludeViewerGestures
 
 @Composable
 internal fun TransferUndoButton(
@@ -32,6 +33,7 @@ internal fun TransferUndoButton(
         contentColor = if (enabled) MaterialTheme.colorScheme.onPrimaryContainer
             else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.padding(horizontal = 16.dp).size(56.dp)
+            .excludeViewerGestures()
             .semantics { if (!available) stateDescription = unavailableDescription }) {
         Box(contentAlignment = Alignment.Center) {
             Icon(if (available) Icons.AutoMirrored.Outlined.Undo else Icons.Outlined.HistoryToggleOff, description)

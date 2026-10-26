@@ -17,9 +17,12 @@ import com.pixel.gallery.model.QuickSortJobStatus
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 
 @AndroidEntryPoint
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class QuickSortService : Service() {
     @Inject lateinit var queue: QuickSortQueueRepository
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -40,7 +43,7 @@ class QuickSortService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0)
         scope.launch {
             var lastUpdate = 0L
-            queue.state.collectLatest { state ->
+            queue.state.sample(750L).flowOn(Dispatchers.Default).collectLatest { state ->
                 val job = state.jobs.firstOrNull { it.status == QuickSortJobStatus.Running }
                 if (job != null) {
                     val remaining = 750L - (System.currentTimeMillis() - lastUpdate)

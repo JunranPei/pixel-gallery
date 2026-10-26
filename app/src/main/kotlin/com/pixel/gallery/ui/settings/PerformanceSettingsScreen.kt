@@ -10,6 +10,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.res.stringResource
@@ -37,6 +43,15 @@ fun PerformanceSettingsScreen(
     val glideCacheSize by viewModel.glideCacheSize.collectAsState()
     val glidePersistentGridCacheSize by viewModel.glidePersistentGridCacheSize.collectAsState()
     var showClearCacheConfirm by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val exportDiagnostics = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) scope.launch {
+            val result = runCatching { withContext(Dispatchers.IO) {
+                com.pixel.gallery.utils.AppDiagnostics.export(context, uri)
+            } }
+            messages.show(context.getString(if (result.isSuccess) R.string.diagnostics_saved else R.string.diagnostics_failed))
+        }
+    }
 
     return GalleryPage(
         modifier = Modifier.navigationBarsPadding(),
@@ -128,6 +143,13 @@ fun PerformanceSettingsScreen(
                         icon = Icons.Outlined.DeleteSweep,
                         onClick = { showClearCacheConfirm = true },
                     )
+                }
+            }
+            item {
+                SettingsGroup(itemCount = 1) {
+                    SettingsClickItem(title = stringResource(R.string.diagnostics_export),
+                        icon = Icons.Outlined.FileDownload,
+                        onClick = { exportDiagnostics.launch("gallery-diagnostics.zip") })
                 }
             }
         }

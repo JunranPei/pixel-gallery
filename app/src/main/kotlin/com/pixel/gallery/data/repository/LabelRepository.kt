@@ -10,6 +10,7 @@ import com.pixel.gallery.model.isValidLabelName
 import com.pixel.gallery.model.normalizeLabelName
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.map
 
 class InvalidLabelNameException : IllegalArgumentException()
 class DuplicateLabelNameException : IllegalArgumentException()
@@ -19,10 +20,11 @@ class LabelMediaUnavailableException(message: String = "The selected media is no
 @Singleton
 class LabelRepository @Inject constructor(
     private val database: GalleryDatabase,
-    private val dao: LabelDao
+    private val dao: LabelDao,
+    private val readRefreshes: MediaReadRefreshCoordinator = MediaReadRefreshCoordinator(),
 ) {
     val labels = dao.observeLabels()
-    val memberships = dao.observeMemberships()
+    val memberships = readRefreshes.refreshes(dao.observeMembershipChanges()).map { dao.getMemberships() }
 
     suspend fun createLabel(name: String): Long = database.withTransaction {
         insertLabel(name, dao.getLabels())
@@ -68,7 +70,7 @@ class LabelRepository @Inject constructor(
             }
         }
         touched
-    }
+    }.also { readRefreshes.publish() }
 
     private suspend fun insertLabel(name: String, current: List<LabelEntry>): Long {
         validateName(name, current)
