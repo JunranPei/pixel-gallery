@@ -1155,7 +1155,7 @@ internal fun ViewerScreen(
                     val rawRatio = if (media.width > 0 && media.height > 0) media.width.toFloat() / media.height else 1f
                     val displayRatio = if (media.sourceRotationDegrees % 180 != 0) 1f / rawRatio else rawRatio
                     RotatingMediaLayer(contentRotation.takeIf { pagerState.settledPage == page }, displayRatio,
-                        Modifier.fillMaxSize()) {
+                        Modifier.fillMaxSize(), nativeImage = !isGif) {
                     key(rememberImageZoom, if (rememberImageZoom) null else imageVisit) {
                     val pageImageTransforms = if (rememberImageZoom) imageTransforms else remember { ViewerTransformStateStore() }
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -1244,6 +1244,8 @@ internal fun ViewerScreen(
                             }
                         }
 
+                        RotatingMediaLayer(contentRotation.takeIf { !isGif && pagerState.settledPage == page },
+                            displayRatio, Modifier.fillMaxSize()) {
                         GlideImage(
                             model = swipeThumbnailModel,
                             contentDescription = null,
@@ -1253,6 +1255,7 @@ internal fun ViewerScreen(
                             contentScale = ContentScale.Fit,
                             requestBuilderTransform = swipeThumbnailTransform
                         )
+                        }
 
                         if (isGif) {
                             val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {

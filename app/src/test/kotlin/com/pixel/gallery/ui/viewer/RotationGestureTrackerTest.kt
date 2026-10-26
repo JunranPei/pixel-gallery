@@ -8,6 +8,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RotationGestureTrackerTest {
+    @Test fun rotatedTouchCoordinatesRoundTripAtEveryOrientation() {
+        for (angle in listOf(0, 45, 90, 180, 270)) {
+            val geometry = RotationLayerGeometry().apply {
+                viewportWidth = 1080f
+                viewportHeight = 2400f
+                childWidth = if (angle % 180 == 90) 2400f else 1080f
+                childHeight = if (angle % 180 == 90) 1080f else 2400f
+                aspectRatio = 4f / 3f
+                rotation = ViewerContentRotation(angle, kotlinx.coroutines.CoroutineScope(kotlin.coroutines.EmptyCoroutineContext))
+            }
+            for (point in listOf(androidx.compose.ui.geometry.Offset(100f, 300f), androidx.compose.ui.geometry.Offset(700f, 900f))) {
+                val screen = geometry.map(androidx.compose.ui.geometry.Rect(point, point)).topLeft
+                val restored = geometry.unmap(screen)
+                assertEquals(point.x, restored.x, .001f)
+                assertEquals(point.y, restored.y, .001f)
+            }
+        }
+    }
+
+    @Test fun quarterTurnKeepsRenderedPixelScaleAtAllZoomLevels() {
+        for (zoom in listOf(.65f, 1.2f, 3f)) {
+            val before = zoom * (1080f / 2048f) * rotationFitScale(1080f, 2400f, 1080f, 2400f, 4f / 3f, 90f)
+            val after = zoom * (1080f / 1536f) * rotationFitScale(1080f, 2400f, 2400f, 1080f, 4f / 3f, 90f)
+            assertEquals(before, after, .001f)
+        }
+    }
     private fun pair(degrees: Float, radius: Float = 100f, x: Float = 0f): Pair<RotationPointer, RotationPointer> {
         val angle = Math.toRadians(degrees.toDouble())
         val dx = cos(angle).toFloat() * radius

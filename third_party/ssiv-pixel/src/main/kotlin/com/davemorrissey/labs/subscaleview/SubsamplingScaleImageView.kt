@@ -437,7 +437,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             val newFit = min(w / sWidth().toFloat(), h / sHeight().toFloat())
             // Fit stays fit across a screen rotation. Deep zoom keeps its actual
             // pixel scale and source centre, reusing the same decoder and tiles.
-            pendingScale = if (oldFit > 0f && scale <= oldFit * 1.02f && abs(imageRotation) < 0.001) {
+            pendingScale = if (oldFit > 0f && (preserveRelativeScaleOnResize ||
+                    scale <= oldFit * 1.02f && abs(imageRotation) < 0.001)) {
                 newFit * (scale / oldFit)
             } else scale
             sPendingCenter = sCenter
@@ -469,7 +470,24 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         setMeasuredDimension(width, height)
     }
 
+    var preserveRelativeScaleOnResize = false
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            detector?.onTouchEvent(event)
+            singleDetector?.onTouchEvent(event)
+            isZooming = false
+            isPanning = false
+            isQuickScaling = false
+            maxTouchCount = 0
+            ignoreTouches = false
+            didZoomInGesture = false
+            didRotateInGesture = false
+            preventRotatingInGesture = false
+            anim = null
+            scheduleStableTileRefresh()
+            return true
+        }
         if (anim?.interruptible == false || ignoreTouches) {
             if (event.actionMasked == MotionEvent.ACTION_UP) {
                 isZooming = false
@@ -478,6 +496,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             ignoreTouches = true
             parent?.requestDisallowInterceptTouchEvent(true)
             if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                maxTouchCount = 0
+                isPanning = false
+                isQuickScaling = false
+                didZoomInGesture = false
+                didRotateInGesture = false
+                preventRotatingInGesture = false
                 onImageEventListener?.onUpEvent()
                 ignoreTouches = false
             }
@@ -915,6 +939,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (!checkReady()) {
             return
         }
+        if (pendingScale != null && sPendingCenter != null) preDraw()
         val diagnosticsDrawStartedAt = if (diagnosticsListener != null) {
             SystemClock.elapsedRealtimeNanos()
         } else {

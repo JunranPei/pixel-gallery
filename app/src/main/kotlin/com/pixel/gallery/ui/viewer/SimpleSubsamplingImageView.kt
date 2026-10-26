@@ -498,6 +498,9 @@ internal fun SimpleSubsamplingImageView(
     onClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val rotationGeometry = LocalRotationLayerGeometry.current?.takeIf { it.nativeImage }
+    val rotationBusy = rotationGeometry?.rotation?.busy == true
+    var touchGeneration by remember { mutableIntStateOf(0) }
     val imagePath = remember(filePath, uri) {
         val file = File(filePath)
         if (filePath.isNotEmpty() && file.exists() && file.isFile) {
@@ -775,7 +778,9 @@ internal fun SimpleSubsamplingImageView(
         subsamplingReady,
         previewGestureInProgress,
         previewPointerStrokeActive,
+        rotationBusy,
     ) {
+        if (rotationBusy) return@LaunchedEffect
         if (!canHandoffPreviewToTiles(
                 ssivBaseDrawn = ssivBaseDrawn,
                 isActivePage = isActivePage,
@@ -1183,12 +1188,14 @@ internal fun SimpleSubsamplingImageView(
         }
     }
     BoxWithConstraints(modifier = modifier) {
+        val logicalWidth = rotationGeometry?.childWidth?.toInt() ?: constraints.maxWidth
+        val logicalHeight = rotationGeometry?.childHeight?.toInt() ?: constraints.maxHeight
         val normalizedOrientation = ((orientationDegrees % 360) + 360) % 360
         val swapped = normalizedOrientation == 90 || normalizedOrientation == 270
         val orientedWidth = (if (swapped) sourceHeight else sourceWidth).coerceAtLeast(1)
         val orientedHeight = (if (swapped) sourceWidth else sourceHeight).coerceAtLeast(1)
-        val containerWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
-        val containerHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val containerWidth = logicalWidth.toFloat().coerceAtLeast(1f)
+        val containerHeight = logicalHeight.toFloat().coerceAtLeast(1f)
         val previewFitScale = minOf(
             containerWidth / orientedWidth,
             containerHeight / orientedHeight,
@@ -1201,6 +1208,7 @@ internal fun SimpleSubsamplingImageView(
 
         ZoomableContainer(
             modifier = Modifier.fillMaxSize(),
+            coordinateGeometry = rotationGeometry,
             diagnosticsKey = if (ViewerLoadMetrics.isEnabled) transformStateKey else "",
             minScale = previewMinScale,
             maxScale = previewMaxScale,
@@ -1291,8 +1299,8 @@ internal fun SimpleSubsamplingImageView(
                         userScale = scale,
                         offsetX = offsetX,
                         offsetY = offsetY,
-                        viewWidth = constraints.maxWidth,
-                        viewHeight = constraints.maxHeight,
+                        viewWidth = logicalWidth,
+                        viewHeight = logicalHeight,
                         sourceWidth = sourceWidth,
                         sourceHeight = sourceHeight,
                         orientationDegrees = normalizedOrientation,
@@ -1311,7 +1319,9 @@ internal fun SimpleSubsamplingImageView(
                 "previewVisible=$isPreviewVisible active=$isActivePage decoder=$regionDecoderKind",
                 imageKey = transformStateKey,
             )
-            val frameLayout = android.widget.FrameLayout(ctx)
+            val host = RotatingImageHost(ctx)
+            host.updateGeometry(rotationGeometry)
+            val frameLayout = host.content
             val imageView = android.widget.ImageView(ctx).apply {
                 layoutParams = android.widget.FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1325,6 +1335,10 @@ internal fun SimpleSubsamplingImageView(
                     // tiles behind the preview. A transparent View still receives touches,
                     // though, and must not mutate its fit-scale state before the atomic handoff.
                     if (!isEnabled) return false
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_CANCEL) touchGeneration++
+                    if (event.actionMasked == MotionEvent.ACTION_CANCEL) snapshotViewState()?.let {
+                        transformStateStore.save(transformStateKey, it, "touch-cancel")
+                    }
                     return super.onTouchEvent(event)
                 }
             }.apply ssivView@ {
@@ -1348,8 +1362,7 @@ internal fun SimpleSubsamplingImageView(
                 taskExecutor = tileDecodeExecutor
                 cacheTaskExecutor = tileCacheWriteExecutor
                 setActiveTileMemoryCache(isActivePage)
-                // Two-finger rotation belongs to the viewer's release-to-rotate
-                // screen gesture, never to continuous bitmap/tile rotation.
+                // The native host owns content rotation and touch-coordinate mapping.
                 rotationEnabled = false
                 doubleTapReturnsToFit = true
                 // Direct fit-preview gestures already clamp at their configured minimum.
@@ -1464,6 +1477,7 @@ internal fun SimpleSubsamplingImageView(
                             transformStateStore.save(transformStateKey, it, "touch-up-immediate")
                         }
                         val saveGeneration = imageSessionGeneration
+                        val saveTouchGeneration = touchGeneration
                         ViewerLoadMetrics.event(
                             "SSIV_TOUCH_UP",
                             "immediateScale=${immediateState?.scale ?: -1f} " +
@@ -1474,7 +1488,8 @@ internal fun SimpleSubsamplingImageView(
                         // SSIV may spend 200 ms snapping scale/rotation to bounds after
                         // the fingers lift. Save once after that animation, never per frame.
                         this@ssivView.postDelayed({
-                            if (saveGeneration != imageSessionGeneration || !imageAssigned) {
+                            if (saveGeneration != imageSessionGeneration || !imageAssigned ||
+                                saveTouchGeneration != touchGeneration || rotationGeometry?.rotation?.busy == true) {
                                 ViewerLoadMetrics.event(
                                     "SSIV_TOUCH_SETTLED_SKIPPED",
                                     "savedGeneration=$saveGeneration currentGeneration=$imageSessionGeneration " +
@@ -1566,9 +1581,10 @@ internal fun SimpleSubsamplingImageView(
             frameLayout.addView(ssiv)
             imageViewRef = imageView
             ssivView = ssiv
-            frameLayout
+            host
         },
         update = {
+            it.updateGeometry(rotationGeometry)
             ssivView?.let { view ->
                 view.isEnabled = canTilesReceiveInput(
                     isActivePage = isActivePage,
@@ -1633,9 +1649,14 @@ internal fun SimpleSubsamplingImageView(
                         }
                         imageView.visibility = View.VISIBLE
                     }
+                } else if (layer == "TILES" && rotationBusy && imageView.drawable != null) {
+                    // Retain the existing preview behind tiles exposed by the rotating viewport.
+                    applySavedPreviewTransform(imageView, imageView.drawable, ssivView?.snapshotViewState())
+                    imageView.alpha = 1f
+                    imageView.visibility = View.VISIBLE
                 } else {
                     imageView.alpha = 0f
-                    imageView.visibility = View.GONE
+                    imageView.visibility = View.INVISIBLE
                 }
             }
         }

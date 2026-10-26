@@ -35,6 +35,7 @@ import kotlin.coroutines.resume
 
 /** Self-contained instrumentation; no production media or production queue is submitted for mutation. */
 class QuickSortSafetyInstrumentation : Instrumentation() {
+    private var imageRotationAudit = false
     private var bulkTransferSuite = false
     private var videoHandoffSuite = false
     private var bulkToken: String? = null
@@ -69,6 +70,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var labelBackupEdgeFilter: String? = null
     private var labelBackupCleanupToken: String? = null
     override fun onCreate(arguments: Bundle?) {
+        imageRotationAudit = arguments?.getString("suite") == "image-rotation-audit"
         bulkTransferSuite = arguments?.getString("suite") == "bulk-transfer"
         videoHandoffSuite = arguments?.getString("suite") == "video-handoff"
         bulkToken = arguments?.getString("bulkToken")
@@ -110,6 +112,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                imageRotationAudit -> ImageRotationAudit(this).exercise()
                 bulkTransferSuite -> BulkTransferDeviceChecks(this, bulkToken).exercise()
                 videoHandoffSuite -> VideoHandoffDeviceChecks(this).exercise()
                 labelMultiSelectionSuite -> LabelMultiSelectionChecks(targetContext).exercise()

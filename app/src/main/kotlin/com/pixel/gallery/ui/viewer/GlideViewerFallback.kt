@@ -30,6 +30,7 @@ internal fun GlideViewerFallback(
     transformStateStore: ViewerTransformStateStore? = null,
     onClick: () -> Unit = {}
 ) {
+    val rotationGeometry = LocalRotationLayerGeometry.current?.takeIf { it.nativeImage }
     val memoryKey = "fallback:$imagePath:$dateModifiedMillis"
     val initialTransform = remember(memoryKey, transformStateStore) { transformStateStore?.get(memoryKey) }
     var lastTransform by remember(memoryKey, transformStateStore) { mutableStateOf(initialTransform) }
@@ -38,8 +39,8 @@ internal fun GlideViewerFallback(
         onDispose { lastTransform?.let { transformStateStore?.save(memoryKey, it, "composition-dispose") } }
     }
     BoxWithConstraints(modifier = modifier) {
-        val containerWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
-        val containerHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val containerWidth = (rotationGeometry?.childWidth ?: constraints.maxWidth.toFloat()).coerceAtLeast(1f)
+        val containerHeight = (rotationGeometry?.childHeight ?: constraints.maxHeight.toFloat()).coerceAtLeast(1f)
         val swapped = orientationDegrees == 90 || orientationDegrees == 270
         val imageWidth = (if (width > 0 && height > 0) { if (swapped) height else width }
             else decodedSize.width).toFloat().coerceAtLeast(1f)
@@ -105,6 +106,8 @@ internal fun GlideViewerFallback(
 
         ZoomableContainer(
             modifier = Modifier.fillMaxSize(),
+            coordinateGeometry = rotationGeometry,
+            autoApplyTransformations = false,
             minScale = minScale,
             maxScale = maxScale,
             scaleToOriginal = scaleToOriginal,
@@ -116,6 +119,14 @@ internal fun GlideViewerFallback(
             imageFitScaleX = fitWidthFraction,
             imageFitScaleY = fitHeightFraction,
             onTap = onClick,
+            onTransformFrame = { scale, x, y ->
+                imageView?.let { view ->
+                    view.scaleX = scale
+                    view.scaleY = scale
+                    view.translationX = x
+                    view.translationY = y
+                }
+            },
             onTransformChanged = { scale, x, y ->
                 val actualScale = scale * fitScale
                 val state = com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.ViewState(
@@ -128,16 +139,25 @@ internal fun GlideViewerFallback(
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context ->
-                    ImageView(context).apply {
+                    val host = RotatingImageHost(context)
+                    host.updateGeometry(rotationGeometry)
+                    host.content.addView(ImageView(context).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         scaleType = ImageView.ScaleType.FIT_CENTER
                         imageView = this
-                    }
+                        scaleX = initialTransform?.let {
+                            if (it.scale <= it.baseFitScale * 1.02f) it.scale / it.baseFitScale else it.scale / fitScale
+                        } ?: 1f
+                        scaleY = scaleX
+                        translationX = initialTransform?.let { (it.sourceWidth / 2f - it.sourceCenter.x) * it.scale } ?: 0f
+                        translationY = initialTransform?.let { (it.sourceHeight / 2f - it.sourceCenter.y) * it.scale } ?: 0f
+                    })
+                    host
                 },
-                update = { imageView = it }
+                update = { it.updateGeometry(rotationGeometry) }
             )
         }
     }

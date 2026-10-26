@@ -3,6 +3,7 @@ package com.pixel.gallery.ui.viewer
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -67,15 +68,27 @@ internal class ViewerContentRotation(initialDegrees: Int, private val scope: Cor
 }
 
 internal class RotationLayerGeometry {
-    var viewportWidth = 0f
-    var viewportHeight = 0f
-    var childWidth = 0f
-    var childHeight = 0f
+    var nativeImage = false
+    var viewportWidth by mutableFloatStateOf(0f)
+    var viewportHeight by mutableFloatStateOf(0f)
+    var childWidth by mutableFloatStateOf(0f)
+    var childHeight by mutableFloatStateOf(0f)
     var aspectRatio = 1f
     var rotation: ViewerContentRotation? = null
 
     fun scale(): Float = rotationFitScale(viewportWidth, viewportHeight, childWidth, childHeight,
         aspectRatio, rotation?.degrees ?: 0f)
+
+    fun unmap(point: Offset, vector: Boolean = false): Offset {
+        val radians = Math.toRadians((rotation?.degrees ?: 0f).toDouble())
+        val c = cos(radians).toFloat()
+        val s = sin(radians).toFloat()
+        val x = point.x - if (vector) 0f else viewportWidth / 2f
+        val y = point.y - if (vector) 0f else viewportHeight / 2f
+        val scale = scale().coerceAtLeast(0.0001f)
+        return Offset((x * c + y * s) / scale + if (vector) 0f else childWidth / 2f,
+            (-x * s + y * c) / scale + if (vector) 0f else childHeight / 2f)
+    }
 
     fun map(rect: Rect): Rect {
         val radians = Math.toRadians((rotation?.degrees ?: 0f).toDouble())
@@ -109,11 +122,22 @@ internal val LocalRotationLayerGeometry = staticCompositionLocalOf<RotationLayer
 
 @Composable
 internal fun RotatingMediaLayer(rotation: ViewerContentRotation?, aspectRatio: Float,
-    modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    modifier: Modifier = Modifier, nativeImage: Boolean = false, content: @Composable () -> Unit) {
     val geometry = remember { RotationLayerGeometry() }
     geometry.rotation = rotation
+    geometry.nativeImage = nativeImage
     geometry.aspectRatio = aspectRatio.takeIf { it.isFinite() && it > 0f } ?: 1f
     val swap = (rotation?.settledDegrees ?: 0) % 180 != 0
+    if (nativeImage) {
+        BoxWithConstraints(modifier) {
+            geometry.viewportWidth = constraints.maxWidth.toFloat()
+            geometry.viewportHeight = constraints.maxHeight.toFloat()
+            geometry.childWidth = if (swap) geometry.viewportHeight else geometry.viewportWidth
+            geometry.childHeight = if (swap) geometry.viewportWidth else geometry.viewportHeight
+            CompositionLocalProvider(LocalRotationLayerGeometry provides geometry) { content() }
+        }
+        return
+    }
     Layout(modifier = modifier, content = {
         CompositionLocalProvider(LocalRotationLayerGeometry provides geometry) {
             Box(Modifier.fillMaxSize().graphicsLayer {

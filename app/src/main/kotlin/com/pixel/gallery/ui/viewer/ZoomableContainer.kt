@@ -58,8 +58,9 @@ internal fun previewScaleAfterResize(userScale: Float, oldOriginalScale: Float, 
  * It only reports (scale, offsetX, offsetY) via [onTransformChanged].
  */
 @Composable
-fun ZoomableContainer(
+internal fun ZoomableContainer(
     modifier: Modifier = Modifier,
+    coordinateGeometry: RotationLayerGeometry? = null,
     diagnosticsKey: String = "",
     minScale: Float = 0.333f,
     maxScale: Float = 3.0f,
@@ -85,7 +86,8 @@ fun ZoomableContainer(
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var containerSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
+    var actualSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
+    val containerSize = coordinateGeometry?.let { IntSize(it.childWidth.toInt(), it.childHeight.toInt()) } ?: actualSize
 
     // Ensure minScale <= maxScale to prevent coerceIn crashes
     val safeMinScale = minOf(minScale, maxScale)
@@ -151,6 +153,17 @@ fun ZoomableContainer(
         }
     }
 
+    LaunchedEffect(coordinateGeometry?.rotation?.busy) {
+        if (coordinateGeometry?.rotation?.busy != true) return@LaunchedEffect
+        animationJob?.cancelAndJoin()
+        animationJob = null
+        gestureScale = renderScale
+        gestureOffsetX = renderOffsetX
+        gestureOffsetY = renderOffsetY
+        onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
+        endZoomLifecycle()
+    }
+
     // SSIV can return ownership after a zoomed image has been shrunk back to fit or
     // below-fit. Synchronise both of this container's state representations while its
     // child layers are still hidden, then let the caller reveal the preview atomically.
@@ -196,10 +209,14 @@ fun ZoomableContainer(
     }
 
     var previousViewport by remember(diagnosticsKey) { mutableStateOf<Pair<IntSize, Float>?>(null) }
+    var previousActualSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
     LaunchedEffect(containerSize, scaleToOriginal, enabled) {
         if (containerSize == IntSize.Zero) return@LaunchedEffect
         val geometry = containerSize to scaleToOriginal
         val old = previousViewport
+        val viewportSize = coordinateGeometry?.let { IntSize(it.viewportWidth.toInt(), it.viewportHeight.toInt()) } ?: actualSize
+        val contentTurn = coordinateGeometry != null && previousActualSize == viewportSize
+        previousActualSize = viewportSize
         previousViewport = geometry
         if (!enabled || old == null || old == geometry) return@LaunchedEffect
         // Resizing changes fit scale, not the source-pixel scale of a zoomed image.
@@ -207,9 +224,10 @@ fun ZoomableContainer(
         val runningAnimation = animationJob
         runningAnimation?.cancelAndJoin()
         if (animationJob === runningAnimation) animationJob = null
-        val resizedScale = previewScaleAfterResize(renderScale, old.second, scaleToOriginal)
+        val resizedScale = (if (contentTurn) renderScale else previewScaleAfterResize(renderScale, old.second, scaleToOriginal))
             .coerceIn(safeMinScale, safeMaxScale)
-        val (x, y) = clampOffset(resizedScale, renderOffsetX, renderOffsetY)
+        val offsetRatio = if (contentTurn && scaleToOriginal > 0f) old.second / scaleToOriginal else 1f
+        val (x, y) = clampOffset(resizedScale, renderOffsetX * offsetRatio, renderOffsetY * offsetRatio)
         gestureScale = resizedScale
         gestureOffsetX = x
         gestureOffsetY = y
@@ -222,7 +240,7 @@ fun ZoomableContainer(
         modifier = modifier
             .clipToBounds()
             .onSizeChanged {
-                containerSize = it
+                actualSize = it
                 trace(
                     "ZOOM_PREVIEW_SIZE",
                     "container=${it.width}x${it.height} fit=$imageFitScaleX,$imageFitScaleY " +
@@ -237,7 +255,8 @@ fun ZoomableContainer(
                         doubleTapZoomedIntent = abs(renderScale - 1f) > 0.01f
                         onTap()
                     },
-                    onDoubleTap = { tapPosition ->
+                    onDoubleTap = { position ->
+                        val tapPosition = coordinateGeometry?.unmap(position) ?: position
                         // Reverse the previous logical target, but animate from the
                         // transform that is actually visible at this instant.
                         val currentScale = renderScale
@@ -394,8 +413,10 @@ fun ZoomableContainer(
                         }
 
                         val zoomChange = event.calculateZoom()
-                        val panChange = event.calculatePan()
-                        val centroid = event.calculateCentroid(useCurrent = false)
+                        val rawPan = event.calculatePan()
+                        val rawCentroid = event.calculateCentroid(useCurrent = false)
+                        val panChange = coordinateGeometry?.unmap(rawPan, vector = true) ?: rawPan
+                        val centroid = coordinateGeometry?.unmap(rawCentroid) ?: rawCentroid
 
                         if (!pastTouchSlop) {
                             accumulatedZoom *= zoomChange
@@ -548,6 +569,10 @@ fun ZoomableContainer(
                     )
                     } finally {
                         onPointerStrokeActiveChanged(false)
+                        if (animationJob?.isActive != true) {
+                            onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
+                            endZoomLifecycle()
+                        }
                     }
                 }
             }
