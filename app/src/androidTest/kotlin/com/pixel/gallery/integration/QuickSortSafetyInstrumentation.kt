@@ -38,6 +38,10 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var imageRotationAudit = false
     private var bulkTransferSuite = false
     private var videoHandoffSuite = false
+    private var videoReturnSuite = false
+    private var videoPipSuite = false
+    private var pipFixed = false
+    private var pipMediaId = "1047"
     private var bulkToken: String? = null
     private var mediaTypeSuite = false
     private var mediaPerformanceSuite = false
@@ -73,6 +77,10 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         imageRotationAudit = arguments?.getString("suite") == "image-rotation-audit"
         bulkTransferSuite = arguments?.getString("suite") == "bulk-transfer"
         videoHandoffSuite = arguments?.getString("suite") == "video-handoff"
+        videoReturnSuite = arguments?.getString("suite") == "video-return"
+        videoPipSuite = arguments?.getString("suite") == "video-pip"
+        pipFixed = arguments?.getString("pipFixed") == "true"
+        pipMediaId = arguments?.getString("pipMediaId") ?: "1047"
         bulkToken = arguments?.getString("bulkToken")
         mediaTypeSuite = arguments?.getString("suite") == "media-types"
         mediaPerformanceSuite = arguments?.getString("suite") == "media-performance"
@@ -115,6 +123,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 imageRotationAudit -> ImageRotationAudit(this).exercise()
                 bulkTransferSuite -> BulkTransferDeviceChecks(this, bulkToken).exercise()
                 videoHandoffSuite -> VideoHandoffDeviceChecks(this).exercise()
+                videoReturnSuite -> VideoReturnDeviceChecks(this).exercise()
+                videoPipSuite -> VideoPipDeviceChecks(this, pipFixed, pipMediaId).exercise()
                 labelMultiSelectionSuite -> LabelMultiSelectionChecks(targetContext).exercise()
                 albumSelectionSuite -> AlbumSelectionChecks(this).exercise()
                 albumRenameSuite -> AlbumRenameChecks(targetContext).exercise()

@@ -80,7 +80,7 @@ class PhotosViewModel @Inject constructor(
 
     // Wait for saved visibility before publishing media; an empty placeholder
     // could briefly expose hidden files while preferences are loading.
-    private val hiddenFolders: Flow<Set<String>> = settingsRepository.hiddenFolders
+    private val hiddenFolders: StateFlow<Set<String>> = settingsRepository.hiddenFolders
 
     val photoSortOrder: StateFlow<PhotoSortOrder> = settingsRepository.photoSortOrder
         .map { runCatching { PhotoSortOrder.valueOf(it) }.getOrDefault(PhotoSortOrder.DATE_DESC) }
@@ -106,6 +106,36 @@ class PhotosViewModel @Inject constructor(
 
     val photos: StateFlow<List<MediaEntry>> = orderedMedia.map { it.entries }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * Detail pages must not use the lifecycle-gated grid stream. That stream is
+     * intentionally cleared while an Activity is paused, but a retained viewer
+     * needs its ordered sequence on the first frame after Activity recreation.
+     * The repository stream is process-scoped and keeps the last MediaStore
+     * snapshot without retaining decoded image data.
+     */
+    private fun initialViewerPhotos(): List<MediaEntry> = repository.cachedViewerMediaSnapshot(
+        sortKey = photoSortOrder.value.name,
+        hiddenFolders = hiddenFolders.value,
+    ).orEmpty()
+
+    val viewerPhotos: StateFlow<List<MediaEntry>> = combine(
+        allPhotos,
+        hiddenFolders,
+        photoSortOrder,
+    ) { all, hidden, sort ->
+        val visible = all.filter { entry -> hidden.none { entry.path.isInsideMediaFolder(it) } }
+        val ordered = if (sort == PhotoSortOrder.DATE_DESC) visible else sortMedia(visible, sort)
+        MediaRepository.ViewerMediaSnapshot(ordered, sort.name, hidden)
+    }
+        .flowOn(Dispatchers.Default)
+        .onEach(repository::cacheViewerMediaSnapshot)
+        .map { it.entries }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, initialViewerPhotos())
+
+    val viewerFavourites: StateFlow<List<MediaEntry>> = repository.favourites
+    val viewerTrash: StateFlow<List<MediaEntry>> = repository.trash
+    val viewerVault: StateFlow<List<MediaEntry>> = repository.vaultEntries
 
     // Hidden browsing uses the original records without exposing them to normal
     // library, label, favourite or transfer-destination lists.

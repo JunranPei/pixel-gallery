@@ -30,16 +30,37 @@ internal fun Activity.visibleViewerOrientation(): Int {
     }
 }
 
-internal fun rememberedImageTransforms(repository: VideoSettingsRepository, previous: ViewerTransformStateStore) =
+internal fun rememberedImageTransforms(
+    repository: VideoSettingsRepository,
+    previous: ViewerTransformStateStore,
+    shouldPersist: () -> Boolean,
+) =
     ViewerTransformStateStore(
         readSaved = { key ->
-            repository.zoom(false, key)?.takeIf { it.sourceWidth > 0 && it.sourceHeight > 0 && it.baseFitScale > 0 }?.let {
-                SubsamplingScaleImageView.ViewState(it.scale, it.baseFitScale, PointF(it.centerX, it.centerY),
-                    it.sourceWidth, it.sourceHeight, 0.0)
-            } ?: previous.get(key)
+            val inSession = previous.get(key)
+            if (shouldPersist()) {
+                repository.zoom(false, key)?.takeIf {
+                    it.sourceWidth > 0 && it.sourceHeight > 0 && it.baseFitScale > 0
+                }?.let {
+                    SubsamplingScaleImageView.ViewState(
+                        it.scale, it.baseFitScale, PointF(it.centerX, it.centerY),
+                        it.sourceWidth, it.sourceHeight, 0.0,
+                    )
+                } ?: inSession
+            } else {
+                inSession
+            }
         },
         writeSaved = { key, state ->
-            repository.saveZoom(false, key, SavedViewerZoom(state.scale, state.sourceCenter.x, state.sourceCenter.y,
-                state.baseFitScale, state.sourceWidth, state.sourceHeight))
+            if (shouldPersist()) {
+                repository.saveZoom(
+                    false,
+                    key,
+                    SavedViewerZoom(
+                        state.scale, state.sourceCenter.x, state.sourceCenter.y,
+                        state.baseFitScale, state.sourceWidth, state.sourceHeight,
+                    ),
+                )
+            }
         },
     )

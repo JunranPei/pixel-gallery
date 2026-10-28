@@ -30,10 +30,13 @@ internal fun VideoZoomMemory(
 ) {
     val host = LocalContext.current as? android.app.Activity
     val rememberZoom = settings?.rememberView
+    val currentRememberZoom by rememberUpdatedState(rememberZoom)
     var restored by remember(source) { mutableStateOf(false) }
     val currentViewport by rememberUpdatedState(viewport)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(source, active, rememberZoom, viewport != IntSize.Zero) {
+    // A settings toggle changes the policy for future entries/checkpoints. Do not
+    // replay or reset the transform of a video that is already on screen.
+    LaunchedEffect(source, active, rememberZoom != null, viewport != IntSize.Zero) {
         if (!active || rememberZoom == null || viewport == IntSize.Zero) return@LaunchedEffect
         snapshotFlow { state.contentTransformation.isSpecified }.first { it }
         val saved = if (rememberZoom) repository.zoom(true, source) else null
@@ -47,10 +50,10 @@ internal fun VideoZoomMemory(
         }
         restored = true
     }
-    DisposableEffect(source, active, rememberZoom, lifecycle, state, session) {
+    DisposableEffect(source, active, lifecycle, state, session) {
         fun save() {
             if (!active || !restored || host?.isInPictureInPictureMode == true) return
-            if (rememberZoom != true) return
+            if (currentRememberZoom != true) return
             val bounds = state.transformedContentBounds
             val transform = state.contentTransformation
             if (!transform.isSpecified || bounds.width <= 0f || bounds.height <= 0f) return

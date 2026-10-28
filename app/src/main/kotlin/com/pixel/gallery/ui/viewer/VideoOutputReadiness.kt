@@ -12,6 +12,11 @@ internal class VideoOutputReadiness {
         private set
     private var output: Any? = null
 
+    /** Diagnostic-only view of whether the currently bound output has latched a frame. */
+    val isReady: Boolean get() = readyGeneration == generation && generation >= 0
+    /** Diagnostic-only view of whether a frame was confirmed in the current output. */
+    val isBuffered: Boolean get() = bufferedGeneration == generation && generation >= 0
+
     fun bind(output: Any, texture: Boolean) {
         if (this.output === output && this.texture == texture) return
         this.output = output
@@ -46,4 +51,6 @@ internal class VideoOutputReadiness {
     fun readyAfter(previousGeneration: Int, texture: Boolean) =
         this.texture == texture && generation > previousGeneration &&
             readyGeneration == generation && bufferedGeneration == generation
+
+    fun canReveal(expectedGeneration: Int) = generation == expectedGeneration && isReady && isBuffered
 }

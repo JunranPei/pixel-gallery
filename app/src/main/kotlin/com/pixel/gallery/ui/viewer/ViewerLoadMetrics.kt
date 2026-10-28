@@ -9,12 +9,14 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Debug
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.os.Trace
 import android.util.Log
 import android.view.FrameMetrics
+import android.view.Choreographer
 import android.view.Window
 import com.pixel.gallery.BuildConfig
 import java.io.File
@@ -44,6 +46,10 @@ internal object ViewerLoadMetrics {
     private val entries = ConcurrentHashMap<Long, Entry>()
     private val activeEntry = AtomicReference<Entry?>()
     private val frameStats = ConcurrentHashMap<Long, FrameStats>()
+    private val frameMetricsHandler by lazy {
+        Handler(HandlerThread("viewer-frame-metrics").apply { start() }.looper)
+    }
+    private val frameLayerProviders = ConcurrentHashMap<String, () -> String>()
     private val activeWorks = ConcurrentHashMap<Long, WorkToken>()
     private val nextEntryId = AtomicLong()
     private val nextSessionId = AtomicLong()
@@ -189,7 +195,7 @@ internal object ViewerLoadMetrics {
         if (!isEnabled) return
         emit(
             entryId,
-            "EVENT entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms name=$name " +
+            "EVENT entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms name=$name clockNanos=${System.nanoTime()} " +
                 "key=${imageKey ?: "none"} thread=${threadLabel()} $detail"
         )
     }
@@ -263,17 +269,45 @@ internal object ViewerLoadMetrics {
         )
     }
 
-    fun attachFrameMetrics(activity: Activity, entryId: Long): Window.OnFrameMetricsAvailableListener? {
+    fun attachFrameMetrics(
+        activity: Activity,
+        entryId: Long,
+        snapshot: () -> String = { "none" },
+    ): Window.OnFrameMetricsAvailableListener? {
         if (!isEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.N || entryId == 0L) return null
         val stats = FrameStats()
         frameStats[entryId] = stats
+        var previousTraceWorkNs = 0L
         val listener = Window.OnFrameMetricsAvailableListener { _, metrics, dropped ->
+            val traceStartNs = System.nanoTime()
             val totalNs = metrics.getMetric(FrameMetrics.TOTAL_DURATION)
             if (totalNs <= 0L) return@OnFrameMetricsAvailableListener
             val totalMs = totalNs / 1_000_000L
-            stats.frames.incrementAndGet()
+            val frameNumber = stats.frames.incrementAndGet()
             stats.totalNs.addAndGet(totalNs)
             stats.maxNs.updateAndGet { old -> maxOf(old, totalNs) }
+            emitFrame(
+                entryId,
+                "FRAME_ACTUAL entry=$entryId frame=$frameNumber totalMs=${nanosToMillis(totalNs)} " +
+                    "dropped=$dropped reportsDropped=$dropped callbackNanos=${System.nanoTime()} previousTraceWorkNs=$previousTraceWorkNs " +
+                    "intendedVsyncNanos=${metrics.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP)} " +
+                    "vsyncNanos=${metrics.getMetric(FrameMetrics.VSYNC_TIMESTAMP)} " +
+                    "unknownMs=${metricMs(metrics, FrameMetrics.UNKNOWN_DELAY_DURATION)} " +
+                    "firstDraw=${metrics.getMetric(FrameMetrics.FIRST_DRAW_FRAME)} " +
+                    "deadlineNs=${if (Build.VERSION.SDK_INT >= 31) metrics.getMetric(FrameMetrics.DEADLINE) else -1L} " +
+                    "inputMs=${metricMs(metrics, FrameMetrics.INPUT_HANDLING_DURATION)} " +
+                    "animationMs=${metricMs(metrics, FrameMetrics.ANIMATION_DURATION)} " +
+                    "layoutMs=${metricMs(metrics, FrameMetrics.LAYOUT_MEASURE_DURATION)} " +
+                    "drawMs=${metricMs(metrics, FrameMetrics.DRAW_DURATION)} " +
+                    "syncMs=${metricMs(metrics, FrameMetrics.SYNC_DURATION)} " +
+                    "commandMs=${metricMs(metrics, FrameMetrics.COMMAND_ISSUE_DURATION)} " +
+                    "swapMs=${metricMs(metrics, FrameMetrics.SWAP_BUFFERS_DURATION)} " +
+                    "gpuMs=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        metricMs(metrics, FrameMetrics.GPU_DURATION)
+                    } else -1L} " +
+                    "state={${runCatching { snapshot() }.getOrElse { "snapshotError=${it.javaClass.simpleName}" }}} " +
+                        "layersSource=FRAME_STATE layersVsyncNanos=${metrics.getMetric(FrameMetrics.VSYNC_TIMESTAMP)}",
+            )
             if (totalMs >= 12L) {
                 stats.slowFrames.incrementAndGet()
                 val gpuMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -283,7 +317,7 @@ internal object ViewerLoadMetrics {
                 }
                 emit(
                     entryId,
-                    "FRAME_SLOW entry=$entryId sinceClick=${sinceEntryMs(entryId)}ms total=${totalMs}ms " +
+                    "FRAME_SLOW entry=$entryId frame=$frameNumber sinceClick=${sinceEntryMs(entryId)}ms total=${totalMs}ms " +
                         "input=${metricMs(metrics, FrameMetrics.INPUT_HANDLING_DURATION)}ms " +
                         "animation=${metricMs(metrics, FrameMetrics.ANIMATION_DURATION)}ms " +
                         "layout=${metricMs(metrics, FrameMetrics.LAYOUT_MEASURE_DURATION)}ms " +
@@ -294,8 +328,11 @@ internal object ViewerLoadMetrics {
                         "gpu=${gpuMs}ms dropped=$dropped ${snapshotDetail()}"
                 )
             }
+            previousTraceWorkNs = System.nanoTime() - traceStartNs
         }
-        activity.window.addOnFrameMetricsAvailableListener(listener, Handler(Looper.getMainLooper()))
+        // UI-layer getters remain on Choreographer's thread in FRAME_STATE; join by vsync.
+        // Formatting and process/GC/IO measurements must not delay the next UI frame.
+        activity.window.addOnFrameMetricsAvailableListener(listener, frameMetricsHandler)
         event("FRAME_MONITOR_ATTACH", entryId = entryId)
         return listener
     }
@@ -321,6 +358,90 @@ internal object ViewerLoadMetrics {
                 entryId = entryId,
             )
         }
+    }
+
+    /**
+     * Records every choreographer callback for a diagnostic viewer build. The existing
+     * Window frame listener only reports completed/slow frames; this trace also captures
+     * the state that was visible at each vsync, including frames that never became a
+     * completed Window frame after a detach or surface handoff.
+     */
+    fun attachPerFrameTrace(entryId: Long, snapshot: () -> String): Choreographer.FrameCallback? {
+        if (!isEnabled || entryId == 0L) return null
+        val choreographer = Choreographer.getInstance()
+        val callback = object : Choreographer.FrameCallback {
+            private var frameNumber = 0L
+            private var previousFrameTimeNanos = 0L
+            private var previousTraceWorkNs = 0L
+
+            override fun doFrame(frameTimeNanos: Long) {
+                val traceStartNs = System.nanoTime()
+                frameNumber += 1L
+                val intervalNanos = if (previousFrameTimeNanos == 0L) {
+                    -1L
+                } else {
+                    frameTimeNanos - previousFrameTimeNanos
+                }
+                previousFrameTimeNanos = frameTimeNanos
+                val callbackDelayNanos = System.nanoTime() - frameTimeNanos
+                val state = runCatching { snapshot() }
+                    .getOrElse { "snapshotError=${it.javaClass.simpleName}:${it.message}" }
+                emitFrame(
+                    entryId,
+                    "FRAME_STATE entry=$entryId frame=$frameNumber " +
+                        "vsyncNanos=$frameTimeNanos intervalMs=${nanosToMillis(intervalNanos)} " +
+                        "callbackDelayMs=${nanosToMillis(callbackDelayNanos)} " +
+                        "previousTraceWorkNs=$previousTraceWorkNs " +
+                        "state={$state} layers={${frameLayerDetail()}}",
+                )
+                previousTraceWorkNs = System.nanoTime() - traceStartNs
+                choreographer.postFrameCallback(this)
+            }
+        }
+        choreographer.postFrameCallback(callback)
+        event("PER_FRAME_TRACE_ATTACH", entryId = entryId)
+        return callback
+    }
+
+    fun detachPerFrameTrace(entryId: Long, callback: Choreographer.FrameCallback?) {
+        if (!isEnabled || callback == null) return
+        Choreographer.getInstance().removeFrameCallback(callback)
+        event("PER_FRAME_TRACE_DETACH", "reason=viewer-dispose", entryId = entryId)
+    }
+
+    fun registerFrameLayer(key: String, provider: () -> String) {
+        if (isEnabled) frameLayerProviders[key] = provider
+    }
+
+    fun unregisterFrameLayer(key: String) {
+        frameLayerProviders.remove(key)
+    }
+
+    private fun frameLayerDetail(): String = frameLayerProviders.entries
+        .sortedBy { it.key }
+        .take(12)
+        .joinToString("|") { (key, provider) ->
+            val detail = runCatching { provider() }
+                .getOrElse { "providerError=${it.javaClass.simpleName}:${it.message}" }
+            "$key:$detail"
+        }
+
+    private fun emitFrame(entryId: Long, line: String) {
+        // Keep the per-vsync trace out of the in-memory entry ring. A long trace must not
+        // increase viewer heap pressure or make the very issue being measured worse; the
+        // diagnostic build is collected from logcat while the user reproduces the event.
+        Log.i(tag, line)
+    }
+
+    // Per-video-frame records bypass the entry ring just like per-vsync records.
+    fun videoFrame(detail: String) {
+        if (isEnabled) Log.i(tag, "VIDEO_FRAME $detail")
+    }
+
+    private fun nanosToMillis(value: Long): String = if (value < 0L) {
+        "-1"
+    } else {
+        (value / 1_000L / 1000.0).toString()
     }
 
     fun entryEnded(context: Context, entryId: Long, reason: String) {

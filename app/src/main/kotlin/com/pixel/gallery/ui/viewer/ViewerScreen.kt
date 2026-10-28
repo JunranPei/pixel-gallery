@@ -11,7 +11,9 @@ import com.pixel.gallery.ui.components.ConfirmationReminder
 import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
 import com.pixel.gallery.MainActivity
+import com.pixel.gallery.data.repository.ImageViewerSettings
 import com.pixel.gallery.data.repository.VideoSettingsViewModel
+import com.pixel.gallery.data.repository.ViewerScreenDirection
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -390,14 +392,17 @@ internal fun ViewerScreen(
     val messages = LocalGalleryMessages.current
     val presentationModel: VideoSettingsViewModel = hiltViewModel()
     val videoPreferences by presentationModel.settings.collectAsState()
-    val imagePreferences by presentationModel.imageSettings.collectAsState()
-    val rememberImageZoom = imagePreferences?.rememberView == true
-    val imageTransforms = remember(presentationModel.repository, rememberImageZoom) {
-        if (rememberImageZoom) rememberedImageTransforms(presentationModel.repository, transformStateStore)
-        else ViewerTransformStateStore()
-    }
-    LaunchedEffect(rememberImageZoom, imagePreferences != null) {
-        if (imagePreferences != null && !rememberImageZoom) transformStateStore.clear()
+    val imagePreferences by presentationModel.imageSettings.collectAsState(initial = ImageViewerSettings())
+    // ImageViewerSettings defaults rememberZoom to true. Use that same default while
+    // DataStore is resolving so a restored image is rendered immediately instead of
+    // entering the no-memory renderer and being keyed out when the setting arrives.
+    val rememberImageZoom = imagePreferences?.rememberView ?: true
+    val currentRememberImageZoom by rememberUpdatedState(rememberImageZoom)
+    val imageTransforms = remember(presentationModel.repository) {
+        rememberedImageTransforms(
+            presentationModel.repository,
+            transformStateStore,
+        ) { currentRememberImageZoom }
     }
     var toolbarVideo by remember { mutableStateOf<VideoPlaybackSession?>(null) }
     var autoplayNextId by remember { mutableStateOf<Long?>(null) }
@@ -449,16 +454,41 @@ internal fun ViewerScreen(
     val currentMedia = remember(pagerState.currentPage, photos) {
         photos.getOrNull(pagerState.currentPage)
     }
-    val imageVisit = remember(pagerState.settledPage, isForeground) { Any() }
     val directionMedia = photos.getOrNull(pagerState.settledPage)
     val directionIsVideo = directionMedia?.sourceMimeType?.startsWith("video/") == true
     val directionKey = directionMedia?.let { "${it.uri}:${it.dateModifiedMillis}" }
-    val screenDirection = if (directionIsVideo) videoPreferences?.screenDirection else imagePreferences?.screenDirection
-    val rememberDirection = if (directionIsVideo) videoPreferences?.rememberView == true else imagePreferences?.rememberView == true
+    val screenDirection = if (directionIsVideo) {
+        videoPreferences?.screenDirection
+    } else {
+        // Images use the persisted default while DataStore is resolving. This keeps
+        // the rotation layer identity stable on a background return.
+        imagePreferences?.screenDirection ?: ViewerScreenDirection.SYSTEM
+    }
+    val rememberDirection = if (directionIsVideo) {
+        videoPreferences?.rememberView == true
+    } else {
+        imagePreferences?.rememberView ?: true
+    }
     val rotationScope = rememberCoroutineScope()
-    val contentRotation = remember(directionKey, screenDirection != null) {
+    // The memory toggle changes future restore/save policy. It must not recreate
+    // the current media layer or reset a rotation already visible in this viewer.
+    val contentRotation = remember(directionKey, screenDirection) {
         ViewerContentRotation(if (rememberDirection && directionKey != null)
             presentationModel.repository.contentRotation(directionIsVideo, directionKey) else 0, rotationScope)
+    }
+    val frameSnapshot = remember { AtomicReference("viewer-not-composed") }
+    SideEffect {
+        val frameMedia = photos.getOrNull(pagerState.currentPage)
+        frameSnapshot.set(
+            "currentPage=${pagerState.currentPage} settledPage=${pagerState.settledPage} " +
+                "scrolling=${pagerState.isScrollInProgress} " +
+                "media=${frameMedia?.viewerCacheKey() ?: "none"} " +
+                "foreground=$isForeground ui=$showUI info=$showInfo menu=$showMenu " +
+                "rotation=${contentRotation.degrees} settledRotation=${contentRotation.settledDegrees} " +
+                "rotationBusy=${contentRotation.busy} " +
+                "rememberZoom=$rememberImageZoom rememberDirection=$rememberDirection " +
+                "direction=${screenDirection ?: "none"}",
+        )
     }
     DisposableEffect(contentRotation) { onDispose { contentRotation.cancel() } }
     LaunchedEffect(directionKey, screenDirection) {
@@ -489,12 +519,16 @@ internal fun ViewerScreen(
             "initialId=$initialId initialIndex=$initialIndex count=${photos.size}",
             entryId = entryId,
         )
-        val frameListener = activity?.let { ViewerLoadMetrics.attachFrameMetrics(it, entryId) }
+        val frameListener = activity?.let {
+            ViewerLoadMetrics.attachFrameMetrics(it, entryId) { frameSnapshot.get() }
+        }
+        val perFrameListener = ViewerLoadMetrics.attachPerFrameTrace(entryId) { frameSnapshot.get() }
         onDispose {
             ViewerLoadMetrics.event("VIEWER_DISPOSE", entryId = entryId)
             if (activity != null) {
                 ViewerLoadMetrics.detachFrameMetrics(activity, entryId, frameListener)
             }
+            ViewerLoadMetrics.detachPerFrameTrace(entryId, perFrameListener)
             ViewerLoadMetrics.entryEnded(context.applicationContext, entryId, "viewer-dispose")
         }
     }
@@ -1060,8 +1094,11 @@ internal fun ViewerScreen(
             userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage,
             key = { photos[it].contentId }
         ) { page ->
-            if (videoPreferences == null || imagePreferences == null) return@HorizontalPager
             val media = photos[page]
+            // Settings must gate video preparation so a cold start cannot autoplay
+            // before the user's preference has arrived. Images can render with their
+            // stable default memory policy while the same settings flow resolves.
+            if (media.sourceMimeType.startsWith("video/") && videoPreferences == null) return@HorizontalPager
             val pageKey = remember(media.contentId, media.dateModifiedMillis) {
                 media.viewerCacheKey()
             }
@@ -1156,8 +1193,9 @@ internal fun ViewerScreen(
                     val displayRatio = if (media.sourceRotationDegrees % 180 != 0) 1f / rawRatio else rawRatio
                     RotatingMediaLayer(contentRotation.takeIf { pagerState.settledPage == page }, displayRatio,
                         Modifier.fillMaxSize(), nativeImage = !isGif) {
-                    key(rememberImageZoom, if (rememberImageZoom) null else imageVisit) {
-                    val pageImageTransforms = if (rememberImageZoom) imageTransforms else remember { ViewerTransformStateStore() }
+                    // The store remains the same for this viewer. The setting only
+                    // controls whether its callbacks read/write persistent memory.
+                    val pageImageTransforms = imageTransforms
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val isActivePage = pagerState.settledPage == page
                         val isPagerIdle = !pagerState.isScrollInProgress
@@ -1604,7 +1642,6 @@ internal fun ViewerScreen(
                             )
                         }
                     }
-                    } // Image renderer lifetime, reset on a new visit only when memory is off.
                     } // Content rotation never includes viewer chrome.
                 }
             }
@@ -2176,13 +2213,6 @@ internal fun VideoPlayer(
     var activityVisible by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
     val latestEnded by rememberUpdatedState(onEnded)
     val latestSessionCallback by rememberUpdatedState(onSession)
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, _ ->
-            activityVisible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
 
     val minUserZoom = 0.333f
     val maxUserZoom = 10f
@@ -2247,9 +2277,20 @@ internal fun VideoPlayer(
             }
         }
     }
-    LaunchedEffect(session, settings, isActive, isForeground, activityVisible, inPip) {
+    LaunchedEffect(session, settings) {
         settings?.let { session?.updateSettings(it) }
-        session?.updateVisibility(isActive, isForeground, activityVisible, inPip)
+    }
+    DisposableEffect(session, lifecycle, isActive, isForeground, inPip) {
+        fun updateVisibility() {
+            val visible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            activityVisible = visible
+            // Resume decoding in the lifecycle callback, before the next layout/recomposition.
+            session?.updateVisibility(isActive, isForeground, visible, inPip)
+        }
+        val observer = LifecycleEventObserver { _, _ -> updateVisibility() }
+        lifecycle.addObserver(observer)
+        updateVisibility()
+        onDispose { lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(isActive, hasRenderedFirstFrame) {
@@ -2261,7 +2302,41 @@ internal fun VideoPlayer(
         }
     }
 
-    val showVideoSurface = hasRenderedFirstFrame && hasPresentedVideoSurface
+    val currentActive = rememberUpdatedState(isActive)
+    val currentForeground = rememberUpdatedState(isForeground)
+    val currentActivityVisible = rememberUpdatedState(activityVisible)
+    val currentPresented = rememberUpdatedState(hasPresentedVideoSurface)
+    val currentShowSurface = remember(session) {
+        derivedStateOf { session?.firstFrame == true && currentPresented.value && session?.outputReadiness?.isBuffered == true }
+    }
+    DisposableEffect(session) {
+        val value = session
+        if (value == null) {
+            onDispose { }
+        } else {
+            val frameKey = "video:${value.id}"
+            ViewerLoadMetrics.registerFrameLayer(frameKey) {
+                "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
+                    "activityVisible=${currentActivityVisible.value} firstFrame=${value.firstFrame} " +
+                    "presented=${currentPresented.value} showSurface=${currentShowSurface.value} " +
+                    "surfaceAlpha=${if (currentShowSurface.value) 1f else 0f} cover=${value.retainedFrame != null} " +
+                    "${value.diagnosticsSnapshot()}"
+            }
+            ViewerLoadMetrics.event(
+                "VIDEO_COMPOSE_ATTACH",
+                "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
+                    "activityVisible=${currentActivityVisible.value} showSurface=${currentShowSurface.value}",
+            )
+            onDispose {
+                ViewerLoadMetrics.event(
+                    "VIDEO_COMPOSE_DISPOSE",
+                    "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
+                        "activityVisible=${currentActivityVisible.value} showSurface=${currentShowSurface.value}",
+                )
+                ViewerLoadMetrics.unregisterFrameLayer(frameKey)
+            }
+        }
+    }
     val videoRatio = session?.let {
         val w = it.native?.width ?: it.videoSize.width
         val h = it.native?.height ?: it.videoSize.height
@@ -2292,7 +2367,7 @@ internal fun VideoPlayer(
         }
     }) {
         val transform = zoomableState.contentTransformation
-        isActive && isForeground && !inPip && !isMotionPhoto && showVideoSurface && contentRotation?.busy != true &&
+        isActive && isForeground && !inPip && !isMotionPhoto && currentShowSurface.value && contentRotation?.busy != true &&
             (!transform.isSpecified || kotlin.math.abs(transform.scaleMetadata.userZoom - 1f) < .02f)
     }
 
@@ -2331,29 +2406,8 @@ internal fun VideoPlayer(
                     transformOrigin = transformation.transformOrigin
                 }.graphicsLayer { alpha = if (dismissFrame != null) 0f else 1f }
         ) {
-            if (firstFrameModel != null && !showVideoSurface) {
-                GlideImage(
-                    model = firstFrameModel,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    requestBuilderTransform = { request ->
-                        request
-                            .dontTransform()
-                            .format(DecodeFormat.PREFER_RGB_565)
-                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                            .override(720)
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-
-            session?.let { playback ->
-                key(playback, nativeVideoView) {
-                    VideoOutputSurface(playback, videoRatio, rotatedOutput,
-                        isActive && isForeground && activityVisible,
-                        Modifier.fillMaxSize().alpha(if (showVideoSurface) 1f else 0f))
-                }
-            }
+            VideoPresentation(session, firstFrameModel, hasPresentedVideoSurface, videoRatio,
+                rotatedOutput, isActive && isForeground && activityVisible)
             surfaceTransition.cover?.let { bitmap ->
                 Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().drawWithContent {

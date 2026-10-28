@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.media.MediaPlayer
 import android.net.Uri
@@ -53,6 +54,12 @@ class VideoPlaybackSession(
     var texture: android.view.TextureView? = null
     internal val outputReadiness = VideoOutputReadiness()
     private val outputScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    var retainedFrame by mutableStateOf<Bitmap?>(null)
+        private set
+    private var retainedFrameJob: Job? = null
+    var retainedFrameMayClear by mutableStateOf(false)
+        private set
+    internal fun onActivityResumed() { retainedFrameMayClear = true }
     var contentRotationDegrees: Int = 0
     var onPresentationCheckpoint: (() -> Unit)? = null
     var captureBusy by mutableStateOf(false)
@@ -63,23 +70,71 @@ class VideoPlaybackSession(
     private var activityVisible = true
     private var inPip = false
     private var pipEntering = false
+    private var pipSourceRect: Rect? = null
+    private var lastPipParams: PictureInPictureParams? = null
+
+    internal fun preparePipTransition() {
+        pipEntering = true
+        activity?.prepareVideoPip(pipSourceRect)
+    }
     private var wantsPlay = motionPhoto || initialSettings.autoplay
     private var applyingPolicy = false
     private var audioRegistered = false
     private var initialPosition = if (!motionPhoto && initialSettings.rememberPosition) repository.position(sourceKey) else 0L
 
-    val player: ExoPlayer = ExoPlayer.Builder(context, DefaultRenderersFactory(context).setEnableDecoderFallback(true))
+    val player: ExoPlayer = ExoPlayer.Builder(context, DefaultRenderersFactory(context)
+        .setEnableDecoderFallback(true))
         .setMediaSourceFactory(DefaultMediaSourceFactory(context, DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
             .setMp4ExtractorFlags(Mp4Extractor.FLAG_READ_MOTION_PHOTO_METADATA)))
         .build()
 
     init {
+        ViewerLoadMetrics.event(
+            "VIDEO_SESSION_CREATE",
+            "session=$id uri=$uri sourceKey=$sourceKey motionPhoto=$motionPhoto " +
+                "autoplay=${initialSettings.autoplay} background=${initialSettings.backgroundAction} " +
+                "rememberPosition=${initialSettings.rememberPosition} " +
+                "pid=${android.os.Process.myPid()} media3=${MediaLibraryInfo.VERSION}",
+        )
         speed = speed.takeIf { it in VideoPlaybackSpeeds } ?: 1f
         player.setAudioAttributes(AudioAttributes.DEFAULT, true)
         player.setHandleAudioBecomingNoisy(true)
         player.setWakeMode(C.WAKE_MODE_LOCAL)
+        if (ViewerLoadMetrics.isEnabled) {
+            var sequence = 0L
+            var previousCallbackNs = 0L
+            player.setVideoFrameMetadataListener { ptsUs, releaseNs, format, _ ->
+                val nowNs = System.nanoTime()
+                ViewerLoadMetrics.videoFrame(
+                    "session=$id seq=${++sequence} callbackNanos=$nowNs ptsUs=$ptsUs " +
+                        "releaseNanos=$releaseNs callbackGapNs=${if (previousCallbackNs == 0L) -1 else nowNs - previousCallbackNs} " +
+                        "generation=${outputReadiness.generation} fps=${format.frameRate}",
+                )
+                previousCallbackNs = nowNs
+            }
+        }
         player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onVideoDecoderReleased(eventTime: AnalyticsListener.EventTime, decoderName: String) {
+                ViewerLoadMetrics.event("VIDEO_DECODER_RELEASED", "session=$id decoder=$decoderName")
+            }
+            override fun onAudioUnderrun(eventTime: AnalyticsListener.EventTime, bufferSize: Int,
+                bufferSizeMs: Long, elapsedSinceLastFeedMs: Long) {
+                ViewerLoadMetrics.event("VIDEO_AUDIO_UNDERRUN", "session=$id bufferMs=$bufferSizeMs elapsedMs=$elapsedSinceLastFeedMs")
+            }
+            override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime,
+                decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                ViewerLoadMetrics.event("VIDEO_DECODER_INIT",
+                    "session=$id decoder=$decoderName durationMs=$initializationDurationMs initializedMs=$initializedTimestampMs")
+            }
+            override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                ViewerLoadMetrics.event("VIDEO_DROPPED_FRAMES", "session=$id count=$droppedFrames elapsedMs=$elapsedMs")
+            }
+            override fun onVideoFrameProcessingOffset(eventTime: AnalyticsListener.EventTime,
+                totalProcessingOffsetUs: Long, frameCount: Int) {
+                ViewerLoadMetrics.event("VIDEO_PROCESSING_OFFSET",
+                    "session=$id sumUs=$totalProcessingOffsetUs count=$frameCount")
+            }
             override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
                 // TextureView confirms latching in onSurfaceTextureUpdated instead.
                 if (!outputReadiness.texture && outputReadiness.owns(output)) {
@@ -89,8 +144,19 @@ class VideoPlaybackSession(
             }
         })
         player.addListener(object : Player.Listener {
-            override fun onRenderedFirstFrame() { firstFrame = true; updatePipParams() }
+            override fun onRenderedFirstFrame() {
+                firstFrame = true
+                ViewerLoadMetrics.event(
+                    "VIDEO_FIRST_FRAME",
+                    videoDiagnostics(),
+                )
+                updatePipParams()
+            }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                ViewerLoadMetrics.event(
+                    "VIDEO_PLAY_WHEN_READY",
+                    "requested=$playWhenReady reason=$reason ${videoDiagnostics()}",
+                )
                 if (!applyingPolicy && native == null) {
                     wantsPlay = playWhenReady
                     checkpoint()
@@ -99,6 +165,10 @@ class VideoPlaybackSession(
                 }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
+                ViewerLoadMetrics.event(
+                    "VIDEO_PLAYBACK_STATE",
+                    "state=${playbackStateName(playbackState)} code=$playbackState ${videoDiagnostics()}",
+                )
                 if (native != null) return
                 if (playbackState == Player.STATE_READY && initialPosition > 0) {
                     if (player.duration > 0 && initialPosition >= player.duration - 1000) player.seekTo(0)
@@ -110,10 +180,24 @@ class VideoPlaybackSession(
                 if (reason == Player.DISCONTINUITY_REASON_SEEK) checkpoint()
             }
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                this@VideoPlaybackSession.videoSize = videoSize
+                // Track selection is intentionally changed to audio-only while the
+                // activity is in the background. Media3 reports UNKNOWN at that
+                // point; keeping the last real dimensions prevents the returning
+                // surface from making a one-frame 16:9 layout jump.
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    this@VideoPlaybackSession.videoSize = videoSize
+                }
+                ViewerLoadMetrics.event(
+                    "VIDEO_SIZE",
+                    "size=${videoSize.width}x${videoSize.height} ratio=${videoSize.pixelWidthHeightRatio} ${videoDiagnostics()}",
+                )
                 updatePipParams()
             }
             override fun onPlayerError(error: PlaybackException) {
+                ViewerLoadMetrics.event(
+                    "VIDEO_PLAYER_ERROR",
+                    "error=${error.errorCodeName} message=${error.message ?: "none"} ${videoDiagnostics()}",
+                )
                 if (released || native != null) return
                 val position = player.currentPosition
                 applyingPolicy = true
@@ -134,9 +218,72 @@ class VideoPlaybackSession(
 
     internal fun nativeSurfaceBound(view: SurfaceView) {
         val output = view.holder.surface
+        ViewerLoadMetrics.event(
+            "VIDEO_NATIVE_SURFACE_BOUND",
+            "valid=${output.isValid} generation=${outputReadiness.generation} ${videoDiagnostics()}",
+        )
         outputReadiness.bind(output, texture = false)
         native?.refreshPausedFrame()
         confirmSurfaceBuffer(view, nativeOutput = true)
+    }
+
+    /**
+     * Capture one small cover before Android tears down the SurfaceView on background.
+     * This is a transition cover only; it is released after the replacement output
+     * has presented a frame and is never kept as a media cache.
+     */
+    internal fun captureRetainedFrame(reason: String) {
+        val autoPip = settings.backgroundAction == VideoBackgroundAction.PIP &&
+            wantsPlay && active && routeVisible && firstFrame && pipSupported
+        if (inPip || pipEntering || activity?.isVideoPip == true || autoPip) return
+        retainedFrameMayClear = false
+        if (released || retainedFrame != null || retainedFrameJob?.isActive == true) return
+        if (!outputReadiness.isBuffered) return
+        val view = surface ?: return
+        val output = view.holder.surface
+        if (!output.isValid && texture == null) return
+        val sourceWidth = native?.width ?: videoSize.width
+        val sourceHeight = native?.height ?: videoSize.height
+        if (sourceWidth <= 0 || sourceHeight <= 0) return
+        val scale = minOf(1f, 720f / maxOf(sourceWidth, sourceHeight).toFloat())
+        val width = (sourceWidth * scale).toInt().coerceAtLeast(1)
+        val height = (sourceHeight * scale).toInt().coerceAtLeast(1)
+        retainedFrameJob = outputScope.launch {
+            val frame = try {
+                withTimeoutOrNull(180) { captureSessionFrame(this@VideoPlaybackSession, width, height) }
+            } catch (_: CancellationException) {
+                null
+            } catch (_: Exception) {
+                null
+            }
+            // A successful outgoing copy remains valid after the surface is unbound.
+            if (frame != null && !released) {
+                retainedFrame = frame
+                ViewerLoadMetrics.event(
+                    "VIDEO_RETAINED_FRAME",
+                    "reason=$reason size=${frame.width}x${frame.height} ${videoDiagnostics()}",
+                )
+            } else {
+                frame?.recycle()
+                ViewerLoadMetrics.event(
+                    "VIDEO_RETAINED_FRAME_MISS",
+                    "reason=$reason ${videoDiagnostics()}",
+                )
+            }
+            retainedFrameJob = null
+        }
+    }
+
+    internal fun clearRetainedFrame() {
+        if (retainedFrame != null) ViewerLoadMetrics.event("VIDEO_COVER_CLEAR", videoDiagnostics())
+        // Compose/RenderThread may still reference the published bitmap.
+        retainedFrame = null
+    }
+
+    internal fun clearRetainedFrame(expected: Bitmap, generation: Int) {
+        if (retainedFrame === expected && retainedFrameMayClear && outputReadiness.canReveal(generation)) {
+            clearRetainedFrame()
+        }
     }
 
     private fun confirmSurfaceBuffer(view: SurfaceView, nativeOutput: Boolean = false) {
@@ -153,6 +300,7 @@ class VideoPlaybackSession(
                 if (copied != null) {
                     copied.recycle()
                     outputReadiness.bufferAvailable(output, generation)
+                    ViewerLoadMetrics.event("VIDEO_BUFFER_AVAILABLE", "generation=$generation ${videoDiagnostics()}")
                     if (nativeOutput && outputReadiness.owns(output, generation)) outputReadiness.rendered(output)
                     return@launch
                 }
@@ -162,7 +310,13 @@ class VideoPlaybackSession(
     }
 
     fun updateSettings(value: VideoSettings) {
+        if (settings == value) return
         settings = value
+        ViewerLoadMetrics.event(
+            "VIDEO_SETTINGS_UPDATE",
+            "autoplay=${value.autoplay} background=${value.backgroundAction} muted=${value.muted} " +
+                "speed=${value.lastSpeed} ${videoDiagnostics()}",
+        )
         applyOptions()
         applyPolicy()
     }
@@ -185,6 +339,13 @@ class VideoPlaybackSession(
     }
 
     fun updateVisibility(isActive: Boolean, isRouteVisible: Boolean, isActivityVisible: Boolean, isInPip: Boolean) {
+        if (active == isActive && routeVisible == isRouteVisible &&
+            activityVisible == isActivityVisible && inPip == isInPip) return
+        ViewerLoadMetrics.event(
+            "VIDEO_VISIBILITY",
+            "active=$isActive routeVisible=$isRouteVisible activityVisible=$isActivityVisible " +
+                "inPip=$isInPip ${videoDiagnostics()}",
+        )
         if (active && (!isActive || !isRouteVisible || !isActivityVisible)) checkpoint()
         active = isActive
         routeVisible = isRouteVisible
@@ -205,9 +366,16 @@ class VideoPlaybackSession(
         native?.setPlaying(allowed && wantsPlay)
         // Audio-only playback must not keep decoding an invisible video track.
         val audioOnly = !activityVisible && !inPip && !pipEntering && settings.backgroundAction == VideoBackgroundAction.AUDIO
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, audioOnly).build()
+        if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO) != audioOnly) {
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, audioOnly).build()
+        }
         applyingPolicy = false
+        ViewerLoadMetrics.event(
+            "VIDEO_POLICY",
+            "allowed=$allowed audioOnly=$audioOnly wantsPlay=$wantsPlay applying=$applyingPolicy " +
+                "${videoDiagnostics()}",
+        )
         refreshAudioService()
     }
 
@@ -240,34 +408,55 @@ class VideoPlaybackSession(
         if (!pipSupported || motionPhoto || !active || !routeVisible || !firstFrame) return false
         checkpoint()
         onPresentationCheckpoint?.invoke()
-        pipEntering = true
+        updatePipParams()
+        preparePipTransition()
         val entered = runCatching { host.enterPictureInPictureMode(pipParams()) }.getOrDefault(false)
-        if (!entered) pipEntering = false
+        if (!entered) { pipEntering = false; host.cancelVideoPip() }
         return entered
     }
 
     fun onUserLeaveHint() {
         if (active && routeVisible) onPresentationCheckpoint?.invoke()
         if (settings.backgroundAction == VideoBackgroundAction.PIP && wantsPlay && active && routeVisible && firstFrame) {
+            updatePipParams()
+            activity?.armVideoPip(pipSourceRect)
             pipEntering = true
             if (Build.VERSION.SDK_INT < 31) enterPip()
         }
     }
 
     private fun pipParams(): PictureInPictureParams {
-        val width = native?.width ?: player.videoSize.width
-        val height = native?.height ?: player.videoSize.height
-        val rawRatio = if (width > 0 && height > 0) width.toFloat() / height else 16f / 9f
+        val width = native?.width ?: videoSize.width
+        val height = native?.height ?: videoSize.height
+        val pixelRatio = if (native == null) videoSize.pixelWidthHeightRatio else 1f
+        val rawRatio = if (width > 0 && height > 0) width.toFloat() * pixelRatio / height else 16f / 9f
         val ratio = (if (contentRotationDegrees % 180 != 0) 1f / rawRatio else rawRatio).coerceIn(1f / 2.39f, 2.39f)
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational((ratio * 10000).toInt(), 10000))
-        (texture ?: surface)?.let { view -> Rect().also { if (view.getGlobalVisibleRect(it)) builder.setSourceRectHint(it) } }
-        if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(
-            !motionPhoto && active && routeVisible && wantsPlay && firstFrame && settings.backgroundAction == VideoBackgroundAction.PIP)
+        if (activity?.isVideoPipLayoutLocked != true && activity?.isVideoPip != true) {
+            (texture ?: surface)?.let { view ->
+                val rect = Rect()
+                if (view.isAttachedToWindow && view.getGlobalVisibleRect(rect) && !rect.isEmpty) pipSourceRect = rect
+            }
+        }
+        pipSourceRect?.let(builder::setSourceRectHint)
+        if (Build.VERSION.SDK_INT >= 31) {
+            builder.setSeamlessResizeEnabled(true)
+            builder.setAutoEnterEnabled(!motionPhoto && active && routeVisible && wantsPlay && firstFrame &&
+                pipSourceRect != null && settings.backgroundAction == VideoBackgroundAction.PIP)
+        }
         return builder.build()
     }
 
     fun updatePipParams() {
-        if (activity?.videoSession === this && pipSupported) runCatching { activity?.setPictureInPictureParams(pipParams()) }
+        if (activity?.videoSession !== this || !pipSupported || released) return
+        val params = pipParams()
+        if (params == lastPipParams) return
+        runCatching {
+            activity?.setPictureInPictureParams(params)
+            lastPipParams = params
+            ViewerLoadMetrics.event("VIDEO_PIP_PARAMS", "session=$id source=$pipSourceRect " +
+                "ratio=${params.aspectRatio} locked=${activity?.isVideoPipLayoutLocked}")
+        }
     }
 
     private fun refreshAudioService() {
@@ -282,15 +471,49 @@ class VideoPlaybackSession(
     }
 
     fun release() {
+        ViewerLoadMetrics.event(
+            "VIDEO_SESSION_RELEASE",
+            videoDiagnostics() + " surfaceGeneration=${outputReadiness.generation}",
+        )
         checkpoint()
         onPresentationCheckpoint?.invoke()
         onPresentationCheckpoint = null
         released = true
+        retainedFrameJob?.cancel()
+        retainedFrameJob = null
+        clearRetainedFrame()
         outputScope.cancel()
         VideoPlaybackService.drop(appContext, id)
         native?.release()
         player.release()
         surface = null
+    }
+
+    internal fun diagnosticsSnapshot(): String = videoDiagnostics()
+
+    private fun videoDiagnostics(): String {
+        val output = surface?.holder?.surface
+        val textureView = texture
+        val counters = if (ViewerLoadMetrics.isEnabled) player.videoDecoderCounters?.let {
+            " videoRendered=${it.renderedOutputBufferCount} videoDropped=${it.droppedBufferCount}" +
+                " videoSkipped=${it.skippedOutputBufferCount} maxConsecutiveDropped=${it.maxConsecutiveDroppedBufferCount}"
+        } ?: "" else ""
+        return "session=$id firstFrame=$firstFrame native=${native != null} " +
+            "playback=${playbackStateName(player.playbackState)} playWhenReady=${player.playWhenReady} " +
+            "isPlaying=${player.isPlaying} position=${player.currentPosition} duration=${player.duration} " +
+            "size=${videoSize.width}x${videoSize.height} " +
+            "surfaceValid=${output?.isValid ?: false} textureAvailable=${textureView?.isAvailable ?: false} " +
+            "outputGeneration=${outputReadiness.generation} outputReady=${outputReadiness.isReady} " +
+            "outputBuffered=${outputReadiness.isBuffered} active=$active routeVisible=$routeVisible " +
+            "activityVisible=$activityVisible inPip=$inPip released=$released$counters"
+    }
+
+    private fun playbackStateName(value: Int): String = when (value) {
+        Player.STATE_IDLE -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY -> "READY"
+        Player.STATE_ENDED -> "ENDED"
+        else -> value.toString()
     }
 }
 

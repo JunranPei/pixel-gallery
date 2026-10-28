@@ -69,6 +69,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.withContext
@@ -83,6 +84,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -94,6 +96,12 @@ class MediaRepository @Inject constructor(
     private val settingsRepository: SettingsRepository,
     internal val readRefreshes: MediaReadRefreshCoordinator = MediaReadRefreshCoordinator(),
 ) {
+    internal data class ViewerMediaSnapshot(
+        val entries: List<MediaEntry>,
+        val sortKey: String,
+        val hiddenFolders: Set<String>,
+    )
+
     data class VaultRestoreResult(
         val restoredIds: List<Long>,
         val failedIds: List<Long>
@@ -120,6 +128,7 @@ class MediaRepository @Inject constructor(
     private val replacementRecoveryComplete = CompletableDeferred<Unit>()
     private val mediaMutationMutex = Mutex()
     private val syncMutex = Mutex()
+    private val viewerMediaSnapshot = AtomicReference<ViewerMediaSnapshot?>(null)
     private val moveJournalLock = Any()
     @Volatile private var mediaMutationInProgress = false
 
@@ -187,11 +196,26 @@ class MediaRepository @Inject constructor(
         entries.filter { entry ->
             !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.isInsideMediaFolder(it) }
         }
+    }.onEach {
+        // A real MediaStore/Room refresh invalidates the retained detail snapshot.
+        // Settings-only changes are checked against the snapshot key below.
+        viewerMediaSnapshot.set(null)
     }.stateIn(
         scope = repositoryScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList()
     )
+
+    internal fun cachedViewerMediaSnapshot(
+        sortKey: String,
+        hiddenFolders: Set<String>,
+    ): List<MediaEntry>? = viewerMediaSnapshot.get()?.takeIf {
+        it.sortKey == sortKey && it.hiddenFolders == hiddenFolders
+    }?.entries
+
+    internal fun cacheViewerMediaSnapshot(snapshot: ViewerMediaSnapshot) {
+        viewerMediaSnapshot.set(snapshot)
+    }
 
     /** Reads the post-sync Room snapshot without waiting for the UI StateFlow to re-emit. */
     internal suspend fun currentActiveEntries(): List<MediaEntry> = withContext(Dispatchers.IO) {

@@ -145,8 +145,17 @@ internal class ViewerTransformStateStore(
     private val states = LinkedHashMap<String, StoredState>(16, 0.75f, true)
 
     @Synchronized
-    fun get(key: String): SubsamplingScaleImageView.ViewState? = states[key]?.state ?: readSaved?.invoke(key)?.also {
-        states[key] = StoredState(it, 1)
+    fun get(key: String): SubsamplingScaleImageView.ViewState? {
+        // A centered fit state is the renderer's default, not a user presentation
+        // to restore. Keeping it makes a fresh preview start transparent while it
+        // waits for Glide, which is the one-frame black flash seen after resume.
+        states[key]?.state?.let { state ->
+            if (hasMeaningfulViewerTransform(state)) return state
+            states.remove(key)
+        }
+        return readSaved?.invoke(key)?.takeIf(::hasMeaningfulViewerTransform)?.also {
+            states[key] = StoredState(it, 1)
+        }
     }
 
     @Synchronized
@@ -164,6 +173,16 @@ internal class ViewerTransformStateStore(
         state: SubsamplingScaleImageView.ViewState,
         reason: String = "unspecified",
     ) {
+        if (!hasMeaningfulViewerTransform(state)) {
+            states.remove(key)
+            ViewerLoadMetrics.event(
+                "TRANSFORM_STORE_SKIP_FIT",
+                "reason=$reason scale=${state.scale} base=${state.baseFitScale} " +
+                    "center=${state.sourceCenter} rotation=${state.rotationRadians}",
+                imageKey = key,
+            )
+            return
+        }
         val revision = (states[key]?.revision ?: 0) + 1
         states[key] = StoredState(state, revision)
         while (states.size > MAX_SAVED_TRANSFORMS) {
@@ -399,14 +418,14 @@ private fun applyPreviewTransform(
     imageView.translationY = offsetY
 }
 
-private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boolean {
+internal fun hasMeaningfulViewerTransform(state: SubsamplingScaleImageView.ViewState?): Boolean {
     if (state == null || state.baseFitScale <= 0f) return false
     val relativeScale = state.scale / state.baseFitScale
-    // A centered state at or below fit-screen is fully represented by the preview.
-    // Loading SSIV for it causes an unnecessary renderer handoff and can strand the
-    // gesture at the minimum scale. Pan is only meaningful above fit-screen.
     return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
+
+private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boolean =
+    hasMeaningfulViewerTransform(state)
 
 private fun shouldUseIntermediatePreview(
     state: SubsamplingScaleImageView.ViewState?,
@@ -571,6 +590,26 @@ internal fun SimpleSubsamplingImageView(
     }) {
         isActivePage && subsamplingReady && !previewOwnsTransform && !previewTakeoverPending &&
             ssivView?.isAtRestWithinFit() == true
+    }
+
+    // The per-vsync diagnostic trace reads this provider on the main thread, so it
+    // captures the actual layer and view state of the frame being presented rather
+    // than a state transition inferred from Compose callbacks.
+    DisposableEffect(transformStateKey) {
+        ViewerLoadMetrics.registerFrameLayer(transformStateKey) {
+            val tiles = ssivView
+            val preview = imageViewRef
+            val tileState = runCatching { tiles?.snapshotViewState() }.getOrNull()
+            "layer=${renderedLayer.get()} active=$isActivePage previewVisible=$isPreviewVisible " +
+                "previewLoaded=$previewLoaded tilesReady=$subsamplingReady " +
+                "tileView=${tiles?.visibility ?: -1}/${tiles?.alpha ?: -1f} " +
+                "tileScale=${tileState?.scale ?: -1f} tileCenter=${tileState?.sourceCenter ?: "none"} " +
+                "previewView=${preview?.visibility ?: -1}/${preview?.alpha ?: -1f} " +
+                "previewTransform=${preview?.scaleX ?: -1f},${preview?.scaleY ?: -1f}," +
+                "${preview?.translationX ?: 0f},${preview?.translationY ?: 0f} " +
+                "previewGesture=$previewGestureInProgress pointer=$previewPointerStrokeActive"
+        }
+        onDispose { ViewerLoadMetrics.unregisterFrameLayer(transformStateKey) }
     }
 
     // Active-page bookkeeping is intentionally separate from preview loading.

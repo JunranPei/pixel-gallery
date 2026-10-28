@@ -437,6 +437,12 @@ private fun MainScaffoldContent(
         }
     }
     val allPhotos by photosViewModel.photos.collectAsState()
+    // Detail pages use repository-backed snapshots so Activity recreation does not
+    // expose the grid's lifecycle-cleared empty value for one frame.
+    val viewerPhotos by photosViewModel.viewerPhotos.collectAsState()
+    val viewerFavourites by photosViewModel.viewerFavourites.collectAsState()
+    val viewerTrash by photosViewModel.viewerTrash.collectAsState()
+    val viewerVault by photosViewModel.viewerVault.collectAsState()
     val hiddenPhotos by photosViewModel.hiddenPhotos.collectAsState()
     val hiddenAlbums by photosViewModel.hiddenAlbums.collectAsState()
     val browsingIndex by photosViewModel.browsingIndex.collectAsState()
@@ -532,6 +538,15 @@ private fun MainScaffoldContent(
     val retainedViewer = navigationStack.lastOrNull { it is Screen.Viewer } as? Screen.Viewer
     // A viewer belongs to its underlying grid; another album or Home starts a different scope.
     val quickSortScope = navigationStack.lastOrNull { it !is Screen.Viewer }
+    LaunchedEffect(navigationStack, currentScreen, visibleViewer?.initialId, retainedViewer?.initialId) {
+        ViewerLoadMetrics.event(
+            "NAV_STATE",
+            "stack=${navigationStack.joinToString(">") { it::class.simpleName ?: "unknown" }} " +
+                "current=${currentScreen::class.simpleName ?: "unknown"} " +
+                "visibleViewer=${visibleViewer?.initialId ?: "none"} " +
+                "retainedViewer=${retainedViewer?.initialId ?: "none"}",
+        )
+    }
     val favouriteLabelName = stringResource(R.string.labels_favourites)
     val labelNamesByMedia = remember(labelEntries, labelMemberships, favouriteLabelName) {
         val names = labelEntries.associate { it.id to if (it.isSystem) favouriteLabelName else it.name }
@@ -867,11 +882,14 @@ private fun MainScaffoldContent(
     val scrollBehavior = FloatingToolbarDefaults.exitAlwaysScrollBehavior(
         exitDirection = FloatingToolbarExitDirection.Bottom
     )
-    val homeTopBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    // The toolbar is a single mounted instance in UnifiedGalleryContainer, so every
+    // route must drive the same top-bar scroll state. The floating bottom navigation
+    // keeps its separate behavior because it is a different surface.
+    val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
     LaunchedEffect(isHomeSearchMode) {
         if (isHomeSearchMode) {
-            homeTopBarScrollBehavior.state.heightOffset = 0f
-            homeTopBarScrollBehavior.state.contentOffset = 0f
+            topBarScrollBehavior.state.heightOffset = 0f
+            topBarScrollBehavior.state.contentOffset = 0f
         }
     }
     // Window Insets
@@ -1628,43 +1646,50 @@ private fun MainScaffoldContent(
                 }
                 val livePhotosForViewer = remember(
                     viewer,
-                    allPhotos,
+                    viewerPhotos,
+                    viewerFavourites,
+                    viewerTrash,
+                    viewerVault,
                     hiddenPhotos,
-                    browsingIndex,
-                    photoSearchResult,
-                    favourites,
-                    trash,
-                    vault,
                     cachedAlbumPhotos,
                     labelMemberships,
                 ) {
                     val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
                     var listSource = "DIRECT"
                     val result = when (viewer.source) {
-                        Screen.ViewerSource.All -> browsingIndex.library[viewer.mediaType].media.photos
-                        Screen.ViewerSource.Search -> if (photoSearchResult.mediaType == viewer.mediaType &&
-                            photoSearchResult.photoQuery == viewer.searchQuery.orEmpty()) {
-                            photoSearchResult.photos
+                        // The browse index is rebuilt asynchronously after an activity
+                        // returns to the foreground. It publishes an empty snapshot
+                        // before the stable repository list is available, which would
+                        // unmount ViewerScreen and cause a visible reload. The viewer
+                        // already has the ordered repository snapshot, so use it
+                        // directly and only apply the media/search filters here.
+                        Screen.ViewerSource.All -> if (viewer.mediaType == MediaTypeFilter.ALL) {
+                            viewerPhotos
                         } else {
-                            browsingIndex.library[viewer.mediaType].media.photos.filter {
-                                it.matchesFileSearch(viewer.searchQuery.orEmpty())
-                            }
+                            viewerPhotos.filter(viewer.mediaType::matches)
                         }
-                        Screen.ViewerSource.Favourites -> favourites
+                        Screen.ViewerSource.Search -> viewerPhotos.filter {
+                            viewer.mediaType.matches(it) && it.matchesFileSearch(viewer.searchQuery.orEmpty())
+                        }
+                        Screen.ViewerSource.Favourites -> viewerFavourites
                         Screen.ViewerSource.Label -> {
                             // Settings may cover this retained viewer; its source
                             // remains its own label, not the foreground route.
                             val ids = labelMemberships.filter { it.labelId == viewer.labelId }
                                 .mapTo(hashSetOf()) { it.contentId }
-                            val lockedIds = vault.mapTo(hashSetOf()) { it.contentId }
-                            allPhotos.filter { it.contentId in ids && it.contentId !in lockedIds }
+                            val lockedIds = viewerVault.mapTo(hashSetOf()) { it.contentId }
+                            viewerPhotos.filter { it.contentId in ids && it.contentId !in lockedIds }
                         }
-                        Screen.ViewerSource.Trash -> trash
-                        Screen.ViewerSource.Vault -> vault
+                        Screen.ViewerSource.Trash -> viewerTrash
+                        Screen.ViewerSource.Vault -> viewerVault
                         Screen.ViewerSource.Album -> {
-                            cachedAlbumPhotos ?: run {
+                            // Album flows also publish an empty initial value while
+                            // their source is being restored. Treat that value as
+                            // unresolved and derive the album from the stable media
+                            // snapshot instead of tearing down the viewer.
+                            cachedAlbumPhotos?.takeIf { it.isNotEmpty() } ?: run {
                                 listSource = "FALLBACK_SCAN"
-                                (if (viewer.hiddenAlbum) hiddenPhotos else allPhotos).filter {
+                                (if (viewer.hiddenAlbum) hiddenPhotos else viewerPhotos).filter {
                                     val lastSlash = it.path.lastIndexOf('/')
                                     if (lastSlash <= 0) false
                                     else {
@@ -1801,15 +1826,28 @@ private fun MainScaffoldContent(
         }
         if (showRootNavigation) scrollBehavior.state.offset = 0f
     }
-    val homeHeaderOwnsShell = baseScreen == Screen.Home && visibleViewer == null && reviewPage == null
     val density = LocalDensity.current
-    val baseRouteTopInset = 64.dp +
-        WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() +
-        if (baseScreen == Screen.Home) {
-            with(density) {
-                homeTopBarScrollBehavior.state.heightOffset.coerceIn(-64.dp.toPx(), 0f).toDp()
-            }
-        } else 0.dp
+    val routeHeaderScrollBehavior = topBarScrollBehavior
+    val detailToolbarLocked = visibleViewer != null && reviewPage == null
+    LaunchedEffect(detailToolbarLocked) {
+        if (detailToolbarLocked) {
+            // Viewer controls must remain reachable while the media surface
+            // consumes vertical gestures for paging and dismissal.
+            topBarScrollBehavior.state.heightOffset = 0f
+            topBarScrollBehavior.state.contentOffset = 0f
+        }
+    }
+    val headerHeightOffsetPx = if (detailToolbarLocked) {
+        0f
+    } else {
+        with(density) {
+            routeHeaderScrollBehavior.state.heightOffset.coerceIn(-64.dp.toPx(), 0f)
+        }
+    }
+    val baseRouteTopInset = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() +
+        with(density) {
+            (64.dp.toPx() + headerHeightOffsetPx).toDp()
+        }
 
     CompositionLocalProvider(LocalGallerySettingsAction provides {
         if (currentScreen != Screen.Settings) navigateToStack(navigationStack + Screen.Settings)
@@ -1817,7 +1855,8 @@ private fun MainScaffoldContent(
         UnifiedGalleryContainer.instance.Shell(
             containerColor = appShellColor,
             modifier = Modifier,
-            scrollBehavior = if (homeHeaderOwnsShell) homeTopBarScrollBehavior else null,
+            // Every route drives this one mounted toolbar through the same scroll state.
+            scrollBehavior = routeHeaderScrollBehavior.takeUnless { detailToolbarLocked },
         snackbarHost = {
             GalleryMessageHost()
         },
@@ -1825,7 +1864,7 @@ private fun MainScaffoldContent(
         underlayHeader = (selectionHeader ?: routePages.getValue(baseScreenIndex).header).takeIf {
             visibleViewer != null && reviewPage == null
         },
-        underlayScrollBehavior = homeTopBarScrollBehavior.takeIf { baseScreen == Screen.Home },
+        underlayScrollBehavior = routeHeaderScrollBehavior.takeUnless { detailToolbarLocked },
         underlayVisible = { viewerTransitions.revealing },
         underlayAlpha = {
             1f - (viewerTransitions.active?.gesture?.visual?.backdropAlpha ?: 1f)
@@ -1845,9 +1884,7 @@ private fun MainScaffoldContent(
                     .fillMaxSize()
                     .padding(top = baseRouteTopInset)
                     .nestedScroll(scrollBehavior)
-                    .then(if (currentScreen == Screen.Home && reviewPage == null && !isHomeSearchMode && !quickSortEnabled) {
-                        Modifier.nestedScroll(homeTopBarScrollBehavior.nestedScrollConnection)
-                    } else Modifier)
+                    .then(if (detailToolbarLocked) Modifier else Modifier.nestedScroll(topBarScrollBehavior.nestedScrollConnection))
                     .drawWithContent {
                         // Hide the route decorations together with its content.
                         if ((visibleViewer == null || viewerTransitions.revealing) && reviewPage == null) drawContent()

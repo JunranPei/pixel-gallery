@@ -52,7 +52,7 @@ android {
         applicationId = when (viewerTestVariant) {
             "test" -> "com.pixel.gallery.multitask.test"
             "simplemerge" -> "com.pixel.gallery.simplegallerymerge"
-            "trace" -> "com.pixel.gallery.codextrace"
+            "trace" -> "com.pixel.gallery.viewertrace"
             "clean" -> "com.pixel.gallery.codexclean"
             "compressed" -> "com.pixel.gallery.codexcompressed"
             "zoomtrace" -> "com.pixel.gallery.zoomtrace"

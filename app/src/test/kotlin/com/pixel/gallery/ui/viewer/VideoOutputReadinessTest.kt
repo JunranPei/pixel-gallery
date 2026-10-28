@@ -4,6 +4,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VideoOutputReadinessTest {
+    @Test fun commitFromAnEarlierBindingCannotClearTheCover() {
+        val readiness = VideoOutputReadiness()
+        val first = Any()
+        readiness.bind(first, true)
+        readiness.rendered(first)
+        val committedGeneration = readiness.generation
+        val second = Any()
+        readiness.bind(second, true)
+        readiness.rendered(second)
+        assertFalse(readiness.canReveal(committedGeneration))
+        assertTrue(readiness.canReveal(readiness.generation))
+        readiness.unbind(second)
+        assertFalse(readiness.canReveal(readiness.generation))
+    }
+
+    @Test fun commitMustWaitForBothDecoderAndBuffer() {
+        val readiness = VideoOutputReadiness()
+        val output = Any()
+        readiness.bind(output, false)
+        readiness.bufferAvailable(output, readiness.generation)
+        assertFalse(readiness.canReveal(readiness.generation))
+        readiness.rendered(output)
+        assertTrue(readiness.canReveal(readiness.generation))
+    }
+
     @Test fun oldTextureFrameCannotUncoverANewSurface() {
         val readiness = VideoOutputReadiness()
         val texture = Any()

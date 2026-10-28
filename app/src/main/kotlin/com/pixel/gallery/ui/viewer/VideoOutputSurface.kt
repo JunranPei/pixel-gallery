@@ -37,16 +37,56 @@ internal class VideoSurfaceHost(context: Context, private val session: VideoPlay
     private var bound: Surface? = null
     private var textureView: TextureView? = null
     private var textureOutput: Surface? = null
+    private val pipLayoutListener = android.view.ViewTreeObserver.OnPreDrawListener {
+        session.updatePipParams()
+        true
+    }
     private val ordinary = SurfaceView(context).apply {
         if (Build.VERSION.SDK_INT >= 34) setSurfaceLifecycle(SurfaceView.SURFACE_LIFECYCLE_FOLLOWS_ATTACHMENT)
         holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) { selectOutput() }
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-            override fun surfaceDestroyed(holder: SurfaceHolder) { clearIfBound(holder.surface) }
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                ViewerLoadMetrics.event(
+                    "VIDEO_SURFACE_CREATED",
+                    "kind=surface valid=${holder.surface.isValid} host=${hashCode()} " +
+                        session.diagnosticsSnapshot(),
+                )
+                selectOutput()
+            }
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                ViewerLoadMetrics.event(
+                    "VIDEO_SURFACE_CHANGED",
+                    "kind=surface size=${width}x$height format=$format host=${hashCode()} " +
+                        session.diagnosticsSnapshot(),
+                )
+            }
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                ViewerLoadMetrics.event(
+                    "VIDEO_SURFACE_DESTROYED",
+                    "kind=surface valid=${holder.surface.isValid} host=${hashCode()} " +
+                        session.diagnosticsSnapshot(),
+                )
+                clearIfBound(holder.surface)
+            }
         })
     }
 
-    init { addView(ordinary, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)) }
+    init {
+        ViewerLoadMetrics.event(
+            "VIDEO_SURFACE_HOST_CREATE",
+            "host=${hashCode()} session=${session.id}",
+        )
+        addView(ordinary, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnPreDrawListener(pipLayoutListener)
+    }
+
+    override fun onDetachedFromWindow() {
+        if (viewTreeObserver.isAlive) viewTreeObserver.removeOnPreDrawListener(pipLayoutListener)
+        super.onDetachedFromWindow()
+    }
 
     fun update(texture: Boolean, surfaceReady: Boolean, keepAwake: Boolean) {
         keepScreenOn = keepAwake
@@ -63,15 +103,27 @@ internal class VideoSurfaceHost(context: Context, private val session: VideoPlay
         view.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                 if (disposed || textureView !== view) return
+                ViewerLoadMetrics.event(
+                    "VIDEO_TEXTURE_AVAILABLE",
+                    "size=${width}x$height host=${hashCode()} session=${session.id}",
+                )
                 output = Surface(texture)
                 textureOutput = output
                 selectOutput()
             }
             override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) {}
             override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
+                ViewerLoadMetrics.event(
+                    "VIDEO_TEXTURE_UPDATED",
+                    "host=${hashCode()} session=${session.id}",
+                )
                 output?.let { session.outputReadiness.rendered(it) }
             }
             override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+                ViewerLoadMetrics.event(
+                    "VIDEO_TEXTURE_DESTROYED",
+                    "host=${hashCode()} session=${session.id}",
+                )
                 output?.let { clearIfBound(it); it.release() }
                 if (textureOutput === output) textureOutput = null
                 output = null
@@ -86,6 +138,11 @@ internal class VideoSurfaceHost(context: Context, private val session: VideoPlay
         val output = (if (wantTexture) textureOutput else ordinary.holder.surface)
             ?.takeIf { it.isValid } ?: return
         if (bound === output) return
+        ViewerLoadMetrics.event(
+            "VIDEO_OUTPUT_BIND",
+            "kind=${if (wantTexture) "texture" else "surface"} valid=${output.isValid} " +
+                "host=${hashCode()} session=${session.id} ${session.diagnosticsSnapshot()}",
+        )
         session.surface = ordinary
         session.texture = if (wantTexture) textureView else null
         session.outputReadiness.bind(output, wantTexture)
@@ -98,6 +155,10 @@ internal class VideoSurfaceHost(context: Context, private val session: VideoPlay
 
     private fun clearIfBound(output: Surface) {
         if (bound !== output) return
+        ViewerLoadMetrics.event(
+            "VIDEO_OUTPUT_UNBIND",
+            "valid=${output.isValid} host=${hashCode()} session=${session.id} ${session.diagnosticsSnapshot()}",
+        )
         if (native == null) session.player.clearVideoSurface(output)
         else if (session.outputReadiness.owns(output)) native.setSurface(null)
         session.outputReadiness.unbind(output)
@@ -113,6 +174,10 @@ internal class VideoSurfaceHost(context: Context, private val session: VideoPlay
     }
 
     fun dispose() {
+        ViewerLoadMetrics.event(
+            "VIDEO_SURFACE_HOST_DISPOSE",
+            "host=${hashCode()} session=${session.id} ${session.diagnosticsSnapshot()}",
+        )
         disposed = true
         bound?.let(::clearIfBound)
         releaseTexture()

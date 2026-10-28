@@ -5,8 +5,14 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.pixel.gallery.model.ThemeMode
@@ -32,6 +38,9 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
 class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    // Settings are process-scoped. Keeping the resolved visibility state alive
+    // lets a recreated Activity reuse the same detail-page inputs immediately.
+    private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val STARTUP_AT_ALBUMS = booleanPreferencesKey("flutter.albums")
     private val SHOW_FULL_ALBUM_NAMES = booleanPreferencesKey("show_full_album_names")
     private val MATERIAL_YOU = booleanPreferencesKey("flutter.material_you")
@@ -200,10 +209,10 @@ class SettingsRepository @Inject constructor(
         .map { preferences -> preferences[HIDDEN_FOLDERS] ?: emptySet() }
 
     /** Visibility includes in-flight protection; the Hidden grid uses saved roots only. */
-    val hiddenFolders: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+    val hiddenFolders: StateFlow<Set<String>> = context.dataStore.data.map { preferences ->
         (preferences[HIDDEN_FOLDERS] ?: emptySet()) +
             (preferences[HIDDEN_RENAME_PROTECTION] ?: emptySet())
-    }
+    }.stateIn(settingsScope, SharingStarted.Eagerly, emptySet())
 
     suspend fun addHiddenFolder(path: String) {
         context.dataStore.edit { preferences ->
