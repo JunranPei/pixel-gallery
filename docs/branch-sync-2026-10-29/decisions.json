@@ -1,0 +1,328 @@
+{
+  "decisions": [
+    {
+      "path": ".gitignore",
+      "disposition": "combined",
+      "candidate_path": ".gitignore",
+      "candidate_blob": "f15a4aeda169ad2b9de7877aec06e58a928c866e",
+      "candidate_mode": "100644",
+      "reason": "Retain the original exclusions and add upstream private agent-directory exclusion.",
+      "preservation": "Retain the original exclusions and add upstream private agent-directory exclusion.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "disposition": "combined",
+      "candidate_path": "app/build.gradle.kts",
+      "candidate_blob": "6453a680238307d58a307e239228fe4f2608fe57",
+      "candidate_mode": "100644",
+      "reason": "Retain branch package IDs, diagnostic package matrix, branch-2 ordinary-debug .test isolation, cold-test flag, four ABI splits/universal support and uncompressed 16KB-aligned libraries; update shared dependencies, runner and release version to 4.3.5.9/2076.",
+      "preservation": "Retain branch package IDs, diagnostic package matrix, branch-2 ordinary-debug .test isolation, cold-test flag, four ABI splits/universal support and uncompressed 16KB-aligned libraries; update shared dependencies, runner and release version to 4.3.5.9/2076.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/AndroidManifest.xml",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/AndroidManifest.xml",
+      "candidate_blob": "4aaa62aa790a5dcd2d814bbfbf5549c684064b27",
+      "candidate_mode": "100644",
+      "reason": "Use standard activity launch mode for explicit NEW_DOCUMENT shortcuts; keep documentLaunchMode=always absent. The old singleTop mode ignored the document flag in real emulator launches. Ordinary launcher task reuse is verified separately. Shared PiP/services remain.",
+      "preservation": "Use standard activity launch mode for explicit NEW_DOCUMENT shortcuts; keep documentLaunchMode=always absent. The old singleTop mode ignored the document flag in real emulator launches. Ordinary launcher task reuse is verified separately. Shared PiP/services remain.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/MainActivity.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/MainActivity.kt",
+      "candidate_blob": "60aa34a8e2dffe803d8f2e87935c12d75257e498",
+      "candidate_mode": "100644",
+      "reason": "Retain branch-2 injected settings repository and all four performance-setting collectors; integrate shared video/PiP lifecycle. Read the existing shortcut extras on initial launch and use saved title/icon for its task.",
+      "preservation": "Retain branch-2 injected settings repository and all four performance-setting collectors; integrate shared video/PiP lifecycle. Read the existing shortcut extras on initial launch and use saved title/icon for its task.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/data/local/dao/MediaDao.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/data/local/dao/MediaDao.kt",
+      "candidate_blob": "954d5741d5e8fd5d6f06023b0ab2453891cc8872",
+      "candidate_mode": "100644",
+      "reason": "Retain 256-entry keyset paging and transactional reconciliation. Upstream uses invalidation tokens rather than counts and migrates favourite memberships into the label tables; existing favourite APIs forward to reserved label 1.",
+      "preservation": "Retain 256-entry keyset paging and transactional reconciliation. Upstream uses invalidation tokens rather than counts and migrates favourite memberships into the label tables; existing favourite APIs forward to reserved label 1.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/data/repository/MediaRepository.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/data/repository/MediaRepository.kt",
+      "candidate_blob": "c6662bd24752acf27ea843b5a97cfdf4adec6848",
+      "candidate_mode": "100644",
+      "reason": "Retain paged loading, index relocation/deletion and mutation serialization. Integrate shared label migration, journalled transfers and read-refresh holds; remove obsolete duplicate overloads so callers use the stronger coordinator.",
+      "preservation": "Retain paged loading, index relocation/deletion and mutation serialization. Integrate shared label migration, journalled transfers and read-refresh holds; remove obsolete duplicate overloads so callers use the stronger coordinator.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/data/repository/SettingsRepository.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/data/repository/SettingsRepository.kt",
+      "candidate_blob": "265356e8158cab28fedfc73d39fad9eabfa505e0",
+      "candidate_mode": "100644",
+      "reason": "Retain viewer_test_settings/large_image_cold_test_mode and original defaults; integrate shared process-scoped settings and new keys. Branch 2 retains the exact custom_shortcuts JSON key and add/remove methods without altering IDs or icon paths.",
+      "preservation": "Retain viewer_test_settings/large_image_cold_test_mode and original defaults; integrate shared process-scoped settings and new keys. Branch 2 retains the exact custom_shortcuts JSON key and add/remove methods without altering IDs or icon paths.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/glide/AvesAppGlideModule.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/glide/AvesAppGlideModule.kt",
+      "candidate_blob": "48ea2c16c1dd615d4d363ac7407a8c3a325240cc",
+      "candidate_mode": "100644",
+      "reason": "Register both original indexed JPEG/PNG preview models and the shared native-fit model; use the shared bounded executor window without enabling the unlimited source pool.",
+      "preservation": "Register both original indexed JPEG/PNG preview models and the shared native-fit model; use the shared bounded executor window without enabling the unlimited source pool.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/MainScaffold.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/MainScaffold.kt",
+      "candidate_blob": "808ef2f3bd8cdaf9ecb1d3ab5255fd7e8b9ccec2",
+      "candidate_mode": "100644",
+      "reason": "Integrate current shared headers, retained route shell, labels, classification and browse indexes. Retain local focus behavior and stable viewer order; reconciliation moves to ViewerSessionPhotos.kt, covered by original tests. Branch 2 restores its ShortcutManager route and settings navigation callback.",
+      "preservation": "Integrate current shared headers, retained route shell, labels, classification and browse indexes. Retain local focus behavior and stable viewer order; reconciliation moves to ViewerSessionPhotos.kt, covered by original tests. Branch 2 restores its ShortcutManager route and settings navigation callback.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/components/VerticalScrollbar.kt",
+      "disposition": "upstream-equivalent",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/components/VerticalScrollbar.kt",
+      "candidate_blob": "3f88b6e201548bea66918586302e34f317ab89d9",
+      "candidate_mode": "100644",
+      "reason": "Shared replacement preserves local vertical track drag, slop arbitration and 1000ms position hint while adding current handle geometry and media position labels. Old jumpToTrackPosition was a drag helper, not a separate track-tap feature.",
+      "preservation": "Shared replacement preserves local vertical track drag, slop arbitration and 1000ms position hint while adding current handle geometry and media position labels. Old jumpToTrackPosition was a drag helper, not a separate track-tap feature.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/home/HomeScreenComponents.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/home/HomeScreenComponents.kt",
+      "candidate_blob": "03bb54f99e5f2ba77686d954a3ab074ea1341142",
+      "candidate_mode": "100644",
+      "reason": "Retain photo/album click, exclusion, hiding, scrollbar drag arbitration and grid sizing through shared grids; integrate labels, classification reservations and current empty-state loading guards.",
+      "preservation": "Retain photo/album click, exclusion, hiding, scrollbar drag arbitration and grid sizing through shared grids; integrate labels, classification reservations and current empty-state loading guards.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/PerformanceSettingsScreen.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/PerformanceSettingsScreen.kt",
+      "candidate_blob": "243a9e96dd4286d10fd18fb51219e02476177996",
+      "candidate_mode": "100644",
+      "reason": "Move controls into GalleryPage/SettingsGroup, preserve the cold-test toggle in metrics builds and report cache-clear failures from its Boolean completion callback; adopt shared diagnostics export and toast provider.",
+      "preservation": "Move controls into GalleryPage/SettingsGroup, preserve the cold-test toggle in metrics builds and report cache-clear failures from its Boolean completion callback; adopt shared diagnostics export and toast provider.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/SettingsScreen.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/SettingsScreen.kt",
+      "candidate_blob": "ade23356ff21cae116fb5ff3ae756111dc6955a9",
+      "candidate_mode": "100644",
+      "reason": "Move existing destinations into the shared settings shell and color groups. Branch 2 has a separate first-level desktop-shortcuts group with a concise localized title and home-screen icon.",
+      "preservation": "Move existing destinations into the shared settings shell and color groups. Branch 2 has a separate first-level desktop-shortcuts group with a concise localized title and home-screen icon.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/ShortcutManagerScreen.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/ShortcutManagerScreen.kt",
+      "candidate_blob": "6e35db46c133f243ca4e2c0dae438733aa77daa6",
+      "candidate_mode": "100644",
+      "reason": "Retain target picker, custom/preset icons, saved shortcut list, pin/remove operations and creation dialog. Return GalleryPageContent using one shared header; creation action is in the header, notifications use shared swipe-dismiss toasts, and redundant headings/instructions are removed.",
+      "preservation": "Retain target picker, custom/preset icons, saved shortcut list, pin/remove operations and creation dialog. Return GalleryPageContent using one shared header; creation action is in the header, notifications use shared swipe-dismiss toasts, and redundant headings/instructions are removed.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/transfer/TransferDestinationScreen.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/transfer/TransferDestinationScreen.kt",
+      "candidate_blob": "bb5b1ce6531554a3f4acade964f23895a03a48a4",
+      "candidate_mode": "100644",
+      "reason": "Retain source/destination filtering, conflict choices and completion navigation through shared retained transfer routes and confirmation state; labels and classification reservations are included.",
+      "preservation": "Retain source/destination filtering, conflict choices and completion navigation through shared retained transfer routes and confirmation state; labels and classification reservations are included.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/SimpleSubsamplingImageView.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/SimpleSubsamplingImageView.kt",
+      "candidate_blob": "3683bf0ab534a104b3e9b4d15974ba238f76dd82",
+      "candidate_mode": "100644",
+      "reason": "Retain indexed-fit previews, deferred DATA handoff, RESOURCE-only cache probes, cold cache bypass, tile-cache switch and capability revisions. Combine shared native JPEG fit with explicit platform failure fallback and host-owned content rotation.",
+      "preservation": "Retain indexed-fit previews, deferred DATA handoff, RESOURCE-only cache probes, cold cache bypass, tile-cache switch and capability revisions. Combine shared native JPEG fit with explicit platform failure fallback and host-owned content rotation.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerGlideTaskCompression.kt",
+      "disposition": "adapted",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerGlideTaskCompression.kt",
+      "candidate_blob": "2ffce99a0aca89aae27da7fbc188a61fdab434dd",
+      "candidate_mode": "100644",
+      "reason": "Preserve the local prohibition on unlimited source executors. Shared bounded viewer windows temporarily resize configured source/disk pools and restore them on exit; source concurrency remains capped.",
+      "preservation": "Preserve the local prohibition on unlimited source executors. Shared bounded viewer windows temporarily resize configured source/disk pools and restore them on exit; source concurrency remains capped.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerLoadMetrics.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerLoadMetrics.kt",
+      "candidate_blob": "f91e282fdde311c296ffea8c92b88fd68ecd123d",
+      "candidate_mode": "100644",
+      "reason": "Retain local snapshotEvent diagnostics and integrate current frame/layer/lifecycle tracing. Release builds still gate diagnostics through BuildConfig.",
+      "preservation": "Retain local snapshotEvent diagnostics and integrate current frame/layer/lifecycle tracing. Release builds still gate diagnostics through BuildConfig.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerScreen.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerScreen.kt",
+      "candidate_blob": "dc44137b547e1ebabd3be297c830b64ef4d8036b",
+      "candidate_mode": "100644",
+      "reason": "Retain cold-test preference, per-source index generations, indexed fit-preview models, v8 upgrade availability/action and index operation refresh. Adopt shared video/PiP, gesture and dialog lifecycle; remembered image transforms pass through both renderer paths.",
+      "preservation": "Retain cold-test preference, per-source index generations, indexed fit-preview models, v8 upgrade availability/action and index operation refresh. Adopt shared video/PiP, gesture and dialog lifecycle; remembered image transforms pass through both renderer paths.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ZoomableContainer.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ZoomableContainer.kt",
+      "candidate_blob": "4a305414b8daadc69a365b24d2e9b27c8b3c2788",
+      "candidate_mode": "100644",
+      "reason": "Retain existing pan/zoom transforms and integrate shared coordinate mapping and cancellation while content rotates.",
+      "preservation": "Retain existing pan/zoom transforms and integrate shared coordinate mapping and cancellation while content rotates.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewmodel/PhotosViewModel.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/ui/viewmodel/PhotosViewModel.kt",
+      "candidate_blob": "99c8b9778561e08825764cb33862579bee7f1c7b",
+      "candidate_mode": "100644",
+      "reason": "Retain resume-gated background transforms, cold-test preference/setter and content-observer mutation guard. Adopt indexed browse/grouping, label-aware favourites and read-refresh coordination. Branch 2 retains customShortcuts StateFlow and add/remove operations.",
+      "preservation": "Retain resume-gated background transforms, cold-test preference/setter and content-observer mutation guard. Adopt indexed browse/grouping, label-aware favourites and read-refresh coordination. Branch 2 retains customShortcuts StateFlow and add/remove operations.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/utils/AppLogger.kt",
+      "disposition": "upstream-equivalent",
+      "candidate_path": "app/src/main/kotlin/com/pixel/gallery/utils/AppLogger.kt",
+      "candidate_blob": "65a65da174144e0709f308b502828cd3775c486c",
+      "candidate_mode": "100644",
+      "reason": "Retain timestamped logging with the upstream synchronized timestamp helper, crash forwarding and prior-exit diagnostics.",
+      "preservation": "Retain timestamped logging with the upstream synchronized timestamp helper, crash forwarding and prior-exit diagnostics.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/ui/MainScaffoldSearchTest.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/test/kotlin/com/pixel/gallery/ui/MainScaffoldSearchTest.kt",
+      "candidate_blob": "51eb1d94bae74de3071c6e88fbc3cdde81adae0c",
+      "candidate_mode": "100644",
+      "reason": "Retain original search and swipe-threshold cases; add shared album-selection regression case.",
+      "preservation": "Retain original search and swipe-threshold cases; add shared album-selection regression case.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/ui/ViewerSessionTest.kt",
+      "disposition": "combined",
+      "candidate_path": "app/src/test/kotlin/com/pixel/gallery/ui/ViewerSessionTest.kt",
+      "candidate_blob": "a7b51c70bc185b8c69b45423122022fb2e91b820",
+      "candidate_mode": "100644",
+      "reason": "Retain original stable-session identity/order tests; add receipt replay and metadata refresh regressions using the relocated helper.",
+      "preservation": "Retain original stable-session identity/order tests; add receipt replay and metadata refresh regressions using the relocated helper.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "build.gradle.kts",
+      "disposition": "combined",
+      "candidate_path": "build.gradle.kts",
+      "candidate_blob": "4d9fbabe00bf0544be9595f7db6e549a69949a39",
+      "candidate_mode": "100644",
+      "reason": "Retain AGP 8.13.2/Kotlin 2.1.10 and original repositories; restore upstream public/google mirrors ahead of slow repositories. Dependency versions are unchanged from the reviewed shared tree.",
+      "preservation": "Retain AGP 8.13.2/Kotlin 2.1.10 and original repositories; restore upstream public/google mirrors ahead of slow repositories. Dependency versions are unchanged from the reviewed shared tree.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "indexed-jpeg/src/main/cpp/CMakeLists.txt",
+      "disposition": "combined",
+      "candidate_path": "indexed-jpeg/src/main/cpp/CMakeLists.txt",
+      "candidate_blob": "7d54e89f76f9b8941c667abdbae6d4c0c9d91009",
+      "candidate_mode": "100644",
+      "reason": "Retain local libjpeg-turbo 3.2.0 SIMD/v8 tile backend and add the isolated shared 3.1.3 native preview target. ARM retains required SIMD. x86 uses its portable C backend without requiring an absent NASM host dependency; native output correctness must be checked separately from performance.",
+      "preservation": "Retain local libjpeg-turbo 3.2.0 SIMD/v8 tile backend and add the isolated shared 3.1.3 native preview target. ARM retains required SIMD. x86 uses its portable C backend without requiring an absent NASM host dependency; native output correctness must be checked separately from performance.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    },
+    {
+      "path": "third_party/ssiv-pixel/src/main/kotlin/com/davemorrissey/labs/subscaleview/SubsamplingScaleImageView.kt",
+      "disposition": "combined",
+      "candidate_path": "third_party/ssiv-pixel/src/main/kotlin/com/davemorrissey/labs/subscaleview/SubsamplingScaleImageView.kt",
+      "candidate_blob": "4392e2c516b1e4e2a47d3990445c77b4b6ec2730",
+      "candidate_mode": "100644",
+      "reason": "Retain local stored sample selection, source-aligned decoded tile cap, persistent decoder capability grid, and cold-mode tile-cache policy. Integrate shared resize center/scale handling, gesture cancel cleanup and host rotation arbitration.",
+      "preservation": "Retain local stored sample selection, source-aligned decoded tile cap, persistent decoder capability grid, and cold-mode tile-cache policy. Integrate shared resize center/scale handling, gesture cancel cleanup and host rotation arbitration.",
+      "verification": [
+        "366 unit tests across app/indexed-jpeg/ssiv-pixel; see verification.md for native/runtime scope"
+      ]
+    }
+  ]
+}

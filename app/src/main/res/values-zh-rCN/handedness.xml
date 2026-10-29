@@ -1,0 +1,18 @@
+<resources>
+    <string name="display_handedness">利手</string>
+    <string name="display_right_handed">右利手</string>
+    <string name="display_left_handed">左利手</string>
+    <string name="qs_undo">撤回快速分拣</string>
+    <string name="qs_undo_unavailable">本次分拣暂无可撤回操作</string>
+    <string name="qs_conflict_title">已有同名文件</string>
+    <string name="qs_conflict_count">%1$d 个同名冲突</string>
+    <string name="qs_keep_both">保留两份</string>
+    <string name="qs_keep_both_description">给移入的文件名添加编号</string>
+    <string name="qs_skip_conflicts">跳过同名文件</string>
+    <string name="qs_skip_conflicts_description">将冲突文件保留在当前相册</string>
+    <string name="qs_continue">继续</string>
+    <string name="qs_replace">替换</string>
+    <string name="qs_replace_description">本次分拣期间可撤回恢复被替换的文件</string>
+    <string name="qs_replace_permission">当前 Android 版本需要所有文件访问权限</string>
+    <string name="qs_warning_title">移动未完成</string>
+</resources>

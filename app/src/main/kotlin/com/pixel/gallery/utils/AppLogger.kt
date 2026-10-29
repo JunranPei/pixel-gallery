@@ -24,14 +24,15 @@ object AppLogger {
             }
         }
         setupCrashHandler()
+        executor.execute { AppDiagnostics.recordPreviousExit(context.applicationContext) }
         log("AppLogger", "Logger initialized. Cache dir: ${logDir?.absolutePath}")
     }
 
     private fun setupCrashHandler() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            logCrash(thread, throwable)
-            defaultHandler?.uncaughtException(thread, throwable)
+            try { logCrash(thread, throwable) } catch (_: Throwable) { }
+            finally { defaultHandler?.uncaughtException(thread, throwable) }
         }
     }
 
@@ -43,7 +44,7 @@ object AppLogger {
 
         val crashInfo = buildString {
             append("================ CRASH ================\n")
-            append("Time: ${dateFormat.format(Date())}\n")
+            append("Time: ${timestamp()}\n")
             append("Thread: ${thread.name} (id: ${thread.id})\n")
             append("Exception: ${throwable.javaClass.name}: ${throwable.message}\n")
             append("Stacktrace:\n")
@@ -65,7 +66,7 @@ object AppLogger {
     }
 
     fun log(tag: String, message: String, throwable: Throwable? = null) {
-        val time = dateFormat.format(Date())
+        val time = timestamp()
         val threadName = Thread.currentThread().name
         val formattedLog = buildString {
             append("$time [$threadName] $tag: $message")
@@ -104,6 +105,8 @@ object AppLogger {
     fun getLogFile(): File? {
         return logDir?.let { File(it, "app_log.txt") }
     }
+
+    private fun timestamp() = synchronized(dateFormat) { dateFormat.format(Date()) }
 
     fun getCrashLogFile(): File? {
         return logDir?.let { File(it, "crash_log.txt") }

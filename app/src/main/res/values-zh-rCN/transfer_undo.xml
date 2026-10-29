@@ -1,0 +1,4 @@
+<resources>
+    <string name="transfer_undo">撤销移动</string>
+    <string name="transfer_undo_unavailable">暂无可撤销的操作</string>
+</resources>

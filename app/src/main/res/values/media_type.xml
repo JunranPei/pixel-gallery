@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_type_title">Media type</string>
+    <string name="media_type_all">All</string>
+    <string name="media_type_images">Images</string>
+    <string name="media_type_videos">Videos</string>
+    <string name="media_type_no_images">No images</string>
+    <string name="media_type_no_videos">No videos</string>
+    <string name="media_type_no_image_albums">No albums with images</string>
+    <string name="media_type_no_video_albums">No albums with videos</string>
+    <plurals name="media_type_item_count"><item quantity="one">%d item</item><item quantity="other">%d items</item></plurals>
+    <plurals name="media_type_image_count"><item quantity="one">%d image</item><item quantity="other">%d images</item></plurals>
+    <plurals name="media_type_video_count"><item quantity="one">%d video</item><item quantity="other">%d videos</item></plurals>
+</resources>

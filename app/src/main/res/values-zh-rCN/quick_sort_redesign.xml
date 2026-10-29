@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qs_targets_frequent">常用</string>
+    <string name="qs_targets_all">全部相册</string>
+    <string name="qs_targets_selected">已选</string>
+    <string name="qs_targets_expand">展开</string>
+    <string name="qs_targets_no_frequent">暂无常用相册</string>
+    <string name="qs_targets_no_selection">到“全部相册”选择分类目标。</string>
+    <string name="duplicate_keeper_rule">默认保留媒体时间最早的文件，也可手动更换保留项。</string>
+</resources>

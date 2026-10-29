@@ -2,6 +2,10 @@ package com.pixel.gallery.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -9,11 +13,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FolderOff
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -26,9 +36,12 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.Album
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
+import com.pixel.gallery.ui.components.GalleryOverflowMenu
+import com.pixel.gallery.ui.components.GalleryMenuRow
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.CheckCircle
@@ -36,11 +49,13 @@ import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.ui.graphics.graphicsLayer
 import com.pixel.gallery.ui.utils.photoGridDragSelect
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.compose.ui.platform.LocalContext
@@ -52,8 +67,26 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.Velocity
-import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DecodeFormat
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.R
+import com.pixel.gallery.ui.viewer.viewerThumbnailAnchor
+import com.pixel.gallery.ui.viewer.viewerTransitionKey
+import com.pixel.gallery.ui.quicksort.quickSortGridPresentation
+import com.pixel.gallery.ui.quicksort.QuickSortUiConfig
+import com.pixel.gallery.ui.quicksort.QuickSortGestureState
+import com.pixel.gallery.ui.quicksort.QuickSortDock
+import com.pixel.gallery.ui.quicksort.QuickSortPhotoDragPreview
+import com.pixel.gallery.ui.quicksort.quickSortPhotoGestures
+import com.pixel.gallery.ui.quicksort.quickSortGestureArbitration
+import com.pixel.gallery.ui.quicksort.QuickSortGridPresentation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 
 
 
@@ -70,9 +103,74 @@ fun PhotosScreen(
     bottomPadding: Dp = 0.dp,
     state: LazyGridState = rememberLazyGridState(),
     emptyMessage: String? = null,
+    quickSort: QuickSortUiConfig? = null,
+    positionLabels: List<String?>? = null,
+    selectionMode: Boolean = selectedIds.isNotEmpty(),
+    gridContextKey: Any? = null,
+    retainMovedItems: Boolean = false,
 ) {
+    val ordinaryMove = com.pixel.gallery.ui.quicksort.LocalMoveGridPresentation.current
+    val retainedSelectionMode = com.pixel.gallery.ui.quicksort.LocalMediaSelectionMode.current
+    val presentationSession = quickSort?.sessionKey ?: ordinaryMove?.sessionKey
+    val holdBatches = quickSort != null || ordinaryMove != null
+    var sessionSlots by remember(presentationSession, holdBatches, gridContextKey) { mutableStateOf(items) }
+    SideEffect { if (holdBatches && sessionSlots.isEmpty() && items.isNotEmpty()) sessionSlots = items }
     var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
+    var gridTouchActive by remember { mutableStateOf(false) }
+    val quickSortGestures = remember { QuickSortGestureState() }
+    var removedPaths by remember(presentationSession) { mutableStateOf(emptySet<String>()) }
+    val completedPaths = quickSort?.completedBatchPaths ?: ordinaryMove?.completedBatchPaths.orEmpty()
+    val relocatedEntries = quickSort?.relocatedEntries ?: ordinaryMove?.relocatedEntries.orEmpty()
+    LaunchedEffect(completedPaths, gridTouchActive, quickSortGestures.busy, state.isScrollInProgress) {
+        if (!gridTouchActive && !quickSortGestures.busy && !state.isScrollInProgress) removedPaths = completedPaths
+    }
+    val heldItems = quickSort?.heldItems ?: ordinaryMove?.heldItems ?: com.pixel.gallery.model.QuickSortBatchHold()
+    val heldPaths = remember(heldItems.paths, completedPaths, removedPaths) {
+        heldItems.paths + (completedPaths - removedPaths)
+    }
+    var presentation by remember(presentationSession, holdBatches, gridContextKey) {
+        mutableStateOf(if (holdBatches) QuickSortGridPresentation(sessionSlots, emptySet()) else null,
+            referentialEqualityPolicy())
+    }
+    LaunchedEffect(sessionSlots, items, holdBatches, removedPaths, heldPaths, retainMovedItems, relocatedEntries) {
+        if (!holdBatches) {
+            presentation = null
+            return@LaunchedEffect
+        }
+        val before = presentation
+        val next = withContext(Dispatchers.Default) {
+            quickSortGridPresentation(sessionSlots, items, removedPaths, heldPaths,
+                retainMovedItems, relocatedEntries).let {
+                if (it == before) before else it
+            }
+        }
+        if (next !== before) {
+            // Mapping a large library may finish after another stroke has begun.
+            snapshotFlow { !gridTouchActive && !quickSortGestures.busy && !state.isScrollInProgress }.first { it }
+            presentation = next
+        }
+    }
+    val displayedPresentation = presentation
+    val displayedItems = displayedPresentation?.items ?: items
+    val unavailableIds = displayedPresentation?.unavailableIds.orEmpty()
+    var gridOriginInWindow by remember { mutableStateOf(Offset.Zero) }
+    var dockHeightPx by remember { mutableIntStateOf(0) }
+    val dockHeight = with(LocalDensity.current) { dockHeightPx.toDp() }
+    val effectiveBottomPadding = bottomPadding + (quickSort?.dockBottomInset ?: 0.dp) +
+        com.pixel.gallery.ui.quicksort.LocalSelectionPanelInset.current
+    val gridSidePadding = 4.dp
+    val gridSidePaddingPx = with(LocalDensity.current) { gridSidePadding.roundToPx().toFloat() }
+    val movingIds = remember(heldItems.ids, presentation?.pendingIds) { heldItems.ids + presentation?.pendingIds.orEmpty() }
+    val reservedIds = remember(movingIds, unavailableIds) { movingIds + unavailableIds }
+    LaunchedEffect(reservedIds) {
+        if (selectedIds.any { it in reservedIds }) onSelectionChange(selectedIds - reservedIds)
+    }
+    val quickSortBusy = quickSort != null && quickSortGestures.busy
+    val idsByIndex = remember(displayedItems, quickSort != null) {
+        if (quickSort != null) displayedItems.map { (it as? GridItem.Photo)?.entry?.contentId } else emptyList()
+    }
+    SideEffect { quickSortGestures.scrollbarDragging = isScrollbarDragging }
 
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
@@ -98,12 +196,10 @@ fun PhotosScreen(
         }
     }
 
-    val firstVisibleIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
-    val context = LocalContext.current
-    val scrollbarPositionLabels = remember(items) {
+    val scrollbarPositionLabels = positionLabels?.takeIf { !holdBatches } ?: remember(displayedItems) {
         var currentDateLabel: String? = null
-        List(items.size) { index ->
-            when (val item = items[index]) {
+        List(displayedItems.size) { index ->
+            when (val item = displayedItems[index]) {
                 is GridItem.Header -> {
                     currentDateLabel = item.title
                     item.title
@@ -116,104 +212,114 @@ fun PhotosScreen(
         { index: Int -> scrollbarPositionLabels.getOrNull(index) }
     }
 
-    LaunchedEffect(firstVisibleIndex, items, isFastScrolling, isScrollbarDragging) {
-        if (!isFastScrolling && !isScrollbarDragging) {
-            val info = state.layoutInfo
-            val visibleCount = info.visibleItemsInfo.size
-            if (visibleCount > 0 && items.isNotEmpty()) {
-                val preloadStartIndex = firstVisibleIndex + visibleCount
-                val preloadEndIndex = (preloadStartIndex + 18).coerceAtMost(items.size - 1)
-                for (i in preloadStartIndex..preloadEndIndex) {
-                    val item = items[i]
-                    if (item is GridItem.Photo) {
-                        val media = item.entry
-                        val model = AvesAppGlideModule.getModel(
-                            context = context,
-                            uri = Uri.parse(media.uri),
-                            mimeType = media.sourceMimeType,
-                            pageId = null,
-                            sizeBytes = media.sizeBytes,
-                            isThumbnail = true,
-                            rotationDegrees = media.sourceRotationDegrees,
-                            dateModifiedMillis = media.dateModifiedMillis
-                        )
-                        Glide.with(context)
-                            .load(model)
-                            .signature(ObjectKey(media.dateModifiedMillis))
-                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                            .format(DecodeFormat.PREFER_RGB_565)
-                            .override(200)
-                            .preload()
-                    }
+    Box(modifier = Modifier.fillMaxSize()
+        .then(if (quickSort != null) Modifier.clipToBounds() else Modifier)
+        .then(if (quickSort != null) Modifier.quickSortGestureArbitration(quickSortGestures) else Modifier)
+        .then(if (holdBatches) Modifier.pointerInput(presentationSession) {
+            try {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    gridTouchActive = true
+                    do { val event = awaitPointerEvent(PointerEventPass.Final) }
+                    while (event.changes.any { it.pressed })
+                    gridTouchActive = false
                 }
-            }
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
+            } finally { gridTouchActive = false }
+        } else Modifier)
+        .onGloballyPositioned { quickSortGestures.containerBounds = it.boundsInWindow() }
+    ) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             state = state,
+            userScrollEnabled = !quickSortBusy,
             modifier = Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { gridOriginInWindow = it.positionInWindow() }
                 .nestedScroll(nestedScrollConnection)
-                .photoGridDragSelect(
-                    gridState = state,
-                    items = items,
-                    selectedIds = selectedIds,
-                    onSelectionChange = onSelectionChange,
-                    isPhoto = { index -> items[index] is GridItem.Photo },
-                    getPhotoId = { index -> (items[index] as GridItem.Photo).entry.contentId }
+                .then(
+                    if (quickSort == null) {
+                        Modifier.photoGridDragSelect(
+                            gridState = state,
+                            items = displayedItems,
+                            selectedIds = selectedIds,
+                            onSelectionChange = { onSelectionChange(it - reservedIds) },
+                            isPhoto = { index -> displayedItems[index] is GridItem.Photo },
+                            getPhotoId = { index -> (displayedItems[index] as GridItem.Photo).entry.contentId },
+                            leftContentPaddingPx = gridSidePaddingPx,
+                        )
+                    } else {
+                        Modifier.quickSortPhotoGestures(
+                            gridState = state,
+                            idsByIndex = idsByIndex,
+                            selectedIds = selectedIds,
+                            onSelectionChange = onSelectionChange,
+                            config = quickSort.copy(reservedIds = reservedIds),
+                            gestures = quickSortGestures,
+                            gridOriginInWindow = gridOriginInWindow,
+                            scrollbarDragging = isScrollbarDragging,
+                            leftContentPaddingPx = gridSidePaddingPx,
+                        )
+                    },
                 )
                 .pinchToZoomColumns(
                     currentColumns = columns,
                     onColumnsChange = onColumnsChange,
                     minColumns = 2,
-                    maxColumns = 6
+                    maxColumns = 6,
+                    isEnabled = { quickSort == null || !quickSortGestures.busy },
                 ),
             contentPadding = PaddingValues(
-                start = 4.dp,
-                top = 4.dp,
-                end = 4.dp,
-                bottom = 80.dp + bottomPadding
+                start = gridSidePadding,
+                top = 4.dp + if (quickSort?.dockTop == true) dockHeight + 16.dp else 0.dp,
+                end = gridSidePadding,
+                    bottom = effectiveBottomPadding + when {
+                    quickSort == null -> 80.dp
+                    !quickSort.dockTop -> dockHeight + 24.dp
+                    else -> 4.dp
+                },
             ),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(
-                count = items.size,
+                count = displayedItems.size,
                 key = { index ->
-                    when (val item = items[index]) {
+                    when (val item = displayedItems[index]) {
                         is GridItem.Header -> "header_${item.title}_${item.timestamp}"
-                        is GridItem.Photo -> item.entry.contentId
+                        is GridItem.Photo -> displayedPresentation?.let { it.keys?.get(index) ?: "photo_${item.entry.path}" }
+                            ?: item.entry.contentId
                     }
                 },
+                contentType = { index -> if (displayedItems[index] is GridItem.Header) "header" else "photo" },
                 span = { index ->
-                    when (items[index]) {
+                    when (displayedItems[index]) {
                         is GridItem.Header -> androidx.compose.foundation.lazy.grid.GridItemSpan(columns)
                         is GridItem.Photo -> androidx.compose.foundation.lazy.grid.GridItemSpan(1)
                     }
                 }
             ) { index ->
-                when (val item = items[index]) {
+                when (val item = displayedItems[index]) {
                     is GridItem.Header -> {
-                        val headerPhotos = remember(item, items) {
+                        val headerPhotos = remember(item, displayedItems) {
                             val photos = mutableListOf<Long>()
-                            for (i in index + 1 until items.size) {
-                                val nextItem = items[i]
+                            for (i in index + 1 until displayedItems.size) {
+                                val nextItem = displayedItems[i]
                                 if (nextItem is GridItem.Header) break
                                 if (nextItem is GridItem.Photo) photos.add(nextItem.entry.contentId)
                             }
                             photos
                         }
-                        val isHeaderSelected = headerPhotos.isNotEmpty() && headerPhotos.all { selectedIds.contains(it) }
-                        val isSelectionMode = selectedIds.isNotEmpty()
-                        val onHeaderClick = remember(isHeaderSelected, selectedIds, headerPhotos) {
+                        val selectableHeaderPhotos = headerPhotos.filterNot { it in reservedIds }
+                        val isHeaderSelected = selectableHeaderPhotos.isNotEmpty() && selectableHeaderPhotos.all { selectedIds.contains(it) }
+                        val isSelectionMode = selectionMode || retainedSelectionMode || quickSort != null
+                        val onHeaderClick = remember(isHeaderSelected, selectedIds, selectableHeaderPhotos, quickSortBusy, reservedIds) {
                             {
-                                if (isHeaderSelected) {
-                                    onSelectionChange(selectedIds - headerPhotos.toSet())
-                                } else {
-                                    onSelectionChange(selectedIds + headerPhotos.toSet())
+                                if (!quickSortBusy) {
+                                    if (isHeaderSelected) {
+                                        onSelectionChange(selectedIds - selectableHeaderPhotos.toSet() - reservedIds)
+                                    } else {
+                                        onSelectionChange((selectedIds + selectableHeaderPhotos.toSet()) - reservedIds)
+                                    }
                                 }
                             }
                         }
@@ -228,9 +334,10 @@ fun PhotosScreen(
                     is GridItem.Photo -> {
                         val media = item.entry
                         val isSelected = selectedIds.contains(media.contentId)
-                        val isSelectionMode = selectedIds.isNotEmpty()
-                        val onPhotoClick = remember(media.contentId, isSelectionMode) {
-                            {
+                        val isSelectionMode = selectionMode || retainedSelectionMode || quickSort != null
+                        val isReserved = media.contentId in reservedIds
+                        val onPhotoClick: () -> Unit = {
+                            if (!isReserved && !quickSortBusy) {
                                 if (isSelectionMode) {
                                     onToggleSelection(media.contentId)
                                 } else {
@@ -239,20 +346,40 @@ fun PhotosScreen(
                             }
                         }
                         
-                        PhotoTile(
-                            media = media,
-                            isSelected = isSelected,
-                            isSelectionMode = isSelectionMode,
-                            isFastScrolling = isFastScrolling || isScrollbarDragging,
-                            onClick = onPhotoClick,
-                            onLongClick = null
-                        )
+                        Box(Modifier.fillMaxWidth()) {
+                            if (media.contentId in unavailableIds) {
+                                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(ExpressiveShapes.LargeIncreased)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                                    val pending = media.contentId in movingIds
+                                    Icon(if (pending) Icons.Outlined.HourglassEmpty else Icons.Outlined.CheckCircle,
+                                        stringResource(if (pending) R.string.qs_pending else R.string.qs_processed),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else PhotoTile(
+                                media = media,
+                                isSelected = isSelected,
+                                isSelectionMode = isSelectionMode,
+                                isFastScrolling = isFastScrolling || isScrollbarDragging,
+                                onClick = onPhotoClick,
+                                onLongClick = null,
+                            )
+                            if (isReserved && media.contentId !in unavailableIds) {
+                                Box(
+                                    Modifier.matchParentSize().clip(ExpressiveShapes.LargeIncreased)
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = .55f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Outlined.HourglassEmpty, stringResource(R.string.qs_pending),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        if (items.isEmpty() && emptyMessage != null) {
+        if (displayedItems.isEmpty() && emptyMessage != null) {
             Text(
                 text = emptyMessage,
                 style = MaterialTheme.typography.bodyLarge,
@@ -261,14 +388,34 @@ fun PhotosScreen(
             )
         }
 
-        com.pixel.gallery.ui.components.GalleryScrollbar(
+        if (!quickSortBusy) com.pixel.gallery.ui.components.GalleryScrollbar(
             lazyGridState = state,
             layoutModifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(bottom = bottomPadding),
+                .padding(
+                    top = if (quickSort?.dockTop == true) dockHeight + 16.dp else 0.dp,
+                    bottom = effectiveBottomPadding + if (quickSort != null && !quickSort.dockTop) dockHeight + 24.dp else 0.dp,
+                ),
             positionLabelProvider = scrollbarPositionLabelProvider,
             onDragStateChanged = { isScrollbarDragging = it }
         )
+
+        if (quickSort != null) {
+            QuickSortDock(
+                config = quickSort.copy(reservedIds = reservedIds),
+                gestures = quickSortGestures,
+                selectedIds = selectedIds,
+                modifier = Modifier.align(if (quickSort.dockTop) Alignment.TopCenter else Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    // Translate the intact dock as the chooser rises. A growing bottom
+                    // padding would constrain its measurement and squash the album rows.
+                    .offset(y = if (quickSort.dockTop) 0.dp else -effectiveBottomPadding)
+                    .padding(top = if (quickSort.dockTop) 8.dp else 0.dp,
+                        bottom = if (quickSort.dockTop) 0.dp else 16.dp),
+                onMeasuredHeight = { dockHeightPx = it },
+            )
+            QuickSortPhotoDragPreview(quickSortGestures)
+        }
     }
 }
 
@@ -282,9 +429,11 @@ fun PhotoTile(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
 ) {
+    val thumbnailAnchor = Modifier.viewerThumbnailAnchor(media.viewerTransitionKey(), ExpressiveShapes.GridCornerRadius)
     val isVideo = remember(media.sourceMimeType) { media.sourceMimeType.startsWith("video/") }
     val context = LocalContext.current
-    val model = remember(media.uri, media.sourceMimeType, media.sizeBytes, isFastScrolling) {
+    val model = remember(media.uri, media.sourceMimeType, media.sizeBytes,
+        media.sourceRotationDegrees, media.dateModifiedMillis, isFastScrolling) {
         if (isFastScrolling) null
         else AvesAppGlideModule.getModel(
             context = context,
@@ -311,7 +460,6 @@ fun PhotoTile(
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)
                 .override(200)
-                .thumbnail(requestBuilder.clone().sizeMultiplier(0.1f))
         }
     }
     val formattedDuration = remember(media.durationMillis) {
@@ -348,7 +496,7 @@ fun PhotoTile(
             label = "CornerRadius",
             transitionSpec = { spring(stiffness = Spring.StiffnessLow) }
         ) { state ->
-            if (state) 28.dp else 20.dp
+            if (state) 28.dp else ExpressiveShapes.GridCornerRadius
         }
         
         val overlayAlpha by transition.animateFloat(
@@ -359,6 +507,7 @@ fun PhotoTile(
         }
 
         PhotoTileContent(
+            modifier = thumbnailAnchor,
             model = model,
             isVideo = isVideo,
             formattedDuration = formattedDuration,
@@ -373,11 +522,12 @@ fun PhotoTile(
         )
     } else {
         PhotoTileContent(
+            modifier = thumbnailAnchor,
             model = model,
             isVideo = isVideo,
             formattedDuration = formattedDuration,
             scale = 1.0f,
-            cornerRadius = 20.dp,
+            cornerRadius = ExpressiveShapes.GridCornerRadius,
             overlayAlpha = 0.0f,
             isSelected = false,
             isSelectionMode = false,
@@ -401,10 +551,11 @@ fun PhotoTileContent(
     isSelectionMode: Boolean,
     transform: (com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable>) -> com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable>,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)?
+    onLongClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
             .graphicsLayer {
                 scaleX = scale
@@ -472,10 +623,10 @@ fun PhotoTileContent(
         }
         
         // Video indicators
-        if (isVideo && !isSelectionMode) {
+        if (isVideo) {
             Row(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
+                    .align(if (isSelectionMode) Alignment.TopStart else Alignment.TopEnd)
                     .padding(8.dp)
                     .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -510,73 +661,42 @@ fun AlbumsScreen(
     onNavigateToAlbum: (String) -> Unit,
     onExclude: (String) -> Unit = {},
     onHide: (String) -> Unit = {},
+    onRename: suspend (String, String) -> Result<Unit>,
+    selectedPaths: Set<String> = emptySet(),
+    selectionMode: Boolean = false,
+    onToggleAlbumSelection: (String) -> Unit = {},
     columns: Int = 2,
     onColumnsChange: (Int) -> Unit = {},
     showHeaderButtons: Boolean = true,
     emptyMessage: String? = null,
 ) {
-    var isScrollbarDragging by remember { mutableStateOf(false) }
-    val firstVisibleIndex by remember { derivedStateOf { gridState.firstVisibleItemIndex } }
-    val context = LocalContext.current
-
-    LaunchedEffect(firstVisibleIndex, albums, isScrollbarDragging) {
-        if (!isScrollbarDragging) {
-            val info = gridState.layoutInfo
-            val visibleCount = info.visibleItemsInfo.size
-            if (visibleCount > 0 && albums.isNotEmpty()) {
-                val preloadStartIndex = firstVisibleIndex + visibleCount
-                val preloadEndIndex = (preloadStartIndex + 18).coerceAtMost(albums.size - 1)
-                for (i in preloadStartIndex..preloadEndIndex) {
-                    val album = albums[i]
-                    val mimeType = MimeTypeMap.getFileExtensionFromUrl(album.coverUri).lowercase().let { ext ->
-                        MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "image/jpeg"
-                    }
-                    val model = AvesAppGlideModule.getModel(
-                        context = context,
-                        uri = Uri.parse(album.coverUri),
-                        mimeType = mimeType,
-                        pageId = null,
-                        sizeBytes = null,
-                        isThumbnail = true,
-                        rotationDegrees = 0,
-                        dateModifiedMillis = album.lastModified
-                    )
-                    Glide.with(context)
-                        .load(model)
-                        .signature(ObjectKey(album.lastModified))
-                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                        .format(DecodeFormat.PREFER_RGB_565)
-                        .override(200)
-                        .preload()
-                }
-            }
+    val entries = remember(albums) {
+        albums.map { album ->
+            AlbumCollectionItem(
+                key = album.path,
+                title = album.name,
+                subtitle = "${album.itemCount} items",
+                coverUri = album.coverUri.takeIf { it.isNotBlank() },
+                coverModifiedMillis = album.lastModified,
+            )
         }
     }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
-            state = gridState,
-            modifier = Modifier
-                .fillMaxSize()
-                .pinchToZoomColumns(
-                    currentColumns = columns,
-                    onColumnsChange = onColumnsChange,
-                    minColumns = 1,
-                    maxColumns = 4
-                ),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                top = 16.dp,
-                end = 16.dp,
-                bottom = 80.dp + bottomPadding
-            ),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    AlbumCollectionGrid.instance.Content(
+        entries = entries,
+        columns = columns,
+        onColumnsChange = onColumnsChange,
+        state = gridState,
+        modifier = Modifier.fillMaxSize(),
+        bottomPadding = bottomPadding,
+        emptyMessage = emptyMessage,
+        selectedKeys = selectedPaths,
+        selectionMode = selectionMode,
+        onOpen = onNavigateToAlbum,
+        onToggleSelection = onToggleAlbumSelection,
+        beforeItems = {
             if (showHeaderButtons) {
-                // Header Buttons: Favourites and Bin
-                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(columns) }) {
+                // Reuse the existing Favourites slot for Labels; keep the Bin slot unchanged.
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -585,8 +705,8 @@ fun AlbumsScreen(
                     ) {
                         AlbumHeaderButton(
                             modifier = Modifier.weight(1.0f),
-                            icon = Icons.Outlined.StarOutline,
-                            label = "Favourites",
+                            icon = Icons.Outlined.Label,
+                            label = stringResource(R.string.qs_labels_title),
                             onClick = onNavigateToFavourites
                         )
                         AlbumHeaderButton(
@@ -598,73 +718,53 @@ fun AlbumsScreen(
                     }
                 }
             }
-
-            items(
-                count = albums.size,
-                key = { albums[it].name }
-            ) { index ->
-                val album = albums[index]
-                val onAlbumClick = remember(album.name) { { onNavigateToAlbum(album.name) } }
-                val onAlbumExclude = remember(album.path) { { onExclude(album.path) } }
-                val onAlbumHide = remember(album.path) { { onHide(album.path) } }
-                AlbumCard(
-                    album = album,
-                    onClick = onAlbumClick,
-                    onExclude = onAlbumExclude,
-                    onHide = onAlbumHide,
-                    columns = columns
-                )
-            }
-        }
-
-        if (albums.isEmpty() && emptyMessage != null) {
-            Text(
-                text = emptyMessage,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
-
-        com.pixel.gallery.ui.components.GalleryScrollbar(
-            lazyGridState = gridState,
-            layoutModifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(bottom = bottomPadding),
-            onDragStateChanged = { isScrollbarDragging = it }
-        )
-    }
+        },
+    )
 }
 
+/** Shared album/label presentation. Filesystem actions belong to the caller. */
 @OptIn(ExperimentalGlideComposeApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun AlbumCard(
-    album: Album,
+fun AlbumCoverCard(
+    title: String,
+    subtitle: String,
+    coverUri: String?,
+    coverModifiedMillis: Long,
     onClick: () -> Unit,
-    onExclude: () -> Unit,
-    onHide: () -> Unit,
-    columns: Int = 2
+    columns: Int = 2,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
+    coverMimeType: String? = null,
+    coverSizeBytes: Long? = null,
+    coverRotationDegrees: Int = 0,
+    emptyIcon: ImageVector = Icons.Outlined.Folder,
+    coverShape: androidx.compose.ui.graphics.Shape = ExpressiveShapes.ExtraLargeIncreased,
+    titleMaxLines: Int = Int.MAX_VALUE,
+    captionContent: @Composable ColumnScope.() -> Unit = {},
 ) {
-    var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val mimeType = remember(album.coverUri) {
-        val extension = MimeTypeMap.getFileExtensionFromUrl(album.coverUri)
-        MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "image/jpeg"
+    val mimeType = remember(coverUri, coverMimeType) {
+        coverMimeType ?: run {
+            val extension = MimeTypeMap.getFileExtensionFromUrl(coverUri.orEmpty())
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase()) ?: "image/jpeg"
+        }
     }
-    val model = remember(album.coverUri, mimeType) {
-        AvesAppGlideModule.getModel(
+    val model = remember(coverUri, mimeType, coverModifiedMillis, coverSizeBytes, coverRotationDegrees) {
+        coverUri?.let { AvesAppGlideModule.getModel(
             context = context,
-            uri = Uri.parse(album.coverUri),
+            uri = Uri.parse(it),
             mimeType = mimeType,
             pageId = null,
-            sizeBytes = null,
+            sizeBytes = coverSizeBytes,
             isThumbnail = true,
-            rotationDegrees = 0,
-            dateModifiedMillis = album.lastModified
-        )
+            rotationDegrees = coverRotationDegrees,
+            dateModifiedMillis = coverModifiedMillis
+        ) }
     }
-    val signatureKey = remember(album.lastModified) {
-        ObjectKey(album.lastModified)
+    val signatureKey = remember(coverModifiedMillis) {
+        ObjectKey(coverModifiedMillis)
     }
     val transform = remember(signatureKey) {
         { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
@@ -696,66 +796,147 @@ fun AlbumCard(
         3 -> 8.dp
         else -> 6.dp
     }
+    val showFullAlbumNames = LocalShowFullAlbumNames.current
+    val visibleTitleLines = if (showFullAlbumNames) titleMaxLines else minOf(titleMaxLines, 2)
+    val subtitleTopPadding = if (columns <= 2) 2.dp else 0.dp
+    val textMeasurer = rememberTextMeasurer()
+    val captionMinHeight = if (showFullAlbumNames) 0.dp else {
+        // Reserve space below short captions so the next row starts at the same height.
+        val titleHeight = textMeasurer.measure(
+            text = List(visibleTitleLines) { "Ag" }.joinToString("\n"),
+            style = LocalTextStyle.current.merge(titleStyle),
+        ).size.height
+        val subtitleHeight = textMeasurer.measure(
+            text = "Ag",
+            style = LocalTextStyle.current.merge(subtitleStyle),
+        ).size.height
+        with(LocalDensity.current) { (titleHeight + subtitleHeight).toDp() } + subtitleTopPadding
+    }
+    val selectionTransition = updateTransition(selected, label = "AlbumSelectionTransition")
+    val coverScale by selectionTransition.animateFloat(
+        label = "AlbumCoverSelectionScale",
+        transitionSpec = {
+            if (targetState) spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)
+            else spring(stiffness = Spring.StiffnessLow)
+        },
+    ) { if (it) 0.92f else 1f }
+    val coverRadius by selectionTransition.animateDp(
+        label = "AlbumCoverSelectionCornerRadius",
+        transitionSpec = { spring(stiffness = Spring.StiffnessLow) },
+    ) { if (it) 28.dp else 32.dp }
+    val selectedOverlayAlpha by selectionTransition.animateFloat(
+        label = "AlbumCoverSelectionOverlay",
+        transitionSpec = { tween(200) },
+    ) { if (it) 0.3f else 0f }
+    val animatedCoverShape = if (selectionMode || selected) RoundedCornerShape(coverRadius) else coverShape
 
     Column(
         modifier = Modifier.combinedClickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            enabled = enabled,
             onClick = onClick,
-            onLongClick = { showMenu = true }
+            onLongClick = onLongClick
         )
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
+                .graphicsLayer {
+                    scaleX = coverScale
+                    scaleY = coverScale
+                    clip = true
+                    shape = animatedCoverShape
+                }
                 .background(
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = ExpressiveShapes.ExtraLargeIncreased
+                    shape = animatedCoverShape
                 )
-                .clip(ExpressiveShapes.ExtraLargeIncreased),
+                .clip(animatedCoverShape),
             contentAlignment = Alignment.Center
         ) {
-            GlideImage(
-                model = model,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                requestBuilderTransform = transform
-            )
+            if (coverUri != null) {
+                GlideImage(
+                    model = model,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    requestBuilderTransform = transform
+                )
+            } else {
+                Icon(
+                    imageVector = emptyIcon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(if (columns <= 2) 56.dp else 36.dp)
+                )
+            }
+            if (selectedOverlayAlpha > 0f) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = selectedOverlayAlpha)))
+            }
+            if (selectionMode) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selected,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                    enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.scaleOut() + androidx.compose.animation.fadeOut(),
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface,
+                    ) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = "Selected",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(2.dp),
+                        )
+                    }
+                }
+                if (!selected) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp)
+                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                            .padding(2.dp)
+                            .background(Color.White.copy(alpha = 0.55f), CircleShape)
+                    )
+                }
+            } else if (selected) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = "Selected",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(2.dp),
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(spacerHeight))
-        Text(
-            text = album.name,
-            style = titleStyle,
-            modifier = Modifier.padding(start = 4.dp)
-        )
-        Text(
-            text = "${album.itemCount} items",
-            style = subtitleStyle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, top = if (columns <= 2) 2.dp else 0.dp)
-        )
-
-        DropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Hide Album") },
-                onClick = {
-                    showMenu = false
-                    onHide()
-                },
-                leadingIcon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null) }
+        Column(modifier = Modifier.fillMaxWidth().heightIn(min = captionMinHeight)) {
+            Text(
+                text = title,
+                style = titleStyle,
+                maxLines = visibleTitleLines,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp)
             )
-            DropdownMenuItem(
-                text = { Text("Exclude Album") },
-                onClick = {
-                    showMenu = false
-                    onExclude()
-                },
-                leadingIcon = { Icon(Icons.Outlined.FolderOff, contentDescription = null) }
+            Text(
+                text = subtitle,
+                style = subtitleStyle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = subtitleTopPadding)
             )
         }
+
+        captionContent()
     }
 }
 

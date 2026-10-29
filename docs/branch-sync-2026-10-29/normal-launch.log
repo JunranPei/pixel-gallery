@@ -1,0 +1,8 @@
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.pixel.gallery.shortcuts.test/com.pixel.gallery.MainActivity }
+Warning: Activity not started, intent has been delivered to currently running top-most instance.
+Status: ok
+LaunchState: UNKNOWN (0)
+Activity: com.pixel.gallery.shortcuts.test/com.pixel.gallery.MainActivity
+TotalTime: 0
+WaitTime: 8
+Complete

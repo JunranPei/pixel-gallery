@@ -15,9 +15,11 @@ val Shapes = Shapes(
 
 // Material 3 Expressive - Asymmetric and Decorative Shapes
 object ExpressiveShapes {
+    val GridCornerRadius = 20.dp
+    val AlbumCornerRadius = 32.dp
     // Specifically mentioned in M3E: Increased corner radii
-    val LargeIncreased = RoundedCornerShape(20.dp)
-    val ExtraLargeIncreased = RoundedCornerShape(32.dp)
+    val LargeIncreased = RoundedCornerShape(GridCornerRadius)
+    val ExtraLargeIncreased = RoundedCornerShape(AlbumCornerRadius)
     val ExtraExtraLarge = RoundedCornerShape(48.dp)
     
     // Decorative Asymmetric Shapes (Hallmark of M3E)

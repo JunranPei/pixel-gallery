@@ -10,13 +10,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import com.pixel.gallery.ui.theme.EmphasizedTypography
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LicensesScreen(onBack: () -> Unit) {
-    Scaffold(
+fun LicensesScreen(onBack: () -> Unit): GalleryPageContent {
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { 
                     Text(
                         "Open Source Licenses",

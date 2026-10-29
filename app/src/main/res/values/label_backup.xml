@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_settings_title">Library</string>
+    <string name="label_backup_title">Label backup</string>
+    <string name="label_backup_details">Unmatched files</string>
+    <string name="label_backup_menu_body">Back up labels and file associations to JSON, or restore them after copying the original files. Photos and videos are not included in the backup.</string>
+    <string name="label_backup_back">Back</string>
+    <string name="label_backup_export">Export labels</string>
+    <string name="label_backup_import">Import labels</string>
+    <string name="label_backup_explanation">Save labels and Favourites to a JSON file. Import after copying your original photos and videos. Files are matched by their contents, even after renaming or moving. The backup does not include the media files. Locked, trashed, excluded and unavailable files are not exported.</string>
+    <string name="label_backup_exporting">Exporting labels…</string>
+    <string name="label_backup_scanning">Matching files…</string>
+    <string name="label_backup_importing">Restoring labels…</string>
+    <string name="label_backup_preview">Import preview</string>
+    <string name="label_backup_matches">Matched %1$d of %2$d files</string>
+    <string name="label_backup_label_count">Labels: %1$d</string>
+    <string name="label_backup_merge_note">Restore adds missing labels and memberships. Existing labels are kept. Unmatched files are skipped.</string>
+    <string name="label_backup_unreadable">Could not read %1$d local files. Check file access and scan again.</string>
+    <string name="label_backup_source_skipped">The export skipped %1$d unavailable files; their links are not in this backup.</string>
+    <string name="label_backup_restore">Restore labels</string>
+    <string name="label_backup_missing">Not found: %1$d</string>
+    <string name="label_backup_missing_note">Copy the original files, allow access, then import again. Edited or compressed copies require labels to be assigned manually.</string>
+    <string name="label_backup_ambiguous">Copies could not be distinguished: %1$d</string>
+    <string name="label_backup_ambiguous_note">These files were not labelled automatically. Keep the original filenames or album paths when copying, then import again, or assign their labels manually.</string>
+    <string name="label_backup_import_done">Labels restored</string>
+    <string name="label_backup_import_result">%1$d files matched · %2$d labels created · %3$d memberships added</string>
+    <string name="label_backup_export_done">Labels exported</string>
+    <string name="label_backup_export_result">%1$d labels · %2$d files exported\n%3$d unavailable files skipped</string>
+    <string name="label_backup_error">Label backup failed</string>
+    <string name="label_backup_invalid">This is not a supported Pixel Gallery label backup, or the file is damaged. No labels were changed.</string>
+    <string name="label_backup_changed">Some files changed after matching. Nothing was restored. Import the backup again to rescan.</string>
+    <string name="label_backup_export_failed">Could not finish exporting. Check file access and available space, then export again. The output file may be incomplete.</string>
+    <string name="label_backup_import_failed">Could not finish importing. No labels were changed. Check file access and the backup, then try again.</string>
+    <string name="label_backup_ok">OK</string>
+</resources>

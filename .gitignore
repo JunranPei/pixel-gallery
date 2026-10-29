@@ -41,6 +41,9 @@ fastlane/slather
 # VS Code
 .vscode/
 
+# Private agent instructions
+/.agents/
+
 # APK Archives
 released_apks/
 all_apks/

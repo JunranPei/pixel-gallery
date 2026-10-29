@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qs_targets_frequent">Frequent</string>
+    <string name="qs_targets_all">All albums</string>
+    <string name="qs_targets_selected">Selected</string>
+    <string name="qs_targets_expand">Expand</string>
+    <string name="qs_targets_no_frequent">No frequent albums</string>
+    <string name="qs_targets_no_selection">Choose albums in All albums to add sorting targets.</string>
+    <string name="duplicate_keeper_rule">Keep the earliest media date by default. You can choose another copy to keep.</string>
+</resources>

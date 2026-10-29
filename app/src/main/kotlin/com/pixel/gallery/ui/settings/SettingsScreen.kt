@@ -6,38 +6,41 @@ import androidx.compose.ui.unit.dp
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Tab
-import androidx.compose.material.icons.outlined.FolderOff
+import androidx.compose.material.icons.outlined.AddToHomeScreen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Tab
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.R
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.BuildConfig
-import com.pixel.gallery.ui.viewmodel.PhotosViewModel
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onNavigateToExcludedFolders: () -> Unit,
+    onNavigateToDisplaySettings: () -> Unit,
     onNavigateToLicenses: () -> Unit,
-    onNavigateToShortcutManager: () -> Unit,
     onNavigateToPerformanceSettings: () -> Unit,
-    viewModel: PhotosViewModel = hiltViewModel()
-) {
-    val materialYou by viewModel.materialYou.collectAsState()
-    val startupAtAlbums by viewModel.startupAtAlbums.collectAsState()
-    val pageColor = MaterialTheme.colorScheme.surface
-
-    Scaffold(
-        containerColor = pageColor,
+    onNavigateToLibrarySettings: () -> Unit,
+    onNavigateToShortcutManager: () -> Unit,
+): GalleryPageContent {
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { 
                     Text(
                         "Settings",
@@ -48,69 +51,62 @@ fun SettingsScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = pageColor,
-                    scrolledContainerColor = pageColor
-                )
+                }
             )
         }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
+            contentPadding = SettingsLayout.ContentPadding,
+            verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing),
         ) {
             item {
-                SettingsToggleItem(
-                    title = "Material You",
-                    description = "Use system dynamic colors",
-                    icon = Icons.Outlined.Palette,
-                    checked = materialYou,
-                    onCheckedChange = { viewModel.setMaterialYou(it) }
-                )
+                SettingsGroup(itemCount = 3) { index ->
+                    when (index) {
+                        0 -> {
+                            SettingsClickItem(
+                                title = "Display",
+                                icon = Icons.Outlined.Tab,
+                                onClick = onNavigateToDisplaySettings,
+                            )
+                        }
+                        1 -> {
+                            SettingsClickItem(
+                                title = stringResource(R.string.library_settings_title),
+                                icon = Icons.Outlined.PhotoLibrary,
+                                onClick = onNavigateToLibrarySettings,
+                            )
+                        }
+                        2 -> {
+                            SettingsClickItem(
+                                title = "Performance & Caching",
+                                icon = Icons.Outlined.Speed,
+                                onClick = onNavigateToPerformanceSettings,
+                            )
+                        }
+                    }
+                }
             }
             item {
-                SettingsToggleItem(
-                    title = "Start at Albums",
-                    description = "Open the albums tab by default",
-                    icon = Icons.Outlined.Tab,
-                    checked = startupAtAlbums,
-                    onCheckedChange = { viewModel.setStartupAtAlbums(it) }
-                )
+                SettingsGroup(itemCount = 1) {
+                    SettingsClickItem(
+                        title = stringResource(R.string.desktop_shortcuts_title),
+                        icon = Icons.Outlined.AddToHomeScreen,
+                        onClick = onNavigateToShortcutManager,
+                    )
+                }
             }
             item {
-                SettingsClickItem(
-                    title = "Performance & Caching",
-                    description = "Manage cache limit, threads and cleanup",
-                    icon = Icons.Outlined.Speed,
-                    onClick = onNavigateToPerformanceSettings
-                )
-            }
-            item {
-                SettingsClickItem(
-                    title = "Desktop Shortcuts",
-                    description = "Create and manage independent custom shortcuts",
-                    icon = Icons.Outlined.Tab,
-                    onClick = onNavigateToShortcutManager
-                )
-            }
-
-            item {
-                SettingsClickItem(
-                    title = "Excluded Folders",
-                    description = "Manage ignored media locations",
-                    icon = Icons.Outlined.FolderOff,
-                    onClick = onNavigateToExcludedFolders
-                )
-            }
-            item {
-                SettingsClickItem(
-                    title = "About",
-                    description = "Pixel Gallery v${BuildConfig.VERSION_NAME}",
-                    icon = Icons.Outlined.Info,
-                    onClick = onNavigateToLicenses
-                )
+                SettingsGroup(itemCount = 1) {
+                    SettingsClickItem(
+                        title = "About",
+                        description = "Pixel Gallery v${BuildConfig.VERSION_NAME}",
+                        icon = Icons.Outlined.Info,
+                        onClick = onNavigateToLicenses,
+                    )
+                }
             }
         }
     }
@@ -119,19 +115,20 @@ fun SettingsScreen(
 @Composable
 fun SettingsToggleItem(
     title: String,
-    description: String,
+    description: String? = null,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
     ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { 
             Text(
                 title,
                 style = EmphasizedTypography.LabelLarge
             ) 
         },
-        supportingContent = { Text(description) },
+        supportingContent = description?.let { { Text(it) } },
         leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         trailingContent = {
             Switch(
@@ -145,19 +142,20 @@ fun SettingsToggleItem(
 @Composable
 fun SettingsClickItem(
     title: String,
-    description: String,
+    description: String? = null,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit
 ) {
     ListItem(
         modifier = Modifier.clickable { onClick() },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { 
             Text(
                 title,
                 style = EmphasizedTypography.LabelLarge
             ) 
         },
-        supportingContent = { Text(description) },
+        supportingContent = description?.let { { Text(it) } },
         leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
     )
 }
@@ -174,6 +172,7 @@ fun SettingsSliderItem(
 ) {
     var sliderValue by remember(value) { mutableStateOf(value) }
     ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { 
             Text(
                 title,
@@ -190,6 +189,7 @@ fun SettingsSliderItem(
                     onValueChangeFinished = { onValueChangeFinished(sliderValue) },
                     valueRange = valueRange,
                     steps = steps,
+                    track = { state -> SliderDefaults.Track(sliderState = state, drawStopIndicator = null) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }

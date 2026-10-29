@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="media_type_title">媒体类型</string>
+    <string name="media_type_all">全部</string>
+    <string name="media_type_images">图片</string>
+    <string name="media_type_videos">视频</string>
+    <string name="media_type_no_images">没有图片</string>
+    <string name="media_type_no_videos">没有视频</string>
+    <string name="media_type_no_image_albums">没有包含图片的相册</string>
+    <string name="media_type_no_video_albums">没有包含视频的相册</string>
+    <plurals name="media_type_item_count"><item quantity="other">%d 项</item></plurals>
+    <plurals name="media_type_image_count"><item quantity="other">%d 张图片</item></plurals>
+    <plurals name="media_type_video_count"><item quantity="other">%d 个视频</item></plurals>
+</resources>

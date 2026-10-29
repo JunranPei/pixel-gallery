@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="qs_labels_title">标签</string>
+    <string name="qs_move_to">移动到</string>
+    <string name="qs_move_dock">拖到上沿或下沿；轻点切换位置</string>
+    <string name="qs_choose_albums">选择相册</string>
+    <string name="qs_manage_albums">选择分类相册</string>
+    <string name="qs_choose_sorting_albums_hint">选择相册；长按拖动胶囊可调整排列位置。</string>
+    <string name="qs_options">快速分类选项</string>
+    <string name="qs_exit">退出快速分类</string>
+    <string name="qs_dock_top">上沿</string>
+    <string name="qs_dock_bottom">下沿</string>
+    <string name="qs_search_albums">搜索相册</string>
+    <string name="qs_move_earlier">向前移动</string>
+    <string name="qs_move_later">向后移动</string>
+    <string name="qs_cancel">取消</string>
+    <string name="qs_apply">应用</string>
+    <string name="qs_done">完成</string>
+    <string name="qs_pending">等待移动</string>
+    <string name="qs_processed">已移走</string>
+</resources>

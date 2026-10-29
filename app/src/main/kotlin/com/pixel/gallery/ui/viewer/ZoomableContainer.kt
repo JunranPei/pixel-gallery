@@ -40,6 +40,10 @@ internal fun shouldDoubleTapReturnToFit(
     currentRenderedScale: Float,
 ): Boolean = zoomedIntent || abs(currentRenderedScale - 1f) > 0.01f
 
+internal fun previewScaleAfterResize(userScale: Float, oldOriginalScale: Float, newOriginalScale: Float): Float =
+    if (userScale <= 1.02f || oldOriginalScale <= 0f || newOriginalScale <= 0f) userScale
+    else userScale * newOriginalScale / oldOriginalScale
+
 /**
  * Custom zoom/pan container for the image viewer.
  *
@@ -54,8 +58,9 @@ internal fun shouldDoubleTapReturnToFit(
  * It only reports (scale, offsetX, offsetY) via [onTransformChanged].
  */
 @Composable
-fun ZoomableContainer(
+internal fun ZoomableContainer(
     modifier: Modifier = Modifier,
+    coordinateGeometry: RotationLayerGeometry? = null,
     diagnosticsKey: String = "",
     minScale: Float = 0.333f,
     maxScale: Float = 3.0f,
@@ -81,7 +86,8 @@ fun ZoomableContainer(
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var containerSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
+    var actualSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
+    val containerSize = coordinateGeometry?.let { IntSize(it.childWidth.toInt(), it.childHeight.toInt()) } ?: actualSize
 
     // Ensure minScale <= maxScale to prevent coerceIn crashes
     val safeMinScale = minOf(minScale, maxScale)
@@ -106,6 +112,17 @@ fun ZoomableContainer(
     }
     var animationGeneration by remember(diagnosticsKey) { mutableIntStateOf(0) }
     var zoomLifecycleOpen by remember(diagnosticsKey) { mutableStateOf(false) }
+    ViewerDismissImageEligibility(bounds = {
+        val width = containerSize.width.toFloat()
+        val height = containerSize.height.toFloat()
+        val halfWidth = width * imageFitScaleX * renderScale / 2f
+        val halfHeight = height * imageFitScaleY * renderScale / 2f
+        androidx.compose.ui.geometry.Rect(width / 2f + renderOffsetX - halfWidth,
+            height / 2f + renderOffsetY - halfHeight, width / 2f + renderOffsetX + halfWidth,
+            height / 2f + renderOffsetY + halfHeight)
+    }) {
+        enabled && !zoomLifecycleOpen && animationJob?.isActive != true && renderScale <= 1.02f
+    }
 
     fun trace(name: String, detail: String) {
         if (diagnosticsKey.isNotEmpty()) {
@@ -146,6 +163,17 @@ fun ZoomableContainer(
             )
             onZoomGestureEnded()
         }
+    }
+
+    LaunchedEffect(coordinateGeometry?.rotation?.busy) {
+        if (coordinateGeometry?.rotation?.busy != true) return@LaunchedEffect
+        animationJob?.cancelAndJoin()
+        animationJob = null
+        gestureScale = renderScale
+        gestureOffsetX = renderOffsetX
+        gestureOffsetY = renderOffsetY
+        onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
+        endZoomLifecycle()
     }
 
     // SSIV can return ownership after a zoomed image has been shrunk back to fit or
@@ -192,11 +220,39 @@ fun ZoomableContainer(
         return rawX.coerceIn(-maxX, maxX) to rawY.coerceIn(-maxY, maxY)
     }
 
+    var previousViewport by remember(diagnosticsKey) { mutableStateOf<Pair<IntSize, Float>?>(null) }
+    var previousActualSize by remember(diagnosticsKey) { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(containerSize, scaleToOriginal, enabled) {
+        if (containerSize == IntSize.Zero) return@LaunchedEffect
+        val geometry = containerSize to scaleToOriginal
+        val old = previousViewport
+        val viewportSize = coordinateGeometry?.let { IntSize(it.viewportWidth.toInt(), it.viewportHeight.toInt()) } ?: actualSize
+        val contentTurn = coordinateGeometry != null && previousActualSize == viewportSize
+        previousActualSize = viewportSize
+        previousViewport = geometry
+        if (!enabled || old == null || old == geometry) return@LaunchedEffect
+        // Resizing changes fit scale, not the source-pixel scale of a zoomed image.
+        // Keep fit/under-fit relative to the new viewport and clamp its pan bounds.
+        val runningAnimation = animationJob
+        runningAnimation?.cancelAndJoin()
+        if (animationJob === runningAnimation) animationJob = null
+        val resizedScale = (if (contentTurn) renderScale else previewScaleAfterResize(renderScale, old.second, scaleToOriginal))
+            .coerceIn(safeMinScale, safeMaxScale)
+        val offsetRatio = if (contentTurn && scaleToOriginal > 0f) old.second / scaleToOriginal else 1f
+        val (x, y) = clampOffset(resizedScale, renderOffsetX * offsetRatio, renderOffsetY * offsetRatio)
+        gestureScale = resizedScale
+        gestureOffsetX = x
+        gestureOffsetY = y
+        doubleTapZoomedIntent = resizedScale > 1.01f
+        renderFrame(resizedScale, x, y)
+        onTransformChanged(resizedScale, x, y)
+    }
+
     Box(
         modifier = modifier
             .clipToBounds()
             .onSizeChanged {
-                containerSize = it
+                actualSize = it
                 trace(
                     "ZOOM_PREVIEW_SIZE",
                     "container=${it.width}x${it.height} fit=$imageFitScaleX,$imageFitScaleY " +
@@ -211,7 +267,8 @@ fun ZoomableContainer(
                         doubleTapZoomedIntent = abs(renderScale - 1f) > 0.01f
                         onTap()
                     },
-                    onDoubleTap = { tapPosition ->
+                    onDoubleTap = { position ->
+                        val tapPosition = coordinateGeometry?.unmap(position) ?: position
                         // Reverse the previous logical target, but animate from the
                         // transform that is actually visible at this instant.
                         val currentScale = renderScale
@@ -368,8 +425,10 @@ fun ZoomableContainer(
                         }
 
                         val zoomChange = event.calculateZoom()
-                        val panChange = event.calculatePan()
-                        val centroid = event.calculateCentroid(useCurrent = false)
+                        val rawPan = event.calculatePan()
+                        val rawCentroid = event.calculateCentroid(useCurrent = false)
+                        val panChange = coordinateGeometry?.unmap(rawPan, vector = true) ?: rawPan
+                        val centroid = coordinateGeometry?.unmap(rawCentroid) ?: rawCentroid
 
                         if (!pastTouchSlop) {
                             accumulatedZoom *= zoomChange
@@ -522,6 +581,10 @@ fun ZoomableContainer(
                     )
                     } finally {
                         onPointerStrokeActiveChanged(false)
+                        if (animationJob?.isActive != true) {
+                            onTransformChanged(renderScale, renderOffsetX, renderOffsetY)
+                            endZoomLifecycle()
+                        }
                     }
                 }
             }

@@ -1,10 +1,13 @@
 package com.pixel.gallery.ui.gallery
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -19,53 +22,40 @@ import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
+import com.pixel.gallery.ui.components.MediaCollectionTopBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrashScreen(
     onBack: () -> Unit,
     onNavigateToViewer: (Long) -> Unit,
+    onSort: () -> Unit = {},
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
     items: List<GridItem> = emptyList(),
     gridState: LazyGridState = rememberLazyGridState(),
     viewModel: PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val gridColumns by viewModel.gridColumns.collectAsState()
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
+    return GalleryPage(
         topBar = {
-            if (selectedIds.isEmpty()) {
-                TopAppBar(
-                    title = { 
-                        Text(
-                            "Recycle Bin",
-                            style = EmphasizedTypography.TitleLarge
-                        ) 
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        if (items.isNotEmpty()) {
-                            TextButton(onClick = { /* TODO: Empty bin */ }) {
-                                Text("Empty", color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-                )
-            }
+
+                MediaCollectionTopBar("Recycle Bin", onBack, sortLabel = "Sort Bin", onSort = onSort)
+
         }
     ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                ,
+        ) {
         if (items.isEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
                     .padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -91,7 +81,7 @@ fun TrashScreen(
                 )
             }
         } else {
-            Box(modifier = Modifier.padding(innerPadding)) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 PhotosScreen(
                     items = items,
                     onNavigateToViewer = onNavigateToViewer,
@@ -103,6 +93,7 @@ fun TrashScreen(
                     state = gridState
                 )
             }
+        }
         }
     }
 }

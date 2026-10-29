@@ -1,108 +1,162 @@
 package com.pixel.gallery.ui.gallery
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.pixel.gallery.R
+import com.pixel.gallery.model.Album
+import com.pixel.gallery.model.MediaTypeFilter
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.components.GalleryMenuRow
+import com.pixel.gallery.ui.components.GalleryOverflowButton
+import com.pixel.gallery.ui.components.MediaTypeMenuSection
+import com.pixel.gallery.ui.home.AlbumCollectionGrid
+import com.pixel.gallery.ui.home.AlbumCollectionItem
 import com.pixel.gallery.ui.theme.EmphasizedTypography
-import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HiddenAlbumsScreen(
+    albums: List<Album>,
     onBack: () -> Unit,
-    viewModel: PhotosViewModel = hiltViewModel()
-) {
-    val hiddenFolders by viewModel.hiddenFolders.collectAsState()
-    val hiddenAlbums by viewModel.hiddenAlbums.collectAsState()
+    onNavigateToAlbum: (String) -> Unit,
+    onSort: () -> Unit,
+    onDeduplicate: () -> Unit,
+    columns: Int = 2,
+    onColumnsChange: (Int) -> Unit = {},
+    gridState: LazyGridState = rememberLazyGridState(),
+    bottomPadding: Dp = 0.dp,
+    selectedPaths: Set<String> = emptySet(),
+    onToggleAlbumSelection: (String) -> Unit = {},
+    isForeground: Boolean = true,
+    mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
+    onMediaTypeChange: (MediaTypeFilter) -> Unit = {},
+    emptyMessage: String? = null,
+): GalleryPageContent {
+    var showMenu by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchMode by rememberSaveable { mutableStateOf(false) }
+    var searchFocusRequested by remember { mutableStateOf(false) }
+    val entries = remember(albums, searchQuery) {
+        val query = searchQuery.trim()
+        albums.filter { query.isEmpty() || it.name.contains(query, ignoreCase = true) }
+            .map { album ->
+                AlbumCollectionItem(
+                    key = album.path,
+                    title = album.name,
+                    subtitle = "${album.itemCount} items",
+                    coverUri = album.coverUri.takeIf { it.isNotBlank() },
+                    coverModifiedMillis = album.lastModified,
+                    emptyIcon = Icons.Outlined.VisibilityOff,
+                )
+            }
+    }
 
-    Scaffold(
+    return GalleryPage(
         topBar = {
-            TopAppBar(
-                title = { 
-                    Text(
-                        "Hidden Albums",
-                        style = EmphasizedTypography.TitleLarge
-                    ) 
+            GalleryHeader(
+                search = rememberAlbumSearch(
+                    isSearchMode = searchMode,
+                    onSearchModeChange = { enabled ->
+                        if (enabled && !searchMode) searchFocusRequested = true
+                        if (!enabled) searchFocusRequested = false
+                        searchMode = enabled
+                    },
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    searchPlaceholder = "Search albums",
+                    clearSearchDescription = stringResource(R.string.album_clear_search),
+                    focusRequested = searchFocusRequested,
+                    onFocusRequestConsumed = { searchFocusRequested = false },
+                    backEnabled = isForeground,
+                ),
+                title = {
+                            Text(
+                                "Hidden Albums",
+                                style = EmphasizedTypography.TitleLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
-            )
-        }
-    ) { innerPadding ->
-        if (hiddenFolders.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.VisibilityOff,
-                    contentDescription = null,
-                    modifier = Modifier.size(100.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "No Hidden Albums",
-                    style = EmphasizedTypography.HeadlineMedium,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Albums you hide from the main gallery will appear here. They are not visible in Recents or Albums grid.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                items(hiddenAlbums) { album ->
-                    ListItem(
-                        headlineContent = { Text(album.name) },
-                        supportingContent = { Text(album.path) },
-                        leadingContent = {
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Outlined.VisibilityOff, contentDescription = null)
-                            }
-                        },
-                        trailingContent = {
-                            IconButton(onClick = { viewModel.removeHiddenFolder(album.path) }) {
-                                Icon(Icons.Outlined.Visibility, contentDescription = "Unhide")
-                            }
+                },
+                actions = {
+                    GalleryOverflowButton(expanded = showMenu, onExpandedChange = { showMenu = it }) {
+                        MediaTypeMenuSection(mediaType) { type ->
+                            showMenu = false
+                            onMediaTypeChange(type)
                         }
+                        GalleryMenuRow("Sort Albums", Icons.AutoMirrored.Filled.Sort, accented = true, onClick = {
+                            showMenu = false
+                            onSort()
+                        })
+                        GalleryMenuRow(
+                            stringResource(R.string.duplicate_find_each_album),
+                            Icons.Outlined.FileCopy,
+                            accented = true,
+                            enabled = albums.any { it.itemCount > 1 },
+                            onClick = {
+                                showMenu = false
+                                onDeduplicate()
+                            },
+                        )
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Box(Modifier.fillMaxSize().padding(innerPadding)) {
+            // Keep every saved hidden root, including empty folders, in the shared grid.
+            AlbumCollectionGrid.instance.Content(
+                entries = entries,
+                columns = columns,
+                onColumnsChange = onColumnsChange,
+                state = gridState,
+                modifier = Modifier.fillMaxSize(),
+                bottomPadding = bottomPadding,
+                selectedKeys = selectedPaths,
+                onOpen = onNavigateToAlbum,
+                onToggleSelection = onToggleAlbumSelection,
+                emptyMessage = if (searchQuery.isNotBlank() && entries.isEmpty()) "No matching albums" else emptyMessage,
+            )
+            if (albums.isEmpty() && emptyMessage == null && searchQuery.isBlank()) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.VisibilityOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(100.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        "No Hidden Albums",
+                        style = EmphasizedTypography.HeadlineMedium,
+                        textAlign = TextAlign.Center,
                     )
                 }
             }

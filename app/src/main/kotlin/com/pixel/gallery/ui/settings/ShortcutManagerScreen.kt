@@ -5,7 +5,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
-import android.widget.Toast
+import com.pixel.gallery.R
+import androidx.compose.ui.res.stringResource
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.components.LocalGalleryMessages
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -43,19 +48,20 @@ import java.util.UUID
 fun ShortcutManagerScreen(
     onBack: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val context = LocalContext.current
+    val messages = LocalGalleryMessages.current
     val customShortcuts by viewModel.customShortcuts.collectAsState()
     val albums by viewModel.albums.collectAsState()
 
     var showCreateDialog by remember { mutableStateOf(false) }
 
-    Scaffold(
+    return GalleryPage(
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { 
                     Text(
-                        "Desktop Shortcuts",
+                        stringResource(R.string.desktop_shortcuts_title),
                         style = EmphasizedTypography.TitleLarge
                     ) 
                 },
@@ -63,18 +69,14 @@ fun ShortcutManagerScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    IconButton(onClick = { showCreateDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Create Shortcut")
+                    }
                 }
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showCreateDialog = true },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Create Shortcut")
-            }
-        }
     ) { innerPadding ->
         if (customShortcuts.isEmpty()) {
             Box(
@@ -85,14 +87,8 @@ fun ShortcutManagerScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "No custom shortcuts created",
+                        "No shortcuts",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Tap the + button to create a new desktop shortcut.",
-                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -105,20 +101,13 @@ fun ShortcutManagerScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                item {
-                    Text(
-                        "Active Shortcuts",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
                 items(customShortcuts, key = { it.id }) { shortcut ->
                     ShortcutItemRow(
                         shortcut = shortcut,
                         onDelete = {
                             viewModel.removeCustomShortcut(shortcut.id)
                             ShortcutHelper.disableShortcut(context, shortcut.id)
-                            Toast.makeText(context, "Shortcut removed", Toast.LENGTH_SHORT).show()
+                            messages.show("Shortcut removed")
                         }
                     )
                 }
@@ -148,9 +137,9 @@ fun ShortcutManagerScreen(
                                 targetParam = targetParam
                             )
                         )
-                        Toast.makeText(context, "Shortcut added to home screen", Toast.LENGTH_SHORT).show()
+                        messages.show("Shortcut added to home screen")
                     } else {
-                        Toast.makeText(context, "Failed to create shortcut", Toast.LENGTH_SHORT).show()
+                        messages.show("Failed to create shortcut")
                     }
                     showCreateDialog = false
                 }
@@ -245,6 +234,7 @@ fun CreateShortcutDialog(
     onCreate: (label: String, targetScreen: String, targetParam: String?, iconBitmap: Bitmap) -> Unit
 ) {
     val context = LocalContext.current
+    val messages = LocalGalleryMessages.current
     var label by remember { mutableStateOf("") }
     var targetType by remember { mutableStateOf("Photos") } // Photos, Albums, Favourites, Trash, Album
     var selectedAlbum by remember { mutableStateOf(albums.firstOrNull() ?: "") }
@@ -399,7 +389,7 @@ fun CreateShortcutDialog(
             Button(
                 onClick = {
                     if (label.isBlank()) {
-                        Toast.makeText(context, "Please enter a name", Toast.LENGTH_SHORT).show()
+                        messages.show("Please enter a name")
                         return@Button
                     }
                     val targetParam = if (targetType == "PhotoAlbum") selectedAlbum else null

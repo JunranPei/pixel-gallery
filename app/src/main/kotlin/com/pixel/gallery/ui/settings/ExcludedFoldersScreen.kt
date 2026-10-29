@@ -19,18 +19,22 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExcludedFoldersScreen(
     onBack: () -> Unit,
     viewModel: PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val excludedFolders by viewModel.excludedFolders.collectAsState()
 
-    Scaffold(
+    return GalleryPage(
+        modifier = Modifier.navigationBarsPadding(),
         topBar = {
-            TopAppBar(
+            GalleryHeader(
                 title = { 
                     Text(
                         "Excluded Folders",
@@ -68,7 +72,7 @@ fun ExcludedFoldersScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Folders you exclude will not be scanned for media. This is useful for folders containing many non-gallery images.",
+                    text = "Excluded folders are not scanned for media.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center

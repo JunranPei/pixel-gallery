@@ -1,12 +1,15 @@
 package com.pixel.gallery.ui.locked
 
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.GalleryHeader
+
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,12 +17,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.theme.ExpressiveShapes
+import com.pixel.gallery.ui.components.MediaCollectionTopBar
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -28,16 +35,23 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun LockedFolderScreen(
     onBack: () -> Unit,
     onNavigateToViewer: (Long) -> Unit,
+    onSort: () -> Unit = {},
+    onAuthenticationCancelled: () -> Unit = onBack,
+    bottomPadding: Dp = 0.dp,
+    gridState: LazyGridState = rememberLazyGridState(),
+    isForeground: Boolean = true,
     selectedIds: Set<Long> = emptySet(),
     onSelectionChange: (Set<Long>) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
     items: List<GridItem> = emptyList(),
     viewModel: com.pixel.gallery.ui.viewmodel.PhotosViewModel = hiltViewModel()
-) {
+): GalleryPageContent {
     val gridColumns by viewModel.gridColumns.collectAsState()
     val context = LocalContext.current
     var isAuthenticated by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
+    val foregroundNow by rememberUpdatedState(isForeground)
+    val cancelAuthentication by rememberUpdatedState(onAuthenticationCancelled)
 
     val biometricManager = remember { BiometricManager.from(context) }
     val canAuthenticate = remember {
@@ -58,6 +72,9 @@ fun LockedFolderScreen(
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
                     authError = errString.toString()
+                    if (foregroundNow && errorCode in setOf(BiometricPrompt.ERROR_USER_CANCELED, BiometricPrompt.ERROR_NEGATIVE_BUTTON)) {
+                        cancelAuthentication()
+                    }
                 }
             }
         )
@@ -71,7 +88,8 @@ fun LockedFolderScreen(
         biometricPrompt.authenticate(promptInfo)
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isForeground, isAuthenticated) {
+        if (!isForeground || isAuthenticated) return@LaunchedEffect
         if (canAuthenticate != BiometricManager.BIOMETRIC_SUCCESS) {
             // No system lock present or available, bypass as requested
             isAuthenticated = true
@@ -80,24 +98,11 @@ fun LockedFolderScreen(
         }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
+    return GalleryPage(
         topBar = {
-            if (selectedIds.isEmpty()) {
-                TopAppBar(
-                    title = { 
-                        Text(
-                            "Locked Folder",
-                            style = EmphasizedTypography.TitleLarge
-                        ) 
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                )
-            }
+
+                MediaCollectionTopBar("Locked Folder", onBack, sortLabel = "Sort Locked Files", onSort = onSort)
+
         }
     ) { innerPadding ->
         if (!isAuthenticated) {
@@ -105,6 +110,7 @@ fun LockedFolderScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+
                     .padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -158,18 +164,13 @@ fun LockedFolderScreen(
                     style = EmphasizedTypography.HeadlineMedium,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Move sensitive photos and videos here to hide them from your main gallery and other apps.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
             }
         } else {
             Box(modifier = Modifier.padding(innerPadding)) {
                 PhotosScreen(
                     items = items,
+                    state = gridState,
+                    bottomPadding = bottomPadding,
                     onNavigateToViewer = onNavigateToViewer,
                     selectedIds = selectedIds,
                     onSelectionChange = onSelectionChange,

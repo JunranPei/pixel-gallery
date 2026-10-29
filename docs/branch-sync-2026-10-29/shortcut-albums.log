@@ -1,0 +1,7 @@
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] dat=gallery-shortcut://shortcut/... flg=0x10080000 cmp=com.pixel.gallery.shortcuts.test/com.pixel.gallery.MainActivity (has extras) }
+Status: ok
+LaunchState: COLD
+Activity: com.pixel.gallery.shortcuts.test/com.pixel.gallery.MainActivity
+TotalTime: 3776
+WaitTime: 3782
+Complete

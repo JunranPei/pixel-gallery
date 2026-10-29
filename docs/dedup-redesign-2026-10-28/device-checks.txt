@@ -1,0 +1,2 @@
+Toast gesture checks passed:
+PASS: left/right real swipes; short drag retained; identical queued message reset; light/dark modal hosts; no close action; automatic timeout. Dedup page: light/dark screenshots, horizontal photo swipe, floating footer remains anchored, empty selection disables action. Screenshots: /data/user/0/com.pixel.gallery.multitask.test/cache/toast-qa

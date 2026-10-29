@@ -1,0 +1,9 @@
+<resources>
+    <string name="qs_move_failed">未能完成移动。</string>
+    <string name="qs_move_failed_count">%1$d 项未能移动。</string>
+    <string name="qs_move_no_permission">缺少存储权限。</string>
+    <string name="qs_move_name_conflict">已有同名文件。</string>
+    <string name="qs_move_no_space">存储空间不足。</string>
+    <string name="qs_move_busy">请等待当前移动结束。</string>
+    <string name="qs_move_album_missing">目标相册已不可用。</string>
+</resources>

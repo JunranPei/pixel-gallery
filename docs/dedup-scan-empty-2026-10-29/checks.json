@@ -1,0 +1,11 @@
+{
+  "emptyLightDarkAndText": "PASS",
+  "scanLightDarkAndText": "PASS",
+  "identicalResultOrigins": "PASS",
+  "allTwentyMobileAndBack": "PASS",
+  "progressAndPreparing": "PASS",
+  "finalPairSharedRoundedPhotos": "PASS",
+  "finalPairNoStopDot": "PASS",
+  "reducedMotion": true,
+  "browserErrors": []
+}

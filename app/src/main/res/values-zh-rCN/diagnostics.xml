@@ -1,0 +1,5 @@
+<resources>
+    <string name="diagnostics_export">导出诊断记录</string>
+    <string name="diagnostics_saved">诊断记录已保存</string>
+    <string name="diagnostics_failed">无法保存诊断记录</string>
+</resources>

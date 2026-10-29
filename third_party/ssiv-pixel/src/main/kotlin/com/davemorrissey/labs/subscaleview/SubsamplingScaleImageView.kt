@@ -516,10 +516,19 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        val sCenter = getCenter()
+        // width/height already contain the NEW bounds here. Sampling getCenter()
+        // would treat the new viewport centre as the old one and jump the image.
+        val sCenter = if (oldw > 0 && oldh > 0) viewToSourceCoord(PointF(oldw / 2f, oldh / 2f)) else getCenter()
         if (isReady && sCenter != null) {
             anim = null
-            pendingScale = scale
+            val oldFit = min(oldw / sWidth().toFloat(), oldh / sHeight().toFloat())
+            val newFit = min(w / sWidth().toFloat(), h / sHeight().toFloat())
+            // Fit stays fit across a screen rotation. Deep zoom keeps its actual
+            // pixel scale and source centre, reusing the same decoder and tiles.
+            pendingScale = if (oldFit > 0f && (preserveRelativeScaleOnResize ||
+                    scale <= oldFit * 1.02f && abs(imageRotation) < 0.001)) {
+                newFit * (scale / oldFit)
+            } else scale
             sPendingCenter = sCenter
         }
     }
@@ -549,7 +558,24 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         setMeasuredDimension(width, height)
     }
 
+    var preserveRelativeScaleOnResize = false
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            detector?.onTouchEvent(event)
+            singleDetector?.onTouchEvent(event)
+            isZooming = false
+            isPanning = false
+            isQuickScaling = false
+            maxTouchCount = 0
+            ignoreTouches = false
+            didZoomInGesture = false
+            didRotateInGesture = false
+            preventRotatingInGesture = false
+            anim = null
+            scheduleStableTileRefresh()
+            return true
+        }
         if (anim?.interruptible == false || ignoreTouches) {
             if (event.actionMasked == MotionEvent.ACTION_UP) {
                 isZooming = false
@@ -558,6 +584,12 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
             ignoreTouches = true
             parent?.requestDisallowInterceptTouchEvent(true)
             if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                maxTouchCount = 0
+                isPanning = false
+                isQuickScaling = false
+                didZoomInGesture = false
+                didRotateInGesture = false
+                preventRotatingInGesture = false
                 onImageEventListener?.onUpEvent()
                 ignoreTouches = false
             }
@@ -999,6 +1031,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         if (!checkReady()) {
             return
         }
+        if (pendingScale != null && sPendingCenter != null) preDraw()
         val diagnosticsDrawStartedAt = if (diagnosticsListener != null) {
             SystemClock.elapsedRealtimeNanos()
         } else {
@@ -2146,6 +2179,13 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         }
     }
 
+    /** A read-only query for the host's single-finger dismiss arbitration. */
+    fun isAtRestWithinFit(): Boolean {
+        if (!isReady || anim != null || isZooming || isPanning || isQuickScaling) return false
+        val state = snapshotViewState() ?: return false
+        return state.scale <= state.baseFitScale * 1.02f
+    }
+
     /** Captures the small, decoder-independent transform state for pager restoration. */
     fun snapshotViewState(): ViewState? {
         if (!isReady || scale <= 0f) return null
@@ -2314,6 +2354,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     "grid=${xTiles}x$yTiles count=${tileGrid.size} " +
                     "decodedTarget=${(sTileWidth + sampleSize - 1) / sampleSize}x" +
                     "${(sTileHeight + sampleSize - 1) / sampleSize} " +
+                    "decodedCap=${maxTileDimensions.x}x${maxTileDimensions.y} " +
                     "base=$fullImageSampleSize viewport=${width}x$height source=${sWidth()}x${sHeight()}",
             )
         }

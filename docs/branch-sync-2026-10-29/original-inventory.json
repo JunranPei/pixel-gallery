@@ -1,0 +1,3069 @@
+{
+  "schema": 1,
+  "repository": "D:\\workplace\\antigravity\\pixel-gallery",
+  "local": "13ebb461fcc2561211c20dc8c3c00c19ce502918",
+  "upstream": "7e6bec97bd9c6ebc5a4351e7115d3cb2a6ba5542",
+  "merge_base": "ed0e276f12b7d4f0735b3e812a95a15ae4e5ffdd",
+  "counts": {
+    "M": 65,
+    "D": 40,
+    "A": 50
+  },
+  "path_count": 155,
+  "files": [
+    {
+      "path": ".gitignore",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0360ab0555d3ffd0dff9dccf087e5aea0e8fb7a0",
+        "sha256": "a19862f0ff624c220a30759899e09e679c851ac950aadf12e72c13ec0246ae34"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3892bf411aab1eff8f3979fdc90f195658f7cf50",
+        "sha256": "b33f80cdc81440e30c701785d47ae5cf609acd44811001f77d8b63fed72ba359"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6a5cc4ef3f17880c043b82fed35759584e860f3b",
+        "sha256": "c8510dafdeb5bfa845037effa0e9936df6af0714408c8a85727e0a47fa6932ae"
+      }
+    },
+    {
+      "path": ".temp_aar/GlideImageSource.kt",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "843619f5b630caac86e222e0315b99bfd3b508fd",
+        "sha256": "0a28e8d5ea816ca171a88d5d34979e003c93ce696badef1c703fb40df33a8fd8"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "843619f5b630caac86e222e0315b99bfd3b508fd",
+        "sha256": "0a28e8d5ea816ca171a88d5d34979e003c93ce696badef1c703fb40df33a8fd8"
+      }
+    },
+    {
+      "path": ".temp_aar/extracted/AndroidManifest.xml",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "01ec7c6f986caaf6a7c225fbcd01f6df547288eb",
+        "sha256": "cfe6a9dcf332a5cff436d4781c2a3b2eadf9d2934f76ab0cf1ac837c0991cfc4"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "01ec7c6f986caaf6a7c225fbcd01f6df547288eb",
+        "sha256": "cfe6a9dcf332a5cff436d4781c2a3b2eadf9d2934f76ab0cf1ac837c0991cfc4"
+      }
+    },
+    {
+      "path": ".temp_aar/extracted/classes.jar",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dcdaf7a384ee2bce9462360b1381cff1166f2a93",
+        "sha256": "0f276ae1828ec80aeb92dcc82d0d87f3f3ab1e9446bfeac75a2e13873a9c3a4f"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dcdaf7a384ee2bce9462360b1381cff1166f2a93",
+        "sha256": "0f276ae1828ec80aeb92dcc82d0d87f3f3ab1e9446bfeac75a2e13873a9c3a4f"
+      }
+    },
+    {
+      "path": ".temp_aar/extracted/me/saket/telephoto/zoomable/internal/FixedSizePainterKt.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bed110eb341f450fb7ba10b34efe04ffd22acc03",
+        "sha256": "19e4fcb9cc31429ca0a924342faf024c0fc8290628115355d4d03f41a0b88768"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bed110eb341f450fb7ba10b34efe04ffd22acc03",
+        "sha256": "19e4fcb9cc31429ca0a924342faf024c0fc8290628115355d4d03f41a0b88768"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/AndroidManifest.xml",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6830c5a7b96878153bfcebbaa7618b1878dc8a7b",
+        "sha256": "4c8eff92cf6684919c798838661c967f544fdaef8b801ce7e197e071cecd2d32"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6830c5a7b96878153bfcebbaa7618b1878dc8a7b",
+        "sha256": "4c8eff92cf6684919c798838661c967f544fdaef8b801ce7e197e071cecd2d32"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/META-INF/glide_release.kotlin_module",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "5d0aacdc56e00f67eed17c531902feb1c2307224",
+        "sha256": "6d2bc6f73fdab4158395afae87dc054440c58bc6a2470e5df07659e801798c93"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "5d0aacdc56e00f67eed17c531902feb1c2307224",
+        "sha256": "6d2bc6f73fdab4158395afae87dc054440c58bc6a2470e5df07659e801798c93"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/classes.jar",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "5acf97a998e72e96fbfb3c0e28350981d06f7a55",
+        "sha256": "0d2a58cd9fe6139b64601cc33cd8dd4e17fe08aaa5c119c516be50f622550cf3"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "5acf97a998e72e96fbfb3c0e28350981d06f7a55",
+        "sha256": "0d2a58cd9fe6139b64601cc33cd8dd4e17fe08aaa5c119c516be50f622550cf3"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/glide.zip",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6865ba085d36301fce5dbfdc8313dfbbd4df00f3",
+        "sha256": "3f218ae3aa84b12be0f8f243fd779cc30fe2b34dad2a72f2828b815247f6f44c"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6865ba085d36301fce5dbfdc8313dfbbd4df00f3",
+        "sha256": "3f218ae3aa84b12be0f8f243fd779cc30fe2b34dad2a72f2828b815247f6f44c"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/AsyncGlideSize.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "315b5aaf67c8001752b86f2634ee237e1943443d",
+        "sha256": "d05b775dd6fa5b950183b120eb31faba6a40049c98c617ed2717fc862de8cdce"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "315b5aaf67c8001752b86f2634ee237e1943443d",
+        "sha256": "d05b775dd6fa5b950183b120eb31faba6a40049c98c617ed2717fc862de8cdce"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/FlowTarget$1.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "62b73ac097299ce641eccfe2b29b9d1abfccead6",
+        "sha256": "d7a2e5793e413f01fc0e00c7f59a83b66296e9a6e78a3297a4184858406d4ba9"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "62b73ac097299ce641eccfe2b29b9d1abfccead6",
+        "sha256": "d7a2e5793e413f01fc0e00c7f59a83b66296e9a6e78a3297a4184858406d4ba9"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/FlowTarget.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "68ed540cb51615eef33be409c0fc4465bd1fdb49",
+        "sha256": "05789f1e58ade7b399e36df5d4c837b821dbcc6c35ae96ee30516207f83ad411"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "68ed540cb51615eef33be409c0fc4465bd1fdb49",
+        "sha256": "05789f1e58ade7b399e36df5d4c837b821dbcc6c35ae96ee30516207f83ad411"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/FlowsKt$flow$1$1.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "472f22977dddb170d3a50b0036b97a7bc70b0ce8",
+        "sha256": "fa6d4df90f1eae4c640c406da01c821bd91d237cde49536b33d5258edff63c7a"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "472f22977dddb170d3a50b0036b97a7bc70b0ce8",
+        "sha256": "fa6d4df90f1eae4c640c406da01c821bd91d237cde49536b33d5258edff63c7a"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/FlowsKt$flow$1.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "17cd7c19ecfd1be425ce00b4701c7beec371452b",
+        "sha256": "fc9a454153c8a052feae988933815e65537cd50b1a796bb5c9872dd5a17722ac"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "17cd7c19ecfd1be425ce00b4701c7beec371452b",
+        "sha256": "fc9a454153c8a052feae988933815e65537cd50b1a796bb5c9872dd5a17722ac"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/FlowsKt.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7baebed9cce9c24716841534ec124b95894c1f21",
+        "sha256": "72962cd35643c50bf68ccc55d8e76b5d7d4ac842f702ea4f7687fa2f5a34f2e0"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7baebed9cce9c24716841534ec124b95894c1f21",
+        "sha256": "72962cd35643c50bf68ccc55d8e76b5d7d4ac842f702ea4f7687fa2f5a34f2e0"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/ForwardingDiskCacheStrategy.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bc41194c112f445aac1d2db0624bc3528227cdfd",
+        "sha256": "b7212930ac08f9b720279f659767286a0ed70c673cb3f3c06c951f15c931ee5b"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bc41194c112f445aac1d2db0624bc3528227cdfd",
+        "sha256": "b7212930ac08f9b720279f659767286a0ed70c673cb3f3c06c951f15c931ee5b"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideFlowInstant.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "20771fc0c63776c535882edab15af4dfe1307cf5",
+        "sha256": "86133c17a57123495dada1a14df0a66c077e0a60652a68168bca29f3bf8c481f"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "20771fc0c63776c535882edab15af4dfe1307cf5",
+        "sha256": "86133c17a57123495dada1a14df0a66c077e0a60652a68168bca29f3bf8c481f"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageResolver$downloadAsFile$2.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bf7250788884b0b2965c717be294c84e79226413",
+        "sha256": "8e36b892d1e977009108c5b52a51102dd650b2931785ca7bebbbf48c2f8be88c"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bf7250788884b0b2965c717be294c84e79226413",
+        "sha256": "8e36b892d1e977009108c5b52a51102dd650b2931785ca7bebbbf48c2f8be88c"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageResolver$work$2.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6627d55ed46ce23c26a9fa159986ee03747102c3",
+        "sha256": "4633920dd60dfd068883c5f49d6e31a649fa5260b801ff7d5c46c6b70c327366"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6627d55ed46ce23c26a9fa159986ee03747102c3",
+        "sha256": "4633920dd60dfd068883c5f49d6e31a649fa5260b801ff7d5c46c6b70c327366"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageResolver$work$3$emit$1.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b5b480cde67fe4b14ef9ea26e6b367393572cf58",
+        "sha256": "1d340ee5c56500e3da6d7bc90b79d4b50f8f64d4112417c415761203fa54cf74"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b5b480cde67fe4b14ef9ea26e6b367393572cf58",
+        "sha256": "1d340ee5c56500e3da6d7bc90b79d4b50f8f64d4112417c415761203fa54cf74"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageResolver$work$3.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1eaf24e29a8896176f8fc1b9a64b302a36a3b612",
+        "sha256": "209b5ef9ad55dc6c85df6b6ce380f5eac396c4f0c43deb3f584347aa35327b08"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1eaf24e29a8896176f8fc1b9a64b302a36a3b612",
+        "sha256": "209b5ef9ad55dc6c85df6b6ce380f5eac396c4f0c43deb3f584347aa35327b08"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageResolver.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d702d92488fafa74d24f9690b26d7eb7a7d999c9",
+        "sha256": "ed69aeb4e3235b2ef85ac911bd42fac5c6127a7c13d1f1a1cbe311c5442a282b"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d702d92488fafa74d24f9690b26d7eb7a7d999c9",
+        "sha256": "ed69aeb4e3235b2ef85ac911bd42fac5c6127a7c13d1f1a1cbe311c5442a282b"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageSource$resolve$resolver$1$1.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3caf546c8d31cf1f2c320c798624ea9c73165fe5",
+        "sha256": "2afa8f5f5798811c85004a1e7bec4891594e5f1540838e7f6aa44cad9842c322"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3caf546c8d31cf1f2c320c798624ea9c73165fe5",
+        "sha256": "2afa8f5f5798811c85004a1e7bec4891594e5f1540838e7f6aa44cad9842c322"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageSource.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b2c25fda93521f5e393d8e531be7b7bd4d59a356",
+        "sha256": "5da851fdd44affae09cc3035b6ce39e32bca6ab5ed7be9ad33b2109bc956289b"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b2c25fda93521f5e393d8e531be7b7bd4d59a356",
+        "sha256": "5da851fdd44affae09cc3035b6ce39e32bca6ab5ed7be9ad33b2109bc956289b"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/GlideImageSourceKt.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "002e2ed5724193926011d0fa7c367029e8128104",
+        "sha256": "0a16e135f2ede3495aa8317d8a94d69089874c3fa6c7658bdbace60b3e3c494e"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "002e2ed5724193926011d0fa7c367029e8128104",
+        "sha256": "0a16e135f2ede3495aa8317d8a94d69089874c3fa6c7658bdbace60b3e3c494e"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/Placeholder.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dd3b74a4691659d3da0467da428fdf1fba31f79d",
+        "sha256": "b425713772fb84263c585c12ca7bd05a24c769495e4c1270fe880a1b9794616b"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dd3b74a4691659d3da0467da428fdf1fba31f79d",
+        "sha256": "b425713772fb84263c585c12ca7bd05a24c769495e4c1270fe880a1b9794616b"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/ResolvableGlideSize.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ebb11af735813d848f73ffff9969c648b9e48ed4",
+        "sha256": "c281eb4680c2915199f12e771e6d05725623bb7958796ccb01036e07fbb20f45"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ebb11af735813d848f73ffff9969c648b9e48ed4",
+        "sha256": "c281eb4680c2915199f12e771e6d05725623bb7958796ccb01036e07fbb20f45"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/Resource.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "288c427ff26ad4971904f714750f143acad2b2a4",
+        "sha256": "7525dc79273a6e15ebbb283e34626157929713b153987055d7dc34851bfca6e4"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "288c427ff26ad4971904f714750f143acad2b2a4",
+        "sha256": "7525dc79273a6e15ebbb283e34626157929713b153987055d7dc34851bfca6e4"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/Size.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "77b3705df0fb96f5f5bbefcd150f29dad56f00f1",
+        "sha256": "d0d7a88728e8b0346fef0479e7d9ba86e0a03358dd551ad6f638b213eb939240"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "77b3705df0fb96f5f5bbefcd150f29dad56f00f1",
+        "sha256": "d0d7a88728e8b0346fef0479e7d9ba86e0a03358dd551ad6f638b213eb939240"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/Status.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ef59ed189e3cf1cfbe2c9ba298eba3a058b7f3c2",
+        "sha256": "4a190022bf7a8e120b4940a75b0d1edd4c6060cecae84625a557e6155c5582ff"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ef59ed189e3cf1cfbe2c9ba298eba3a058b7f3c2",
+        "sha256": "4a190022bf7a8e120b4940a75b0d1edd4c6060cecae84625a557e6155c5582ff"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/ZoomableGlideImageKt$ZoomableGlideImage$1.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "82175b90356433ff17e760417dc38364451f4ff6",
+        "sha256": "f0428835f2832a7db7db5230b2ecb771ed7302b0e14c2f0d9eed902597ebca14"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "82175b90356433ff17e760417dc38364451f4ff6",
+        "sha256": "f0428835f2832a7db7db5230b2ecb771ed7302b0e14c2f0d9eed902597ebca14"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/ZoomableGlideImageKt$ZoomableGlideImage$2.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "560dc34932d7e9dec044d9ddb830e63953d580fe",
+        "sha256": "6293e5b83623897e3d4acc28c40f423c50c0c57460560660a7caa8d886359d95"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "560dc34932d7e9dec044d9ddb830e63953d580fe",
+        "sha256": "6293e5b83623897e3d4acc28c40f423c50c0c57460560660a7caa8d886359d95"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/ZoomableGlideImageKt$glide$1.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a060b2ee4a8687b2bf3d0c373e1990ae05039b80",
+        "sha256": "f5fa0987fe1d7e97a46e2d77cd9b80355c3b1655b37dc8d39b967980b430f353"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a060b2ee4a8687b2bf3d0c373e1990ae05039b80",
+        "sha256": "f5fa0987fe1d7e97a46e2d77cd9b80355c3b1655b37dc8d39b967980b430f353"
+      }
+    },
+    {
+      "path": ".temp_aar/glide_extracted/me/saket/telephoto/zoomable/glide/ZoomableGlideImageKt.class",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9965d737fc50873b492e832fd3d1817f6e0c0720",
+        "sha256": "8e0dcede0ff5ed017f8c73f1422c404e5394f0d9a82f88756d666ea973ef05a1"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9965d737fc50873b492e832fd3d1817f6e0c0720",
+        "sha256": "8e0dcede0ff5ed017f8c73f1422c404e5394f0d9a82f88756d666ea973ef05a1"
+      }
+    },
+    {
+      "path": ".temp_aar/zoomable-image.zip",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "21d4e0dbbb1b0306d5b8f5e2b71fec55489ecf78",
+        "sha256": "fa9588030e4d2a77fc89e22f02322ac91a70e8e28ea222f35ea0e37e2fffd4a3"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "21d4e0dbbb1b0306d5b8f5e2b71fec55489ecf78",
+        "sha256": "fa9588030e4d2a77fc89e22f02322ac91a70e8e28ea222f35ea0e37e2fffd4a3"
+      }
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "423fdc1b7a938b716ca070cdf3e9aae1a21fd9b8",
+        "sha256": "0e034d1870e12434c78c0b6ff25e7f6fbb6739eb223e8e287e6c097dbcba04d6"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "90fcb021d76ed4d7ae6f7b19d1d5c42065768e3f",
+        "sha256": "ae3233945f25430363fc2f8adf1cdd5370b5ba1fd1c614f85e96d79509ac959b"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e34a7fe08c86a5ff295f232d95d2a9e72fdb2344",
+        "sha256": "318c982c7e2bea81286c200dbac7bc3d2261d39d650a2c20f788027326c6ba78"
+      }
+    },
+    {
+      "path": "app/src/main/AndroidManifest.xml",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "09b1f2e33770956f533fcf38e5af1fb0f31a28ef",
+        "sha256": "af7721c1d679ddbb9d400f8e9a6c2c507e2cdd283c69178db1eb22c79c10bce9"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0452030f079a83a9aead475c4506b00d5e0050e8",
+        "sha256": "182d0c06ba1c83cde1a2f68c6b47ddb5d11455667112a55c320b46b592d92857"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e68f1bc4e50b82cea342c33165d8c482c6fb1981",
+        "sha256": "49d52429bcfd105bf85bf7ff97213c0e1c564ac1ffe240e53a8b628e5b0fafbd"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/MainActivity.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4be076654bdd0bc3c77588a2925f67078f4e22a0",
+        "sha256": "830c86dd3927939036e65b3af4bcb528c3c41cdcda11e6b57406a9ff2170aff2"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f535e4dbbd4f726a54f490471108ffec144969ea",
+        "sha256": "8787856d5a02387038b9f294d126ee556cf9900f6f4ff1b19d51f800fe24eeaa"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a6f5e414ba940e02063efe84657e6993a4ab33e3",
+        "sha256": "2def8f6a11e6db684e476c67f0f67247025ad58f28cae92ec15611dfe9e55f93"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/data/local/dao/MediaDao.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "35d3f55cb36c89e80b990c91b2eae4c7317d2187",
+        "sha256": "5b331a9d9deb6bbca4f588494195dc7121b461021b984ba8c881c4f6291dbc65"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "86b9fd25f754f142d5c33ad8d25b8d612e62f2c1",
+        "sha256": "8670fbe27b43233afe8990851ba849270f2e7d3f7f5c9ed6ed49a4f111dbd2a3"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "954d5741d5e8fd5d6f06023b0ab2453891cc8872",
+        "sha256": "87ade01cf00fdbcfa77a1772cd0448df942e14af1164982389f76f394e7dcde7"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/data/repository/MediaRepository.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e3c53c7ca7a2874205a9dd3f926d75551539adbb",
+        "sha256": "0930883c4fdc53a202eca929e8a2e40d835630f915bc8c1f59bc357dafb051f8"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4b6c787ad462d776679ca6406d8ab45390ebafe1",
+        "sha256": "675d7f34612f5946669be655c9d89ee8668eb8ee5d45245c1b185d31336c0071"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6003c58f6820c1949031ff4b38e5dd745894a1c3",
+        "sha256": "dbeeca3187dce7b609f3fd47990b309186c5e197e24d25911c77a2487f72e4da"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/data/repository/SettingsRepository.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0332b7f2841a77eadf38c7d12ce48eea58d5a7a4",
+        "sha256": "7e4030f6b18f8e449810719146fe561413b6e78beaaf580e8550ab757f426ea1"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a1557559893debfb34bc1f50b64b9e17e73e10aa",
+        "sha256": "d470a697cbb2a241de1aa721cb97a5f60efb60708eed66098fc65b9adf4f47c4"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d0f7fcb268762566fe8bceb3378701ce8eda0938",
+        "sha256": "5c25de4769f3356db441deb9eab868b626ebe0ec588b74394bfdb396cd85cfef"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/glide/AvesAppGlideModule.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "222a3817a09b4370a8b561b99e6574b440e7f673",
+        "sha256": "1bd7c50a10a54bcba784fab63ed1922e05321f9435c307e32636480b891decf9"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f3457dfc3eef3020e0585e395adc132d51f72ff0",
+        "sha256": "771a8f17130d51a067bc3d360dcbe876a48f4ce165ad74b47c667d3090be9cd1"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9119f509a369a1bd2c1032322261dea8cb8bbc52",
+        "sha256": "b87841d22d5d714bff107db8562d46dfb4e16838de675716a1ca1ebc86b09729"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/glide/IndexedJpegScreenPreviewGlideModule.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4645805cab263c2389d27bc76b91ef23bb1d40be",
+        "sha256": "cf20b81703291fa51fb5a8d75e6692e0f1288730688a315dd478d5d915d15208"
+      },
+      "upstream": null
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/glide/IndexedPngScreenPreviewGlideModule.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f8e763aeea8443ebd7cf7516aa5c61cdf5affb22",
+        "sha256": "08fb8121ad25fb6e92504d8441ad2e1175658e86487a8574255557c65dde96fb"
+      },
+      "upstream": null
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/glide/VideoThumbnailGlideModule.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "19ec39270791ba7bfe8a0d195f6b0427c2775034",
+        "sha256": "847181755c4a8fd259db7697a894dbd15ba646fcf3b2c2f645d677c74381b187"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "802a088250239a50e208cab52b04562cd22fc56a",
+        "sha256": "b9f8726c3b591d7856e0a79bd83aa7edc02e13ae5b9036f0e2c0d1c6ca1b5420"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "802a088250239a50e208cab52b04562cd22fc56a",
+        "sha256": "b9f8726c3b591d7856e0a79bd83aa7edc02e13ae5b9036f0e2c0d1c6ca1b5420"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/model/MediaTransfer.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9ea6f4a604423c055d3b6bb8f56b5aa22f9df7a5",
+        "sha256": "5e7f947f73fd02a6c6cc8b2679d8fb4058f61756af0c75ba4b0158bd88432aba"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "560e385f34f887a1e50637b6c405442e12163cc0",
+        "sha256": "6e5755ca6cedfbdb5af3bc4e781b165e446ebe3c42f220a7ad1ea5f3c8abd371"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "560e385f34f887a1e50637b6c405442e12163cc0",
+        "sha256": "6e5755ca6cedfbdb5af3bc4e781b165e446ebe3c42f220a7ad1ea5f3c8abd371"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/MainScaffold.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "2d78952cf25b304cd7be3558a95e1ad2d142f3c1",
+        "sha256": "89c5da0b4f7c6cadd899233272160101b2901ec3da977e95703a0e4cadf7bd12"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f8d9a31c3bb253dccebac65e26cc476c33ab24da",
+        "sha256": "64ab9ace9c856d4e820ce2873986190f38e817d1be966ec074ac2ee13d439ad7"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e049def6fdb3262ea4df0e8d655cbbd1f5366e0b",
+        "sha256": "a78d80302fa7d98d4422d9be656211eaa8b8295cdc9c98da5a7a718402f7475d"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/components/VerticalScrollbar.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9fa41c466abe35365727e23f545764ecdb6c5760",
+        "sha256": "65fbf5b51b7f063d87bd681d699bc3ab6412b03e247d32d2f2a8c832d096cd4b"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0353cf5511be0075dc1a7820c23f04dbeaf4f0b6",
+        "sha256": "7d729e6c0bca78cbe1d6763e5520777892372dd38ad22cbad2467a71d4d0845f"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3f88b6e201548bea66918586302e34f317ab89d9",
+        "sha256": "a8455340cfceecb89a2b880d51a13c2df9b84b7f7dd355ff355914043e1e1456"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/home/HomeScreenComponents.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "aa63c0c0e232bcfeaaf13d7a70e87c972c0955c7",
+        "sha256": "ac007d32015a8e9858ef6e995a33bba92f9d53770696424965a295cc14fcd9c1"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "5f97f2fbc3486bb76cbfe8a0a0d84e756be23f86",
+        "sha256": "8a3bbe0661bcd3281ddfd04d510a6bb5f0145f8f730590ef56e27d1dfc1d90f2"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "03bb54f99e5f2ba77686d954a3ab074ea1341142",
+        "sha256": "b0c0c7cfdbf255379dc99f20383332e04d78a1992c02f30b995035923171596a"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/PerformanceSettingsScreen.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e2b6234d6a2c3ca679c5bb42329c2ef9041cc7e3",
+        "sha256": "80f63c0564d033d9cad2fc036df57143395ff435143cb9c066df34dd651e918c"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3e32d83e1ddd2b24a03e1ff0f5abd9fd63db861a",
+        "sha256": "926b11ded753ec741c070c9f3f2b3be9693a3dac7f41b932108a98ba61d4caf1"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ca5fcd8a8cd2f3b0fcf594861cbc3792de7b5d0f",
+        "sha256": "d74aa12550734c5fe4be8308a48c82e89027670e29977f4a104496995ff0bd9e"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/SettingsScreen.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bc7dcebf71e2d53d23195639704c2481f14694dd",
+        "sha256": "8089ddcf4ab5bd128245e92ecc661b0d79128172fb0cf95f64c6d5f98eb81946"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7d8a41ad244c24eb10bee3ea82aca0a154327ef3",
+        "sha256": "4e125e318d66990615b34220f7121774359c1d5c17f4f66e7f678b9711a3dfff"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7123e897e89134af41b8795198fa96c5f9dec683",
+        "sha256": "348b81e7251ef3b336d1a1b29ac4a87d98a29bbad180cd761f4bd2a271787814"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/settings/ShortcutManagerScreen.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3bb766267001266460cef06eca1db4646d42b2a8",
+        "sha256": "e7c3f61e23de61dddce8db18f7ecdfb2461c4b2188a402dbfe90665f2771f3b7"
+      },
+      "upstream": null
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/transfer/TransferDestinationScreen.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "353e4e2392de82aff105fa362b966e443d32cbec",
+        "sha256": "a47a75b0eeebfbbfe6725b8d571ebb7ca4a62c094277f827360b7df0278d152f"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "193671d569b6ab7e0625798b49c1a1b6da6a3b51",
+        "sha256": "3c7b3448150411941ff62b706bc0ef4f9ad9e4507c4a919067136e831ea7f109"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "bb5b1ce6531554a3f4acade964f23895a03a48a4",
+        "sha256": "c43c4e51b6f591502cdd8d4cf83933ea3ae560abcd1f64f3ad44bf0fce9313fe"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/SimpleSubsamplingImageView.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "05b307a0ee95d94caa8e2c13d4a092205e980c48",
+        "sha256": "13e106135c40997670ab4f159616cb61111f228b4df0026aa15caa0d8356f2c3"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4d628b9e0f21eb75af2deb2bb714fbd8b47ff5a9",
+        "sha256": "310b408c618d7539583a713cdc9d84943c09f0d606825d853df354e1f76aa43a"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e17926e4b0d0ff8524e2b833282a7ff6602c4f7d",
+        "sha256": "dacb2910e71e7e232e9af0aa1f7bc61581c339c8806356f236423e62e26b0080"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerGlideTaskCompression.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b27ddb6de4fece9f7369b7a294f3bb41883e0241",
+        "sha256": "c4befed8ee26453fc3c399ce4361c53df5734ba1fbc52e741965335d9b412e2d"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ce69ad082f60cbbe0f3a02cba592a4496d7d5dd9",
+        "sha256": "64c23f89ea15c045bcd43d786b50a1def7d6cf74c38a8a59f7353880a414ab90"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "2ffce99a0aca89aae27da7fbc188a61fdab434dd",
+        "sha256": "c789119f140cecc97ea0623fc865b9c2a2bb6140611b2acc19061f3ef3d101ee"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerLoadMetrics.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "77f4a20f4c171f5edb26e3ad946555866c888fc8",
+        "sha256": "bac93b3a6877b166b7dcca92ee1a7ce4fd10da3725d0a94c532219577e759dfd"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4330f1acaa481cfa5440547c0c6819a79c8e16ce",
+        "sha256": "c336d59840145f88e5c9e36b0501f122b19332e0094cde1718a131b974193071"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "92eae4128ae61b9655546e38f56a27ccd8444e1f",
+        "sha256": "04e2be3be243e102188349c9b8867203d3c6d999216f1e7996ea06f293a2ee0c"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ViewerScreen.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "fb859cfba28c6ea94dbfc4e04a09b9b917b615de",
+        "sha256": "8c6e0c13ce4665eb1a6f9e32518280693beec248a65c241447892d1c8e3fe6b6"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a447627313155c6ca59bfc3fa962b20144ebca2c",
+        "sha256": "d82cd395c37b1d0e162d8a1d2b31d51c2a692fb2434cb70b7dbe91cfc84c4688"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "43d1a7eb3d6e05b10cf060634f901e09bcfa6d6b",
+        "sha256": "a496f88e26e56116f1c5535f2f87374cb67c7c95af619416875d36dc076d3a14"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/ZoomableContainer.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b443d2380030ad2d503a2cce0dde11f55b9da49b",
+        "sha256": "c447ab68edef20942671d4e2ddde8b5bb777a530236fd5889825506c8c847f99"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "05a23c5b121ad064edd0b0a789b32bf60e1a105c",
+        "sha256": "5e9aa4fe2da5f676783e46a79253a35f03b3ef376192cbb2b0a21bc820346c9b"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ada489b68a7e905c653ed2f99bbb598fb07d2dec",
+        "sha256": "cb627328940c667ff825eedb687edb9c97f46ea8582f251e1387cd23d5da029b"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewer/decoders/FastRegionDecoder.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "094468700a65466f3c9891ed41727d33a47acf44",
+        "sha256": "91518d0eb11a6779bf33afdbee8ac20a1480c2d1db0951168d620c9197ecc922"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6ff090d571745b82f8391d04de3a14a0f1f7ca01",
+        "sha256": "2763305008bcc8b4a5ed561041e9fb11273cd99d01c3e74a6c242ff8dd734cea"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "094468700a65466f3c9891ed41727d33a47acf44",
+        "sha256": "91518d0eb11a6779bf33afdbee8ac20a1480c2d1db0951168d620c9197ecc922"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/ui/viewmodel/PhotosViewModel.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0ec62dde85e7ab6c6c24d22e12254b6e2537da8c",
+        "sha256": "83c604db1dcd9ae1445054e20df2d69d34b18b77f1b74770c72a167f15ce0f62"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f3744b5f2c658dc5226bec68a84d7cb17e69b735",
+        "sha256": "fbdc367d574337f98ffa8956eef6e099a6f68f3f725294eaf205bb1be0d4c830"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "70f7975538e45b0e1555ecfb6e9eab4983d29407",
+        "sha256": "7e2dfd3567fbd5c617c776ac5f479b7faf43349a33a0e9507b2ec34c24ca7845"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/utils/AppLogger.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1f14aa1906c5076872c322270f4529987482c042",
+        "sha256": "c0376bd1ef06fcd97553d45d5e5c3141f0e21de6ae1de249b7749525655d3487"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "2fb27ebc3ecfed21a3e0708d5285a76cb5347ff4",
+        "sha256": "44145d5fe86aa4d45f0f70a3eb0e3f3890b32d23aa4291ff6f6080942df7a3f5"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a6671e93fea7754c40f451a73c74c0917e647ae3",
+        "sha256": "3cc987e9474c66e3a971856d1cd5c23bd98df7f975757718cf37120882ae4c85"
+      }
+    },
+    {
+      "path": "app/src/main/kotlin/com/pixel/gallery/utils/ShortcutHelper.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8612d1c2d281a5f1d92408d7e22829db2f77bd4d",
+        "sha256": "58d7e98cba34bd0baec2007919f10f64e70a4763a316c9d9acd1687bdbb29066"
+      },
+      "upstream": null
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/data/repository/MediaRepositoryIndexCleanupTest.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "eff9ca6ebb276e79cef7aa41e87aa78f3103663b",
+        "sha256": "1ea30e8e30203171c5e594b1e35776338223b2162bec36188c58d1c254efbadd"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "eff9ca6ebb276e79cef7aa41e87aa78f3103663b",
+        "sha256": "1ea30e8e30203171c5e594b1e35776338223b2162bec36188c58d1c254efbadd"
+      }
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/glide/IndexedPngScreenPreviewTest.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e1b89102b8655d60112aef95b05a5ce732b99c55",
+        "sha256": "57d2c8ed4089bd9392319ba01719b654bb347beaedfab7f135c2f85fdd4722af"
+      },
+      "upstream": null
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/model/MediaTransferTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "40fe5315ad29e6ae4bffb0b56ea88d828010fa50",
+        "sha256": "5b2ee8a34c4ed5d1b243d704af0d0a74401140b569bc7c766954936784dbc52c"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ea7d5ea3c234142b6ffb19f968a2d8652575ac8c",
+        "sha256": "3c3e822847575a4bcddd2d4d3ec45afae2c565f8737c8933e6825a23d46e4ff4"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ea7d5ea3c234142b6ffb19f968a2d8652575ac8c",
+        "sha256": "3c3e822847575a4bcddd2d4d3ec45afae2c565f8737c8933e6825a23d46e4ff4"
+      }
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/ui/MainScaffoldSearchTest.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "373817cef14029f2bbee1f1fb11c7d71fc008d6b",
+        "sha256": "0c4827b58471f436fa715189b8b3a0724507cce4d119b9b376be37682aa53952"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "51eb1d94bae74de3071c6e88fbc3cdde81adae0c",
+        "sha256": "ea54ea1785831ea1fdd51a7d65609d3d45e1f001dc330ca75f1c552d48de2d27"
+      }
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/ui/ViewerSessionTest.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "70c1a1c5944fb1ab014158d544e4a4b02dc96abb",
+        "sha256": "4df2fbf27dd84be8d67cdbead38da6b90006e8c7dc35b9faed05fddcd6735cb4"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a7b51c70bc185b8c69b45423122022fb2e91b820",
+        "sha256": "52e636c085bb2bb69eaaac00aad2106d3441f5c37941f36a5036c806d1ab8b66"
+      }
+    },
+    {
+      "path": "app/src/test/kotlin/com/pixel/gallery/ui/viewer/ViewerGestureHandoffTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "08cccbabdf51abc1cf72ae44c8e97b26504cd27c",
+        "sha256": "255010520ba2d9ade17d1cf73c6240466e31ebe586f6486a0de603d0773855ef"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "304a9e9981c689c169a3e9775240ec667576f8b0",
+        "sha256": "b95515ac07ae416b9c389d1d60ef08090be66c924f3ab56a3a9cec49e8ce1869"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "304a9e9981c689c169a3e9775240ec667576f8b0",
+        "sha256": "b95515ac07ae416b9c389d1d60ef08090be66c924f3ab56a3a9cec49e8ce1869"
+      }
+    },
+    {
+      "path": "archive_apks_isolated/app-arm64-v8a-release.apk",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "938cd3505fe4eb9e0a4e8004ed8926395ff7b15a",
+        "sha256": "a4a4a9a12558ccccfa8c3584d90492100785052b8fa1d937d4ae5b85d20614bb"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "938cd3505fe4eb9e0a4e8004ed8926395ff7b15a",
+        "sha256": "a4a4a9a12558ccccfa8c3584d90492100785052b8fa1d937d4ae5b85d20614bb"
+      }
+    },
+    {
+      "path": "archive_apks_isolated/app-armeabi-v7a-release.apk",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1378761199bddbecef3592381f87e366d97eba10",
+        "sha256": "4ec01add40a207f449565c8b5c39b58f382c8a34b4ac8055df70470e903f037a"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1378761199bddbecef3592381f87e366d97eba10",
+        "sha256": "4ec01add40a207f449565c8b5c39b58f382c8a34b4ac8055df70470e903f037a"
+      }
+    },
+    {
+      "path": "archive_apks_isolated/app-universal-release.apk",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9eb399591f02ae2f48f38967a5394c0405e49e83",
+        "sha256": "f18e2e2dd6db8834b3e1e6d9e6455288ad8b276778a3a828bef452c077bfda92"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9eb399591f02ae2f48f38967a5394c0405e49e83",
+        "sha256": "f18e2e2dd6db8834b3e1e6d9e6455288ad8b276778a3a828bef452c077bfda92"
+      }
+    },
+    {
+      "path": "archive_apks_isolated/app-x86-release.apk",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b98d499a5467cf253ffd5c20aed297c44623c1ae",
+        "sha256": "5b07492cc49f97ca32fbbd87678a7db767bb2a75b76348707308b01c00c8a14d"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b98d499a5467cf253ffd5c20aed297c44623c1ae",
+        "sha256": "5b07492cc49f97ca32fbbd87678a7db767bb2a75b76348707308b01c00c8a14d"
+      }
+    },
+    {
+      "path": "archive_apks_isolated/app-x86_64-release.apk",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "410877b03261408a96caa4a1a25bbfa0f75bce2a",
+        "sha256": "94049bba1e1cb5b716b931c38fb6d892d55aaf2f1719530d43e0ae2ae7eb483d"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "410877b03261408a96caa4a1a25bbfa0f75bce2a",
+        "sha256": "94049bba1e1cb5b716b931c38fb6d892d55aaf2f1719530d43e0ae2ae7eb483d"
+      }
+    },
+    {
+      "path": "archive_apks_isolated/output-metadata.json",
+      "change": "D",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "19e2df0fdb57f4e13a4f1d7abe67998f614472c6",
+        "sha256": "4bb0ef5ead4b1df7677172baad16c855f97beb22e8277124461bc7b4f39dcff8"
+      },
+      "local": null,
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "19e2df0fdb57f4e13a4f1d7abe67998f614472c6",
+        "sha256": "4bb0ef5ead4b1df7677172baad16c855f97beb22e8277124461bc7b4f39dcff8"
+      }
+    },
+    {
+      "path": "build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "634ce68a7fad76006fab5dfd56039560bf58ca66",
+        "sha256": "29dc756ce71aa962909ca2a88c83f852742d570e06cbb0bc6d4e24ea02b0972f"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ea03a79f56e0d92fd603af5bef3f19c6f4284e88",
+        "sha256": "aa1759e9944e772912255da504cb5f822241286bed5a0fc3d1cf8864d92eb5d4"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "634ce68a7fad76006fab5dfd56039560bf58ca66",
+        "sha256": "29dc756ce71aa962909ca2a88c83f852742d570e06cbb0bc6d4e24ea02b0972f"
+      }
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/app-arm64-v8a-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f1e7a552f74ffd7cd61d1d0f8c5fd0fed9da8cfa",
+        "sha256": "be3527bb34b2557b6956187c255a55b84c0746689d1ff3c6d254074da8403742"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/app-armeabi-v7a-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ae58aeb4e2e107a27304b3f3c0128dc46d779d79",
+        "sha256": "45c819b65946dcf5ae475df78e4e3e77c05402785013e4290c04eee7b4d2eaef"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/app-universal-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "23c68f2d8c3328c7caeb074dd9573a1a48737259",
+        "sha256": "fa765cb46efbaea542df4e70e859b071ebe0d5dae217e99874396fc2483df832"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/app-x86-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1bf547d7f2b575977045c2b8542a279cd557cade",
+        "sha256": "789bba701d53da132ba8a0af958a84bb91746476da6e30b8ede33b5d6f2379ce"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/app-x86_64-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f01b09216135bd9188875e8105a6b739c58f09db",
+        "sha256": "4cec99434ca7b6e7c8ac2d2276fa9c3f345d40b51004838d4420a67e7e4d9ff3"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/0/app-arm64-v8a-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e8501eb1677554525c090639cf66e450a6d07444",
+        "sha256": "90348a84afee44869eeee185ddd8966e97e749b540d7427871f640dbdc676dd2"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/0/app-armeabi-v7a-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e8501eb1677554525c090639cf66e450a6d07444",
+        "sha256": "90348a84afee44869eeee185ddd8966e97e749b540d7427871f640dbdc676dd2"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/0/app-universal-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e8501eb1677554525c090639cf66e450a6d07444",
+        "sha256": "90348a84afee44869eeee185ddd8966e97e749b540d7427871f640dbdc676dd2"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/0/app-x86-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e8501eb1677554525c090639cf66e450a6d07444",
+        "sha256": "90348a84afee44869eeee185ddd8966e97e749b540d7427871f640dbdc676dd2"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/0/app-x86_64-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e8501eb1677554525c090639cf66e450a6d07444",
+        "sha256": "90348a84afee44869eeee185ddd8966e97e749b540d7427871f640dbdc676dd2"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/1/app-arm64-v8a-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "60e4b86e8b455002f43be1e944c5acbca1d638ac",
+        "sha256": "bb20a52392ac3b9a7ff56656f899b63834da5418ae3d21a1a6f7f3f0c1bd12a1"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/1/app-armeabi-v7a-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "60e4b86e8b455002f43be1e944c5acbca1d638ac",
+        "sha256": "bb20a52392ac3b9a7ff56656f899b63834da5418ae3d21a1a6f7f3f0c1bd12a1"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/1/app-universal-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "60e4b86e8b455002f43be1e944c5acbca1d638ac",
+        "sha256": "bb20a52392ac3b9a7ff56656f899b63834da5418ae3d21a1a6f7f3f0c1bd12a1"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/1/app-x86-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "60e4b86e8b455002f43be1e944c5acbca1d638ac",
+        "sha256": "bb20a52392ac3b9a7ff56656f899b63834da5418ae3d21a1a6f7f3f0c1bd12a1"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/baselineProfiles/1/app-x86_64-release.dm",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "60e4b86e8b455002f43be1e944c5acbca1d638ac",
+        "sha256": "bb20a52392ac3b9a7ff56656f899b63834da5418ae3d21a1a6f7f3f0c1bd12a1"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/2_manual_shortcuts/output-metadata.json",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8a0a6ea02eacb42a8b8f9cae30c370abaa28ab17",
+        "sha256": "00bd7b32913fa142216ba4b30efd34e67e490d43d7373e54c103aa440f942824"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/3_auto_multitask/app-arm64-v8a-release.apk",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "365ad7d964ba03fda9d7a9047f7c7755362fe842",
+        "sha256": "0dcaac2e9b3aa4b0cb0a25c49cb289159e4fc6d453d9ab167323a1d4bc38a238"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "249ba4f3149922a454fdc56cf79a28275a70ffcd",
+        "sha256": "ecd957669989fa1399285a441184c4764a5a0f7404825bb4e7a2ee5fb22e43d5"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "365ad7d964ba03fda9d7a9047f7c7755362fe842",
+        "sha256": "0dcaac2e9b3aa4b0cb0a25c49cb289159e4fc6d453d9ab167323a1d4bc38a238"
+      }
+    },
+    {
+      "path": "build_apks/3_auto_multitask/app-armeabi-v7a-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ca8d50eb8ef186de56b281f72c19de8782e66997",
+        "sha256": "0adbb9990af8c4ba8bc3c8352d8c2ad569890c41f7c0ff485f2b012ee1a3c911"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/3_auto_multitask/app-universal-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "fa4923879b5e79c9485ac878720fd47ddc4a08b2",
+        "sha256": "4a58ea27d2c0c847fc5644b9bf249f66b608aa34bb34f6765990782c5ff2f2da"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/3_auto_multitask/app-x86-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ee86dc6e4f23635506b7fcfed74a46d47fff6103",
+        "sha256": "defc6e852c2a27ee675b2f9225632d09de212f3151c1884b185813ab3f5b3c68"
+      },
+      "upstream": null
+    },
+    {
+      "path": "build_apks/3_auto_multitask/app-x86_64-release.apk",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4484cb33ad39aa2c404dd3029238c99ce77fadd8",
+        "sha256": "2f507017bb98930b5e83dafadaf2e22d20beb2261c24e9307f20a74b113bb242"
+      },
+      "upstream": null
+    },
+    {
+      "path": "docs/SSIV_JPEG_V7_STABILIZATION_PLAN.md",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "efb01a9ab385ccc6a130aff4c7bed34e4e428456",
+        "sha256": "57d6199595aacad0b5d412b92304333db66e2973c6d1495247ec85a2b15b6507"
+      },
+      "upstream": null
+    },
+    {
+      "path": "docs_archive",
+      "change": "M",
+      "base": {
+        "mode": "160000",
+        "type": "commit",
+        "object": "4e08988a83e86cc7837c6ec695c3a10f463d8661",
+        "sha256": null
+      },
+      "local": {
+        "mode": "160000",
+        "type": "commit",
+        "object": "74fbdf43d1c1aee992c2963e146375e34f018055",
+        "sha256": null
+      },
+      "upstream": {
+        "mode": "160000",
+        "type": "commit",
+        "object": "4e08988a83e86cc7837c6ec695c3a10f463d8661",
+        "sha256": null
+      }
+    },
+    {
+      "path": "indexed-bmp/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "abe55c93135ef81f172355529308cf4c639a66a4",
+        "sha256": "51c7f89589fdb97e80b1cfca4db5bdf49b10cd564fc7291ac6f28b558ebf5d21"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "037f87920a52f5476ce645ae55e9b86dad5f49a2",
+        "sha256": "e6a04b55eb2a8862e74653f401395a155ba56fcb48e9c7e6dd8614e3ce7232a2"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "abe55c93135ef81f172355529308cf4c639a66a4",
+        "sha256": "51c7f89589fdb97e80b1cfca4db5bdf49b10cd564fc7291ac6f28b558ebf5d21"
+      }
+    },
+    {
+      "path": "indexed-bmp/src/androidTest/kotlin/io/github/indexedbmp/IndexedBmpStoreInstrumentedTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "392c31da781254b2188ed430e5aff0647f904840",
+        "sha256": "3daf5eb793e59d7389da06087986ef7c129a3609acf4c15761d84004f6e6d388"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ca5378b28a6ee58e78333d99afb5db2d1b8e5f6b",
+        "sha256": "92cd80a27cfd2b2a3e3055aaef1103cea59e00afa5d1e4511c79ac6f83d925db"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ca5378b28a6ee58e78333d99afb5db2d1b8e5f6b",
+        "sha256": "92cd80a27cfd2b2a3e3055aaef1103cea59e00afa5d1e4511c79ac6f83d925db"
+      }
+    },
+    {
+      "path": "indexed-bmp/src/main/cpp/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f1af862ae3e7d6055b40191daa4e537a571d2120",
+        "sha256": "f15071b6feac54839b051e5cded26e8ab694d042b688d1f5dd6f709a975b2c1f"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-bmp/src/main/kotlin/io/github/indexedbmp/IndexedBmpStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "79765c9937d9c382466ca8b296211991a7216e2a",
+        "sha256": "0479d61f547f3fcccded7e7a92ded320c223036ce9b2b39af41d1e2a3b67731f"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "73a4548e41bf499bcdde5b766a0e70da05a7809f",
+        "sha256": "e6eb43089543f12f0dc21eb7d8b2634ddfacc2a51aa362965ebf5c6112a2b1e5"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "73a4548e41bf499bcdde5b766a0e70da05a7809f",
+        "sha256": "e6eb43089543f12f0dc21eb7d8b2634ddfacc2a51aa362965ebf5c6112a2b1e5"
+      }
+    },
+    {
+      "path": "indexed-heif/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "18f1865fac7dd41947b981018d8fa23f37e64b41",
+        "sha256": "a06cd128988866e51915d8a219e7e2b564c01efad22abb0084fad76e5bf7ee3c"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a0470ff5b5d397b5e6da924fa08dd528006fb773",
+        "sha256": "7167e4e09a4a66b822d11243d2f4d476767a78d535c5a31c75cef2e6b3a3b00c"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "18f1865fac7dd41947b981018d8fa23f37e64b41",
+        "sha256": "a06cd128988866e51915d8a219e7e2b564c01efad22abb0084fad76e5bf7ee3c"
+      }
+    },
+    {
+      "path": "indexed-heif/src/androidTest/kotlin/io/github/indexedheif/IndexedHeifStoreInstrumentedTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "2b4914eb73ca224721ddd0643acb79f0d245e5e9",
+        "sha256": "86dd7abc1792c71f3a3fdbfa488d479edb836bf6d6bb796455932f6522a429e0"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "75c80351aad8cbd57874c9d7a662a2be7a0288d7",
+        "sha256": "4ecffc3d2cd384c119164e52821c025953a1114731a4baed10fe5e884de021fc"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "75c80351aad8cbd57874c9d7a662a2be7a0288d7",
+        "sha256": "4ecffc3d2cd384c119164e52821c025953a1114731a4baed10fe5e884de021fc"
+      }
+    },
+    {
+      "path": "indexed-heif/src/main/cpp/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "fe83412d5606210108081c2611c0d3f3fc5dbd1c",
+        "sha256": "6d806bdbeddf0456594d95977a6a4d529c9e12b3722b1010eb46b4f4a23b6836"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-heif/src/main/cpp/indexed_heif_jni.cpp",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0d73925b7265b1b35a9fdbfea0e4738383441cb6",
+        "sha256": "1f200f0545a6275fa4f4cb293030a62b3415662ccad85dc5c8fed8dc2acde10c"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "468ac7f093cf7b85deddf11d398acf3426b59fd2",
+        "sha256": "bc8df8c5e4133496ae5329eeeedd9e820f8db85d3d9e6c64761bdb3aae14e1c5"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0d73925b7265b1b35a9fdbfea0e4738383441cb6",
+        "sha256": "1f200f0545a6275fa4f4cb293030a62b3415662ccad85dc5c8fed8dc2acde10c"
+      }
+    },
+    {
+      "path": "indexed-heif/src/main/kotlin/io/github/indexedheif/HeifFileType.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1bf79d7234fae6a1a75d583c0eb0d5810dde0511",
+        "sha256": "27f879869a5d047ee57762f84714888b9746913b7b1a4eadc627c318e673e605"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1bf79d7234fae6a1a75d583c0eb0d5810dde0511",
+        "sha256": "27f879869a5d047ee57762f84714888b9746913b7b1a4eadc627c318e673e605"
+      }
+    },
+    {
+      "path": "indexed-heif/src/main/kotlin/io/github/indexedheif/IndexedHeifStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b11502e26a9ed264b8e9c32a501f53aed34bb6cb",
+        "sha256": "944f3d97f4bf6032ffe07ecf7d0bf79f4c3900069ff8d238cd33fae73d92f83b"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7717e1b0e8c09f1204e874c546f2ad288be26177",
+        "sha256": "ecb3e3d626f05b3874a9c168f53f4b39471a155ed6b4ffbf3cab872db80acde8"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7717e1b0e8c09f1204e874c546f2ad288be26177",
+        "sha256": "ecb3e3d626f05b3874a9c168f53f4b39471a155ed6b4ffbf3cab872db80acde8"
+      }
+    },
+    {
+      "path": "indexed-jpeg/DESIGN.md",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1bbf3f6e0879c692196bab5df4ecdbce4766360d",
+        "sha256": "da2303b7322d831297f851fb0ba93aac9f7aa7e8d4b5842e9361666b071fe9ba"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b5c37ecab35fb89780bbde94997ffcf8c4c4358a",
+        "sha256": "1c03d5fd3a084a9d32c3ccc4c3ed170935cce0ffa1cce8db33f677b1437e9bd5"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1bbf3f6e0879c692196bab5df4ecdbce4766360d",
+        "sha256": "da2303b7322d831297f851fb0ba93aac9f7aa7e8d4b5842e9361666b071fe9ba"
+      }
+    },
+    {
+      "path": "indexed-jpeg/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "c0f9f5fc52f70986208193e88b3a997621b32f4f",
+        "sha256": "ed7bbd1809cf4afa59215dab5876e0c30d347d414143c736caa7df25117cb525"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d1735fc8c073ef3242634868dd7c110f1d2c72dc",
+        "sha256": "aa1b14577aaceaaa4742f3a37583257383bcf87bbdc38bfff05767f5d522e6d9"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "c0f9f5fc52f70986208193e88b3a997621b32f4f",
+        "sha256": "ed7bbd1809cf4afa59215dab5876e0c30d347d414143c736caa7df25117cb525"
+      }
+    },
+    {
+      "path": "indexed-jpeg/src/androidTest/kotlin/io/github/indexedjpeg/IndexedJpegStoreInstrumentedTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "623d7e1bc9d2a4e9bcaa9ecbb5ce51b23e6a8309",
+        "sha256": "4982dac8b33ad216465568c9e2608a22d59adbe0c1262b6b2a701ac7da4a8efc"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b4af65931b8ed16ae63d2cfdf9d226f6c366fd0a",
+        "sha256": "58392ec088fd58a85110bc1691954edbb3dcf1b5120551ac62531e0b820fe580"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "955bc0c38a75b1d4c1a3886572df014b67fa9b94",
+        "sha256": "37310d8bf0d533d2b55c6bdffd7d90e4ad6d1ecdfa94ef70f5454142ad50b422"
+      }
+    },
+    {
+      "path": "indexed-jpeg/src/main/cpp/CMakeLists.txt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "358e9617659e3f18fd2aab4b4174687026d979cd",
+        "sha256": "687133d9b0b57e3e11c30bd3eac1ee42a31fa8e1efc0f1a1c83108aca25261e9"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "81f5d9d80908a4e4bfb2d453404bfad2a35a388b",
+        "sha256": "8cc2eb15e5c0cabdde3e113266312d9ff86cf3fa7ab776adae9e52ee5328248a"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "5436735ea52954fe6d931801a7105a50efba890e",
+        "sha256": "43bf5713a1d2c6396ed76fbe982d28b60de46210631676868b81790f335a6532"
+      }
+    },
+    {
+      "path": "indexed-jpeg/src/main/cpp/indexed_jpeg_jni.cpp",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7b53d301b1a91bbb547d80972ecbb756bd01e1ab",
+        "sha256": "fd576b9f5262c9f46c033151bc047e9c1a47af7c9eb185bcc56557df64469c9b"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9bbcb5545ffd5bca2002459f44e6f83e58082937",
+        "sha256": "246e1652180aef285465a95c7c1963e7b6feecbcea48c74a8bc822e67e589e2c"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7b53d301b1a91bbb547d80972ecbb756bd01e1ab",
+        "sha256": "fd576b9f5262c9f46c033151bc047e9c1a47af7c9eb185bcc56557df64469c9b"
+      }
+    },
+    {
+      "path": "indexed-jpeg/src/main/cpp/indexed_jpeg_simd.cpp",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f4e944761786165352bf1a39fa7bf1d0fcda3cee",
+        "sha256": "772a28537e6f55599bbd651507d41c6c40569c94f493804213af791249689b1b"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jpeg/src/main/cpp/indexed_jpeg_simd.h",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "11b8cea3a249cba2c3f2419baa728e55d141280c",
+        "sha256": "b8a2f05629963dd9bb0a97f8971a03a10d4febe7c042e29c4779dc9e70dcdb8d"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jpeg/src/main/cpp/vendor/libjpeg-turbo-3.2.0.README.md",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "c8982d2d656d6f9b7dd6cb131ce5cf93553fceb1",
+        "sha256": "5d3bb113d00b1f84466607d289e3e741370abe3ec5e8879c415b4a10dde5e967"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jpeg/src/main/cpp/vendor/libjpeg-turbo-3.2.0.tar.gz",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "66418935b34f92d3bdd736a38b6029e2507c981c",
+        "sha256": "f1b91499f5d6eef3c49f63f19554cef2ea91949adcc0efb6ce525032e0bbffa9"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jpeg/src/main/kotlin/io/github/indexedjpeg/IndexedJpegPyramidPlanner.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "2640fc81da17122e93c7a45cc059ba9080316671",
+        "sha256": "0c2630e2e2cb727e8e96801840e9b5ea33565f7ccad0cd6f1b6137e7d2d62bc4"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jpeg/src/main/kotlin/io/github/indexedjpeg/IndexedJpegStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "32f35903a8f17819a8176cafeb7a39faa36148f7",
+        "sha256": "2c661e9c20098a7b3077332087e8c2797dbe03c654604fbf9a1d60abcf3bfb83"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8e456dc931e9b4f09808efd6721ed05922aea0e0",
+        "sha256": "7b5a3d4f4e2ff6dc3d0d731c24098c80dbf19eb9a4c8ae0c31256a5616b666ea"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e3c27b3ea9224f146151056b68e86c3b5f11fee2",
+        "sha256": "e8f3047803e1b51bb48ac303217e2137d712bd7acb19ab35e5206e2ea67eec3c"
+      }
+    },
+    {
+      "path": "indexed-jpeg/src/test/kotlin/io/github/indexedjpeg/IndexedJpegPyramidPlannerTest.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "df77fba902098a2f6e7c601449f49cbc75982dd0",
+        "sha256": "7763c7ea9e38fa5c815901e7b09fa3deb4850617fd1a303e5fbed0557282796f"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jxl/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e781db9479745cf327e07395caab36b043f6bd90",
+        "sha256": "955eea73ec1f44be7bcea613cf903125528fd002e49ffff0d5373a350fb380b0"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dc940b981367309c3f65ccd9129ee91af5b3504c",
+        "sha256": "acca98285cdff5cf459b5af4b6aaf0ccffd7c07ab84b273772a25a2c028ad995"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e781db9479745cf327e07395caab36b043f6bd90",
+        "sha256": "955eea73ec1f44be7bcea613cf903125528fd002e49ffff0d5373a350fb380b0"
+      }
+    },
+    {
+      "path": "indexed-jxl/src/androidTest/kotlin/io/github/indexedjxl/IndexedJxlStoreInstrumentedTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0b8c001ceabefaed6477dde242708eda4ade301e",
+        "sha256": "0af036f8e1a73c4d6b9fff73fd83aff32bfd4e6dbfb1f9acfc2a5388ea9f1528"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8ce56faf1a1be0bbe72ec9fdea3f617844c8afeb",
+        "sha256": "c0263903f22d1ffcf251c24000024018c0c00f2f627ff3953bb77948ef460bdb"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8ce56faf1a1be0bbe72ec9fdea3f617844c8afeb",
+        "sha256": "c0263903f22d1ffcf251c24000024018c0c00f2f627ff3953bb77948ef460bdb"
+      }
+    },
+    {
+      "path": "indexed-jxl/src/main/cpp/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7df5dde8113eddc0b58daba51a1fa577ed8fb6d7",
+        "sha256": "c922214aed47fcbacb141ce423fd0c9b5ad7e73c2e4d6bcc5c06e0fcaa7df149"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jxl/src/main/cpp/indexed_jxl_jni.cpp",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "81283d8a509ce707fb77b713a39847ef29676e3c",
+        "sha256": "ec614eac56344464e3140efa79cd01836a6e0d1d361fbcdba96288f7d704ce64"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "2e218a1319ed4568ee7172ac51aff1716d8a95da",
+        "sha256": "037866ef77ab678d8d72de9a63c6329734cd5705277231e4abc8681d9a661b6d"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a55a1e84b0d8d81d9fd15ad3fa81687d43ec84cb",
+        "sha256": "0f9ad3a96562035836082300da5f590f5407047d162268e00adb5797b092f5f6"
+      }
+    },
+    {
+      "path": "indexed-jxl/src/main/cpp/vendor/libjxl/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8e219b6b8dd19ac16c4930373b063ddaedeeb7c0",
+        "sha256": "d088ac6c3d65eb8932dff14ce9dba6e9254ab9a4d2e1713d5d3f22e18bcdacbc"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jxl/src/main/cpp/vendor/libjxl/lib/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f80cbfb6c4bef9fda84a0235c49a8f2620c34747",
+        "sha256": "ea6de8b452bd744b8a2d644251c3b4feb6424261e44c61fcf1beb1806f1f1ff0"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jxl/src/main/cpp/vendor/libjxl/third_party/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3d06659f1a010d2ed8673f6d4b97f69ce045f876",
+        "sha256": "139a10292975c6eb8dfb82c9e530d144ea29334b2e3c4a854f77ce2d5a0b01c1"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jxl/src/main/cpp/vendor/libjxl/third_party/brotli/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9e4cf40830efd1c46eb5803e010d52561e2e1814",
+        "sha256": "8b457fa246116559a5d6696117fdb1223fa7fd39fc7ccad3a20dcd3e35278bcf"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jxl/src/main/cpp/vendor/libjxl/third_party/highway/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "ea8b330c0d7b0567d56cdc2a999838c9504d513f",
+        "sha256": "99d47f7cdc6b98ca9458f1dbdc182f9338afaeee2e3b1f39e2955c98e7ce4532"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-jxl/src/main/kotlin/io/github/indexedjxl/IndexedJxlStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1e318b8b06c6a1d65d17227bee7fbbaf41e59a57",
+        "sha256": "9e429def0b37bc3cb4a9718c99138ea1d8a889840a739f6a13c66ef148af427e"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3637c92affc8dd6010bb2430514111bbf15ecd15",
+        "sha256": "4ee56679320a55aa1247dd84496921bbb3e8505e10507bd1278fbf22647e18c7"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3637c92affc8dd6010bb2430514111bbf15ecd15",
+        "sha256": "4ee56679320a55aa1247dd84496921bbb3e8505e10507bd1278fbf22647e18c7"
+      }
+    },
+    {
+      "path": "indexed-png/DESIGN.md",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e2fa06b67a22524031e2dda5c051e01784e00596",
+        "sha256": "11c527a6b701e9606824de74faa422d2544e4da24ea9f91be6fd8ce966b2328c"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "c1bf8354a53de8237b9a563331db91ef208beefa",
+        "sha256": "94f20fbab6489dcff323a5a1bbe2db8c2ba698397181494ec00ecaee70a7f677"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e2fa06b67a22524031e2dda5c051e01784e00596",
+        "sha256": "11c527a6b701e9606824de74faa422d2544e4da24ea9f91be6fd8ce966b2328c"
+      }
+    },
+    {
+      "path": "indexed-png/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d2c336ea2a2382b8f5a8c74c3b747c8c375f4586",
+        "sha256": "6d142a992f2b666c7fa40b82b1cf0b21018ac268be8bb6573e8b221ace4283e6"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "b10944dfc157f297d8235ab905be115f6ac8ad90",
+        "sha256": "e560af531e75c6bc47c0e81c349ed758b47944ab07e62865aa903f4de871342c"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d2c336ea2a2382b8f5a8c74c3b747c8c375f4586",
+        "sha256": "6d142a992f2b666c7fa40b82b1cf0b21018ac268be8bb6573e8b221ace4283e6"
+      }
+    },
+    {
+      "path": "indexed-png/src/androidTest/kotlin/io/github/indexedpng/IndexedPngStoreInstrumentedTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "83afc9e3ebe12fa65859553d84bac986b8c2286f",
+        "sha256": "757ebdbecacb9f5b9d18cd2109a77a9fe0f62e4e45045f2aa1e0e38aa270cd8d"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "85b4edf812d6bbe981b33ebe25efda2e50acdfbe",
+        "sha256": "da2aab3d1ca98a7ef6521e4f7d896bd5b46ac81b688bbc5c40b6714781918a58"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "67f601a684e02e9550449a7314ae62e3d0941956",
+        "sha256": "f1cd99ad0764497dc1131ced768eac96b26a7123fb4470b74490fe36376044c0"
+      }
+    },
+    {
+      "path": "indexed-png/src/main/cpp/indexed_png_jni.cpp",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "de6dce7d39bd7524925056a135902c5593606ff8",
+        "sha256": "3445abab00ba087db1261cb80da590b1e2ff756330ec9bbfed27d36ccc342740"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dc2dd33679b9974d64cda8452008f76ca54c3320",
+        "sha256": "bc303d9c9b7824647ab126486d0bbd60b70b0595d506571b545ee31ada7b522e"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "de6dce7d39bd7524925056a135902c5593606ff8",
+        "sha256": "3445abab00ba087db1261cb80da590b1e2ff756330ec9bbfed27d36ccc342740"
+      }
+    },
+    {
+      "path": "indexed-png/src/main/kotlin/io/github/indexedpng/IndexedPngSourcePolicy.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "25bb7af4eef37061a4bcdaf5d4704e3fb29f620a",
+        "sha256": "7c7f6f6cbb61cee95636a79cf866cab5fbb1a2210991407b55278190afd2b313"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-png/src/main/kotlin/io/github/indexedpng/IndexedPngStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "51d1f71a59819098615c563892055c486378c4fd",
+        "sha256": "9c5214bb6f9f7533114be93d4f403ffb30f366bc66f7f2c023f92a46602443a9"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "86440ae1c633fbedc5b98492cfa5ab1f58b0242e",
+        "sha256": "05dad5a623794f64afc4ba99ed80f628ae6f7ae2cebd9a2a9909ecdcd6c35421"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "3084505bc9bfc6ab25a56302f36785766cfb7311",
+        "sha256": "6242b79adce729d380f42c2475dceaca05e67a087540dde4e1bf1c68738d1027"
+      }
+    },
+    {
+      "path": "indexed-raw/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dcf32fbf556578b16ed155f5364da4b6b1ae298e",
+        "sha256": "4b1016d25360175827d2e67da5e5d0ed4096d18ba7cefeaef3b06e5d345e661d"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f33f36312f0eafcc144f18dd75193822eb5cc0bf",
+        "sha256": "4a1c33e87cfb64dbf3edea1bec076fcce11e18c81b7e8333108d5ade40b0dc32"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "dcf32fbf556578b16ed155f5364da4b6b1ae298e",
+        "sha256": "4b1016d25360175827d2e67da5e5d0ed4096d18ba7cefeaef3b06e5d345e661d"
+      }
+    },
+    {
+      "path": "indexed-raw/src/main/cpp/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f5791be47c963e3e490a03323d91190d75f8507b",
+        "sha256": "21ad029820e1669aafee394d47b1f44fce91989c8e67e75dce7cf99d005e9333"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-raw/src/main/cpp/indexed_raw_jni.cpp",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9a44fc29234fa446edde212013863e6602db97e4",
+        "sha256": "a2363193a570ed7df7433912a08810534f32a0ed56f55560dcd1c490a20ba404"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "41e565efb26894bf2b206bdc644e20943cd3d939",
+        "sha256": "c6f7a90d32fcb06368b2876ab8faa2ccd4d6085cbc37e1d33e7e60f8a03b5005"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "9a44fc29234fa446edde212013863e6602db97e4",
+        "sha256": "a2363193a570ed7df7433912a08810534f32a0ed56f55560dcd1c490a20ba404"
+      }
+    },
+    {
+      "path": "indexed-raw/src/main/kotlin/io/github/indexedraw/IndexedRawStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "73a342139fc28908c5455de2778b0e538e957582",
+        "sha256": "27f7a560ad5ec04d45a50e274586bccc99dd3795870656a1ca2f976e370a28e1"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0a2140dc785abbf6a485d3f082fe9d2994b3494d",
+        "sha256": "626cad0d51a9d27afad2c7b3de0ede36be5cbc6cd91a61b49844bf098f990d43"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "0a2140dc785abbf6a485d3f082fe9d2994b3494d",
+        "sha256": "626cad0d51a9d27afad2c7b3de0ede36be5cbc6cd91a61b49844bf098f990d43"
+      }
+    },
+    {
+      "path": "indexed-tiff/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8848172006d50b5d0627cb3f1084e9ae95863408",
+        "sha256": "da5644d1e195aaa537cb6db1c6ba3ed67b0527edb9c4273d0444ffc6723ee535"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6be6e5e1878a89efb300d485cc5a9f560731ca5a",
+        "sha256": "c667118393c39fc5c271e89b9d17d2dbf7d843fe79e063795f8fb2c19ef36f12"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8848172006d50b5d0627cb3f1084e9ae95863408",
+        "sha256": "da5644d1e195aaa537cb6db1c6ba3ed67b0527edb9c4273d0444ffc6723ee535"
+      }
+    },
+    {
+      "path": "indexed-tiff/src/androidTest/kotlin/io/github/indexedtiff/IndexedTiffStoreInstrumentedTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a32f81431a9ec7aba9ef6aa36259ff105b4a3954",
+        "sha256": "b0f0083ac0e595c5fb5707d82a9ef44ee05d24dd06b17c395929a6988abe7ba0"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6e77d8ffc86c046ab7c0ad25e69832e15475fd50",
+        "sha256": "d84d5f350dc657ff3c14c8ec50ba9cdbf00bdafe78c31bc12bb06c79797887fc"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "6e77d8ffc86c046ab7c0ad25e69832e15475fd50",
+        "sha256": "d84d5f350dc657ff3c14c8ec50ba9cdbf00bdafe78c31bc12bb06c79797887fc"
+      }
+    },
+    {
+      "path": "indexed-tiff/src/main/cpp/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4d8b10170443d6e6df4e8d07325846c77bcdc3a7",
+        "sha256": "b852a07392da168389be8848563893d847036a3fc0f10b3708c37f54cf4cffe8"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-tiff/src/main/kotlin/io/github/indexedtiff/IndexedTiffStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "da5bef3a910dc566c8e73deea26e6e80eed7602f",
+        "sha256": "bfae21c5619bbb5a9294096eab82d17d7e47c56713e9b63636a1eb03657a5477"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1d0f006eaef936baf6a8724aa1192c2d1b718be9",
+        "sha256": "5ae2f15daa44f96f7437fd131ad7b492870b4eb9939b67c16258bb9f48bcc5d3"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "1d0f006eaef936baf6a8724aa1192c2d1b718be9",
+        "sha256": "5ae2f15daa44f96f7437fd131ad7b492870b4eb9939b67c16258bb9f48bcc5d3"
+      }
+    },
+    {
+      "path": "indexed-webp/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "c3e441582b348c700282481cfa09f78ad16c4e3e",
+        "sha256": "1d2f9c827b50247c3a13214fd8812f686f711c4a90b1970807f364b6fc1c0630"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "eaa0f13e8948b7fb4aadba0e5e61126f4d73e4d4",
+        "sha256": "05c90ef060ea0cd6041ca64a61ee546acf6eb02ee5c83bb5eb0729faace24112"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "c3e441582b348c700282481cfa09f78ad16c4e3e",
+        "sha256": "1d2f9c827b50247c3a13214fd8812f686f711c4a90b1970807f364b6fc1c0630"
+      }
+    },
+    {
+      "path": "indexed-webp/src/androidTest/kotlin/io/github/indexedwebp/IndexedWebpStoreInstrumentedTest.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "8c16f08170c89482629ed722ef55024d8300ed63",
+        "sha256": "d91243b6f8eca385e45b03456a50842cf23b75b95b23d7fd92eb363b18e552b4"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f3d488d06106f3e8af08eb975fc00e7fe8ff9fa9",
+        "sha256": "62925694dc18a95de117d3f90f5dfd08e51983018ac7110c94a9992dd489dcd7"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "f3d488d06106f3e8af08eb975fc00e7fe8ff9fa9",
+        "sha256": "62925694dc18a95de117d3f90f5dfd08e51983018ac7110c94a9992dd489dcd7"
+      }
+    },
+    {
+      "path": "indexed-webp/src/main/cpp/CMakeLists.txt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "935dd30e7070dcd8114a62218c0b6eed95bffdf3",
+        "sha256": "52a278fc2797683320b9e74e86ff009160919ba05f0b2654051796457fefda5c"
+      },
+      "upstream": null
+    },
+    {
+      "path": "indexed-webp/src/main/cpp/indexed_webp_jni.cpp",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "414361fabf38f2f35748aa1ba7f147a0e936f317",
+        "sha256": "7fb320a6a446e88c8fbb20c00240d77e105be6f4f90c0fef94352f65c03043ba"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "e2480c483a2e83ad42be5008032e3db24a77de21",
+        "sha256": "9ab7b38a9fe4119ced9ffc558df3a63669ce6ca540278a15c60f32ed9a798ddc"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "414361fabf38f2f35748aa1ba7f147a0e936f317",
+        "sha256": "7fb320a6a446e88c8fbb20c00240d77e105be6f4f90c0fef94352f65c03043ba"
+      }
+    },
+    {
+      "path": "indexed-webp/src/main/kotlin/io/github/indexedwebp/IndexedWebpStore.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "fd718a61c5b8b7a3b148ce224ab7c9c77d7b33c7",
+        "sha256": "c56929b9585d56df794745cae6e9d39ffcc1e7dbb535f2d6f0d9dd60fc0356af"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "fa0e6c56ed80021cfeb7cf65f0ad7d0eeb84ea9b",
+        "sha256": "d819692e50fb28ed0f5a2816949bf241b2626c1bb1a9ab943f51d2995c6f23af"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "fa0e6c56ed80021cfeb7cf65f0ad7d0eeb84ea9b",
+        "sha256": "d819692e50fb28ed0f5a2816949bf241b2626c1bb1a9ab943f51d2995c6f23af"
+      }
+    },
+    {
+      "path": "third_party/ssiv-pixel/README.md",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d60a67b15597d7a8bcf76c3f370fb9d5d8c8bf0b",
+        "sha256": "717776301b98a97f8abeded04628cfb89382c57b80d37d3bc002bafcce735c05"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "43bc4cef973c727205855baac22dd5025b37981b",
+        "sha256": "1e3e137f3bc4d47fb7c18b013eb5b68659651bed3eaac90b3c99924c12648fc2"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "d60a67b15597d7a8bcf76c3f370fb9d5d8c8bf0b",
+        "sha256": "717776301b98a97f8abeded04628cfb89382c57b80d37d3bc002bafcce735c05"
+      }
+    },
+    {
+      "path": "third_party/ssiv-pixel/build.gradle.kts",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "45c7ab48a61adbaae62ea9e7ad0eb366bc961350",
+        "sha256": "7520dbfd5b974a80ff0a4ed3e09e42d2498c3f8adfb6c6cbd5d96b4574997f90"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "15e26726a6031f39b052cc88941015accd07ea78",
+        "sha256": "ea32d3c10ca8805fa1b6dce9f21f1bec539b995d4e8174f0984e31f9f57586e7"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "45c7ab48a61adbaae62ea9e7ad0eb366bc961350",
+        "sha256": "7520dbfd5b974a80ff0a4ed3e09e42d2498c3f8adfb6c6cbd5d96b4574997f90"
+      }
+    },
+    {
+      "path": "third_party/ssiv-pixel/src/main/kotlin/com/davemorrissey/labs/subscaleview/ImageRegionDecoder.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7c65d21141a3e2aa8df39bd30033739714c7518f",
+        "sha256": "95bb64550a52e157799d460c463284854689cb0880987c2e942f6d3df6a5b79c"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "4d76cf10ac27938635c6f468df87a205158925ed",
+        "sha256": "af06a8b23b2cce3b70afb7cb67eb20e00d474e5e9ce815e00103538f83d8722e"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "7c65d21141a3e2aa8df39bd30033739714c7518f",
+        "sha256": "95bb64550a52e157799d460c463284854689cb0880987c2e942f6d3df6a5b79c"
+      }
+    },
+    {
+      "path": "third_party/ssiv-pixel/src/main/kotlin/com/davemorrissey/labs/subscaleview/SubsamplingScaleImageView.kt",
+      "change": "M",
+      "base": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "c54634fde2f96910e3bebcf252fdc3e58c3996db",
+        "sha256": "ecc077bf0e574b3ee02f363c08f81d111696ace0d02dd3e610c8e548916bb14e"
+      },
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "451b326609b5e0b22b2e2cd172964ec236b2fee5",
+        "sha256": "145cd7275a8261d2e8d435d29362e6734fca5fd8c1769f93f70e9210115c15dc"
+      },
+      "upstream": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "078138efe88dd5dbff19be31fc8d26194862a33c",
+        "sha256": "0a6dd3c41cddba97dee6bb902c7d963b41416929df5fbab426bd4465c4d4b887"
+      }
+    },
+    {
+      "path": "third_party/ssiv-pixel/src/test/kotlin/com/davemorrissey/labs/subscaleview/StoredSampleSelectionTest.kt",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "09ff9d77b32e7e2b2660cf80d1e3b8ceb4e9753e",
+        "sha256": "69cf9cc64af21579e9003aa2d78e49f206465d46473e4a4633850af6aac0286d"
+      },
+      "upstream": null
+    },
+    {
+      "path": "tools/adb-viewer-log.ps1",
+      "change": "A",
+      "base": null,
+      "local": {
+        "mode": "100644",
+        "type": "blob",
+        "object": "a8d5912b2f19197e2943fcec56f0890442583091",
+        "sha256": "c39e2e958e1467f63effe7e22eb5b28ab74e8f593a7e8296865d32ea45592194"
+      },
+      "upstream": null
+    }
+  ],
+  "local_commits": [
+    {
+      "commit": "13ebb461fcc2561211c20dc8c3c00c19ce502918",
+      "subject": "chore(release): bump shortcuts to 4.3.3.3"
+    },
+    {
+      "commit": "37cad072ad4288ec04156e5bf63bb2479b89c71f",
+      "subject": "perf(viewer): batch direct JPEG source tiles"
+    },
+    {
+      "commit": "ab54fad88a2c3a2020d98076fe3a6a169b70247e",
+      "subject": "Optimize JPEG pyramid sampling and cold viewport waves"
+    },
+    {
+      "commit": "f0858c2b3bd80a5a49af869a46438bd9da687a62",
+      "subject": "perf(viewer): lower JPEG tile cost and retain full metrics"
+    },
+    {
+      "commit": "ec8659747b158b81397def0bdc5290ae6e4e31c9",
+      "subject": "test(viewer): remove cold benchmark self-noise"
+    },
+    {
+      "commit": "8cc9324a495c3f28a67f4421c3b5ccfcc12fe650",
+      "subject": "fix(test): make cold benchmark reproducible"
+    },
+    {
+      "commit": "9d29d7cf521e945a3951f5bded1a57847964ad56",
+      "subject": "test(viewer): add verified zero-cache benchmark mode"
+    },
+    {
+      "commit": "f25ec6968f6e86679c12d99df079f38b9b23c755",
+      "subject": "perf(index): compact and align PNG pyramid tiles"
+    },
+    {
+      "commit": "ca3f110b937d4ce3cf644576c48c334b71790558",
+      "subject": "fix(settings): unify page background"
+    },
+    {
+      "commit": "02b393b27585f9c1d6041fc1a89681a4f5bbad05",
+      "subject": "perf(index): SIMD-decode JPEG pyramid tiles"
+    },
+    {
+      "commit": "5832f0e6487e1a544c8b71c5241787948cd50f77",
+      "subject": "perf(index): decode JPEG pyramid tiles in native code"
+    },
+    {
+      "commit": "a09f7965b0dee51229b2857c0c654480bfcbe8a3",
+      "subject": "fix(android): support 16kb native page size"
+    },
+    {
+      "commit": "4258ad1a207f4cc8d2ebc24c0e060f7527bc1137",
+      "subject": "docs(viewer): record JPEG v7 stabilization results"
+    },
+    {
+      "commit": "c2a93b6f1eec17fb34025deeda351cb6046fc719",
+      "subject": "test(index): cover compatibility and file lifecycle"
+    },
+    {
+      "commit": "92bd4ba20caa08a027d58e5f7f6d5156a3b74d4f",
+      "subject": "fix(index): area-filter high JPEG pyramid levels"
+    },
+    {
+      "commit": "8b6dce7680ffaca08ca79f9472e803b4b52bbf34",
+      "subject": "perf(index): return aligned JPEG tiles directly"
+    },
+    {
+      "commit": "74702a7f6b0694f7acc3a08dc152312f63c349f2",
+      "subject": "fix(viewer): refresh live JPEG index capabilities"
+    },
+    {
+      "commit": "3feabefde0fb18278274d6602eab116171456efc",
+      "subject": "fix(index): validate and publish JPEG indexes safely"
+    },
+    {
+      "commit": "c30a8a09d6870003acf4073eedd6af353e429e6f",
+      "subject": "docs(viewer): record SSIV JPEG v7 stabilization plan"
+    },
+    {
+      "commit": "add3687251655911b0c4f4f36ac6bfe7037aeb92",
+      "subject": "perf(index): store JPEG pyramid as addressable tiles"
+    },
+    {
+      "commit": "dd17915dd0fd96e3684113b7ec1340b3cea0d2a9",
+      "subject": "perf(index): add JPEG pyramid and bound SSIV tiles"
+    },
+    {
+      "commit": "0876aaf6845e1e8d6825e9eb8cd28fbcc99cdf03",
+      "subject": "checkpoint(index): finish PNG policy and park JPEG overview"
+    },
+    {
+      "commit": "9759ffa2dee150bef91d99179868b392bb0e0e8b",
+      "subject": "fix(viewer): limit swipe work and preserve overflow menu"
+    },
+    {
+      "commit": "261cbd8e928d8a589c16838b95ee5c8d1a6a5f69",
+      "subject": "perf(index): reuse persistent pyramids in SSIV"
+    },
+    {
+      "commit": "248ad8a705b4bd594991ed7f4dc7f47ba7a39406",
+      "subject": "perf(ssiv-lite): reduce overlapping viewer decode work"
+    },
+    {
+      "commit": "2496d14a8dc12c8fd04fe9468f88a6835d1d53a9",
+      "subject": "perf(ssiv-lite): avoid overlapping viewer decode work"
+    },
+    {
+      "commit": "461e8faf0eeee214957bda94b3dcff5e2527e092",
+      "subject": "perf(ssiv-lite): bound compact tile batches"
+    },
+    {
+      "commit": "8c4106d3ca83714ecdf6be7b650f3a87306ed7eb",
+      "subject": "perf(ssiv-lite): compact visible tile decode waves"
+    },
+    {
+      "commit": "8d5dc1c8930471665f2c3ca0b53e98eb24ca248d",
+      "subject": "fix(ssiv-lite): reuse tile render nodes during transforms"
+    },
+    {
+      "commit": "2bbc106cdde131b95ff3e387e43075ddcec7b698",
+      "subject": "build(test): add isolated ssiv lite APK package"
+    },
+    {
+      "commit": "66561251b5935088ec264722947527bff58935b7",
+      "subject": "experiment(viewer): simplify ssiv tile rendering"
+    },
+    {
+      "commit": "330f883989f937743939cf80625e2173c30fe449",
+      "subject": "fix(index): migrate and clean persistent image indexes"
+    },
+    {
+      "commit": "dce4680891827a4164fbcddc1696b048cf0d5eb7",
+      "subject": "fix(viewer): load source tiles beyond preview resolution"
+    },
+    {
+      "commit": "ddc79663e5755041ed6f0b5851a7bb05e754dc66",
+      "subject": "sync: bring feature 3 common updates to 4.3.3.1"
+    },
+    {
+      "commit": "bac3bd0e43d1a75e227f460f7e913b578472c65e",
+      "subject": "fix: defer image format detection until indexing"
+    },
+    {
+      "commit": "dfa35f21ee2c93816d31eb9f5551a070342ad9e6",
+      "subject": "fix: route indexes by detected image format"
+    },
+    {
+      "commit": "f54dc3a7759e816ccba872f169135d1e89576827",
+      "subject": "merge: sync feature 3 release 4.3.2.3 to branch 2"
+    },
+    {
+      "commit": "e1e97a422740a63fbde7384e547cd779d391ace2",
+      "subject": "fix(build): restore release flag on branch 2"
+    },
+    {
+      "commit": "ef70b9bd80e6623386860364622f657894cb627a",
+      "subject": "merge: sync feature 3 release 4.3.2.1 to branch 2"
+    },
+    {
+      "commit": "161e25152cb05567f6defbe29fce2cb4b21d88be",
+      "subject": "merge: sync indexed viewer 4.3.1.5 to branch 2"
+    },
+    {
+      "commit": "c2cae26920c9052c337577c0ea437c36b2cc7ed7",
+      "subject": "merge: sync recent feature 3 updates to branch 2"
+    },
+    {
+      "commit": "4cb8b6473f1a354d76e686ee36b3bf02a707e51b",
+      "subject": "fix(viewer): smooth preview and tile handoff"
+    },
+    {
+      "commit": "aeee881cee0d160d512425fbf322f0652361c623",
+      "subject": "fix(viewer): sync deferred zoom handoff fixes"
+    },
+    {
+      "commit": "d05a4bc7f7eb2ebe3c2edbc0375307bc188ec6e4",
+      "subject": "merge: sync compressed viewer mainline to branch 2"
+    },
+    {
+      "commit": "757a9b3087ed4d3c3c7f0fe1039c9d689f0c35c0",
+      "subject": "build: update branch 2 release APKs in archive"
+    },
+    {
+      "commit": "7cdbb196f67782979b4028971ab548294287d215",
+      "subject": "fix(viewer): sync silent automatic fallback to native VideoView and bump version to 4.2.12-multi-entry"
+    },
+    {
+      "commit": "2aec1954d8d54bf20a95e8d1ee65076bc3bf7436",
+      "subject": "chore: bump version to 4.2.11-multi-entry"
+    },
+    {
+      "commit": "edabff9dd4d96b665eae0ced008bee1900dd420d",
+      "subject": "feat: sync branch 10 video controls decoupling and adaptive zoom fixes to branch 2"
+    },
+    {
+      "commit": "eb65d97c362b184700e0ecae62c7506f19ff5463",
+      "subject": "perf: set versionName to 4.2.10 and comment out System.gc() in PixelGalleryApp.kt on branch 2"
+    },
+    {
+      "commit": "51cdcd2fa9f90c2a00b2a49a6473df4575a38537",
+      "subject": "perf: sync performance optimizations and Glide module from branch 8"
+    },
+    {
+      "commit": "57be9d82b2011e589a497a1ed66a811850a22726",
+      "subject": "fix: resolve Samsung video swipe issue by making PlayerView touch-transparent"
+    },
+    {
+      "commit": "7ac4c18d69cba623bb4bcb565360f7a39a4e8ad8",
+      "subject": "build: compile and archive release APKs for branch 2"
+    },
+    {
+      "commit": "299298585f90239d07e20705ff054e508a1e686c",
+      "subject": "fix: make video player zoomable and support swiping between items by using Telephoto modifier"
+    },
+    {
+      "commit": "348b75ee28f0d1cb5ec5035537b5a7c4939c3f6a",
+      "subject": "fix: completely remove physical existence check from syncWithMediaStore to prevent CursorWindow crash and run only on startup"
+    },
+    {
+      "commit": "7a7710f2db9e36121d5e8deafa634304fae23e77",
+      "subject": "fix: apply CursorWindow and telephoto fixes for branch 3 and rebuild release APKs"
+    },
+    {
+      "commit": "6d5a1565f4de29c3d2886a77aaef2ce0fe0cacbc",
+      "subject": "fix: replace heavy getAllMediaEntries with lightweight MediaPath projection to prevent CursorWindow NO_MEMORY crash; throttle physical file check to 10min interval and run async"
+    },
+    {
+      "commit": "b2015c0245ca86776e4b00f24b6c72162f22d0a6",
+      "subject": "fix: resolve canvas too large drawing crash and implement crash recovery on Branch 2"
+    },
+    {
+      "commit": "b8310d854766d2c355094182add754ef53e3076b",
+      "subject": "fix: resolve detail page crash on image zoom, decouple album scroll states, and add detailed AppLogger logs for adb troubleshooting"
+    },
+    {
+      "commit": "79ab0e728abaac95cce12a53a15e37e636323272",
+      "subject": "fix: resolve detail page crash for extra-long images and fix scrollbar jumping in small lists"
+    },
+    {
+      "commit": "50160aca7439ce7032febdc9ea46e134c6dd0f9a",
+      "subject": "fix: prevent unnecessary executor recreation and use dynamic dispatcher in AndroidImageRegionDecoder"
+    },
+    {
+      "commit": "18b886d3eab9f2f1d464742101d4cc62bd8cb6a8",
+      "subject": "fix(large-image): fix large image tile loading failure after background resume by preventing ImageCache coroutine crash and automatically recreating BitmapRegionDecoder on failure"
+    },
+    {
+      "commit": "34db17e10abf5f506471e97c6b38f6d73b9ffb60",
+      "subject": "Fix GIF animation playback and zoom gesture handling in ViewerScreen"
+    },
+    {
+      "commit": "7f8afad8bc40ad41f5a10fd6515294164cdf031e",
+      "subject": "Fix GIF animation playback by conditionally applying dontAnimate()"
+    },
+    {
+      "commit": "39bd6d86795d50043eee57f7bd8a2ce22366e6bf",
+      "subject": "Merge dynamic tile disk cache and update version to 4.3.0 (24) on branch 2"
+    },
+    {
+      "commit": "6f2457b0bd1f8daeea549a5c4d2cb44ef9566837",
+      "subject": "Fix memory cache eviction by implementing thread-safe LRU tile cache"
+    },
+    {
+      "commit": "a0abb65ea5bb61ea7d5b9168bdbf08712e98d231",
+      "subject": "chore: remove binary release apks from git repository for pure source control"
+    },
+    {
+      "commit": "4da59f73955fde276a583420d49008e0d263a271",
+      "subject": "feat: sync large image settings/hysteresis from branch 3 and apply uppercase-first sorting"
+    },
+    {
+      "commit": "c0013837921c1edc4589e0fb44f8e5ad8bf7f8a1",
+      "subject": "build: update version to 4.2.6-manual, ignore and clean release apks"
+    },
+    {
+      "commit": "b7b4e5c09f0a2b0d437cd0a7c12d875fb7ddec36",
+      "subject": "fix: sync anti-flicker, OOM mitigation, keepalive service, and update 2_manual_shortcuts APKs"
+    },
+    {
+      "commit": "0f13986311a561eca20e8108e318aab5b051f644",
+      "subject": "release: sync all branch apks into manual shortcuts branch for ease of local testing"
+    },
+    {
+      "commit": "42f736297293c009f356c04cec223ee238c894bb",
+      "subject": "fix: remove TRIM_MEMORY_UI_HIDDEN check from onTrimMemory to prevent clearing Glide cache on background transition"
+    },
+    {
+      "commit": "1647a8a6d60cda2c178ed5fda0c511a47c58f627",
+      "subject": "release: build and copy manual shortcuts apks and fix Viewmodel compilation"
+    },
+    {
+      "commit": "a9b856d410b614690d3de07a1c2a72fade9b8bb6",
+      "subject": "feat: sync performance improvements and local subsampling from multitask branch to manual shortcuts branch"
+    },
+    {
+      "commit": "f253d0a1a93e2ff0e8e42e940c46316e1f3f0511",
+      "subject": "feat: optimize zoomable logic and implement file presence verification & automatic refresh"
+    },
+    {
+      "commit": "f21f6839031f984b600c9da02fa73334bf276916",
+      "subject": "feat: align maxZoomFactor parameters a and b to 3.0f for smooth transition at screen-size boundary"
+    },
+    {
+      "commit": "b2a9e001b0357f297ca0991ae63ff0e45293daa8",
+      "subject": "perf: sync gpu hardware clip optimization for album list"
+    },
+    {
+      "commit": "c33f182d2e18a6e0a2ed22b0423aff4fbf86c49e",
+      "subject": "chore: bump version to v4.2.5-shortcuts"
+    },
+    {
+      "commit": "c023e3329e05a195a8e94e30133c73fac9033845",
+      "subject": "feat: increase maxRecents limit to 50 in MainActivity to override Samsung/OnePlus recent tasks count limit on manual shortcuts branch"
+    },
+    {
+      "commit": "8f5f1668488fbcc8461c86a5105a999e886834be",
+      "subject": "perf: change package name to com.pixel.gallery.shortcuts and sync MediaRepository StateFlow cache optimization from auto multitask branch"
+    },
+    {
+      "commit": "40e8ac067248a78d11130162bd0626a52fa03795",
+      "subject": "Fix auto multitask bug on main launcher icon by removing documentLaunchMode always"
+    }
+  ],
+  "worktree_status_at_snapshot": "?? .codex-commit-feature-2-sparse/\u0000?? .codex-commit-main-sparse/\u0000?? .codex-commit-main/\u0000?? .codex-publish-index-feature-2-20260820\u0000?? .codex-publish-index-main-20260820\u0000?? .codex-publish-main-local/\u0000?? .codex-worktrees/\u0000?? .gradle-test/\u0000?? .gradle-user/\u0000?? app/hs_err_pid34972.log\u0000?? app/hs_err_pid39952.log\u0000?? app/hs_err_pid41904.log\u0000?? app/hs_err_pid46352.log\u0000?? app/hs_err_pid52760.log\u0000?? app/hs_err_pid58680.log\u0000?? app/hs_err_pid58972.log\u0000?? app/src/test/python/__pycache__/\u0000?? docs/album-context-actions-qa.md\u0000?? docs/png-fit-native-experiment-2026-10-21.md\u0000?? docs/simple-no-neighbor-test-2026-10-20.md\u0000?? docs/ui-options-2026-10-20/\u0000?? docs/viewer-preview-wait-investigation-2026-10-20.md\u0000?? docs/zoom-state-memory-investigation-2026-08-19.md\u0000?? hs_err_pid108600.log\u0000?? hs_err_pid19512.log\u0000?? hs_err_pid29100.log\u0000?? hs_err_pid37440.log\u0000?? hs_err_pid44468.log\u0000?? hs_err_pid71336.log\u0000?? hs_err_pid73936.log\u0000?? indexed-png/src/main/cpp/png_fit_preview.cpp\u0000?? indexed-png/src/main/cpp/png_fit_preview.h\u0000?? replay_pid19512.log\u0000?? replay_pid37440.log\u0000?? replay_pid44468.log\u0000?? scratch/BottomSheetScaffold.kt\u0000?? scratch/ExoPlayerImplInternal-181.java\u0000?? scratch/GenerateInterlacedPng.class\u0000?? scratch/LibRaw-0.22.2/\u0000?? scratch/MediaCodecVideoRenderer-1.5.1.java\u0000?? scratch/ModalBottomSheet.android.kt\u0000?? scratch/ModalBottomSheet.kt\u0000?? scratch/PixelGallery-4.3.4.15-arm64-v8a-release-build.log\u0000?? scratch/PixelGallery-4.3.4.5-arm64-v8a-build.log\u0000?? scratch/PixelGallery-4.3.4.5-arm64-v8a-vc4055-build.log\u0000?? scratch/PixelGallery-4.3.4.5-release-build.log\u0000?? scratch/PixelGallery-4.3.5.9-arm64-v8a-release-build.log\u0000?? scratch/SheetBottomTokens.kt\u0000?? scratch/SheetDefaults.kt\u0000?? scratch/ToolbarPinch.java\u0000?? scratch/ViewerHistoryBenchmark.class\u0000?? scratch/ViewerHistoryBenchmark.java\u0000?? scratch/__pycache__/\u0000?? scratch/add_simple_compare_details_20261020.py\u0000?? scratch/after-back-albums.png\u0000?? scratch/after-back-albums.xml\u0000?? scratch/after-bin-back.xml\u0000?? scratch/after-clean-review.png\u0000?? scratch/after-info-swipe.png\u0000?? scratch/after-info-swipe.xml\u0000?? scratch/after-label-close-task-5556.png\u0000?? scratch/after-label-close-task-5556.xml\u0000?? scratch/after-label-save-task-5556.xml\u0000?? scratch/after-launch-5556.xml\u0000?? scratch/after-lock-grid-task-5556.png\u0000?? scratch/after-lock-grid-task-5556.xml\u0000?? scratch/after-move-out-live.png\u0000?? scratch/after-move-out-live.xml\u0000?? scratch/after-move-to-bin.png\u0000?? scratch/after-move-to-bin.xml\u0000?? scratch/after-moveout.png\u0000?? scratch/after-moveout.xml\u0000?? scratch/after-shared-sheet-install.png\u0000?? scratch/after-shared-sheet-install.xml\u0000?? scratch/after-three-back-live.xml\u0000?? scratch/after-trash-confirm.xml\u0000?? scratch/after-viewer-back-task-5556.xml\u0000?? scratch/after_albums.png\u0000?? scratch/album-caption-two-line-build.log\u0000?? scratch/album-context-actions-build.log\u0000?? scratch/album-longpress-held.png\u0000?? scratch/album-media-normal.png\u0000?? scratch/album-media-normal.xml\u0000?? scratch/album-media-selected.png\u0000?? scratch/album-media-selected.xml\u0000?? scratch/album-menu-before.xml\u0000?? scratch/album-normal.png\u0000?? scratch/album-notice-toast-4.3.4.11-build.log\u0000?? scratch/album-overflow-alignment-build.log\u0000?? scratch/album-overflow-alignment-device-result.log\u0000?? scratch/album-regression-build.log\u0000?? scratch/album-regression-device-result.log\u0000?? scratch/album-regression-qa/\u0000?? scratch/album-rename-device-result.log\u0000?? scratch/album-search-clip-build.log\u0000?? scratch/album-search-clip-ui.log\u0000?? scratch/album-search-clip/\u0000?? scratch/album-search-emulator-error.log\u0000?? scratch/album-search-emulator-fresh-error.log\u0000?? scratch/album-search-emulator-fresh.log\u0000?? scratch/album-search-emulator.log\u0000?? scratch/album-selection-device-result.log\u0000?? scratch/album-selection-final-verification-build.log\u0000?? scratch/album-selection-fix-build.log\u0000?? scratch/album-selection-fix-final-build.log\u0000?? scratch/album-selection-fix-test-build.log\u0000?? scratch/album-selection-held-final.png\u0000?? scratch/album-selection-toolbar-final.png\u0000?? scratch/album0.png\u0000?? scratch/album0.xml\u0000?? scratch/albums-after-check.png\u0000?? scratch/albums-after-check.xml\u0000?? scratch/albums-after-install2.png\u0000?? scratch/albums-after-install2.xml\u0000?? scratch/albums-after-install3.png\u0000?? scratch/albums-after-install3.xml\u0000?? scratch/albums-after-lock-task-5556.xml\u0000?? scratch/albums-after-locked.png\u0000?? scratch/albums-after-locked.xml\u0000?? scratch/albums-back.xml\u0000?? scratch/albums-bin-test.xml\u0000?? scratch/albums-for-bin-current.xml\u0000?? scratch/albums-for-bin.png\u0000?? scratch/albums-for-bin.xml\u0000?? scratch/albums-live.png\u0000?? scratch/albums-live.xml\u0000?? scratch/albums-normal-live.png\u0000?? scratch/albums-normal-live.xml\u0000?? scratch/albums-now.xml\u0000?? scratch/albums-selected-live.png\u0000?? scratch/albums-selected-live.xml\u0000?? scratch/albums-selected-live2.png\u0000?? scratch/albums-selected-live2.xml\u0000?? scratch/albums-task-5556.png\u0000?? scratch/albums-task-5556.xml\u0000?? scratch/albums-ui.png\u0000?? scratch/albums-ui.xml\u0000?? scratch/albums-verify-current.png\u0000?? scratch/albums-verify-current.xml\u0000?? scratch/albums2.png\u0000?? scratch/albums_current.png\u0000?? scratch/align_picker_undo.py\u0000?? scratch/already-in-album-4.3.4.10-build.log\u0000?? scratch/analyze-session-20260731.js\u0000?? scratch/analyze-system-windows-7368.js\u0000?? scratch/analyze-viewer-7368.js\u0000?? scratch/analyze_adaptive_fit_ui_20261021.py\u0000?? scratch/analyze_background_return.py\u0000?? scratch/analyze_compare.py\u0000?? scratch/analyze_entry30.py\u0000?? scratch/analyze_entry30_active.py\u0000?? scratch/analyze_entry30_records.py\u0000?? scratch/analyze_fit_user_20261021.py\u0000?? scratch/analyze_native_fit_ui_20261021.py\u0000?? scratch/analyze_pip_display.py\u0000?? scratch/analyze_pip_layout.py\u0000?? scratch/analyze_pip_ui.py\u0000?? scratch/analyze_repro.py\u0000?? scratch/analyze_return_cpu.py\u0000?? scratch/analyze_return_layout.py\u0000?? scratch/analyze_return_scheduling.py\u0000?? scratch/analyze_samsung_viewer_wait.py\u0000?? scratch/analyze_simple_compare_20261020.py\u0000?? scratch/analyze_simple_fresh_20261020.py\u0000?? scratch/analyze_video_return_frames.py\u0000?? scratch/app-after-permission.png\u0000?? scratch/app-after-permission2.png\u0000?? scratch/app-after-permission3.png\u0000?? scratch/app-screen-verify.png\u0000?? scratch/app-window-verify.xml\u0000?? scratch/apply-quick-sort-redesign.py\u0000?? scratch/assemble-video-trace.log\u0000?? scratch/audio-return-artifact-hashes.json\u0000?? scratch/audio-return-baseline-idle.err\u0000?? scratch/audio-return-baseline-idle.out\u0000?? scratch/audio-return-budget-build.log\u0000?? scratch/audio-return-budget-idle.err\u0000?? scratch/audio-return-budget-idle.out\u0000?? scratch/audio-return-capture.err\u0000?? scratch/audio-return-capture.out\u0000?? scratch/audio-return-dynamic-build.log\u0000?? scratch/audio-return-dynamic-long.err\u0000?? scratch/audio-return-dynamic-long.out\u0000?? scratch/audio-return-insets-aot.err\u0000?? scratch/audio-return-insets-aot.out\u0000?? scratch/audio-return-insets-build.log\u0000?? scratch/audio-return-insets-idle.err\u0000?? scratch/audio-return-insets-idle.out\u0000?? scratch/audio-return-insets-lean.err\u0000?? scratch/audio-return-insets-lean.out\u0000?? scratch/audio-return-isolated-build-2.log\u0000?? scratch/audio-return-isolated-build.log\u0000?? scratch/audio-return-keyframe-build.log\u0000?? scratch/audio-return-keyframe-capture.err\u0000?? scratch/audio-return-keyframe-capture.out\u0000?? scratch/audio-return-long.err\u0000?? scratch/audio-return-long.out\u0000?? scratch/audio-return-no-budget-build.log\u0000?? scratch/audio-return-no-budget-lean.err\u0000?? scratch/audio-return-no-budget-lean.out\u0000?? scratch/audio-return-output-capture.err\u0000?? scratch/audio-return-output-capture.out\u0000?? scratch/audio-return-output-order-build.log\u0000?? scratch/audio-return-output-retry.err\u0000?? scratch/audio-return-output-retry.out\u0000?? scratch/audio-return-pip-regression.err\u0000?? scratch/audio-return-pip-regression.out\u0000?? scratch/audio-return-release-external.err\u0000?? scratch/audio-return-release-external.out\u0000?? scratch/audio-return-release-mode-build.log\u0000?? scratch/audio-return-release-mode.err\u0000?? scratch/audio-return-release-mode.out\u0000?? scratch/audio-return-release-scheduler.err\u0000?? scratch/audio-return-release-scheduler.out\u0000?? scratch/audio-return-test-options-build.log\u0000?? scratch/back-one.xml\u0000?? scratch/back-tap-probe.png\u0000?? scratch/back-tap-probe.xml\u0000?? scratch/back-two.xml\u0000?? scratch/background-flicker-memory-fix-build-2.log\u0000?? scratch/background-flicker-memory-fix-build-3.log\u0000?? scratch/background-flicker-memory-fix-build-4.log\u0000?? scratch/background-flicker-memory-fix-build.log\u0000?? scratch/background-flicker-memory-fix-tests-2.log\u0000?? scratch/background-flicker-memory-fix-tests-3.log\u0000?? scratch/background-flicker-memory-fix-tests.log\u0000?? scratch/background-memory-fix-build.log\u0000?? scratch/background-memory-fix-tests.log\u0000?? scratch/background-toolbar-fix-build-2.log\u0000?? scratch/background-toolbar-fix-build.log\u0000?? scratch/baseline-43416-build-inputs.json\u0000?? scratch/baseline-43416-build-output/\u0000?? scratch/baseline-43416-build.init.gradle\u0000?? scratch/baseline-43416-installable-build.log\u0000?? scratch/baseline-43416-test-build-final.log\u0000?? scratch/baseline-43416-test-build-retry.log\u0000?? scratch/baseline-43416-test-build-same-drive.log\u0000?? scratch/baseline-43416-test-build.log\u0000?? scratch/batch-grid-sheet-fix-build.log\u0000?? scratch/batch-refresh-fix-build.log\u0000?? scratch/batteryguru-audit/\u0000?? scratch/benchmark_adaptive_core_20261021.py\u0000?? scratch/benchmark_jpeg_dc_20261020.py\u0000?? scratch/benchmark_jpeg_fit_20261021.py\u0000?? scratch/benchmark_jpeg_fit_general_20261021.py\u0000?? scratch/benchmark_jpeg_refill_20261021.py\u0000?? scratch/benchmark_lookahead_20261021.py\u0000?? scratch/benchmark_png_fit_20261021.py\u0000?? scratch/bin-after-delete.xml\u0000?? scratch/bin-after-restore-qa.png\u0000?? scratch/bin-after-restore-qa.xml\u0000?? scratch/bin-after.png\u0000?? scratch/bin-after.xml\u0000?? scratch/bin-album-selected1.png\u0000?? scratch/bin-album-selected1.xml\u0000?? scratch/bin-confirm-correct.xml\u0000?? scratch/bin-current.png\u0000?? scratch/bin-current.xml\u0000?? scratch/bin-delete-confirm.xml\u0000?? scratch/bin-folder-grid.xml\u0000?? scratch/bin-installed-verify.png\u0000?? scratch/bin-installed-verify.xml\u0000?? scratch/bin-live-after-current.xml\u0000?? scratch/bin-live-start.png\u0000?? scratch/bin-live-start.xml\u0000?? scratch/bin-menu-current.png\u0000?? scratch/bin-menu-current.xml\u0000?? scratch/bin-menu-qa.png\u0000?? scratch/bin-menu-qa.xml\u0000?? scratch/bin-menu-task-5556.xml\u0000?? scratch/bin-menu-verify-current.png\u0000?? scratch/bin-menu-verify-current.xml\u0000?? scratch/bin-name-prefix-before-fix.log\u0000?? scratch/bin-normal-live.png\u0000?? scratch/bin-normal-live.xml\u0000?? scratch/bin-normal-live2.png\u0000?? scratch/bin-normal-live2.xml\u0000?? scratch/bin-now.png\u0000?? scratch/bin-now.xml\u0000?? scratch/bin-now2.png\u0000?? scratch/bin-now2.xml\u0000?? scratch/bin-one-selected.xml\u0000?? scratch/bin-qa-fixture-20261024/\u0000?? scratch/bin-qa-start.png\u0000?? scratch/bin-qa-start.xml\u0000?? scratch/bin-qa2.png\u0000?? scratch/bin-qa2.xml\u0000?? scratch/bin-restore-actual.xml\u0000?? scratch/bin-restore-selected.xml\u0000?? scratch/bin-select-all-verify.png\u0000?? scratch/bin-select-all-verify.xml\u0000?? scratch/bin-select-debug.png\u0000?? scratch/bin-select-debug.xml\u0000?? scratch/bin-selectall-qa.png\u0000?? scratch/bin-selectall-qa.xml\u0000?? scratch/bin-selected-current.png\u0000?? scratch/bin-selected-current.xml\u0000?? scratch/bin-selected-current2.png\u0000?? scratch/bin-selected-current2.xml\u0000?? scratch/bin-selected-live.png\u0000?? scratch/bin-selected-live.xml\u0000?? scratch/bin-selected-live2.png\u0000?? scratch/bin-selected-live2.xml\u0000?? scratch/bin-selected-menu-live.xml\u0000?? scratch/bin-selected-qa2.png\u0000?? scratch/bin-selected-qa2.xml\u0000?? scratch/bin-selected-verify-current.png\u0000?? scratch/bin-selected-verify-current.xml\u0000?? scratch/bin-sort-current.png\u0000?? scratch/bin-sort-current.xml\u0000?? scratch/bin-sort-dialog-task-5556.png\u0000?? scratch/bin-sort-dialog-task-5556.xml\u0000?? scratch/bin-sort-dialog-verify-current.png\u0000?? scratch/bin-sort-dialog-verify-current.xml\u0000?? scratch/bin-sort-qa.png\u0000?? scratch/bin-sort-qa.xml\u0000?? scratch/bin-task-5556.png\u0000?? scratch/bin-task-5556.xml\u0000?? scratch/bin-test-album.png\u0000?? scratch/bin-test-album.xml\u0000?? scratch/bin-test-correct.xml\u0000?? scratch/branch-sync-20261029/\u0000?? scratch/build-7368b864/\u0000?? scratch/bulk-transfer-deltas-build.log\u0000?? scratch/bulk-transfer-fix-final-build.log\u0000?? scratch/bulk1000-emulator-error.log\u0000?? scratch/bulk1000-emulator-host.log\u0000?? scratch/bulk1000-emulator-retry.log\u0000?? scratch/bulk1000-emulator.log\u0000?? scratch/bulk1000-evidence-a10a0cf4/\u0000?? scratch/bulk1000-expand-build.log\u0000?? scratch/bulk1000-failure.png\u0000?? scratch/bulk1000-final-build.log\u0000?? scratch/bulk1000-move-live.png\u0000?? scratch/bulk1000-quick-live.png\u0000?? scratch/bulk1000-quicksort-collapsed.png\u0000?? scratch/bulk1000-rotation-build.log\u0000?? scratch/bulk1000-selection-failure.png\u0000?? scratch/bulk1000-touch-build.log\u0000?? scratch/capture_background_return.py\u0000?? scratch/capture_pip_complete.py\u0000?? scratch/capture_pip_layers.py\u0000?? scratch/capture_return_external.py\u0000?? scratch/capture_viewer_trace_gzip.py\u0000?? scratch/capture_viewer_trace_persistent.py\u0000?? scratch/check-share-action.png\u0000?? scratch/check-share-action.xml\u0000?? scratch/columns-shared-albums.png\u0000?? scratch/columns-shared-current.png\u0000?? scratch/columns-shared-editor.png\u0000?? scratch/columns-shared-label-album.png\u0000?? scratch/columns-shared-label-menu.png\u0000?? scratch/columns-shared-label1.png\u0000?? scratch/columns-shared-labels.png\u0000?? scratch/columns-shared-menu2.png\u0000?? scratch/columns-shared-menu3.png\u0000?? scratch/columns-shared-return-labels.png\u0000?? scratch/compile-after-snapshot-2.log\u0000?? scratch/compile-after-snapshot.log\u0000?? scratch/compile-debug-recreate-entry.log\u0000?? scratch/compile-video-trace.log\u0000?? scratch/confirmation-after.png\u0000?? scratch/confirmation-boot.png\u0000?? scratch/confirmation-build.log\u0000?? scratch/confirmation-emulator-error.log\u0000?? scratch/confirmation-emulator-test.log\u0000?? scratch/confirmation-emulator-test2.log\u0000?? scratch/confirmation-emulator.log\u0000?? scratch/confirmation-final-build.log\u0000?? scratch/confirmation-qa/\u0000?? scratch/confirmation-test-build.log\u0000?? scratch/confirmation-validation-final.log\u0000?? scratch/confirmation-validation.log\u0000?? scratch/copy-move-cancellation-fix-build.log\u0000?? scratch/copy-move-cancellation-fix-device-result.log\u0000?? scratch/copy-move-edge-baseline-build.log\u0000?? scratch/copy-move-edge-baseline-device-result.log\u0000?? scratch/copy-move-emulator-window.json\u0000?? scratch/copy-move-existing-feedback-result.log\u0000?? scratch/copy-move-final-build.log\u0000?? scratch/copy-move-final-device-result.log\u0000?? scratch/copy-move-final-verification.json\u0000?? scratch/copy-move-label-final-regression.log\u0000?? scratch/copy-move-quicksort-final-regression.log\u0000?? scratch/copy-move-recovery-baseline-build.log\u0000?? scratch/copy-move-recovery-baseline-device-result.log\u0000?? scratch/copy-move-retained-media-verification.json\u0000?? scratch/copy-move-ui-edge-qa/\u0000?? scratch/copy-move-ui-final-result.log\u0000?? scratch/copy-move-ui-initial-result.log\u0000?? scratch/current-after-recover.png\u0000?? scratch/current-after-relaunch.png\u0000?? scratch/current-after-taps.png\u0000?? scratch/current-before-task1.png\u0000?? scratch/current-before-task1.xml\u0000?? scratch/current-emulator.png\u0000?? scratch/current-gallery-build-source-hashes.json\u0000?? scratch/current-gallery-db-after-bin.sqlite\u0000?? scratch/current-gallery-db-qa.sqlite\u0000?? scratch/current-gallery-debug-build.log\u0000?? scratch/current-gallery-debug-initial-build.log\u0000?? scratch/current-gallery-debug-install.log\u0000?? scratch/current-inspection.png\u0000?? scratch/current-inspection.xml\u0000?? scratch/current-install-emulator.err.log\u0000?? scratch/current-install-emulator.out.log\u0000?? scratch/current-live-5556.png\u0000?? scratch/current-live-5556.xml\u0000?? scratch/current-power-logs/\u0000?? scratch/current-restore-screen.png\u0000?? scratch/current-screen.png\u0000?? scratch/current-ui.xml\u0000?? scratch/current-viewer-info-probe.png\u0000?? scratch/current-window.xml\u0000?? scratch/current_labels.png\u0000?? scratch/currentafter.xml\u0000?? scratch/currenttest.png\u0000?? scratch/currenttest.xml\u0000?? scratch/db-after-moveout\u0000?? scratch/db-after-perm-delete.sqlite\u0000?? scratch/db-after-second-trash.sqlite\u0000?? scratch/db-after-trash-ui.sqlite\u0000?? scratch/db-bin-selected.sqlite\u0000?? scratch/db-restore-actual.sqlite\u0000?? scratch/db-restore-latest/\u0000?? scratch/dbcheck\u0000?? scratch/dedup-approved-build-20261029.log\u0000?? scratch/dedup-approved-device-20261029.log\u0000?? scratch/dedup-approved-final-build-20261029.log\u0000?? scratch/dedup-approved-final-device-20261029.log\u0000?? scratch/dedup-clean-selection-build-20261029.log\u0000?? scratch/dedup-clean-selection-device-20261029.log\u0000?? scratch/dedup-clean-selection-final-build-20261029.log\u0000?? scratch/dedup-clean-selection-verified-device-20261029.log\u0000?? scratch/dedup-design-preview.err\u0000?? scratch/dedup-design-preview.log\u0000?? scratch/dedup-entrypoints-ui.log\u0000?? scratch/dedup-final-design-build-20261029.log\u0000?? scratch/dedup-final-device-20261029.log\u0000?? scratch/dedup-final-serial-build-20261029.log\u0000?? scratch/dedup-final-test-build-20261029.log\u0000?? scratch/dedup-palette-aligned-build-20261029.log\u0000?? scratch/dedup-palette-aligned-device-20261029.log\u0000?? scratch/dedup-progress-emulator-error.log\u0000?? scratch/dedup-progress-emulator.log\u0000?? scratch/dedup-progress-fix-build-final.log\u0000?? scratch/dedup-progress-fix-build.log\u0000?? scratch/dedup-progress-fix-ui.log\u0000?? scratch/dedup-progress-fix/\u0000?? scratch/dedup-progress-nav-test-build.log\u0000?? scratch/dedup-selection-switch-check.log\u0000?? scratch/dedup-status-emulator-20261029.log\u0000?? scratch/dedup-status-emulator-direct-20261029.log\u0000?? scratch/dedup-status-emulator-hidden-20261029.log\u0000?? scratch/dedup-status-emulator-host-20261029.log\u0000?? scratch/dedup-status-emulator-host2-20261029.log\u0000?? scratch/dedup-status-emulator-no-vulkan-20261029.log\u0000?? scratch/dedup-status-emulator-readonly-20261029.log\u0000?? scratch/dedup-status-emulator-software-20261029.log\u0000?? scratch/dedup-status-native-build-20261029.log\u0000?? scratch/dedup-status-native-device-20261029.log\u0000?? scratch/dedup-toast-build-20261028.log\u0000?? scratch/dedup-toast-build-output/\u0000?? scratch/dedup-toast-device-20261028.log\u0000?? scratch/dedup-toast-final-build-20261029.log\u0000?? scratch/dedup-toast-isolated-build-20261028.log\u0000?? scratch/dedup-toast-isolated-cache-build-20261028.log\u0000?? scratch/dedup-toast-isolated-final-build-20261028.log\u0000?? scratch/dedup-toast-isolated-retry-20261028.log\u0000?? scratch/dedup-toast-isolated.init.gradle\u0000?? scratch/dedup-toast-permission-ready-device-20261028.log\u0000?? scratch/dedup-toast-project-cache/\u0000?? scratch/dedup-toast-test-build-20261028.log\u0000?? scratch/dedup-toast-verification-build-20261028.log\u0000?? scratch/dedup-verification/\u0000?? scratch/derive_picker_selection_mode.py\u0000?? scratch/detail-flicker-final-validation.log\u0000?? scratch/detail-flicker-regression-build.log\u0000?? scratch/detail-memory-brace-build.log\u0000?? scratch/detail-memory-policy-build-2.log\u0000?? scratch/detail-memory-policy-build.log\u0000?? scratch/detail-memory-policy-tests.log\u0000?? scratch/disable_simple_neighbor_loading_20261020.py\u0000?? scratch/display-settings-order-build.log\u0000?? scratch/duplicate-emulator-test-build.log\u0000?? scratch/duplicate-emulator-test.log\u0000?? scratch/duplicate-progress-build.log\u0000?? scratch/duplicate-qa/\u0000?? scratch/empty-undo-harness-build.log\u0000?? scratch/emulator-5554-current.png\u0000?? scratch/emulator-after-cancel.png\u0000?? scratch/emulator-album-before-selection.png\u0000?? scratch/emulator-album-selection-toolbar.png\u0000?? scratch/emulator-health.png\u0000?? scratch/emulator-info-labels.png\u0000?? scratch/emulator-label-editor-grid.png\u0000?? scratch/emulator-label-editor-latest.png\u0000?? scratch/emulator-labels-final.png\u0000?? scratch/emulator-labels-open.png\u0000?? scratch/emulator-labels-screen.png\u0000?? scratch/emulator-restart-20261025-124415.err.log\u0000?? scratch/emulator-restart-20261025-124415.out.log\u0000?? scratch/emulator-restored.png\u0000?? scratch/emulator-review/\u0000?? scratch/emulator-selected-toolbar-current.png\u0000?? scratch/emulator-selection-toolbar.png\u0000?? scratch/emulator-storage-backup-20261028/\u0000?? scratch/emulator-videos/\u0000?? scratch/emulator-visible-20261020.err.log\u0000?? scratch/emulator-visible-20261020.out.log\u0000?? scratch/emulator-visible-final.png\u0000?? scratch/events_compare.py\u0000?? scratch/extract_entry30_events.py\u0000?? scratch/final-album-menu.xml\u0000?? scratch/final-album-selected.xml\u0000?? scratch/final-album-selection-menu.png\u0000?? scratch/final-albums.xml\u0000?? scratch/final-emulator-error.log\u0000?? scratch/final-emulator.log\u0000?? scratch/final-emulator2.log\u0000?? scratch/final-fix-build.log\u0000?? scratch/final-fix-compile.log\u0000?? scratch/final-frame-log-compile.log\u0000?? scratch/final-install-emulator.err.log\u0000?? scratch/final-install-emulator.out.log\u0000?? scratch/final-launch.png\u0000?? scratch/final-launch.xml\u0000?? scratch/final-memory-topbar-trace-validation.log\u0000?? scratch/final-start.png\u0000?? scratch/final-start.xml\u0000?? scratch/finalize_copy_move_report.py\u0000?? scratch/finalize_label_edge_report.py\u0000?? scratch/finalize_picker_state.py\u0000?? scratch/finalize_quicksort_video_first_report.py\u0000?? scratch/flicker-after.xml\u0000?? scratch/flicker-albums.xml\u0000?? scratch/flicker-alpha-back.xml\u0000?? scratch/flicker-alpha-contact.jpg\u0000?? scratch/flicker-alpha-home.xml\u0000?? scratch/flicker-contact.jpg\u0000?? scratch/flicker-current.png\u0000?? scratch/flicker-current.xml\u0000?? scratch/flicker-frames-alpha/\u0000?? scratch/flicker-frames-fixed/\u0000?? scratch/flicker-frames/\u0000?? scratch/flicker-installed.xml\u0000?? scratch/flicker-menu.xml\u0000?? scratch/flicker-transition-contact.jpg\u0000?? scratch/flicker-transition-fixed-contact.jpg\u0000?? scratch/fresh-db.sqlite\u0000?? scratch/fresh-db.sqlite-shm\u0000?? scratch/fresh-db.sqlite-wal\u0000?? scratch/fresh.png\u0000?? scratch/functional-edge-testing-skill-validation.log\u0000?? scratch/gallery-after-dialog.png\u0000?? scratch/gallery-after-restore.db\u0000?? scratch/gallery-after-restore.db-shm\u0000?? scratch/gallery-after-restore.db-wal\u0000?? scratch/gallery-album-menu-open.xml\u0000?? scratch/gallery-album-selected.png\u0000?? scratch/gallery-album-selected.xml\u0000?? scratch/gallery-albums-selected2.png\u0000?? scratch/gallery-albums-selected2.xml\u0000?? scratch/gallery-albums.png\u0000?? scratch/gallery-albums.xml\u0000?? scratch/gallery-current.png\u0000?? scratch/gallery-current.xml\u0000?? scratch/gallery-db-checkpointed.sqlite\u0000?? scratch/gallery-db-checkpointed.sqlite-shm\u0000?? scratch/gallery-db-checkpointed.sqlite-wal\u0000?? scratch/gallery-db-live.sqlite\u0000?? scratch/gallery-dedup-review.png\u0000?? scratch/gallery-dedup-review.xml\u0000?? scratch/gallery-home.png\u0000?? scratch/gallery-home.xml\u0000?? scratch/gallery-regression-media-20261020/\u0000?? scratch/gallery-regression-media-manifest.json\u0000?? scratch/gallery-regression-media-seed.log\u0000?? scratch/gallery-task-snapshot.db\u0000?? scratch/gallery-task-snapshot.db-shm\u0000?? scratch/gallery-task-snapshot.db-wal\u0000?? scratch/gallery-ui-main.xml\u0000?? scratch/gallery-ui.xml\u0000?? scratch/gallery_db_5556\u0000?? scratch/gallery_db_live\u0000?? scratch/gallery_db_restored_5556\u0000?? scratch/gallery_db_restored_final\u0000?? scratch/gallery_ui_qa.py\u0000?? scratch/grid-before-lock-task-5556.png\u0000?? scratch/grid-before-lock-task-5556.xml\u0000?? scratch/grid-current.png\u0000?? scratch/home-after-clear.xml\u0000?? scratch/home-after-copy.png\u0000?? scratch/home-after-copy.xml\u0000?? scratch/home-after-startup.xml\u0000?? scratch/home-clear.xml\u0000?? scratch/home-clear2.xml\u0000?? scratch/home-live-after-launch.xml\u0000?? scratch/home-menu-after-install.xml\u0000?? scratch/home-menu-live.png\u0000?? scratch/home-menu-live.xml\u0000?? scratch/home-normal-verify.png\u0000?? scratch/home-normal-verify.xml\u0000?? scratch/home-now-5556.png\u0000?? scratch/home-now-5556.xml\u0000?? scratch/home-photos.png\u0000?? scratch/home-photos.xml\u0000?? scratch/home-qa.png\u0000?? scratch/home-qa.xml\u0000?? scratch/home-selected-after-install.xml\u0000?? scratch/home-selected-live.png\u0000?? scratch/home-selected-live.xml\u0000?? scratch/home-selected-trashqa.xml\u0000?? scratch/home-selected.png\u0000?? scratch/home-selected.xml\u0000?? scratch/home-toolbar.png\u0000?? scratch/home-toolbar.xml\u0000?? scratch/home-window-current.xml\u0000?? scratch/home.png\u0000?? scratch/home.xml\u0000?? scratch/image-rotation-audit-build.log\u0000?? scratch/image-rotation-audit-evidence/\u0000?? scratch/image-rotation-deep-after-first.png\u0000?? scratch/image-rotation-edge-fix-build.log\u0000?? scratch/image-rotation-emulator-error.log\u0000?? scratch/image-rotation-emulator.log\u0000?? scratch/image-rotation-fix-build-verified.log\u0000?? scratch/image-rotation-fix-build.log\u0000?? scratch/image-rotation-fix-final-build.log\u0000?? scratch/image-rotation-held-90-fixed.png\u0000?? scratch/image-rotation-held-90.png\u0000?? scratch/image-rotation-release-build.log\u0000?? scratch/image-rotation-zoomed-after.png\u0000?? scratch/incremental-dedup-build-final.log\u0000?? scratch/incremental-dedup-build.log\u0000?? scratch/incremental-dedup-emulator-error.log\u0000?? scratch/incremental-dedup-emulator.log\u0000?? scratch/incremental-dedup-test-build.log\u0000?? scratch/incremental-dedup-ui.log\u0000?? scratch/incremental-dedup-unit-final.log\u0000?? scratch/incremental-dedup/\u0000?? scratch/indexed-corruption/\u0000?? scratch/indexed-image-sync/\u0000?? scratch/info-tap2.png\u0000?? scratch/info-tap2.xml\u0000?? scratch/install-latest-build.log\u0000?? scratch/install_simple_compare_20261020.py\u0000?? scratch/isolate_picker_grids.py\u0000?? scratch/jdk17-download/\u0000?? scratch/jdk17-portable/\u0000?? scratch/jpeg-dc-native-20261020/\u0000?? scratch/jpeg-hotspots-20261021/\u0000?? scratch/label-backup-aborted-test-cleanup.log\u0000?? scratch/label-backup-additional-file-test-build.log\u0000?? scratch/label-backup-additional-files-device-result.log\u0000?? scratch/label-backup-cancellation-baseline-probe.log\u0000?? scratch/label-backup-device-result.log\u0000?? scratch/label-backup-edge-baseline-results/\u0000?? scratch/label-backup-edge-baseline.log\u0000?? scratch/label-backup-edge-device-baseline-build.log\u0000?? scratch/label-backup-edge-device-baseline-result.log\u0000?? scratch/label-backup-edge-device-final-result.log\u0000?? scratch/label-backup-edge-final-test-build.log\u0000?? scratch/label-backup-edge-fixed-build.log\u0000?? scratch/label-backup-edge-parser-ui-build.log\u0000?? scratch/label-backup-edge-provider-harness-result.log\u0000?? scratch/label-backup-edge-ui-qa/\u0000?? scratch/label-backup-edge-unit-final.log\u0000?? scratch/label-backup-fault-provider-build.log\u0000?? scratch/label-backup-fault-provider-result.log\u0000?? scratch/label-backup-final-device-result.log\u0000?? scratch/label-backup-final-verification.json\u0000?? scratch/label-backup-input-boundary-test-build.log\u0000?? scratch/label-backup-migration-final-regression.log\u0000?? scratch/label-backup-retained-media-verification.json\u0000?? scratch/label-backup-roundtrip-device-result.log\u0000?? scratch/label-backup-roundtrip-test-build.log\u0000?? scratch/label-backup-strict-input-device-result.log\u0000?? scratch/label-backup-ui-device-result.log\u0000?? scratch/label-backup-ui-initial-harness-result.log\u0000?? scratch/label-backup-ui-injection-test-build.log\u0000?? scratch/label-backup-ui-native-failed.png\u0000?? scratch/label-backup-ui-native-navigation-build.log\u0000?? scratch/label-backup-ui-native-navigation-result.log\u0000?? scratch/label-design-gallery-error.log\u0000?? scratch/label-design-gallery.log\u0000?? scratch/label-design-native-library-result.log\u0000?? scratch/label-design-native-result.log\u0000?? scratch/label-editor-fav-selected-task-5556.xml\u0000?? scratch/label-editor-selected-task-5556.xml\u0000?? scratch/label-editor-task-5556.png\u0000?? scratch/label-editor-task-5556.xml\u0000?? scratch/label-loading-build-20261029.log\u0000?? scratch/label-loading-device-20261029.log\u0000?? scratch/label-loading-test-build-20261029.log\u0000?? scratch/label-remove-icon-build-20261029.log\u0000?? scratch/label-selection-held-final.png\u0000?? scratch/labels-albums-screen.png\u0000?? scratch/labels-albums-screen2.png\u0000?? scratch/labels-current-20261022-after-permission.png\u0000?? scratch/labels-current-20261022-after-permission.xml\u0000?? scratch/labels-current-20261022-albums-top.xml\u0000?? scratch/labels-current-20261022-albums.png\u0000?? scratch/labels-current-20261022-albums.xml\u0000?? scratch/labels-current-20261022-albums2.xml\u0000?? scratch/labels-current-20261022-back.png\u0000?? scratch/labels-current-20261022-home.png\u0000?? scratch/labels-current-20261022-home.xml\u0000?? scratch/labels-current-20261022-home2.xml\u0000?? scratch/labels-current-20261022-labels-final.png\u0000?? scratch/labels-current-20261022-labels-final.xml\u0000?? scratch/labels-current-20261022-labels-overview.png\u0000?? scratch/labels-current-20261022-labels-overview.xml\u0000?? scratch/labels-current-20261022-labels.png\u0000?? scratch/labels-current-20261022-labels.xml\u0000?? scratch/labels-current-20261022-main.png\u0000?? scratch/labels-current-20261022-main.xml\u0000?? scratch/labels-current-20261022-top2.png\u0000?? scratch/labels-current-20261022-top2.xml\u0000?? scratch/labels-current-20261022-top3.png\u0000?? scratch/labels-current-20261022-top3.xml\u0000?? scratch/labels-current-20261022.png\u0000?? scratch/labels-current-20261022.xml\u0000?? scratch/labels-current-screen.png\u0000?? scratch/labels-current-screen.xml\u0000?? scratch/labels-emulator-current.err.log\u0000?? scratch/labels-emulator-current.out.log\u0000?? scratch/labels-emulator.err.log\u0000?? scratch/labels-emulator.out.log\u0000?? scratch/labels-hidden-task-5556.png\u0000?? scratch/labels-hidden-task-5556.xml\u0000?? scratch/labels-home-after-build.png\u0000?? scratch/labels-home-after-build.xml\u0000?? scratch/labels-home-screen.png\u0000?? scratch/labels-home-screen2.png\u0000?? scratch/labels-home-screen3.png\u0000?? scratch/labels-home-screen4.png\u0000?? scratch/labels-immediate-delivery-build.log\u0000?? scratch/labels-immediate-emulator-error.log\u0000?? scratch/labels-immediate-emulator.log\u0000?? scratch/labels-immediate-shared-build.log\u0000?? scratch/labels-menu-new-device.png\u0000?? scratch/labels-menu-new-ui.xml\u0000?? scratch/labels-menu-ui.xml\u0000?? scratch/labels-overflow-screen.png\u0000?? scratch/labels-overflow-screen2.png\u0000?? scratch/labels-overflow-screen3.png\u0000?? scratch/labels-overview-device.png\u0000?? scratch/labels-overview-final-device.png\u0000?? scratch/labels-overview-final-ui.xml\u0000?? scratch/labels-overview-menu-device.png\u0000?? scratch/labels-overview-new-ui.xml\u0000?? scratch/labels-overview-new.png\u0000?? scratch/labels-overview-ui.xml\u0000?? scratch/labels-physical-home.png\u0000?? scratch/labels-physical-home.xml\u0000?? scratch/labels-qa-current.err.log\u0000?? scratch/labels-qa-current.out.log\u0000?? scratch/labels-qa-launch.err.log\u0000?? scratch/labels-qa-launch.out.log\u0000?? scratch/labels-quick-sort-4.3.4.2-build.log\u0000?? scratch/labels-quick-sort-build.log\u0000?? scratch/labels-quick-sort-final-build.log\u0000?? scratch/labels-quick-sort-qa/\u0000?? scratch/labels-quick-sort-verify.log\u0000?? scratch/labels-task-5556.png\u0000?? scratch/labels-task-5556.xml\u0000?? scratch/labels_done.png\u0000?? scratch/labels_final.png\u0000?? scratch/labels_final2.png\u0000?? scratch/labels_final3.png\u0000?? scratch/labels_immediate_edits.py\u0000?? scratch/labels_latest.png\u0000?? scratch/labels_latest2.png\u0000?? scratch/labels_menu2.png\u0000?? scratch/labels_sort_dialog.png\u0000?? scratch/labels_sort_dialog2.png\u0000?? scratch/latest-dedup-review.png\u0000?? scratch/latest-ui.xml\u0000?? scratch/latest-viewer-entries.log\u0000?? scratch/libjxl-v0.11.2/\u0000?? scratch/library-final-new.png\u0000?? scratch/libspng-v0.7.4/\u0000?? scratch/lifecycle_compare.py\u0000?? scratch/lock-menu-qa.xml\u0000?? scratch/lock-sort-qa.png\u0000?? scratch/lock-sort-qa.xml\u0000?? scratch/locked-all-selected.png\u0000?? scratch/locked-all-selected.xml\u0000?? scratch/locked-before-moveout.png\u0000?? scratch/locked-before-moveout.xml\u0000?? scratch/locked-details-qa.png\u0000?? scratch/locked-details-qa.xml\u0000?? scratch/locked-details-sheet.png\u0000?? scratch/locked-details-sheet.xml\u0000?? scratch/locked-editor-active.xml\u0000?? scratch/locked-editor-after-remove-fav.xml\u0000?? scratch/locked-editor-after-remove.xml\u0000?? scratch/locked-editor-after-save.xml\u0000?? scratch/locked-editor-dismiss-live.png\u0000?? scratch/locked-editor-dismiss-live.xml\u0000?? scratch/locked-editor-live-2.png\u0000?? scratch/locked-editor-live-2.xml\u0000?? scratch/locked-editor-live-3.png\u0000?? scratch/locked-editor-live-3.xml\u0000?? scratch/locked-editor-live-5556.xml\u0000?? scratch/locked-editor-restore.xml\u0000?? scratch/locked-editor-restore3.xml\u0000?? scratch/locked-editor-restore4.png\u0000?? scratch/locked-editor-restore4.xml\u0000?? scratch/locked-favourite-toggle-probe.png\u0000?? scratch/locked-favourite-toggle-probe.xml\u0000?? scratch/locked-final-before-select.png\u0000?? scratch/locked-final-before-select.xml\u0000?? scratch/locked-final-viewer.png\u0000?? scratch/locked-final-viewer.xml\u0000?? scratch/locked-folder-5556.png\u0000?? scratch/locked-folder-5556.xml\u0000?? scratch/locked-grid-current.png\u0000?? scratch/locked-grid-current.xml\u0000?? scratch/locked-grid-live-5556.png\u0000?? scratch/locked-grid-live-5556.xml\u0000?? scratch/locked-grid-live-restore.xml\u0000?? scratch/locked-grid-restore2.xml\u0000?? scratch/locked-info-confirm2.xml\u0000?? scratch/locked-info-final-attempt.png\u0000?? scratch/locked-info-final-attempt.xml\u0000?? scratch/locked-info-live-5556.png\u0000?? scratch/locked-info-live-5556.xml\u0000?? scratch/locked-info-probe-image.png\u0000?? scratch/locked-info-probe.xml\u0000?? scratch/locked-info-restore-final.png\u0000?? scratch/locked-info-restore-final.xml\u0000?? scratch/locked-info-restore.xml\u0000?? scratch/locked-info-restore2.xml\u0000?? scratch/locked-info-sequence-live.png\u0000?? scratch/locked-info-sequence-live.xml\u0000?? scratch/locked-info-sheet2.png\u0000?? scratch/locked-info-sheet2.xml\u0000?? scratch/locked-installed-verify.png\u0000?? scratch/locked-installed-verify.xml\u0000?? scratch/locked-label-editor-live.png\u0000?? scratch/locked-label-editor-live.xml\u0000?? scratch/locked-label-toggle-live.png\u0000?? scratch/locked-label-toggle-live.xml\u0000?? scratch/locked-menu-5556.png\u0000?? scratch/locked-menu-5556.xml\u0000?? scratch/locked-normal-live.png\u0000?? scratch/locked-normal-live.xml\u0000?? scratch/locked-normal-sort-verify.png\u0000?? scratch/locked-normal-sort-verify.xml\u0000?? scratch/locked-one.png\u0000?? scratch/locked-one.xml\u0000?? scratch/locked-qa-start2.png\u0000?? scratch/locked-qa-start2.xml\u0000?? scratch/locked-relaunched.png\u0000?? scratch/locked-relaunched.xml\u0000?? scratch/locked-select-3600.png\u0000?? scratch/locked-select-3600.xml\u0000?? scratch/locked-selected-actions-qa.png\u0000?? scratch/locked-selected-actions-qa.xml\u0000?? scratch/locked-selected-live.png\u0000?? scratch/locked-selected-live.xml\u0000?? scratch/locked-selected-menu-verify-current.png\u0000?? scratch/locked-selected-menu-verify-current.xml\u0000?? scratch/locked-selected-now.png\u0000?? scratch/locked-selected-now.xml\u0000?? scratch/locked-selected-now2.png\u0000?? scratch/locked-selected-now2.xml\u0000?? scratch/locked-selected-task-current.png\u0000?? scratch/locked-selected-task-current.xml\u0000?? scratch/locked-selected-verify-current.png\u0000?? scratch/locked-selected-verify-current.xml\u0000?? scratch/locked-sort-dialog-verify-current.png\u0000?? scratch/locked-sort-dialog-verify-current.xml\u0000?? scratch/locked-sort-verify-current.png\u0000?? scratch/locked-sort-verify-current.xml\u0000?? scratch/locked-ui-tap-open.xml\u0000?? scratch/locked-viewer-after-taps.png\u0000?? scratch/locked-viewer-controls-restore.xml\u0000?? scratch/locked-viewer-details-verify.png\u0000?? scratch/locked-viewer-details-verify.xml\u0000?? scratch/locked-viewer-entry2.png\u0000?? scratch/locked-viewer-entry2.xml\u0000?? scratch/locked-viewer-live-5556.png\u0000?? scratch/locked-viewer-live-5556.xml\u0000?? scratch/locked-viewer-menu-after-probe.xml\u0000?? scratch/locked-viewer-menu-live.xml\u0000?? scratch/locked-viewer-qa.png\u0000?? scratch/locked-viewer-qa.xml\u0000?? scratch/locked-viewer-show-control.xml\u0000?? scratch/locked-viewer-tap-probe.png\u0000?? scratch/logs/\u0000?? scratch/main-label-transition.mp4\u0000?? scratch/main-menu-live.png\u0000?? scratch/main-menu-live.xml\u0000?? scratch/main-to-labels-contact.jpg\u0000?? scratch/main-to-labels.mp4\u0000?? scratch/main-toolbar-alpha-build.log\u0000?? scratch/main-toolbar-fix-build.log\u0000?? scratch/main-toolbar-fix-device.log\u0000?? scratch/main-toolbar-fix-unit.log\u0000?? scratch/material3-sources.jar\u0000?? scratch/md3-capsules-build.log\u0000?? scratch/md3-messages-debug-build.log\u0000?? scratch/md3-messages-debug-install.log\u0000?? scratch/media-browse-cache-build-final.log\u0000?? scratch/media-browse-cache-build.log\u0000?? scratch/media-browse-cache-ui-final.log\u0000?? scratch/media-browse-cache-ui.log\u0000?? scratch/media-browse-memory-build.log\u0000?? scratch/media-browse-memory.log\u0000?? scratch/media-browse-performance.log\u0000?? scratch/media-type-compact/\u0000?? scratch/media-type-qa/\u0000?? scratch/media-types-build-final.log\u0000?? scratch/media-types-build.log\u0000?? scratch/media-types-compact-build.log\u0000?? scratch/media-types-compact-emulator.log\u0000?? scratch/media-types-emulator-final.log\u0000?? scratch/media-types-emulator.log\u0000?? scratch/media-types-test-build.log\u0000?? scratch/media3-AsyncCodec.java\u0000?? scratch/media3-DefaultRenderersFactory.java\u0000?? scratch/media3-ExoPlayer.java\u0000?? scratch/media3-ExoPlayerImpl.java\u0000?? scratch/media3-ExoPlayerImplInternal.java\u0000?? scratch/media3-MediaCodecRenderer.java\u0000?? scratch/media3-SampleQueue.java\u0000?? scratch/media3-source-ProgressiveMediaPeriod.java\u0000?? scratch/media3-video-MediaCodecVideoRenderer.java\u0000?? scratch/mediacodec-MediaCodecRenderer-181.java\u0000?? scratch/memory-topbar-trace-validation.log\u0000?? scratch/menu-d-albums.png\u0000?? scratch/menu-d-albums.xml\u0000?? scratch/menu-d-build.log\u0000?? scratch/menu-d-current.png\u0000?? scratch/menu-d-dark.png\u0000?? scratch/menu-d-dismiss.xml\u0000?? scratch/menu-d-emulator-build.log\u0000?? scratch/menu-d-final.png\u0000?? scratch/menu-d-hidden.xml\u0000?? scratch/menu-d-light.png\u0000?? scratch/menu-d-locked.xml\u0000?? scratch/menu-d-quick-sort.xml\u0000?? scratch/menu-d-resumed.png\u0000?? scratch/menu-d-settings.xml\u0000?? scratch/menu-d-sort.xml\u0000?? scratch/menu-d-x86_64.apk.idsig\u0000?? scratch/menu-main-5556.png\u0000?? scratch/menu-main-5556.xml\u0000?? scratch/menu-nav.xml\u0000?? scratch/menu-relaunch.png\u0000?? scratch/menu-relaunch.xml\u0000?? scratch/menu-task-5556.xml\u0000?? scratch/menu-verify-current.png\u0000?? scratch/menu-verify-current.xml\u0000?? scratch/merged-copy-toggle.png\u0000?? scratch/migrate_settings_groups.py\u0000?? scratch/move-out-check.sqlite\u0000?? scratch/move-out-db\u0000?? scratch/move-out-db2\u0000?? scratch/move-simplify-build.log\u0000?? scratch/move-simplify-emulator-error.log\u0000?? scratch/move-simplify-emulator.log\u0000?? scratch/move-simplify-final-build.log\u0000?? scratch/move-simplify-final-safety.log\u0000?? scratch/move-simplify-final-ui.log\u0000?? scratch/move-simplify-qa/\u0000?? scratch/move-simplify-safety.log\u0000?? scratch/move-simplify-ui.log\u0000?? scratch/nav-albums-current.xml\u0000?? scratch/navigation-material3.jar\u0000?? scratch/navigation-reveal-debug-build.log\u0000?? scratch/navigation-reveal-debug-install.log\u0000?? scratch/navigation-reveal-preview-syntax.js\u0000?? scratch/navigation-reveal-preview.err.log\u0000?? scratch/navigation-reveal-preview.out.log\u0000?? scratch/navigation-reveal-source-hashes.json\u0000?? scratch/now-continuation.xml\u0000?? scratch/now.png\u0000?? scratch/now.xml\u0000?? scratch/opaque-bottom-bar.png\u0000?? scratch/package_baseline_43416.ps1\u0000?? scratch/package_batch_grid_sheet_fix.ps1\u0000?? scratch/package_batch_refresh_fix.ps1\u0000?? scratch/package_bulk_transfer_fix.ps1\u0000?? scratch/package_quicksort_rows_photos.ps1\u0000?? scratch/package_rotation_bulk_stability.ps1\u0000?? scratch/package_selection_4355.ps1\u0000?? scratch/package_video_rotation_handoff.ps1\u0000?? scratch/parse_trace.py\u0000?? scratch/parse_trace2.py\u0000?? scratch/per-frame-trace-build-2.log\u0000?? scratch/per-frame-trace-build.log\u0000?? scratch/perfetto-android-arm64.zip\u0000?? scratch/perfetto-android-arm64/\u0000?? scratch/perfetto-frames.sql\u0000?? scratch/perfetto-win/\u0000?? scratch/perfetto-windows-amd64.zip\u0000?? scratch/performance-final-new.png\u0000?? scratch/persistent-picker-batches-build.log\u0000?? scratch/persistent-picker-delivery-build.log\u0000?? scratch/persistent-picker-final-build.log\u0000?? scratch/photo-grid-baseline.png\u0000?? scratch/photo-grid-baseline.xml\u0000?? scratch/photo-grid-selected.png\u0000?? scratch/photo-grid-selected.xml\u0000?? scratch/photos-after-restore.png\u0000?? scratch/photos-after-restore.xml\u0000?? scratch/photos-delete-select.png\u0000?? scratch/photos-delete-select.xml\u0000?? scratch/photos-grid-for-trash.png\u0000?? scratch/photos-grid-for-trash.xml\u0000?? scratch/photos-menu-verify.png\u0000?? scratch/photos-menu-verify.xml\u0000?? scratch/photos-normal-live.png\u0000?? scratch/photos-normal-live.xml\u0000?? scratch/photos-normal-live2.png\u0000?? scratch/photos-normal-live2.xml\u0000?? scratch/photos-selected-live.png\u0000?? scratch/photos-selected-live.xml\u0000?? scratch/picker-columns-persistence-compile.log\u0000?? scratch/picker-empty-undo-device-final.log\u0000?? scratch/picker-empty-undo-device.log\u0000?? scratch/picker-final-debug-build.log\u0000?? scratch/picker-final-interaction-build.log\u0000?? scratch/picker-grid-corners-dismiss-build.log\u0000?? scratch/picker-interaction-restoration-build.log\u0000?? scratch/picker-isolated-grid-build.log\u0000?? scratch/picker-reachable-dismiss-build.log\u0000?? scratch/picker-regression-harness-build.log\u0000?? scratch/picker-restoration-album-device-final.log\u0000?? scratch/picker-restoration-album-device-final2.log\u0000?? scratch/picker-restoration-album-device.log\u0000?? scratch/picker-restoration-header-device.log\u0000?? scratch/picker-selection-close-build.log\u0000?? scratch/picker-selection-principle-build.log\u0000?? scratch/picker-shared-undo-build.log\u0000?? scratch/picker-stability-build.log\u0000?? scratch/picker-stability-delivery-build.log\u0000?? scratch/picker-stability-final-build.log\u0000?? scratch/picker-undo-final-build.log\u0000?? scratch/pixel-7368-entry-analysis-20260731.json\u0000?? scratch/pixel-7368-full-20260731.log\u0000?? scratch/pixel-7368-system-windows-20260731.json\u0000?? scratch/pixel-7368-viewer-metrics-20260731.log\u0000?? scratch/pixel-foreground.png\u0000?? scratch/pixel-foreground.xml\u0000?? scratch/pixel-foreground2.png\u0000?? scratch/pixel-foreground2.xml\u0000?? scratch/pixel-full-20260731.log\u0000?? scratch/pixel-simple-user-session-20260731.analysis.json\u0000?? scratch/pixel-simple-user-session-20260731.log\u0000?? scratch/pixel-tile-pan.perfetto-trace\u0000?? scratch/player-dedup-merge-check.log\u0000?? scratch/player-dedup-merge-content.json\u0000?? scratch/player-design-browser/\u0000?? scratch/player-device-result.log\u0000?? scratch/player-final-build.log\u0000?? scratch/player-focused-build.log\u0000?? scratch/player-implementation-build.log\u0000?? scratch/player-initial-ui.png\u0000?? scratch/player-landscape.png\u0000?? scratch/player-live.png\u0000?? scratch/player-refinements.png\u0000?? scratch/player-swipe-toolbar.png\u0000?? scratch/player-test-build.log\u0000?? scratch/png-fit-native-20261021/\u0000?? scratch/post-install-selected.png\u0000?? scratch/post-install-selected.xml\u0000?? scratch/post-install-start.xml\u0000?? scratch/prepare_native_fit_emulator_20261021.py\u0000?? scratch/prepare_pixel_512_decode_fix_phone_20261020.py\u0000?? scratch/prepare_pixel_adaptive_preview_20261021.py\u0000?? scratch/prepare_pixel_fit_preview_20261021.py\u0000?? scratch/prepare_pixel_min512_phone_20261020.py\u0000?? scratch/prepare_pixel_native_preview_20261020.py\u0000?? scratch/prepare_pixel_refill_preview_20261021.py\u0000?? scratch/prepare_png_fit_sources_20261021.py\u0000?? scratch/prepare_simple_compare_20261020.py\u0000?? scratch/prepare_simple_no_prefetch_phone_20261020.py\u0000?? scratch/probe_video_provider_move.py\u0000?? scratch/profile_jpeg_hotspots_20261021.py\u0000?? scratch/progress-and-selected-video-4.3.4.7-build.log\u0000?? scratch/progress-end-dot-4.3.4.7-build.log\u0000?? scratch/pull-redesign-qa.py\u0000?? scratch/pull_copy_move_ui_evidence.py\u0000?? scratch/qa-home.xml\u0000?? scratch/qa-launch-final.xml\u0000?? scratch/qa-menu.xml\u0000?? scratch/qa3600-viewer-before-info.png\u0000?? scratch/qa3600-viewer-before-info.xml\u0000?? scratch/qa_locked_label.png\u0000?? scratch/qs-active.png\u0000?? scratch/qs-cover-foreground.png\u0000?? scratch/qs-cover-start.png\u0000?? scratch/qs-expanded.png\u0000?? scratch/qs-reentry.png\u0000?? scratch/qs-reordered.png\u0000?? scratch/qs-round-cover-menu.png\u0000?? scratch/qs-round-cover-start.png\u0000?? scratch/qs-round-cover-visible.png\u0000?? scratch/qs-seven.png\u0000?? scratch/qs-verify.png\u0000?? scratch/quick-sort-batch-dismiss-build.log\u0000?? scratch/quick-sort-before-unification.kt\u0000?? scratch/quick-sort-center-build.log\u0000?? scratch/quick-sort-clean-capsules-build.log\u0000?? scratch/quick-sort-complete-build.log\u0000?? scratch/quick-sort-cover-build.log\u0000?? scratch/quick-sort-current.png\u0000?? scratch/quick-sort-delivery-build.log\u0000?? scratch/quick-sort-expanded-new.png\u0000?? scratch/quick-sort-final-build.log\u0000?? scratch/quick-sort-final-safety-result.log\u0000?? scratch/quick-sort-final-ui-result.log\u0000?? scratch/quick-sort-final-verification-build.log\u0000?? scratch/quick-sort-foreground.png\u0000?? scratch/quick-sort-header-delivery-device-result.log\u0000?? scratch/quick-sort-header-device-result.log\u0000?? scratch/quick-sort-header-final-device-result.log\u0000?? scratch/quick-sort-header-shared-groups-result.log\u0000?? scratch/quick-sort-layout-build.log\u0000?? scratch/quick-sort-layout-check-build.log\u0000?? scratch/quick-sort-layout-confirmation-test-build.log\u0000?? scratch/quick-sort-layout-confirmations-result.log\u0000?? scratch/quick-sort-layout-emulator-error.log\u0000?? scratch/quick-sort-layout-emulator.log\u0000?? scratch/quick-sort-layout-final-build.log\u0000?? scratch/quick-sort-layout-qa/\u0000?? scratch/quick-sort-layout-redesign-result.log\u0000?? scratch/quick-sort-layout-ui-result.log\u0000?? scratch/quick-sort-layout-ui-test-build.log\u0000?? scratch/quick-sort-redesign-build.log\u0000?? scratch/quick-sort-redesign-current.png\u0000?? scratch/quick-sort-redesign-final-build.log\u0000?? scratch/quick-sort-redesign-safety.log\u0000?? scratch/quick-sort-redesign-test-build.log\u0000?? scratch/quick-sort-redesign-ui-build.log\u0000?? scratch/quick-sort-redesign-ui-fresh.log\u0000?? scratch/quick-sort-redesign-ui.log\u0000?? scratch/quick-sort-round-cover-build.log\u0000?? scratch/quick-sort-shared-live.png\u0000?? scratch/quick-sort-shared-live.xml\u0000?? scratch/quick-sort-ui.xml\u0000?? scratch/quicksort-rows-overview-build-final.log\u0000?? scratch/quicksort-rows-overview-build.log\u0000?? scratch/quicksort-rows-overview-verified-build.log\u0000?? scratch/quicksort-video-first-baseline-build-retry.log\u0000?? scratch/quicksort-video-first-baseline-build.log\u0000?? scratch/quicksort-video-first-baseline-device-result.log\u0000?? scratch/quicksort-video-first-baseline-journal.json\u0000?? scratch/quicksort-video-first-cold-1.log\u0000?? scratch/quicksort-video-first-cold-2.log\u0000?? scratch/quicksort-video-first-cold-3.log\u0000?? scratch/quicksort-video-first-cold-4.log\u0000?? scratch/quicksort-video-first-cold-5.log\u0000?? scratch/quicksort-video-first-cold-results.json\u0000?? scratch/quicksort-video-first-final-verification.json\u0000?? scratch/quicksort-video-first-fix-build.log\u0000?? scratch/quicksort-video-first-fixed-device-result.log\u0000?? scratch/quicksort-video-first-inputs-20261020/\u0000?? scratch/quicksort-video-first-inputs.json\u0000?? scratch/quicksort-video-first-label-regression.log\u0000?? scratch/quicksort-video-first-probe-build.log\u0000?? scratch/quicksort-video-first-safety-regression.log\u0000?? scratch/quicksort-video-first-valid-baseline-build.log\u0000?? scratch/quicksort-video-first-valid-baseline-device-result.log\u0000?? scratch/quicksort-video-provider-relative-only-probe.json\u0000?? scratch/read_jpeg_sampling_20261021.py\u0000?? scratch/record_toolbar_selection.py\u0000?? scratch/recover-current.png\u0000?? scratch/recover-current.xml\u0000?? scratch/redesign-emulator-error.log\u0000?? scratch/redesign-emulator.log\u0000?? scratch/redesign-qa-fresh/\u0000?? scratch/redesign-qa/\u0000?? scratch/relaunch-live.xml\u0000?? scratch/relaunch.png\u0000?? scratch/relaunch.xml\u0000?? scratch/relaunch2.xml\u0000?? scratch/release-4.3.4.12-v8a-build.log\u0000?? scratch/release-4.3.4.13-v8a-build.log\u0000?? scratch/release-4.3.4.14-v8a-build.log\u0000?? scratch/release-4356-build.log\u0000?? scratch/release-4357-before-testonly-fix.log\u0000?? scratch/release-4357-build.log\u0000?? scratch/release-4357-initial-build.log\u0000?? scratch/release-4357-previous-signature.log\u0000?? scratch/release-4358-build.log\u0000?? scratch/release-4358-dedup-build.log\u0000?? scratch/release-artifacts/\u0000?? scratch/release-build-final-viewer-fix.log\u0000?? scratch/release-build.log\u0000?? scratch/release-unit-test.log\u0000?? scratch/repro-all-20261027-212604-process-exits.json\u0000?? scratch/repro-all-20261027-212604.err\u0000?? scratch/repro-all-20261027-212604.log\u0000?? scratch/repro-all-20261027-212604.pid\u0000?? scratch/repro-all-20261027-212604.sha256\u0000?? scratch/repro-compare-20261027-214031.err\u0000?? scratch/repro-compare-20261027-214031.log\u0000?? scratch/repro-compare-20261027-214031.pid\u0000?? scratch/repro-compare-20261027-214031.sha256\u0000?? scratch/reset_simple_compare_cache_20261020.py\u0000?? scratch/restarted.png\u0000?? scratch/resume-emulator-error.log\u0000?? scratch/resume-emulator.log\u0000?? scratch/resume_compare.py\u0000?? scratch/reuse-built-native.init.gradle\u0000?? scratch/review-redesign.png\u0000?? scratch/rotation-build.log\u0000?? scratch/rotation-final-build.log\u0000?? scratch/rotation-handoff-build.log\u0000?? scratch/rotation-memory-build.log\u0000?? scratch/rotation-package-verified.log\u0000?? scratch/run_pip_ui_capture.ps1\u0000?? scratch/run_video_handoff_regression.ps1\u0000?? scratch/run_video_return_capture.ps1\u0000?? scratch/samsung-after-pan.png\u0000?? scratch/samsung-current.png\u0000?? scratch/samsung-viewer-wait-20261020/\u0000?? scratch/samsung-zoomed.png\u0000?? scratch/samsung_viewer_wait_capture.py\u0000?? scratch/screen-verify-current.png\u0000?? scratch/scrollbar-qa/\u0000?? scratch/select-all-current.png\u0000?? scratch/select-all-emulator-error.log\u0000?? scratch/select-all-emulator.log\u0000?? scratch/select-all-emulator2-error.log\u0000?? scratch/select-all-emulator2.log\u0000?? scratch/select-all-screenshot-build.log\u0000?? scratch/select-all-window.xml\u0000?? scratch/selected-album-menu-ui.xml\u0000?? scratch/selected-album-menu.png\u0000?? scratch/selection-4355-arm64-release-build.log\u0000?? scratch/selection-4355-unit-tests.log\u0000?? scratch/selection-feedback-4.3.4.7-build.log\u0000?? scratch/selection-notice-4.3.4.7-final-build.log\u0000?? scratch/selection-notice-4.3.4.7-ui-result.log\u0000?? scratch/selection-notice-4.3.4.7-verified-build.log\u0000?? scratch/selection-notice-emulator-error.log\u0000?? scratch/selection-notice-emulator.log\u0000?? scratch/selection-notice-qa/\u0000?? scratch/selection-regression-revert-build.log\u0000?? scratch/separate-sheet-columns-compile.log\u0000?? scratch/settings-main-new.png\u0000?? scratch/settings-selection-device-result.log\u0000?? scratch/settings-selection-shared-groups-result.log\u0000?? scratch/share-chooser.png\u0000?? scratch/share-chooser.xml\u0000?? scratch/share-viewer-probe.xml\u0000?? scratch/shared-grid-refactor-build.log\u0000?? scratch/sheet-columns-and-sort-check.log\u0000?? scratch/show_record.py\u0000?? scratch/simple-clean-apk/\u0000?? scratch/simple-commons-powertrace/\u0000?? scratch/simple-compare-20261020/\u0000?? scratch/simple-compare-decode-20261020.log\u0000?? scratch/simple-gallery-powertrace/\u0000?? scratch/simple-installed-powertrace/\u0000?? scratch/simple-powertrace-datasource-release.apk.idsig\u0000?? scratch/simple-powertrace-release.apk.idsig\u0000?? scratch/simple-ssiv-aar/\u0000?? scratch/simple-trace-apk/\u0000?? scratch/simple-trace-decode/\u0000?? scratch/singleton-compile.log\u0000?? scratch/sort-icon-build.log\u0000?? scratch/ssiv.zip\u0000?? scratch/ssiv_aar/\u0000?? scratch/stable-albums.xml\u0000?? scratch/stable-albums2.xml\u0000?? scratch/stable-current.xml\u0000?? scratch/stable-selection-contact.jpg\u0000?? scratch/stable-selection-frames/\u0000?? scratch/stable-topbar-build.log\u0000?? scratch/stable-transition-contact.jpg\u0000?? scratch/stable-transition-frames/\u0000?? scratch/state-current.png\u0000?? scratch/state-current.xml\u0000?? scratch/state-lockselected.png\u0000?? scratch/state-lockselected.xml\u0000?? scratch/summarize_refill_user_20261021.py\u0000?? scratch/sync-clean-capsules-preview.py\u0000?? scratch/task-after-cancel.xml\u0000?? scratch/task-albums.xml\u0000?? scratch/task-app-access.xml\u0000?? scratch/task-current-5556.png\u0000?? scratch/task-current-5556.xml\u0000?? scratch/task-emulator-current.png\u0000?? scratch/task-emulator-current.xml\u0000?? scratch/task-emulator-home.xml\u0000?? scratch/task-emulator-state.xml\u0000?? scratch/task-list-current-5556.png\u0000?? scratch/task-list-main-5556.png\u0000?? scratch/task-list-main-5556.xml\u0000?? scratch/task-list-window-5556.xml\u0000?? scratch/task1-albums-selected.xml\u0000?? scratch/task1-albums.png\u0000?? scratch/task1-albums.xml\u0000?? scratch/task1-current.xml\u0000?? scratch/task1-long.xml\u0000?? scratch/task1-photos-selected.xml\u0000?? scratch/task1-selected.xml\u0000?? scratch/taskqa-album-5556.png\u0000?? scratch/taskqa-album-5556.xml\u0000?? scratch/taskqa-selected-5556.png\u0000?? scratch/taskqa-selected-5556.xml\u0000?? scratch/taskqa-selection-menu-task-5556.xml\u0000?? scratch/test-after-snapshot.log\u0000?? scratch/test-final-viewer-fix.log\u0000?? scratch/test_simple_no_prefetch_20261020.py\u0000?? scratch/theme-from-display-new.png\u0000?? scratch/tiff-aar/\u0000?? scratch/toast-current-20261028.png\u0000?? scratch/toast-live-probe.err\u0000?? scratch/toast-live-probe.log\u0000?? scratch/toast-live-probe.png\u0000?? scratch/toolbar-acceptance-build.log\u0000?? scratch/toolbar-acceptance-emulator-error.log\u0000?? scratch/toolbar-acceptance-emulator.log\u0000?? scratch/toolbar-acceptance/\u0000?? scratch/toolbar-current.xml\u0000?? scratch/toolbar-final-acceptance-build.log\u0000?? scratch/toolbar-final-low-memory-build.log\u0000?? scratch/toolbar-half-sheet-height-build.log\u0000?? scratch/toolbar-isolated-emulator-error.log\u0000?? scratch/toolbar-isolated-emulator.log\u0000?? scratch/toolbar-pickers-unified-build.log\u0000?? scratch/toolbar-versioned-debug-build.log\u0000?? scratch/toolbar_acceptance.py\u0000?? scratch/top_action.png\u0000?? scratch/trace_processor\u0000?? scratch/transfer-failure-4.3.4.9-build.log\u0000?? scratch/transfer-failure-4.3.4.9-package.log\u0000?? scratch/transfer-failure-4.3.4.9-qa/\u0000?? scratch/transfer-failure-4.3.4.9-regression.log\u0000?? scratch/transfer-failure-4.3.4.9-ui.log\u0000?? scratch/transfer-failure-emulator-error.log\u0000?? scratch/transfer-failure-emulator.log\u0000?? scratch/transfer-failure-screenshot-test-build.log\u0000?? scratch/trash-confirm.png\u0000?? scratch/trash-confirm.xml\u0000?? scratch/ui-current.xml\u0000?? scratch/ui-label-migration-approved-build.log\u0000?? scratch/ui-label-migration-build.log\u0000?? scratch/ui-label-migration-corner-fix-build.log\u0000?? scratch/ui-label-migration-delivery-build.log\u0000?? scratch/ui-label-migration-final-apk-build.log\u0000?? scratch/ui-label-migration-final-build.log\u0000?? scratch/ui-label-migration-latest-build.log\u0000?? scratch/ui-label-migration-library-block-build.log\u0000?? scratch/ui-label-migration-navigation-test-build.log\u0000?? scratch/ui-label-migration-qa/\u0000?? scratch/ui-label-migration-shared-build.log\u0000?? scratch/ui-label-migration-shared-groups-build.log\u0000?? scratch/ui-label-migration-ui-test-build.log\u0000?? scratch/ui-label-migration-verified-build.log\u0000?? scratch/ui-migration-emulator-error.log\u0000?? scratch/ui-migration-emulator-resume-error.log\u0000?? scratch/ui-migration-emulator-resume.log\u0000?? scratch/ui-migration-emulator.log\u0000?? scratch/ui-toggle-final.xml\u0000?? scratch/undo-handedness-emulator-error.log\u0000?? scratch/undo-handedness-emulator.log\u0000?? scratch/undo-handedness-fix-build.log\u0000?? scratch/undo-handedness-qa.tar\u0000?? scratch/undo-handedness-qa/\u0000?? scratch/undo-handedness-replace-build.log\u0000?? scratch/undo-handedness-retry-build.log\u0000?? scratch/undo-handedness-safety-result.log\u0000?? scratch/undo-handedness-ui-build.log\u0000?? scratch/undo-handedness-ui-result.log\u0000?? scratch/unified-all-pages-build.log\u0000?? scratch/unified-final-arm64-release-build.log\u0000?? scratch/unified-final-debug-build.log\u0000?? scratch/unified-label-selector-latest.png\u0000?? scratch/unified-route-model-compile.log\u0000?? scratch/unified-single-topbar-build.log\u0000?? scratch/unified-singleton-build.log\u0000?? scratch/unified-transfer-4354-release-build.log\u0000?? scratch/unified-transfer-baseline-build.log\u0000?? scratch/unified-transfer-baseline-build2.log\u0000?? scratch/unified-transfer-baseline-build3.log\u0000?? scratch/unified-transfer-baseline-device.log\u0000?? scratch/unified-transfer-baseline-device2.log\u0000?? scratch/unified-transfer-build.log\u0000?? scratch/unified-transfer-delta-before.log\u0000?? scratch/unified-transfer-device.log\u0000?? scratch/unified-transfer-emulator-error.log\u0000?? scratch/unified-transfer-emulator.log\u0000?? scratch/unified-transfer-final-build.log\u0000?? scratch/unified-transfer-final-device.log\u0000?? scratch/unified-transfer-final-quicksort-device.log\u0000?? scratch/unified-transfer-index-check-build.log\u0000?? scratch/unified-transfer-index-device.log\u0000?? scratch/unified-transfer-quicksort-baseline-device.log\u0000?? scratch/unified-transfer-quicksort-device.log\u0000?? scratch/unified-transfer-retained-media-verification.json\u0000?? scratch/unified-transfer-video-device.log\u0000?? scratch/unified-transfer-visible-emulator-error.log\u0000?? scratch/unified-transfer-visible-emulator.log\u0000?? scratch/unify_gallery_routes.py\u0000?? scratch/unify_main_route_models.py\u0000?? scratch/unify_selection_pickers.py\u0000?? scratch/update_persistent_pickers.py\u0000?? scratch/user-test-build.log\u0000?? scratch/verify-home.png\u0000?? scratch/verify-home.xml\u0000?? scratch/verify-release-4358.ps1\u0000?? scratch/verify-selected.png\u0000?? scratch/verify-selected.xml\u0000?? scratch/verify-state.png\u0000?? scratch/verify-state.xml\u0000?? scratch/verify_dedup_release_4359.py\u0000?? scratch/verify_release_43415.py\u0000?? scratch/verify_simple_compare_20261020.py\u0000?? scratch/verify_simple_detailed_logger_20261020.py\u0000?? scratch/verify_unified_transfer_media.py\u0000?? scratch/video-MediaCodecVideoRenderer-181.java\u0000?? scratch/video-background-cover-compile.log\u0000?? scratch/video-background-cover-tests.log\u0000?? scratch/video-background-cover-trace-assemble.log\u0000?? scratch/video-cover-handoff-final-build.log\u0000?? scratch/video-cover-handoff-pip-build.log\u0000?? scratch/video-cover-handoff-v2-build.log\u0000?? scratch/video-cover-handoff-v3-build.log\u0000?? scratch/video-cover-test-home.png\u0000?? scratch/video-cover-test-open.png\u0000?? scratch/video-cover-test-reopen.png\u0000?? scratch/video-current.png\u0000?? scratch/video-handoff-final-build.log\u0000?? scratch/video-handoff-layer-build.log\u0000?? scratch/video-handoff-x86-build-2.log\u0000?? scratch/video-handoff-x86-build.log\u0000?? scratch/video-media3-181-build.log\u0000?? scratch/video-perframe-build.log\u0000?? scratch/video-pip-config-build.log\u0000?? scratch/video-pip-exit-build.log\u0000?? scratch/video-pip-final-build.log\u0000?? scratch/video-pip-gesture-fixture-build.log\u0000?? scratch/video-pip-instrument-build.log\u0000?? scratch/video-pip-paused-build.log\u0000?? scratch/video-pip-pinch-build.log\u0000?? scratch/video-pip-test-path-build.log\u0000?? scratch/video-pip-transform-build.log\u0000?? scratch/video-pip-ui-build.log\u0000?? scratch/video-pip-visible-resize-build.log\u0000?? scratch/video-resume-lifecycle-build.log\u0000?? scratch/video-resume-monitor-build.log\u0000?? scratch/video-rotation-handoff-build.log\u0000?? scratch/video-test-home.png\u0000?? scratch/video_listener_regression.py\u0000?? scratch/video_pip_listener_regression.py\u0000?? scratch/video_resume_pip_regression.py\u0000?? scratch/viewer-512-decode-fix-20261020/\u0000?? scratch/viewer-512-decode-fix-build-20261020.log\u0000?? scratch/viewer-512-decode-fix-build-final-20261020.log\u0000?? scratch/viewer-512-decode-fix-final-metrics-build-20261020.log\u0000?? scratch/viewer-ab-session-20260731.analysis.json\u0000?? scratch/viewer-ab-session-20260731.log\u0000?? scratch/viewer-action-stops-build.log\u0000?? scratch/viewer-action-strip-build.log\u0000?? scratch/viewer-after-wait-task-5556.png\u0000?? scratch/viewer-after-wait-task-5556.xml\u0000?? scratch/viewer-background-build.log\u0000?? scratch/viewer-content-rotation-build.log\u0000?? scratch/viewer-controls-v8a-release-build.log\u0000?? scratch/viewer-current.png\u0000?? scratch/viewer-dismiss-build.log\u0000?? scratch/viewer-dismiss-final-build.log\u0000?? scratch/viewer-entry-and-performance-fix-build.log\u0000?? scratch/viewer-entry-and-performance-fix-release.log\u0000?? scratch/viewer-entry-history-benchmark.csv\u0000?? scratch/viewer-entry-history-fix-build.log\u0000?? scratch/viewer-expand-build.log\u0000?? scratch/viewer-expand-x86_64.apk.idsig\u0000?? scratch/viewer-final-build.log\u0000?? scratch/viewer-final-compile.log\u0000?? scratch/viewer-final-x86_64.apk.idsig\u0000?? scratch/viewer-fit.png\u0000?? scratch/viewer-header-reveal-build.log\u0000?? scratch/viewer-header-reveal-final-build.log\u0000?? scratch/viewer-home.png\u0000?? scratch/viewer-home2.png\u0000?? scratch/viewer-home3.png\u0000?? scratch/viewer-home4.png\u0000?? scratch/viewer-info-after-label-task-5556.png\u0000?? scratch/viewer-info-after-label-task-5556.xml\u0000?? scratch/viewer-info-check-task-5556.png\u0000?? scratch/viewer-info-check-task-5556.xml\u0000?? scratch/viewer-info-final-task-5556.png\u0000?? scratch/viewer-info-final-task-5556.xml\u0000?? scratch/viewer-info-now-task-5556.png\u0000?? scratch/viewer-info-now-task-5556.xml\u0000?? scratch/viewer-info-task-5556.png\u0000?? scratch/viewer-info-task-5556.xml\u0000?? scratch/viewer-landscape-build.log\u0000?? scratch/viewer-minimum-512-20261020/\u0000?? scratch/viewer-minimum-512-build-20261020.log\u0000?? scratch/viewer-minimum-512-build-final-20261020.log\u0000?? scratch/viewer-minimum-512-build-final2-20261020.log\u0000?? scratch/viewer-minimum-512-provider-build-20261020.log\u0000?? scratch/viewer-minimum-512-provider-build2-20261020.log\u0000?? scratch/viewer-preview-fix-20261020/\u0000?? scratch/viewer-preview-size-20261020/\u0000?? scratch/viewer-remove-settings-build.log\u0000?? scratch/viewer-rotation-final-build.log\u0000?? scratch/viewer-rotation-handoff-memory-build.log\u0000?? scratch/viewer-rotation-scrollbar-build.log\u0000?? scratch/viewer-rotation-speed-install-build.log\u0000?? scratch/viewer-speed-scrub-build.log\u0000?? scratch/viewer-surface-display-fix-build.log\u0000?? scratch/viewer-task-5556.png\u0000?? scratch/viewer-task-5556.xml\u0000?? scratch/viewer-task-compression-20261021/\u0000?? scratch/viewer-thumbnail-4353-release-build.log\u0000?? scratch/viewer-thumbnail-build.log\u0000?? scratch/viewer-thumbnail-compile.log\u0000?? scratch/viewer-thumbnail-delivery-build.log\u0000?? scratch/viewer-thumbnail-final-build.log\u0000?? scratch/viewer-trace-assemble.log\u0000?? scratch/viewer-trace-capture-20261027.log\u0000?? scratch/viewer-trace-capture-all-20261027.log\u0000?? scratch/viewer-trace-captures/\u0000?? scratch/viewer-trace-final-assemble-2.log\u0000?? scratch/viewer-trace-final-assemble.log\u0000?? scratch/viewer-trace-live-20261027.err\u0000?? scratch/viewer-trace-live-20261027.log\u0000?? scratch/viewer-trace-live-20261027.pid\u0000?? scratch/viewer-trace-live-gzip-20261027.log\u0000?? scratch/viewer-trace-live-gzip-20261027.log.gz\u0000?? scratch/viewer-trace-live-gzip-20261027.pid\u0000?? scratch/viewer-trace-recreate-assemble.log\u0000?? scratch/viewer-transfer-overlay-fix-build.log\u0000?? scratch/viewer-ui-current-task-5556.png\u0000?? scratch/viewer-ui-current-task-5556.xml\u0000?? scratch/viewer-ui-show-task-5556.xml\u0000?? scratch/viewer-ui-show2-task-5556.png\u0000?? scratch/viewer-ui-show2-task-5556.xml\u0000?? scratch/viewer-ui.xml\u0000?? scratch/viewertrace-postfix-start.png\u0000?? scratch/viewertrace-postfix-start2.png\u0000?? scratch/visible-emulator-error.log\u0000?? scratch/visible-emulator.log\u0000?? scratch/webp-aar/\u0000?? scratch/window-current.xml\u0000?? scratch/window-task-5556.xml\u0000?? scratch/window-verify-current.xml\u0000?? third_party/TabulaV3/\u0000",
+  "scope": "Committed Git entries only. Uncommitted work, untracked files, external SDK/cache patches and submodule contents require separate preservation."
+}
