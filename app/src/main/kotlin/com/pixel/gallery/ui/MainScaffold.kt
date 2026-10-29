@@ -1199,11 +1199,13 @@ private fun MainScaffoldContent(
                         val lockedIds = vault.mapTo(hashSetOf()) { it.contentId }
                         allPhotos.filter { it.contentId in ids && it.contentId !in lockedIds }
                     }
-                    val routeGroupedLabelPhotos by produceState<List<GridItem>>(
-                        emptyList(), routeLabelPhotos, gridColumns, photoSortOrder,
-                    ) {
-                        value = withContext(Dispatchers.Default) {
-                            photosViewModel.groupMedia(routeLabelPhotos, gridColumns, photoSortOrder)
+                    // null means grouping is pending; an empty result means the label is empty.
+                    // Reset for each input so another label's result cannot appear during loading.
+                    val routeGroupedLabelPhotos by key(labelId, routeLabelPhotos, gridColumns, photoSortOrder) {
+                        produceState<List<GridItem>?>(null) {
+                            value = withContext(Dispatchers.Default) {
+                                photosViewModel.groupMedia(routeLabelPhotos, gridColumns, photoSortOrder)
+                            }
                         }
                     }
                     LabelPhotosScreen(
