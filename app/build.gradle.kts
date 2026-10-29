@@ -13,6 +13,11 @@ import java.io.FileInputStream
 val keystoreProperties = Properties()
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
+// Legacy DC-only experiment stays isolated; ship the validated adaptive fit path.
+val jpegDcPreviewEnabled = !officialRelease && viewerTestVariant == "trace" &&
+    providers.gradleProperty("jpegDcPreview").orNull.toBoolean()
+val jpegFitPreviewEnabled = providers.gradleProperty("jpegFitPreview").orNull
+    ?.toBooleanStrictOrNull() ?: true
 val viewerMetricsEnabled = !officialRelease && (
     viewerTestVariant == "trace" ||
         viewerTestVariant == "testtrace" ||
@@ -73,6 +78,8 @@ android {
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
+        buildConfigField("boolean", "JPEG_DC_PREVIEW_ENABLED", jpegDcPreviewEnabled.toString())
+        buildConfigField("boolean", "JPEG_FIT_PREVIEW_ENABLED", jpegFitPreviewEnabled.toString())
         buildConfigField(
             "boolean",
             "LARGE_IMAGE_COLD_TEST_DEFAULT",
@@ -85,8 +92,9 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        versionCode = 2047
-        versionName = "4.3.3.3-main"
+        testInstrumentationRunner = "com.pixel.gallery.integration.QuickSortSafetyInstrumentation"
+        versionCode = 2076
+        versionName = "4.3.5.9-main"
     }
 
     signingConfigs {
@@ -158,12 +166,13 @@ android {
         }
     }
 
-    // Apply Flutter-style version code offsets for ABI splits
-    // This ensures that the version code is strictly higher than previous split builds
+    // Keep a single-ABI arm64 release on the same version-code track as
+    // historical arm64 splits, so changing packaging does not cause a downgrade.
     applicationVariants.all {
         val variant = this
         variant.outputs.map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }.forEach { output ->
             val abi = output.getFilter(com.android.build.OutputFile.ABI)
+                ?: if (variant.buildType.name == "release" && !officialRelease) "arm64-v8a" else null
             if (abi != null) {
                 val abiMultiplier = when (abi) {
                     "armeabi-v7a" -> 1
@@ -276,4 +285,15 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
+}
+
+// The focused player suite can run independently of legacy instrumentation hosts.
+if (providers.gradleProperty("playerChecksOnly").orNull == "true") {
+    android.defaultConfig.testInstrumentationRunner = "com.pixel.gallery.integration.VideoPlayerInstrumentation"
+    android.sourceSets.getByName("androidTest").apply {
+        java.setSrcDirs(emptyList<String>())
+        assets.setSrcDirs(listOf("src/playerTest/assets"))
+        manifest.srcFile("src/playerTest/AndroidManifest.xml")
+    }
+    kotlin.sourceSets.getByName("androidTest").kotlin.setSrcDirs(listOf("src/playerTest/kotlin"))
 }

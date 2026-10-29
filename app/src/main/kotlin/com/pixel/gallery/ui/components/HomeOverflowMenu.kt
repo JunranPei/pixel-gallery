@@ -1,0 +1,139 @@
+package com.pixel.gallery.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.FileCopy
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+import com.pixel.gallery.R
+import com.pixel.gallery.model.MediaTypeFilter
+
+@Composable
+fun HomeOverflowMenu(
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onDismissRequest: () -> Unit,
+    showQuickSort: Boolean,
+    sortLabel: String,
+    duplicateLabel: String,
+    canFindDuplicates: Boolean,
+    onQuickSort: () -> Unit,
+    onSort: () -> Unit,
+    onFindDuplicates: () -> Unit,
+    onSettings: () -> Unit,
+    mediaType: MediaTypeFilter = MediaTypeFilter.ALL,
+    onMediaTypeChange: (MediaTypeFilter) -> Unit = {},
+) {
+    GalleryOverflowButton(expanded, onExpandedChange, onSettings = onSettings) {
+        MediaTypeMenuSection(mediaType, onMediaTypeChange)
+        if (showQuickSort) {
+            GalleryMenuRow(
+                label = stringResource(R.string.qs_start),
+                icon = Icons.AutoMirrored.Outlined.DriveFileMove,
+                accented = true,
+                onClick = onQuickSort,
+            )
+        }
+        GalleryMenuRow(sortLabel, Icons.AutoMirrored.Filled.Sort, accented = true, onClick = onSort)
+        GalleryMenuRow(duplicateLabel, Icons.Outlined.FileCopy, accented = true,
+            enabled = canFindDuplicates, onClick = onFindDuplicates)
+    }
+}
+
+@Composable
+fun GalleryOverflowMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    onSettings: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val menuWidth = minOf(
+        (236 * LocalDensity.current.fontScale.coerceAtLeast(1f)).dp,
+        (LocalConfiguration.current.screenWidthDp - 32).dp,
+    )
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = Modifier.width(menuWidth),
+        shape = RoundedCornerShape(32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp,
+        shadowElevation = 6.dp,
+    ) {
+        content()
+        GallerySettingsMenuEntry(onDismissRequest = onDismissRequest, onSettings = onSettings)
+    }
+}
+
+@Composable
+fun GalleryMenuRow(
+    label: String,
+    icon: ImageVector,
+    accented: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val iconBackground = if (accented) colors.primaryContainer else colors.surfaceContainerHighest
+    val iconColor = if (accented) colors.onPrimaryContainer else colors.onSurfaceVariant
+    val contentAlpha = if (enabled) 1f else 0.38f
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(iconBackground.copy(alpha = if (enabled) 1f else 0.38f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = iconColor.copy(alpha = contentAlpha),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyLarge,
+            color = colors.onSurface.copy(alpha = contentAlpha),
+        )
+    }
+}

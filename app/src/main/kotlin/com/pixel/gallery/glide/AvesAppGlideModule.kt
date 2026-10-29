@@ -25,7 +25,6 @@ import com.bumptech.glide.request.RequestOptions
 import com.pixel.gallery.utils.LogUtils
 import com.pixel.gallery.utils.MimeTypes
 import com.pixel.gallery.utils.MimeTypes.isVideo
-import com.bumptech.glide.load.engine.executor.GlideExecutor
 import com.pixel.gallery.utils.StorageUtils
 import com.pixel.gallery.ui.viewer.ViewerLoadMetrics
 import kotlinx.coroutines.flow.first
@@ -42,9 +41,8 @@ class AvesAppGlideModule : AppGlideModule() {
         val configuredSourceThreadCount = kotlinx.coroutines.runBlocking {
             settingsRepository.glideThreadCount.first()
         }.coerceIn(1, 8)
-        // Keep Glide's shared executors governed by the user's setting. Viewer requests
-        // opt into their own source-task pool, so the low-latency viewer policy cannot
-        // raise Grid scrolling concurrency or power usage.
+        // Restore the user's source setting when no viewer is present. During a
+        // viewing session the whole batch shares a source >=4 / cache 3 window.
         val sourceThreadCount = configuredSourceThreadCount
         val diskCacheThreadCount = 1
 
@@ -68,17 +66,10 @@ class AvesAppGlideModule : AppGlideModule() {
         val internalCacheDiskCacheFactory = InternalCacheDiskCacheFactory(context, DiskCache.Factory.DEFAULT_DISK_CACHE_DIR, diskCacheSize.toLong())
         builder.setDiskCache(internalCacheDiskCacheFactory)
 
-        // Glide executors cannot be safely resized after initialization. Apply the persisted
-        // source-decode setting here; disk-cache I/O remains serialized by design.
-        val sourceExec = GlideExecutor.newSourceExecutor(sourceThreadCount, "source-configured", GlideExecutor.UncaughtThrowableStrategy.DEFAULT)
+        val (sourceExec, diskExec) = com.pixel.gallery.ui.viewer.ViewerGlideTaskCompression
+            .executors(sourceThreadCount)
         builder.setSourceExecutor(sourceExec)
-        builder.setDiskCacheExecutor(
-            GlideExecutor.newDiskCacheExecutor(
-                diskCacheThreadCount,
-                "disk-cache-configured",
-                GlideExecutor.UncaughtThrowableStrategy.DEFAULT,
-            ),
-        )
+        builder.setDiskCacheExecutor(diskExec)
 
         fun toMb(bytes: Int) = Formatter.formatFileSize(context, bytes.toLong())
         Log.d(
@@ -88,7 +79,7 @@ class AvesAppGlideModule : AppGlideModule() {
                     ", array pool size=${toMb(memorySizeCalculator.arrayPoolSizeInBytes)}" +
                     ", source threads=$sourceThreadCount" +
                     ", disk cache threads=$diskCacheThreadCount" +
-                    ", viewer task compression=request scoped"
+                    ", viewer task compression=session window source>=4 cache=3"
         )
     }
 
@@ -110,6 +101,7 @@ class AvesAppGlideModule : AppGlideModule() {
             Bitmap::class.java,
             IndexedJpegScreenPreviewLoader.Factory(context),
         )
+        registry.append(NativeJpegFit::class.java, Bitmap::class.java, NativeJpegFitLoader.Factory(context))
     }
 
     override fun isManifestParsingEnabled(): Boolean = false

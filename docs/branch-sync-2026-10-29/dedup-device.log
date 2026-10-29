@@ -1,0 +1,3 @@
+
+Quick-sort synthetic safety checks passed:
+PASS: native light/dark scans; preparation hides counts; rounded progress track has no stop dot; no-match scan and cleanup results are pixel-identical; cancellation, error and incomplete check are not labelled empty. Label/LabelOff comparison captured. Screenshots: /data/user/0/com.pixel.gallery.main.test.debug/cache/duplicate-status-qa

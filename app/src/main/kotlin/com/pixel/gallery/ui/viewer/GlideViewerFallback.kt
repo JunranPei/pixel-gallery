@@ -18,7 +18,7 @@ import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
 
 @Composable
-fun GlideViewerFallback(
+internal fun GlideViewerFallback(
     imagePath: String,
     width: Int,
     height: Int,
@@ -27,14 +27,25 @@ fun GlideViewerFallback(
     isVisiblePage: Boolean,
     modifier: Modifier = Modifier,
     onContentReadyChanged: (Boolean) -> Unit = {},
+    transformStateStore: ViewerTransformStateStore? = null,
     onClick: () -> Unit = {}
 ) {
+    val rotationGeometry = LocalRotationLayerGeometry.current?.takeIf { it.nativeImage }
+    val memoryKey = "fallback:$imagePath:$dateModifiedMillis"
+    val initialTransform = remember(memoryKey, transformStateStore) { transformStateStore?.get(memoryKey) }
+    var lastTransform by remember(memoryKey, transformStateStore) { mutableStateOf(initialTransform) }
+    var decodedSize by remember(memoryKey) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    DisposableEffect(memoryKey, transformStateStore) {
+        onDispose { lastTransform?.let { transformStateStore?.save(memoryKey, it, "composition-dispose") } }
+    }
     BoxWithConstraints(modifier = modifier) {
-        val containerWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
-        val containerHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val containerWidth = (rotationGeometry?.childWidth ?: constraints.maxWidth.toFloat()).coerceAtLeast(1f)
+        val containerHeight = (rotationGeometry?.childHeight ?: constraints.maxHeight.toFloat()).coerceAtLeast(1f)
         val swapped = orientationDegrees == 90 || orientationDegrees == 270
-        val imageWidth = (if (swapped) height else width).toFloat().coerceAtLeast(1f)
-        val imageHeight = (if (swapped) width else height).toFloat().coerceAtLeast(1f)
+        val imageWidth = (if (width > 0 && height > 0) { if (swapped) height else width }
+            else decodedSize.width).toFloat().coerceAtLeast(1f)
+        val imageHeight = (if (width > 0 && height > 0) { if (swapped) width else height }
+            else decodedSize.height).toFloat().coerceAtLeast(1f)
         val fitScale = minOf(containerWidth / imageWidth, containerHeight / imageHeight)
             .coerceAtLeast(0.0001f)
         val scaleToOriginal = 1f / fitScale
@@ -72,6 +83,8 @@ fun GlideViewerFallback(
                             dataSource: com.bumptech.glide.load.DataSource,
                             isFirstResource: Boolean,
                         ): Boolean {
+                            decodedSize = androidx.compose.ui.unit.IntSize(resource.intrinsicWidth.coerceAtLeast(1),
+                                resource.intrinsicHeight.coerceAtLeast(1))
                             currentOnContentReadyChanged(true)
                             return false
                         }
@@ -93,26 +106,58 @@ fun GlideViewerFallback(
 
         ZoomableContainer(
             modifier = Modifier.fillMaxSize(),
+            coordinateGeometry = rotationGeometry,
+            autoApplyTransformations = false,
             minScale = minScale,
             maxScale = maxScale,
             scaleToOriginal = scaleToOriginal,
+            initialScale = initialTransform?.let {
+                if (it.scale <= it.baseFitScale * 1.02f) it.scale / it.baseFitScale else it.scale / fitScale
+            } ?: 1f,
+            initialOffsetX = initialTransform?.let { (it.sourceWidth / 2f - it.sourceCenter.x) * it.scale } ?: 0f,
+            initialOffsetY = initialTransform?.let { (it.sourceHeight / 2f - it.sourceCenter.y) * it.scale } ?: 0f,
             imageFitScaleX = fitWidthFraction,
             imageFitScaleY = fitHeightFraction,
-            onTap = onClick
+            onTap = onClick,
+            onTransformFrame = { scale, x, y ->
+                imageView?.let { view ->
+                    view.scaleX = scale
+                    view.scaleY = scale
+                    view.translationX = x
+                    view.translationY = y
+                }
+            },
+            onTransformChanged = { scale, x, y ->
+                val actualScale = scale * fitScale
+                val state = com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.ViewState(
+                    actualScale, fitScale, android.graphics.PointF(imageWidth / 2f - x / actualScale, imageHeight / 2f - y / actualScale),
+                    imageWidth.toInt(), imageHeight.toInt(), 0.0)
+                lastTransform = state
+                transformStateStore?.save(memoryKey, state, "preview-gesture")
+            },
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context ->
-                    ImageView(context).apply {
+                    val host = RotatingImageHost(context)
+                    host.updateGeometry(rotationGeometry)
+                    host.content.addView(ImageView(context).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         scaleType = ImageView.ScaleType.FIT_CENTER
                         imageView = this
-                    }
+                        scaleX = initialTransform?.let {
+                            if (it.scale <= it.baseFitScale * 1.02f) it.scale / it.baseFitScale else it.scale / fitScale
+                        } ?: 1f
+                        scaleY = scaleX
+                        translationX = initialTransform?.let { (it.sourceWidth / 2f - it.sourceCenter.x) * it.scale } ?: 0f
+                        translationY = initialTransform?.let { (it.sourceHeight / 2f - it.sourceCenter.y) * it.scale } ?: 0f
+                    })
+                    host
                 },
-                update = { imageView = it }
+                update = { it.updateGeometry(rotationGeometry) }
             )
         }
     }

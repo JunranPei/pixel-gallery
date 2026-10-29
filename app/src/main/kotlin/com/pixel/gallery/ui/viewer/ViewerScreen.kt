@@ -1,6 +1,22 @@
 package com.pixel.gallery.ui.viewer
 
+import com.pixel.gallery.ui.components.LocalGalleryMessages
+import androidx.compose.material3.SnackbarDuration
+
+import com.pixel.gallery.ui.GalleryHeader
+import com.pixel.gallery.ui.GalleryPage
+import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.ConfirmationReminder
+import com.pixel.gallery.ui.components.ConfirmationFact
 import android.app.Activity
+import com.pixel.gallery.MainActivity
+import com.pixel.gallery.data.repository.ImageViewerSettings
+import com.pixel.gallery.data.repository.VideoSettingsViewModel
+import com.pixel.gallery.data.repository.ViewerScreenDirection
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.app.WallpaperManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -9,15 +25,26 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -29,15 +56,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.FileProvider
 import android.content.res.Configuration
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -50,6 +82,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.pixel.gallery.data.local.entity.MediaEntry
+import com.pixel.gallery.R
 import com.pixel.gallery.glide.AvesAppGlideModule
 import com.pixel.gallery.glide.IndexedJpegScreenPreview
 import com.pixel.gallery.glide.IndexedPngScreenPreview
@@ -82,10 +115,12 @@ import io.github.indexedjxl.IndexedJxlStatus
 import io.github.indexedjxl.IndexedJxlStore
 import com.pixel.gallery.services.ViewerPhotoMetadata
 import com.pixel.gallery.ui.theme.EmphasizedTypography
+import com.pixel.gallery.ui.components.shareMedia
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
@@ -114,10 +149,15 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import com.pixel.gallery.ui.components.rememberVerticalRevealState
+import com.pixel.gallery.ui.components.verticalRevealDrag
+import com.pixel.gallery.ui.components.revealHeight
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ScaleFactor
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 
 
@@ -338,7 +378,7 @@ private fun trackedDrawableListener(
 
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class, ExperimentalFoundationApi::class)
 internal fun ViewerScreen(
     initialId: Long,
     photos: List<MediaEntry>,
@@ -346,12 +386,40 @@ internal fun ViewerScreen(
     onBack: () -> Unit,
     allowTransfer: Boolean = true,
     onRequestTransfer: (MediaEntry) -> Unit = {},
+    onUnlockFromVault: (MediaEntry) -> Unit = {},
+    allowUnlockFromVault: Boolean = false,
     enableUltraHdr: Boolean = false,
-    viewModel: PhotosViewModel = hiltViewModel()
-) {
+    viewModel: PhotosViewModel = hiltViewModel(),
+    onEditLabels: (Set<Long>) -> Unit = {},
+    labelsForMedia: (Long) -> List<String> = { emptyList() },
+    labelIdsForMedia: (Long) -> List<Long> = { emptyList() },
+    onOpenLabel: (Long) -> Unit = {},
+    allowLabels: Boolean = true,
+    isForeground: Boolean = true,
+    reservedIds: Set<Long> = emptySet()
+): GalleryPageContent {
     val context = LocalContext.current
     val configuredColdTestMode by viewModel.largeImageColdTestMode.collectAsState()
     val coldTestMode = BuildConfig.VIEWER_METRICS_ENABLED && configuredColdTestMode
+    val messages = LocalGalleryMessages.current
+    val presentationModel: VideoSettingsViewModel = hiltViewModel()
+    val videoPreferences by presentationModel.settings.collectAsState()
+    val imagePreferences by presentationModel.imageSettings.collectAsState(initial = ImageViewerSettings())
+    // ImageViewerSettings defaults rememberZoom to true. Use that same default while
+    // DataStore is resolving so a restored image is rendered immediately instead of
+    // entering the no-memory renderer and being keyed out when the setting arrives.
+    val rememberImageZoom = imagePreferences?.rememberView ?: true
+    val currentRememberImageZoom by rememberUpdatedState(rememberImageZoom)
+    val imageTransforms = remember(presentationModel.repository) {
+        rememberedImageTransforms(
+            presentationModel.repository,
+            transformStateStore,
+        ) { currentRememberImageZoom }
+    }
+    var toolbarVideo by remember { mutableStateOf<VideoPlaybackSession?>(null) }
+    var autoplayNextId by remember { mutableStateOf<Long?>(null) }
+    var videoOptionsOpen by remember { mutableStateOf(false) }
+    val inVideoPip = (context as? MainActivity)?.isVideoPip == true
     val initialIndex = remember(initialId, photos) {
         val startedAt = android.os.SystemClock.elapsedRealtimeNanos()
         photos.indexOfFirst { it.contentId == initialId }.coerceAtLeast(0).also { index ->
@@ -372,15 +440,88 @@ internal fun ViewerScreen(
     }
     
     val pagerState = rememberPagerState(initialPage = initialIndex) { photos.size }
+    LaunchedEffect(photos.size) {
+        // Restored page state can outlive an item removed from its label/album.
+        // Keep valid pages untouched and clamp before enabling media actions.
+        if (photos.isNotEmpty() && pagerState.currentPage > photos.lastIndex) {
+            pagerState.scrollToPage(photos.lastIndex)
+        }
+    }
     var showUI by remember { mutableStateOf(true) }
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var expandedBottomActions by remember { mutableStateOf(false) }
+    val bottomActionsReveal = rememberVerticalRevealState(expandedBottomActions) { expandedBottomActions = it }
+    val actionDensity = LocalDensity.current
+    var bottomActionsHeightPx by remember { mutableIntStateOf(0) }
+    val videoControlsBottomPadding = with(actionDensity) { bottomActionsHeightPx.toDp() }
+    var actionLabelsHeight by remember { mutableIntStateOf(0) }
+    var secondaryActionsHeight by remember { mutableIntStateOf(0) }
+    val actionsRangePx = (actionLabelsHeight + secondaryActionsHeight).toFloat().coerceAtLeast(with(actionDensity) { 80.dp.toPx() })
+    val actionsFlingThresholdPx = with(actionDensity) { 600.dp.toPx() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var rotationLocked by remember { mutableStateOf(true) }
+    var requestedViewerOrientation by remember { mutableStateOf<Int?>(null) }
     var ultraHdrActive by remember { mutableStateOf(false) }
 
     val currentMedia = remember(pagerState.currentPage, photos) {
-        if (photos.isNotEmpty()) photos[pagerState.currentPage] else null
+        photos.getOrNull(pagerState.currentPage)
+    }
+    val directionMedia = photos.getOrNull(pagerState.settledPage)
+    val directionIsVideo = directionMedia?.sourceMimeType?.startsWith("video/") == true
+    val directionKey = directionMedia?.let { "${it.uri}:${it.dateModifiedMillis}" }
+    val screenDirection = if (directionIsVideo) {
+        videoPreferences?.screenDirection
+    } else {
+        // Images use the persisted default while DataStore is resolving. This keeps
+        // the rotation layer identity stable on a background return.
+        imagePreferences?.screenDirection ?: ViewerScreenDirection.SYSTEM
+    }
+    val rememberDirection = if (directionIsVideo) {
+        videoPreferences?.rememberView == true
+    } else {
+        imagePreferences?.rememberView ?: true
+    }
+    val rotationScope = rememberCoroutineScope()
+    // The memory toggle changes future restore/save policy. It must not recreate
+    // the current media layer or reset a rotation already visible in this viewer.
+    val contentRotation = remember(directionKey, screenDirection) {
+        ViewerContentRotation(if (rememberDirection && directionKey != null)
+            presentationModel.repository.contentRotation(directionIsVideo, directionKey) else 0, rotationScope)
+    }
+    val frameSnapshot = remember { AtomicReference("viewer-not-composed") }
+    SideEffect {
+        val frameMedia = photos.getOrNull(pagerState.currentPage)
+        frameSnapshot.set(
+            "currentPage=${pagerState.currentPage} settledPage=${pagerState.settledPage} " +
+                "scrolling=${pagerState.isScrollInProgress} " +
+                "media=${frameMedia?.viewerCacheKey() ?: "none"} " +
+                "foreground=$isForeground ui=$showUI info=$showInfo menu=$showMenu " +
+                "rotation=${contentRotation.degrees} settledRotation=${contentRotation.settledDegrees} " +
+                "rotationBusy=${contentRotation.busy} " +
+                "rememberZoom=$rememberImageZoom rememberDirection=$rememberDirection " +
+                "direction=${screenDirection ?: "none"}",
+        )
+    }
+    DisposableEffect(contentRotation) { onDispose { contentRotation.cancel() } }
+    LaunchedEffect(directionKey, screenDirection) {
+        if (screenDirection != null && directionKey != null) {
+            snapshotFlow { !pagerState.isScrollInProgress }.first { it }
+            requestedViewerOrientation = screenDirection.requestedOrientation()
+        }
+    }
+    val viewerLifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(directionKey, directionIsVideo, isForeground, imageTransforms, viewerLifecycle) {
+        fun checkpoint() {
+            imageTransforms.checkpoint()
+        }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) checkpoint() }
+        viewerLifecycle.addObserver(observer)
+        onDispose { viewerLifecycle.removeObserver(observer); checkpoint() }
+    }
+
+    DisposableEffect(isForeground) {
+        val taskWindow = if (isForeground) ViewerGlideTaskCompression.enter() else null
+        onDispose { taskWindow?.close() }
     }
 
     DisposableEffect(entryId) {
@@ -390,12 +531,16 @@ internal fun ViewerScreen(
             "initialId=$initialId initialIndex=$initialIndex count=${photos.size}",
             entryId = entryId,
         )
-        val frameListener = activity?.let { ViewerLoadMetrics.attachFrameMetrics(it, entryId) }
+        val frameListener = activity?.let {
+            ViewerLoadMetrics.attachFrameMetrics(it, entryId) { frameSnapshot.get() }
+        }
+        val perFrameListener = ViewerLoadMetrics.attachPerFrameTrace(entryId) { frameSnapshot.get() }
         onDispose {
             ViewerLoadMetrics.event("VIEWER_DISPOSE", entryId = entryId)
             if (activity != null) {
                 ViewerLoadMetrics.detachFrameMetrics(activity, entryId, frameListener)
             }
+            ViewerLoadMetrics.detachPerFrameTrace(entryId, perFrameListener)
             ViewerLoadMetrics.entryEnded(context.applicationContext, entryId, "viewer-dispose")
         }
     }
@@ -631,9 +776,9 @@ internal fun ViewerScreen(
             UltraHdrTileSupport.clearAll()
         }
     }
-    DisposableEffect(context, enableUltraHdr, ultraHdrActive) {
+    DisposableEffect(context, isForeground, enableUltraHdr, ultraHdrActive) {
         val activity = context as? Activity
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && activity != null) {
+        if (isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && activity != null) {
             val powerManager = context.getSystemService(PowerManager::class.java)
             val enableHdr =
                 enableUltraHdr && ultraHdrActive && powerManager?.isPowerSaveMode != true
@@ -650,7 +795,7 @@ internal fun ViewerScreen(
             }
         }
         onDispose {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (isForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ViewerLoadMetrics.event(
                     "WINDOW_COLOR_MODE_DISPOSE",
                     "requested=DEFAULT",
@@ -666,6 +811,7 @@ internal fun ViewerScreen(
     }
 
     LaunchedEffect(currentMediaCacheKey) {
+        expandedBottomActions = false
         val metadataToken = ViewerLoadMetrics.workStarted(
             type = "MOTION_METADATA",
             imageKey = currentMediaCacheKey ?: "none",
@@ -717,26 +863,44 @@ internal fun ViewerScreen(
     val hasMotionPhoto = viewerPhotoMetadata?.hasMotionPhoto == true
 
     DisposableEffect(Unit) {
-        val activity = context as? Activity
         onDispose {
             motionVideoFile?.delete()
-            val window = activity?.window
-            if (window != null) {
-                WindowCompat.getInsetsController(window, window.decorView)
-                    .show(WindowInsetsCompat.Type.systemBars())
-            }
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 
-    // Keep controls and their popup alive while the overflow menu is open. Closing the
-    // menu starts a fresh timeout instead of letting the old timer dispose the popup.
-    LaunchedEffect(showUI, showMenu, pagerState.currentPage, isPlayingMotion) {
+    DisposableEffect(context, isForeground) {
+        val activity = context as? Activity
+        val previousOrientation = activity?.requestedOrientation
+        onDispose {
+            if (isForeground) {
+                val window = activity?.window
+                if (window != null) {
+                    WindowCompat.getInsetsController(window, window.decorView)
+                        .show(WindowInsetsCompat.Type.systemBars())
+                }
+                previousOrientation?.let { activity?.requestedOrientation = it }
+            }
+        }
+    }
+
+    LaunchedEffect(context, isForeground, requestedViewerOrientation) {
+        if (isForeground) {
+            requestedViewerOrientation?.let { orientation ->
+                (context as? Activity)?.requestedOrientation = orientation
+            }
+        }
+    }
+
+    // Auto-hide UI timer
+    LaunchedEffect(isForeground, showUI, showMenu, videoOptionsOpen, expandedBottomActions, bottomActionsReveal.dragging, pagerState.currentPage, isPlayingMotion) {
+        if (!isForeground) return@LaunchedEffect
         ViewerLoadMetrics.event(
             "UI_AUTO_HIDE_SCHEDULE",
             "showUI=$showUI page=${pagerState.currentPage} playingMotion=$isPlayingMotion",
         )
-        if (showUI && !showMenu && !isPlayingMotion) {
+        // A menu is anchored to the top bar. Keep both bars present while it
+        // is open so the menu cannot disappear before the user taps an item.
+        if (showUI && !showMenu && !videoOptionsOpen && !expandedBottomActions && !bottomActionsReveal.dragging && !isPlayingMotion) {
             delay(3000)
             showUI = false
             ViewerLoadMetrics.event("UI_AUTO_HIDE_FIRE", "page=${pagerState.currentPage}")
@@ -744,7 +908,8 @@ internal fun ViewerScreen(
     }
 
     // Immersive Mode
-    LaunchedEffect(showUI) {
+    LaunchedEffect(context, isForeground, showUI) {
+        if (!isForeground) return@LaunchedEffect
         val window = (context as? Activity)?.window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         ViewerLoadMetrics.event(
@@ -787,15 +952,218 @@ internal fun ViewerScreen(
         } ?: flowOf(false)
     }
     val isFavourite by favouriteFlow.collectAsState(initial = false)
+    val isCurrentReserved = currentMedia?.contentId?.let(reservedIds::contains) == true
+    val currentLabels = currentMedia?.contentId?.let(labelsForMedia).orEmpty()
+    val editLabelsDescription = stringResource(R.string.label_edit)
+    LaunchedEffect(isCurrentReserved) {
+        if (isCurrentReserved) {
+            showDeleteConfirm = false
+            if (!imageIndexBusy) imageIndexAction = null
+        }
+    }
     
+    val headerVisibility by animateFloatAsState(
+        targetValue = if (showUI && !inVideoPip) 1f else 0f,
+        animationSpec = tween(durationMillis = 150),
+        label = "ViewerHeaderVisibility",
+    )
+    val viewerGesturesEnabled = isForeground && !inVideoPip && !showInfo && !showMenu &&
+        !showDeleteConfirm && !videoOptionsOpen && imageIndexAction == null &&
+        !pagerState.isScrollInProgress && !pagerReturningToSettledPage
+    val dismissGesture = rememberViewerDismissGesture(
+        key = currentMedia?.viewerTransitionKey(),
+        isForeground = isForeground,
+        enabled = viewerGesturesEnabled && currentMedia != null && !isPlayingMotion,
+        onDismiss = onBack,
+    )
+    val rotationGesture = rememberViewerRotationGesture(
+        isForeground = isForeground,
+        enabled = viewerGesturesEnabled,
+        onProgress = { contentRotation.drag(it) },
+        onFinish = { step -> contentRotation.finish(step) { degrees ->
+            directionKey?.let { presentationModel.repository.saveContentRotation(directionIsVideo, it, degrees) }
+        } },
+    )
+    SideEffect { dismissGesture.canUseThumbnailTarget = { contentRotation.settledDegrees == 0 } }
+    DisposableEffect(rotationGesture, dismissGesture) {
+        rotationGesture.dismissGesture = dismissGesture
+        onDispose { if (rotationGesture.dismissGesture === dismissGesture) rotationGesture.dismissGesture = null }
+    }
+    return GalleryPage(
+        modifier = Modifier.onSizeChanged { dismissGesture.resize(it.width, it.height) }
+            .onGloballyPositioned { dismissGesture.windowOrigin = it.localToWindow(Offset.Zero) }
+            .drawBehind { drawRect(Color.Black.copy(alpha = dismissGesture.visual.backdropAlpha)) },
+        topBar = {
+            GalleryHeader(
+                modifier = Modifier
+                    .viewerRotationArea(rotationGesture.takeIf { showUI || headerVisibility > 0f }, excluded = true)
+                    .graphicsLayer {
+                        alpha = headerVisibility * dismissGesture.visual.chromeAlpha
+                        translationY = -size.height * (1f - headerVisibility)
+                    }
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+                        )
+                    ),
+                visible = !inVideoPip && (showUI || headerVisibility > 0f),
+                title = {},
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                actions = {
+                    toolbarVideo?.takeIf { it.uri == currentMedia?.uri }?.let { session ->
+                        VideoToolbarActions(session, onRotateScreen = {
+                            val landscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                            requestedViewerOrientation = if (landscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        }, onBusyChanged = { busy -> videoOptionsOpen = busy })
+                    }
+                    if (hasMotionPhoto || motionVideoFile != null) {
+                        IconButton(
+                            enabled = !isExtractingMotion,
+                            onClick = {
+                                if (isPlayingMotion) {
+                                    isPlayingMotion = false
+                                } else if (motionVideoFile != null) {
+                                    isPlayingMotion = true
+                                } else {
+                                    val media = currentMedia ?: return@IconButton
+                                    val requestedKey = currentMediaCacheKey ?: return@IconButton
+                                    isExtractingMotion = true
+                                    viewerScope.launch {
+                                        val extracted = withContext(Dispatchers.IO) {
+                                            viewModel.extractMotionVideo(media.path)
+                                        }
+                                        if (latestMediaCacheKey.value == requestedKey) {
+                                            motionVideoFile = extracted
+                                            isPlayingMotion = extracted != null
+                                            isExtractingMotion = false
+                                        } else {
+                                            withContext(Dispatchers.IO) { extracted?.delete() }
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (isPlayingMotion) Icons.Default.MotionPhotosPause else Icons.Default.MotionPhotosOn,
+                                contentDescription = "Motion Photo",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    if (currentIndexTarget != null) {
+                        IconButton(onClick = {
+                            showUI = true
+                            showMenu = true
+                        }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.width(236.dp),
+                        shape = RoundedCornerShape(32.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 6.dp,
+                    ) {
+                        currentIndexTarget?.let { indexTarget ->
+                            val indexReady = imageIndexReady == true
+                            val indexChecking = imageIndexReady == null
+                            val formatName = indexTarget.format.displayName
+                            if (indexReady && imageIndexUpgradeAvailable) DropdownMenuItem(
+                                text = { Text("Upgrade $formatName index") },
+                                enabled = !imageIndexBusy && !isCurrentReserved,
+                                onClick = {
+                                    showMenu = false
+                                    imageIndexAction = IndexedImageAction.REBUILD
+                                },
+                                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        when {
+                                            imageIndexBusy -> "Building $formatName index…"
+                                            indexChecking -> "Checking $formatName index…"
+                                            indexReady -> "Delete $formatName index"
+                                            else -> "Build $formatName index"
+                                        }
+                                    )
+                                },
+                                enabled = !imageIndexBusy && !indexChecking && !isCurrentReserved,
+                                onClick = {
+                                    showMenu = false
+                                    if (indexReady) {
+                                        imageIndexAction = IndexedImageAction.DELETE
+                                    } else {
+                                        imageIndexBusy = true
+                                        val requestedTarget = indexTarget
+                                        viewerScope.launch {
+                                            val detected = withContext(Dispatchers.IO) {
+                                                File(requestedTarget.path).detectImageContent()
+                                                    ?: DetectedImageContent(null, "Unrecognized image format")
+                                            }
+                                            if (currentIndexTarget == requestedTarget) {
+                                                val detectedFormat = detected.indexedFormat
+                                                when {
+                                                    detectedFormat == null -> {
+                                                        unsupportedIndexFormat = detected.displayName
+                                                        imageIndexBusy = false
+                                                    }
+                                                    detectedFormat == requestedTarget.format -> {
+                                                        imageIndexBusy = false
+                                                        imageIndexAction = IndexedImageAction.BUILD
+                                                    }
+                                                    else -> {
+                                                        pendingIndexBuildAfterResolution = true
+                                                        resolvedIndexFormat = detectedFormat
+                                                    }
+                                                }
+                                            } else {
+                                                imageIndexBusy = false
+                                            }
+                                        }
+                                    }
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    navigationIconContentColor = Color.White
+                )
+            )
+        },
+    ) { _ ->
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
     ) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().viewerRotationArea(rotationGesture),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
             userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage,
@@ -810,6 +1178,10 @@ internal fun ViewerScreen(
             } ?: 0L
             val mediaIndexCapabilityRevision =
                 mediaJpegIndexGeneration * 31L + localIndexCapabilityRevision
+            // Settings must gate video preparation so a cold start cannot autoplay
+            // before the user's preference has arrived. Images can render with their
+            // stable default memory policy while the same settings flow resolves.
+            if (media.sourceMimeType.startsWith("video/") && videoPreferences == null) return@HorizontalPager
             val pageKey = remember(media.contentId, media.dateModifiedMillis) {
                 media.viewerCacheKey()
             }
@@ -849,8 +1221,12 @@ internal fun ViewerScreen(
                 media.sourceMimeType.equals("image/gif", ignoreCase = true) ||
                     media.path.endsWith(".gif", ignoreCase = true)
             }
+            CompositionLocalProvider(LocalViewerDismissGesture provides
+                dismissGesture.takeIf { pagerState.settledPage == page && !pagerState.isScrollInProgress }) {
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().then(
+                    if (!isVideo && pagerState.settledPage == page) Modifier.viewerDismissMotion(dismissGesture)
+                    else Modifier),
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideo) {
@@ -870,15 +1246,39 @@ internal fun ViewerScreen(
                     }
                     VideoPlayer(
                         uri = media.uri, 
+                        controlsBottomPadding = videoControlsBottomPadding,
+                        rotationGesture = rotationGesture,
+                        contentRotation = contentRotation.takeIf { pagerState.settledPage == page },
                         filePath = media.path,
                         fallbackDurationMillis = media.durationMillis ?: 0L,
                         firstFrameModel = firstFrameModel,
                         showUI = showUI, 
                         isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress,
+                        isForeground = isForeground,
                         shouldPrepare = shouldPrepareVideo,
+                        sourceVersion = media.dateModifiedMillis,
+                        startOnOpen = autoplayNextId == media.contentId,
+                        onSession = {
+                            toolbarVideo = it
+                            if (it != null && autoplayNextId == media.contentId) autoplayNextId = null
+                        },
+                        onEnded = {
+                            val next = ((page + 1)..photos.lastIndex).firstOrNull { photos[it].sourceMimeType.startsWith("video/") }
+                            if (next != null) {
+                                autoplayNextId = photos[next].contentId
+                                viewerScope.launch { pagerState.scrollToPage(next) }
+                            }
+                        },
                         onTap = { showUI = !showUI }
                     )
                 } else {
+                    val rawRatio = if (media.width > 0 && media.height > 0) media.width.toFloat() / media.height else 1f
+                    val displayRatio = if (media.sourceRotationDegrees % 180 != 0) 1f / rawRatio else rawRatio
+                    RotatingMediaLayer(contentRotation.takeIf { pagerState.settledPage == page }, displayRatio,
+                        Modifier.fillMaxSize(), nativeImage = !isGif) {
+                    // The store remains the same for this viewer. The setting only
+                    // controls whether its callbacks read/write persistent memory.
+                    val pageImageTransforms = imageTransforms
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val isActivePage = pagerState.settledPage == page
                         val isPagerIdle = !pagerState.isScrollInProgress
@@ -975,6 +1375,8 @@ internal fun ViewerScreen(
                             }
                         }
 
+                        RotatingMediaLayer(contentRotation.takeIf { !isGif && pagerState.settledPage == page },
+                            displayRatio, Modifier.fillMaxSize()) {
                         GlideImage(
                             model = swipeThumbnailModel,
                             contentDescription = null,
@@ -984,6 +1386,7 @@ internal fun ViewerScreen(
                             contentScale = ContentScale.Fit,
                             requestBuilderTransform = swipeThumbnailTransform
                         )
+                        }
 
                         if (isGif) {
                             val model = remember(media.uri, media.sourceMimeType, media.sizeBytes) {
@@ -1186,6 +1589,7 @@ internal fun ViewerScreen(
                             }
                             if (renderPlan is ViewerRenderPlan.PreviewOnly) {
                                 GlideViewerFallback(
+                                    transformStateStore = pageImageTransforms,
                                     imagePath = media.path.ifEmpty { media.uri },
                                     width = media.width,
                                     height = media.height,
@@ -1209,7 +1613,7 @@ internal fun ViewerScreen(
                                     rawIndexReady = imageIndexReady == true &&
                                         currentIndexTarget?.format == IndexedImageFormat.RAW &&
                                         currentIndexTarget.path == media.path,
-                                    transformStateStore = transformStateStore,
+                                    transformStateStore = pageImageTransforms,
                                     modifier = Modifier.fillMaxSize(),
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onClick = onImageClick,
@@ -1233,6 +1637,7 @@ internal fun ViewerScreen(
                                     currentIndexTarget.path == media.path
                                 if (!rareIndexReady) {
                                     GlideViewerFallback(
+                                        transformStateStore = pageImageTransforms,
                                         imagePath = media.path.ifEmpty { media.uri },
                                         width = media.width,
                                         height = media.height,
@@ -1259,7 +1664,7 @@ internal fun ViewerScreen(
                                         previewModel = media.path.ifEmpty { media.uri },
                                         intermediatePreviewModel = swipeThumbnailModel,
                                         regionDecoderKind = indexedRegionKind,
-                                        transformStateStore = transformStateStore,
+                                        transformStateStore = pageImageTransforms,
                                         coldTestMode = coldTestMode,
                                         onContentReadyChanged = { fullPreviewReady = it },
                                         modifier = Modifier.fillMaxSize(),
@@ -1351,7 +1756,7 @@ internal fun ViewerScreen(
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
                                     indexCapabilityRevision = mediaIndexCapabilityRevision,
                                     coldTestMode = coldTestMode,
-                                    transformStateStore = transformStateStore,
+                                    transformStateStore = pageImageTransforms,
                                     onContentReadyChanged = { fullPreviewReady = it },
                                     onUltraHdrAvailabilityChanged = { available ->
                                         ViewerLoadMetrics.event(
@@ -1374,244 +1779,32 @@ internal fun ViewerScreen(
                                 uri = Uri.fromFile(motionVideoFile!!).toString(),
                                 isMotionPhoto = true,
                                 isActive = true, 
+                                isForeground = isForeground,
+                                shouldPrepare = true,
                                 modifier = Modifier.fillMaxSize(),
                                 onTap = { isPlayingMotion = false }
                             )
                         }
                     }
+                    } // Content rotation never includes viewer chrome.
                 }
             }
-        }
-
-        // Top Overlay
-        AnimatedVisibility(
-            visible = showUI,
-            enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { -it },
-            exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { -it },
-            modifier = Modifier.align(Alignment.TopCenter)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
-                        )
-                    )
-                    .windowInsetsPadding(WindowInsets.statusBars)
-            ) {
-                TopAppBar(
-                    title = {},
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                        }
-                    },
-                    actions = {
-                        if (hasMotionPhoto || motionVideoFile != null) {
-                            IconButton(
-                                enabled = !isExtractingMotion,
-                                onClick = {
-                                    if (isPlayingMotion) {
-                                        isPlayingMotion = false
-                                    } else if (motionVideoFile != null) {
-                                        isPlayingMotion = true
-                                    } else {
-                                        val media = currentMedia ?: return@IconButton
-                                        val requestedKey = currentMediaCacheKey ?: return@IconButton
-                                        isExtractingMotion = true
-                                        viewerScope.launch {
-                                            val extracted = withContext(Dispatchers.IO) {
-                                                viewModel.extractMotionVideo(media.path)
-                                            }
-                                            if (latestMediaCacheKey.value == requestedKey) {
-                                                motionVideoFile = extracted
-                                                isPlayingMotion = extracted != null
-                                                isExtractingMotion = false
-                                            } else {
-                                                withContext(Dispatchers.IO) { extracted?.delete() }
-                                            }
-                                        }
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlayingMotion) Icons.Default.MotionPhotosPause else Icons.Default.MotionPhotosOn,
-                                    contentDescription = "Motion Photo",
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                        IconButton(onClick = { 
-                            rotationLocked = !rotationLocked
-                            val activity = context as? Activity
-                            activity?.requestedOrientation = if (rotationLocked) {
-                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            } else {
-                                ActivityInfo.SCREEN_ORIENTATION_SENSOR
-                            }
-                        }) {
-                            Icon(
-                                imageVector = if (rotationLocked) Icons.Outlined.ScreenLockRotation else Icons.Outlined.ScreenRotation,
-                                contentDescription = "Auto-Rotate",
-                                tint = Color.White
-                            )
-                        }
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
-                            currentIndexTarget?.let { indexTarget ->
-                                val indexReady = imageIndexReady == true
-                                val indexChecking = imageIndexReady == null
-                                val formatName = indexTarget.format.displayName
-                                if (
-                                    indexTarget.format == IndexedImageFormat.JPEG &&
-                                    imageIndexUpgradeAvailable &&
-                                    !imageIndexBusy &&
-                                    !indexChecking
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Upgrade JPEG index") },
-                                        enabled = true,
-                                        onClick = {
-                                            showMenu = false
-                                            imageIndexAction = IndexedImageAction.REBUILD
-                                        },
-                                        leadingIcon = {
-                                            Icon(Icons.Outlined.Storage, contentDescription = null)
-                                        },
-                                    )
-                                }
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            when {
-                                                imageIndexBusy -> "Building $formatName index…"
-                                                indexChecking -> "Checking $formatName index…"
-                                                indexReady &&
-                                                    indexTarget.format == IndexedImageFormat.JPEG &&
-                                                    jpegIndexPyramidType == IndexedJpegPyramidType.SEEK_ONLY ->
-                                                    "Delete JPEG seek index"
-                                                indexReady -> "Delete $formatName index"
-                                                else -> "Build $formatName index"
-                                            }
-                                        )
-                                    },
-                                    enabled = !imageIndexBusy && !indexChecking,
-                                    onClick = {
-                                        showMenu = false
-                                        if (indexReady) {
-                                            imageIndexAction = IndexedImageAction.DELETE
-                                        } else {
-                                            imageIndexBusy = true
-                                            val requestedTarget = indexTarget
-                                            viewerScope.launch {
-                                                val detected = withContext(Dispatchers.IO) {
-                                                    File(requestedTarget.path).detectImageContent()
-                                                        ?: DetectedImageContent(null, "Unrecognized image format")
-                                                }
-                                                if (currentIndexTarget == requestedTarget) {
-                                                    val detectedFormat = detected.indexedFormat
-                                                    when {
-                                                        detectedFormat == null -> {
-                                                            unsupportedIndexFormat = detected.displayName
-                                                            imageIndexBusy = false
-                                                        }
-                                                        detectedFormat == requestedTarget.format -> {
-                                                            imageIndexBusy = false
-                                                            imageIndexAction = IndexedImageAction.BUILD
-                                                        }
-                                                        else -> {
-                                                            pendingIndexBuildAfterResolution = true
-                                                            resolvedIndexFormat = detectedFormat
-                                                        }
-                                                    }
-                                                } else {
-                                                    imageIndexBusy = false
-                                                }
-                                            }
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            if (indexReady) Icons.Outlined.DeleteSweep else Icons.Outlined.Storage,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("Set as Wallpaper") },
-                                onClick = {
-                                    showMenu = false
-                                    currentMedia?.let { media ->
-                                        val intent = WallpaperManager.getInstance(context).getCropAndSetWallpaperIntent(Uri.parse(media.uri))
-                                        context.startActivity(intent)
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.Wallpaper, contentDescription = null) }
-                            )
-                            if (allowTransfer) {
-                                DropdownMenuItem(
-                                    text = { Text("Move or copy to…") },
-                                    onClick = {
-                                        showMenu = false
-                                        currentMedia?.let(onRequestTransfer)
-                                    },
-                                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, contentDescription = null) }
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("Move to locked folder") },
-                                onClick = {
-                                    showMenu = false
-                                    currentMedia?.let { media ->
-                                        viewModel.moveToVault(media)
-                                        onBack()
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Open With") },
-                                onClick = {
-                                    showMenu = false
-                                    currentMedia?.let { media ->
-                                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                                            setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        }
-                                        try {
-                                            context.startActivity(Intent.createChooser(intent, "Open with..."))
-                                        } catch (e: Exception) { }
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null) }
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        navigationIconContentColor = Color.White
-                    )
-                )
             }
         }
 
         // Bottom Overlay
         AnimatedVisibility(
-            visible = showUI,
+            visible = showUI && !inVideoPip,
             enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { it },
             exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { it },
             modifier = Modifier.align(Alignment.BottomCenter)
+                .graphicsLayer { alpha = dismissGesture.visual.chromeAlpha }
+                .viewerRotationArea(rotationGesture, excluded = true)
         ) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .onSizeChanged { bottomActionsHeightPx = it.height }
                     .background(
                         Brush.verticalGradient(
                             listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
@@ -1619,24 +1812,20 @@ internal fun ViewerScreen(
                     )
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(bottom = 16.dp, top = 24.dp)
+                    .verticalRevealDrag(bottomActionsReveal, actionsRangePx, flingThresholdPx = actionsFlingThresholdPx),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ViewerAction(Icons.Outlined.Share, "Share") {
+                    ViewerAction(Icons.Outlined.Share, "Share", labelFraction = bottomActionsReveal.fraction) {
                         currentMedia?.let { media ->
-                            val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", File(media.path))
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = media.sourceMimeType
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(intent, "Share Media"))
+                            shareMedia(context, listOf(media))
                         }
                     }
-                    ViewerAction(Icons.Outlined.Edit, "Edit") {
+                    ViewerAction(Icons.Outlined.Edit, "Edit", enabled = !isCurrentReserved, labelFraction = bottomActionsReveal.fraction) {
                         currentMedia?.let { media ->
                             val intent = Intent(Intent.ACTION_EDIT).apply {
                                 setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
@@ -1647,120 +1836,200 @@ internal fun ViewerScreen(
                             } catch (e: Exception) { }
                         }
                     }
-                    IconButton(onClick = { 
-                        currentMedia?.let { viewModel.toggleFavourite(it.contentId, isFavourite) }
-                    }) {
-                        Icon(
-                            imageVector = if (isFavourite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            tint = if (isFavourite) Color.Red else Color.White
-                        )
+                    Column(
+                        modifier = Modifier.width(64.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            modifier = Modifier.size(48.dp).clip(CircleShape).combinedClickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(bounded = false, radius = 24.dp),
+                                enabled = !isCurrentReserved,
+                                role = Role.Button,
+                                onLongClickLabel = if (allowLabels) editLabelsDescription else null,
+                                onLongClick = if (allowLabels) {
+                                    { currentMedia?.let { onEditLabels(setOf(it.contentId)) } }
+                                } else null,
+                                onClick = {
+                                    currentMedia?.let {
+                                        viewModel.toggleFavourite(it.contentId, isFavourite) { message ->
+                                            messages.show(message, SnackbarDuration.Long)
+                                        }
+                                    }
+                                }
+                            ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isFavourite || currentLabels.isNotEmpty()) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                contentDescription = stringResource(R.string.labels_favourites),
+                                tint = (if (isFavourite) Color.Red else Color.White).copy(alpha = if (isCurrentReserved) 0.38f else 1f)
+                            )
+                        }
+                        run {
+                            Text(
+                                text = "Favourite",
+                                modifier = Modifier.revealHeight(bottomActionsReveal.fraction) { height ->
+                                    if (actionLabelsHeight != height) actionLabelsHeight = height
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = if (isCurrentReserved) 0.38f else 0.9f),
+                                maxLines = 1,
+                            )
+                        }
                     }
-                    ViewerAction(Icons.Outlined.Info, "Info") {
+                    ViewerAction(Icons.Outlined.Info, "Info", labelFraction = bottomActionsReveal.fraction) {
                         showInfo = true
                     }
                     if (currentMedia?.isTrashed == true) {
-                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore") {
+                        ViewerAction(Icons.Outlined.RestoreFromTrash, "Restore", enabled = !isCurrentReserved, labelFraction = bottomActionsReveal.fraction) {
                             currentMedia?.let { media ->
                                 viewModel.restoreMedia(media.contentId, media.uri)
                                 onBack()
                             }
                         }
                     } else {
-                        ViewerAction(Icons.Outlined.Delete, "Delete") {
+                        ViewerAction(Icons.Outlined.Delete, "Delete", enabled = !isCurrentReserved, labelFraction = bottomActionsReveal.fraction) {
                             showDeleteConfirm = true
+                        }
+                    }
+                }
+                BoxWithConstraints(Modifier.fillMaxWidth().revealHeight(bottomActionsReveal.fraction) { height ->
+                    if (secondaryActionsHeight != height) secondaryActionsHeight = height
+                }) {
+                    Row(
+                        modifier = Modifier
+                            .horizontalScroll(rememberScrollState())
+                            .widthIn(min = maxWidth)
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (allowTransfer) {
+                            ViewerSecondaryAction(Icons.AutoMirrored.Outlined.DriveFileMove, "Move") {
+                                currentMedia?.let(onRequestTransfer)
+                            }
+                        }
+                        if (allowLabels) {
+                            ViewerSecondaryAction(Icons.Outlined.Label, "Labels", enabled = !isCurrentReserved) {
+                                currentMedia?.let { onEditLabels(setOf(it.contentId)) }
+                            }
+                        }
+                        ViewerSecondaryAction(
+                            if (allowUnlockFromVault) Icons.Outlined.LockOpen else Icons.Outlined.Lock,
+                            stringResource(if (allowUnlockFromVault) R.string.unlock else R.string.lock),
+                            enabled = !isCurrentReserved,
+                        ) {
+                            expandedBottomActions = false
+                            currentMedia?.let { media ->
+                                if (allowUnlockFromVault) {
+                                    onUnlockFromVault(media)
+                                } else {
+                                    viewModel.moveToVault(media)
+                                    onBack()
+                                }
+                            }
+                        }
+                        ViewerSecondaryAction(Icons.Outlined.Wallpaper, "Wallpaper") {
+                            expandedBottomActions = false
+                            currentMedia?.let { media ->
+                                val intent = WallpaperManager.getInstance(context)
+                                    .getCropAndSetWallpaperIntent(Uri.parse(media.uri))
+                                context.startActivity(intent)
+                            }
+                        }
+                        ViewerSecondaryAction(Icons.AutoMirrored.Outlined.OpenInNew, "Open with") {
+                            expandedBottomActions = false
+                            currentMedia?.let { media ->
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(Uri.parse(media.uri), media.sourceMimeType)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                runCatching {
+                                    context.startActivity(Intent.createChooser(intent, "Open with..."))
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        if (showInfo && currentMedia != null) {
+        if (isForeground && showInfo && currentMedia != null) {
             InfoBottomSheet(
                 media = currentMedia,
                 viewModel = viewModel,
-                onDismiss = { showInfo = false }
+                onDismiss = { showInfo = false },
+                labels = currentLabels,
+                labelIds = currentMedia.contentId.let(labelIdsForMedia),
+                allowLabels = allowLabels,
+                canEditLabels = !isCurrentReserved,
+                onOpenLabel = onOpenLabel,
+                onEditLabels = {
+                    showInfo = false
+                    onEditLabels(setOf(currentMedia.contentId))
+                }
             )
         }
 
         DeleteConfirmDialog(
-            visible = showDeleteConfirm,
+            visible = isForeground && showDeleteConfirm && !isCurrentReserved,
             onDismissRequest = { showDeleteConfirm = false },
-            title = "Move to Recycle Bin?",
-            message = "Move this item to the recycle bin?",
-            confirmLabel = "Move to Bin",
-            isDeletePermanently = false,
+            title = if (allowUnlockFromVault) "Delete permanently?" else "Move to Recycle Bin?",
+            message = if (allowUnlockFromVault) "This action cannot be undone." else stringResource(R.string.dialog_restore),
+            confirmLabel = if (allowUnlockFromVault) "Delete" else "Move to Bin",
+            isDeletePermanently = allowUnlockFromVault,
             onConfirm = {
-                currentMedia?.let { media ->
-                    viewModel.moveToTrash(media.contentId, media.uri, media.path)
-                    onBack()
+                currentMedia?.takeUnless { isCurrentReserved }?.let { media ->
+                    if (allowUnlockFromVault) {
+                        viewModel.deleteFromVaultBulk(listOf(media.contentId)) { result ->
+                            if (media.contentId in result.deletedIds) onBack()
+                            else messages.show("Could not delete locked file", SnackbarDuration.Long)
+                        }
+                    } else {
+                        viewModel.moveToTrash(media.contentId, media.uri, media.path)
+                        onBack()
+                    }
                 }
             }
         )
 
-        imageIndexAction?.let { action ->
+        imageIndexAction?.takeIf { isForeground }?.let { action ->
             val target = currentIndexTarget ?: return@let
             val formatName = target.format.displayName
-            val isBuild = action != IndexedImageAction.DELETE
             val isUpgrade = action == IndexedImageAction.REBUILD
-            val detectedFormatMessage = if (target.detectedFromContent) {
-                "This file is named .${File(target.path).extension}, but its actual content is $formatName. " +
-                    "It will be indexed as $formatName.\n\n"
-            } else {
-                ""
-            }
-            AlertDialog(
+            val isBuild = action != IndexedImageAction.DELETE
+            GalleryDialog(
                 onDismissRequest = { if (!imageIndexBusy) imageIndexAction = null },
-                title = {
-                    Text(
-                        when {
-                            isUpgrade -> "Upgrade $formatName index?"
-                            isBuild -> "Build $formatName index?"
-                            else -> "Delete $formatName index?"
-                        }
-                    )
-                },
+                dismissEnabled = !imageIndexBusy,
+                icon = if (isBuild) Icons.Outlined.Description else Icons.Outlined.DeleteOutline,
+                title = { Text(stringResource(if (isBuild) R.string.dialog_build_index else R.string.dialog_delete_index, formatName)) },
                 text = {
-                    Text(
-                        if (isBuild) {
-                            detectedFormatMessage + when (target.format) {
-                                IndexedImageFormat.JPEG ->
-                                    "This reads the complete JPEG once and builds an index. It may temporarily " +
-                                        "use significant power and storage. The original image is not changed."
-                                IndexedImageFormat.PNG ->
-                                    "This decodes the complete PNG once and builds a lossless multi-resolution " +
-                                        "tile index. It may temporarily use significant power and storage."
-                                IndexedImageFormat.TIFF ->
-                                    "This validates and activates the TIFF's existing tiles, strips, and " +
-                                        "reduced-resolution directories. It does not decode or duplicate the full image."
-                                IndexedImageFormat.WEBP ->
-                                    "This decodes the complete static WebP once and builds a lossless " +
-                                        "multi-resolution tile index. Animated WebP is not changed or indexed."
-                                IndexedImageFormat.RAW ->
-                                    "This develops the complete camera RAW once with camera white balance and " +
-                                        "builds a lossless sRGB tile pyramid. The original RAW is never changed."
-                                IndexedImageFormat.HEIF ->
-                                    "This reads bounded HEIF/AVIF regions once and builds a lossless tile " +
-                                        "pyramid. The complete decoded image is never held in memory."
-                                IndexedImageFormat.BMP ->
-                                    "This validates the uncompressed BMP row layout and writes a 56-byte " +
-                                        "activation. Later zoom reads only scan lines crossing the viewport."
-                                IndexedImageFormat.JXL ->
-                                    "This streams the complete still JPEG XL once and builds a lossless sRGB " +
-                                        "multi-resolution tile index without holding the complete image in memory. " +
-                                        "Animated and HDR JPEG XL are not indexed yet."
-                            }
-                        } else {
-                            "Delete the saved $formatName index for this image? Future uncached tiles will use " +
-                                "the standard decoder again."
+                    ConfirmationFact(stringResource(R.string.dialog_file), File(target.path).name, formatName)
+                    if (target.detectedFromContent && isBuild) {
+                        ConfirmationReminder(stringResource(R.string.dialog_format_detected, File(target.path).extension, formatName))
+                    }
+                    if (isBuild) {
+                        val warning = when (target.format) {
+                            IndexedImageFormat.JPEG -> R.string.dialog_index_jpeg_note
+                            IndexedImageFormat.PNG -> R.string.dialog_index_png_note
+                            IndexedImageFormat.WEBP -> R.string.dialog_index_webp_note
+                            IndexedImageFormat.JXL -> R.string.dialog_index_jxl_note
+                            else -> null
                         }
-                    )
+                        warning?.let { ConfirmationReminder(stringResource(it)) }
+                        ConfirmationReminder(stringResource(R.string.dialog_original_unchanged), Icons.Default.Check)
+                    } else {
+                        ConfirmationReminder(stringResource(R.string.dialog_index_remove_body, formatName), Icons.Outlined.DeleteOutline)
+                        ConfirmationReminder(stringResource(R.string.dialog_index_remove_decode))
+                    }
                 },
                 confirmButton = {
-                    TextButton(
-                        enabled = !imageIndexBusy,
-                        onClick = {
-                            val operationTarget = currentIndexTarget ?: return@TextButton
+                    Button(
+                        enabled = !imageIndexBusy && !isCurrentReserved,
+                        onClick = confirm@ {
+                            val operationTarget = currentIndexTarget ?: return@confirm
                             imageIndexAction = null
                             imageIndexBusy = isBuild
                             viewerScope.launch {
@@ -1892,11 +2161,10 @@ internal fun ViewerScreen(
                                         )
                                     }
                                 }
-                                android.widget.Toast.makeText(
-                                    context,
+                                messages.show(
                                     result.getOrElse { it.message ?: "$formatName index operation failed" },
-                                    android.widget.Toast.LENGTH_LONG,
-                                ).show()
+                                    SnackbarDuration.Long,
+                                )
                             }
                         },
                     ) {
@@ -1914,40 +2182,45 @@ internal fun ViewerScreen(
                         enabled = !imageIndexBusy,
                         onClick = { imageIndexAction = null },
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.dialog_cancel))
                     }
                 },
             )
         }
 
-        unsupportedIndexFormat?.let { formatName ->
-            AlertDialog(
+        unsupportedIndexFormat?.takeIf { isForeground }?.let { formatName ->
+            GalleryDialog(
                 onDismissRequest = { unsupportedIndexFormat = null },
-                title = { Text("$formatName indexing is not supported") },
+                title = { Text(stringResource(R.string.dialog_unsupported_title, formatName)) },
                 text = {
-                    Text(
-                        "This file is named .${currentMedia?.path?.let(::File)?.extension ?: ""}, " +
-                            "but its actual content is $formatName. It can still be viewed normally, " +
-                            "but a zoom index cannot be built for this format yet.",
-                    )
+                    ConfirmationReminder(stringResource(R.string.dialog_unsupported_body, currentMedia?.path?.let(::File)?.extension ?: "", formatName))
+                    ConfirmationReminder(stringResource(R.string.dialog_unsupported_view))
                 },
                 confirmButton = {
-                    TextButton(onClick = { unsupportedIndexFormat = null }) { Text("Got it") }
+                    Button(onClick = { unsupportedIndexFormat = null }) { Text(stringResource(R.string.dialog_got_it)) }
                 },
             )
         }
     }
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun InfoBottomSheet(
     media: MediaEntry,
     viewModel: PhotosViewModel,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    labels: List<String> = emptyList(),
+    labelIds: List<Long> = emptyList(),
+    allowLabels: Boolean = false,
+    canEditLabels: Boolean = true,
+    onEditLabels: () -> Unit = {},
+    onOpenLabel: (Long) -> Unit = {},
 ) {
-    val metadata = remember(media.path) { viewModel.getMediaMetadata(media.path) }
-    val coords = remember(media.path) { viewModel.getCoordinates(media.path) }
+    val displayPath = media.vaultOriginalPath ?: media.path
+    val metadata = remember(displayPath) { viewModel.getMediaMetadata(displayPath) }
+    val coords = remember(displayPath) { viewModel.getCoordinates(displayPath) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1957,6 +2230,7 @@ fun InfoBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp)
         ) {
@@ -1966,8 +2240,8 @@ fun InfoBottomSheet(
                 modifier = Modifier.padding(bottom = 24.dp)
             )
 
-            InfoRow(Icons.Outlined.Image, media.path.substringAfterLast("/"), "${media.width} x ${media.height} • ${media.sizeBytes / 1024} KB")
-            InfoRow(Icons.Outlined.Folder, "Storage Path", media.path)
+            InfoRow(Icons.Outlined.Image, displayPath.substringAfterLast("/"), "${media.width} x ${media.height} • ${media.sizeBytes / 1024} KB")
+            InfoRow(Icons.Outlined.Folder, "Storage Path", displayPath)
             // Sharing apps can strip EXIF while MediaStore still retains DATE_TAKEN.
             // Fall back through the timestamps already collected for this item.
             val dateTaken = metadata["Date Taken"]
@@ -1980,6 +2254,38 @@ fun InfoBottomSheet(
                     ?.let(::formatPhotoDateTime)
                 ?: "Unknown"
             InfoRow(Icons.Outlined.CalendarToday, "Date Taken", dateTaken)
+
+            if (allowLabels) {
+                Spacer(Modifier.height(16.dp))
+                InfoRow(
+                    icon = Icons.Outlined.Label,
+                    title = stringResource(R.string.labels_title),
+                    subtitle = when (labels.size) {
+                        0 -> stringResource(R.string.labels_empty)
+                        1 -> labels.first()
+                        else -> stringResource(R.string.labels_attached_count, labels.size)
+                    },
+                    trailing = {
+                        Text(stringResource(if (labels.isEmpty()) R.string.labels_add else R.string.label_edit))
+                    },
+                    onTrailingClick = onEditLabels,
+                    trailingEnabled = canEditLabels,
+                )
+                if (labels.isNotEmpty()) FlowRow(
+                    modifier = Modifier.padding(start = 40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    labels.forEachIndexed { index, name ->
+                        SuggestionChip(
+                            onClick = {
+                                labelIds.getOrNull(index)?.let(onOpenLabel)
+                            },
+                            enabled = canEditLabels,
+                            label = { Text(name) }
+                        )
+                    }
+                }
+            }
 
             if (metadata["Model"] != "Unknown") {
                 Spacer(Modifier.height(24.dp))
@@ -2025,7 +2331,14 @@ fun InfoBottomSheet(
 }
 
 @Composable
-fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String) {
+fun InfoRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    trailing: (@Composable () -> Unit)? = null,
+    onTrailingClick: (() -> Unit)? = null,
+    trailingEnabled: Boolean = true,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2034,16 +2347,23 @@ fun InfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String
     ) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (trailing != null) {
+            if (onTrailingClick != null) {
+                TextButton(onClick = onTrailingClick, enabled = trailingEnabled) { trailing() }
+            } else {
+                trailing()
+            }
         }
     }
 }
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-fun VideoPlayer(
+internal fun VideoPlayer(
     uri: String, 
     filePath: String = "",
     fallbackDurationMillis: Long = 0L,
@@ -2051,17 +2371,33 @@ fun VideoPlayer(
     modifier: Modifier = Modifier,
     isMotionPhoto: Boolean = false,
     isActive: Boolean = true,
+    isForeground: Boolean = true,
     shouldPrepare: Boolean = isActive,
     showUI: Boolean = true,
-    onTap: () -> Unit = {}
+    onTap: () -> Unit = {},
+    sourceVersion: Long = 0L,
+    startOnOpen: Boolean = false,
+    onSession: (VideoPlaybackSession?) -> Unit = {},
+    onEnded: () -> Unit = {},
+    rotationGesture: ViewerRotationGesture? = null,
+    contentRotation: ViewerContentRotation? = null,
+    controlsBottomPadding: Dp = 96.dp,
+    videoViewModel: VideoSettingsViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
-    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
-    var useNativeFallback by remember(uri) { mutableStateOf(false) }
-    var nativeVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
-    var hasRenderedFirstFrame by remember(uri) { mutableStateOf(false) }
+    val settings by videoViewModel.settings.collectAsState()
+    var session by remember(uri) { mutableStateOf<VideoPlaybackSession?>(null) }
+    val exoPlayer = session?.player
+    val nativeVideoView = session?.native
+    val useNativeFallback = nativeVideoView != null
+    val hasRenderedFirstFrame = session?.firstFrame == true
     var hasPresentedVideoSurface by remember(uri) { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
+    val host = context as? MainActivity
+    val inPip = host?.isVideoPip == true
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var activityVisible by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
+    val latestEnded by rememberUpdatedState(onEnded)
+    val latestSessionCallback by rememberUpdatedState(onSession)
 
     val minUserZoom = 0.333f
     val maxUserZoom = 10f
@@ -2093,57 +2429,131 @@ fun VideoPlayer(
         )
     }
 
-    DisposableEffect(shouldPrepare, uri, filePath) {
-        hasRenderedFirstFrame = false
+    var videoViewport by remember(uri) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    LaunchedEffect(videoViewport, session) { session?.updatePipParams() }
+    val zoomViewport = if ((contentRotation?.settledDegrees ?: 0) % 180 != 0)
+        androidx.compose.ui.unit.IntSize(videoViewport.height, videoViewport.width) else videoViewport
+    if (!isMotionPhoto) VideoZoomMemory(zoomableState, videoViewModel.repository, settings,
+        "$uri:$sourceVersion", isActive && isForeground, zoomViewport, session)
+
+    DisposableEffect(shouldPrepare, uri, sourceVersion, settings != null) {
         hasPresentedVideoSurface = false
-        val player = if (shouldPrepare) {
-            val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
-                .setEnableDecoderFallback(true)
-
-            val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory()
-                .setConstantBitrateSeekingEnabled(true)
-                .setMp4ExtractorFlags(
-                    androidx.media3.extractor.mp4.Mp4Extractor.FLAG_READ_MOTION_PHOTO_METADATA
-                )
-
-            val primaryUri = Uri.parse(uri)
-            val fallbackUri = try {
-                val file = java.io.File(filePath)
-                if (filePath.isNotEmpty() && file.exists() && file.canRead()) Uri.fromFile(file) else null
-            } catch (e: Exception) {
-                null
-            }
-
-            val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context, extractorsFactory)
-
-            ExoPlayer.Builder(context, renderersFactory)
-                .setMediaSourceFactory(mediaSourceFactory)
-                .build()
-                .apply {
-                    setMediaItem(MediaItem.fromUri(primaryUri))
-                    repeatMode = if (isMotionPhoto) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-                    addListener(object : Player.Listener {
-                        override fun onRenderedFirstFrame() {
-                            hasRenderedFirstFrame = true
-                        }
-
-                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            hasRenderedFirstFrame = false
-                            useNativeFallback = true
-                        }
-                    })
-                    prepare()
-                    playWhenReady = isActive
-                }
-        } else null
-        
-        exoPlayer = player
-        
-        onDispose {
-            exoPlayer = null
-            player?.stop()
-            player?.release()
+        val value = if (shouldPrepare && settings != null) VideoPlaybackSession(
+            host, context, uri, "$uri:$sourceVersion", videoViewModel.repository,
+            settings!!.copy(autoplay = settings!!.autoplay || startOnOpen), isMotionPhoto, { latestEnded() },
+        ) else null
+        session = value
+        onDispose { value?.release(); if (session === value) session = null }
+    }
+    DisposableEffect(session, isActive, isForeground) {
+        val value = session
+        if (value != null && isActive && isForeground && !isMotionPhoto) {
+            host?.videoSession = value
+            latestSessionCallback(value)
+            value.updatePipParams()
         }
+        onDispose {
+            if (host?.videoSession === value) {
+                host?.videoSession = null
+                if (Build.VERSION.SDK_INT >= 31 && host?.packageManager?.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE) == true) {
+                    host.setPictureInPictureParams(android.app.PictureInPictureParams.Builder().setAutoEnterEnabled(false).build())
+                }
+                latestSessionCallback(null)
+            }
+        }
+    }
+    LaunchedEffect(session, settings) {
+        settings?.let { session?.updateSettings(it) }
+    }
+    DisposableEffect(session, lifecycle, isActive, isForeground, inPip) {
+        fun updateVisibility() {
+            val visible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            activityVisible = visible
+            // Resume decoding in the lifecycle callback, before the next layout/recomposition.
+            session?.updateVisibility(isActive, isForeground, visible, inPip)
+        }
+        val observer = LifecycleEventObserver { _, _ -> updateVisibility() }
+        lifecycle.addObserver(observer)
+        updateVisibility()
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(isActive, hasRenderedFirstFrame) {
+        if (isActive && hasRenderedFirstFrame) {
+            // Once a settled page has handed off to the real video surface, keep
+            // showing that paused surface while it slides out. Switching it back
+            // to the retriever-produced poster can cause an immediate color jump.
+            hasPresentedVideoSurface = true
+        }
+    }
+
+    val currentActive = rememberUpdatedState(isActive)
+    val currentForeground = rememberUpdatedState(isForeground)
+    val currentActivityVisible = rememberUpdatedState(activityVisible)
+    val currentPresented = rememberUpdatedState(hasPresentedVideoSurface)
+    val currentShowSurface = remember(session) {
+        derivedStateOf { session?.firstFrame == true && currentPresented.value && session?.outputReadiness?.isBuffered == true }
+    }
+    DisposableEffect(session) {
+        val value = session
+        if (value == null) {
+            onDispose { }
+        } else {
+            val frameKey = "video:${value.id}"
+            ViewerLoadMetrics.registerFrameLayer(frameKey) {
+                "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
+                    "activityVisible=${currentActivityVisible.value} firstFrame=${value.firstFrame} " +
+                    "presented=${currentPresented.value} showSurface=${currentShowSurface.value} " +
+                    "surfaceAlpha=${if (currentShowSurface.value) 1f else 0f} cover=${value.retainedFrame != null} " +
+                    "${value.diagnosticsSnapshot()}"
+            }
+            ViewerLoadMetrics.event(
+                "VIDEO_COMPOSE_ATTACH",
+                "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
+                    "activityVisible=${currentActivityVisible.value} showSurface=${currentShowSurface.value}",
+            )
+            onDispose {
+                ViewerLoadMetrics.event(
+                    "VIDEO_COMPOSE_DISPOSE",
+                    "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
+                        "activityVisible=${currentActivityVisible.value} showSurface=${currentShowSurface.value}",
+                )
+                ViewerLoadMetrics.unregisterFrameLayer(frameKey)
+            }
+        }
+    }
+    val videoRatio = session?.let {
+        val w = it.native?.width ?: it.videoSize.width
+        val h = it.native?.height ?: it.videoSize.height
+        if (w > 0 && h > 0) w.toFloat() * (if (it.native == null) it.videoSize.pixelWidthHeightRatio else 1f) / h else 16f / 9f
+    } ?: (16f / 9f)
+    val surfaceTransition = rememberVideoSurfaceTransition(session,
+        contentRotation?.let { it.busy || it.settledDegrees != 0 } == true)
+    val rotatedOutput = surfaceTransition.texture
+    LaunchedEffect(session, contentRotation?.settledDegrees) {
+        session?.contentRotationDegrees = contentRotation?.settledDegrees ?: 0
+        session?.updatePipParams()
+    }
+    val videoDismiss = LocalViewerDismissGesture.current
+    val dismissFrame = rememberVideoDismissFrame(session, videoDismiss?.isRevealing == true)
+    ViewerDismissImageEligibility(bounds = {
+        val width = videoViewport.width.toFloat()
+        val height = videoViewport.height.toFloat()
+        val sourceWidth = nativeVideoView?.width ?: exoPlayer?.videoSize?.width ?: 0
+        val sourceHeight = nativeVideoView?.height ?: exoPlayer?.videoSize?.height ?: 0
+        if (width <= 0f || height <= 0f || sourceWidth <= 0 || sourceHeight <= 0) null else {
+            val pixelRatio = exoPlayer?.videoSize?.pixelWidthHeightRatio ?: 1f
+            val rawRatio = sourceWidth.toFloat() * pixelRatio / sourceHeight
+            val ratio = if ((contentRotation?.settledDegrees ?: 0) % 180 != 0) 1f / rawRatio else rawRatio
+            val fitWidth = minOf(width, height * ratio)
+            val fitHeight = fitWidth / ratio
+            androidx.compose.ui.geometry.Rect((width - fitWidth) / 2f, (height - fitHeight) / 2f,
+                (width + fitWidth) / 2f, (height + fitHeight) / 2f)
+        }
+    }) {
+        val transform = zoomableState.contentTransformation
+        isActive && isForeground && !inPip && !isMotionPhoto && currentShowSurface.value && contentRotation?.busy != true &&
+            (!transform.isSpecified || kotlin.math.abs(transform.scaleMetadata.userZoom - 1f) < .02f)
     }
 
     LaunchedEffect(exoPlayer, nativeVideoView, isActive, useNativeFallback) {
@@ -2170,7 +2580,18 @@ fun VideoPlayer(
 
     Box(
         modifier = modifier
-            .zoomable(
+            .onSizeChanged { videoViewport = it }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (videoDismiss != null) Modifier.viewerDismissMotion(videoDismiss) else Modifier)
+        ) {
+        RotatingMediaLayer(
+            if (rotatedOutput || surfaceTransition.cover != null) contentRotation else null,
+            videoRatio, Modifier.fillMaxSize()
+        ) {
+        Box(Modifier.fillMaxSize().zoomable(
                 state = zoomableState,
                 onClick = { _ -> onTap() },
                 onDoubleClick = DoubleClickToZoomListener { state, centroid ->
@@ -2181,11 +2602,8 @@ fun VideoPlayer(
                         state.resetZoom()
                     }
                 }
-            )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
+            )) {
+        Box(Modifier.fillMaxSize()
                 .graphicsLayer {
                     val transformation = zoomableState.contentTransformation
                     scaleX = transformation.scale.scaleX
@@ -2193,87 +2611,42 @@ fun VideoPlayer(
                     translationX = transformation.offset.x
                     translationY = transformation.offset.y
                     transformOrigin = transformation.transformOrigin
-                }
+                }.graphicsLayer { alpha = if (dismissFrame != null) 0f else 1f }
         ) {
-            if (firstFrameModel != null && !showVideoSurface) {
-                GlideImage(
-                    model = firstFrameModel,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    requestBuilderTransform = { request ->
-                        request
-                            .dontTransform()
-                            .format(DecodeFormat.PREFER_RGB_565)
-                            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                            .override(720)
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
+            VideoPresentation(session, firstFrameModel, hasPresentedVideoSurface, videoRatio,
+                rotatedOutput, isActive && isForeground && activityVisible)
+            surfaceTransition.cover?.let { bitmap ->
+                Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().drawWithContent {
+                        drawContent()
+                        surfaceTransition.drawnCover = bitmap
+                    })
             }
-
-            if (exoPlayer != null) {
-                if (useNativeFallback) {
-                    AndroidView(
-                        factory = { ctx ->
-                            android.widget.VideoView(ctx).apply {
-                                setVideoURI(Uri.parse(uri))
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = !isMotionPhoto
-                                    hasRenderedFirstFrame = true
-                                    if (isActive) mp.start()
-                                }
-                                setOnErrorListener { _, _, _ -> true }
-                                nativeVideoView = this
-                            }
-                        },
-                        update = { view ->
-                            nativeVideoView = view
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(if (showVideoSurface) 1f else 0f)
-                    )
-                } else {
-                    AndroidView(
-                        factory = { ctx ->
-                            object : PlayerView(ctx) {
-                                override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
-                                    return false
-                                }
-                            }.apply {
-                                setEnableComposeSurfaceSyncWorkaround(true)
-                                player = exoPlayer
-                                useController = false
-                                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                setKeepScreenOn(true)
-                                setBackgroundColor(android.graphics.Color.BLACK)
-                            }
-                        },
-                        update = { view ->
-                            if (view.player != exoPlayer) {
-                                view.player = exoPlayer
-                            }
-                        },
-                        onRelease = { view ->
-                            view.player = null
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(if (showVideoSurface) 1f else 0f)
-                    )
-                }
-            }
+        }
+        dismissFrame?.let { bitmap ->
+            Image(bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize())
+        }
+        }
+        }
         }
 
         if (!isMotionPhoto) {
             val currentZoom = zoomableState.contentTransformation.takeIf { it.isSpecified }?.scaleMetadata?.userZoom ?: 1f
             VideoControls(
                 player = exoPlayer,
+                rotationGesture = rotationGesture,
                 nativeVideoView = if (useNativeFallback) nativeVideoView else null,
-                isVisible = showUI,
+                isVisible = showUI && isForeground && !inPip,
+                isForeground = isForeground && activityVisible && isActive && !inPip,
+                onPlayPause = { session?.togglePlay() },
+                onSeekFinished = { session?.checkpoint() },
                 currentZoom = currentZoom,
                 fallbackDurationMillis = fallbackDurationMillis,
-                modifier = Modifier.fillMaxSize()
+                bottomPadding = controlsBottomPadding,
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    alpha = videoDismiss?.visual?.chromeAlpha ?: 1f
+                }
             )
         }
     }
@@ -2282,21 +2655,24 @@ fun VideoPlayer(
 @Composable
 fun VideoControls(
     player: Player?,
-    nativeVideoView: android.widget.VideoView? = null,
+    rotationGesture: ViewerRotationGesture? = null,
+    nativeVideoView: NativeVideoPlayback? = null,
     isVisible: Boolean,
+    isForeground: Boolean = true,
+    onPlayPause: (() -> Unit)? = null,
+    onSeekFinished: () -> Unit = {},
     currentZoom: Float = 1f,
     fallbackDurationMillis: Long = 0L,
+    bottomPadding: Dp = 96.dp,
     modifier: Modifier = Modifier
 ) {
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isDragging by remember { mutableStateOf(false) }
 
-    LaunchedEffect(player, nativeVideoView, isDragging, fallbackDurationMillis) {
+    LaunchedEffect(player, nativeVideoView, isDragging, fallbackDurationMillis, isForeground, isVisible) {
+        if (!isForeground || !isVisible) return@LaunchedEffect
         while (true) {
             try {
                 if (nativeVideoView != null) {
@@ -2331,7 +2707,9 @@ fun VideoControls(
             IconButton(
                 onClick = { 
                     try {
-                        if (nativeVideoView != null) {
+                        if (onPlayPause != null) {
+                            onPlayPause()
+                        } else if (nativeVideoView != null) {
                             if (nativeVideoView.isPlaying) {
                                 nativeVideoView.pause()
                             } else {
@@ -2360,6 +2738,7 @@ fun VideoControls(
                         scaleY = pauseButtonScale
                     }
                     .size(64.dp)
+                    .viewerRotationArea(rotationGesture, excluded = true)
                     .background(Color.Black.copy(alpha = 0.4f), CircleShape)
             ) {
                 Icon(
@@ -2373,10 +2752,16 @@ fun VideoControls(
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (isLandscape) 48.dp else 96.dp)
+                    .padding(bottom = bottomPadding)
                     .padding(horizontal = 24.dp)
                     .fillMaxWidth()
+                    .viewerRotationArea(rotationGesture, excluded = true)
             ) {
+                val progressColors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.White,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                )
                 Slider(
                     value = currentPosition.toFloat(),
                     onValueChange = { 
@@ -2391,14 +2776,16 @@ fun VideoControls(
                             } else {
                                 player?.seekTo(currentPosition)
                             }
+                            onSeekFinished()
                         } catch (e: Exception) {}
                     },
                     valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                    )
+                    colors = progressColors,
+                    track = { state -> SliderDefaults.Track(
+                        sliderState = state,
+                        colors = progressColors,
+                        drawStopIndicator = null,
+                    ) },
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2439,9 +2826,43 @@ private fun formatPhotoDateTime(millis: Long): String =
 fun ViewerAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    onClick: () -> Unit
+    enabled: Boolean = true,
+    labelFraction: Float = 0f,
+    onClick: () -> Unit,
 ) {
-    IconButton(onClick = onClick) {
-        Icon(icon, contentDescription = label, tint = Color.White)
+    Column(modifier = Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = if (enabled) 1f else .38f))
+        }
+        Text(text = label, style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = if (enabled) .9f else .38f), maxLines = 1,
+            modifier = Modifier.revealHeight(labelFraction))
+    }
+}
+
+@Composable
+private fun ViewerSecondaryAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.width(72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = if (enabled) 0.9f else 0.38f),
+            maxLines = 1,
+        )
     }
 }

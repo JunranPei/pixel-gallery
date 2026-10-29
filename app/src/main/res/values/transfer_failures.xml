@@ -1,0 +1,9 @@
+<resources>
+    <string name="transfer_copy_incomplete">Copy incomplete</string>
+    <string name="transfer_copy_failed">Could not complete the copy.</string>
+    <string name="transfer_move_failed_result">Moved: %1$d; unsuccessful: %2$d.</string>
+    <string name="transfer_copy_failed_result">Copied: %1$d; unsuccessful: %2$d.</string>
+    <string name="transfer_source_missing">The original file is unavailable.</string>
+    <string name="transfer_already_in_album">Already in the destination album</string>
+    <string name="transfer_already_moving">These files are already being moved</string>
+</resources>

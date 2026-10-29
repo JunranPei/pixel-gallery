@@ -1,0 +1,4 @@
+<resources>
+    <string name="transfer_undo">Undo move</string>
+    <string name="transfer_undo_unavailable">Nothing to undo</string>
+</resources>

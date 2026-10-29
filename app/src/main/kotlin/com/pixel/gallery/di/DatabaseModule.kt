@@ -3,6 +3,10 @@ package com.pixel.gallery.di
 import android.content.Context
 import androidx.room.Room
 import com.pixel.gallery.data.local.GalleryDatabase
+import com.pixel.gallery.data.local.LABEL_DATABASE_CALLBACK
+import com.pixel.gallery.data.local.MIGRATION_3_4
+import com.pixel.gallery.data.local.MIGRATION_4_5
+import com.pixel.gallery.data.local.dao.LabelDao
 import com.pixel.gallery.data.local.dao.MediaDao
 import dagger.Module
 import dagger.Provides
@@ -22,7 +26,8 @@ object DatabaseModule {
             context,
             GalleryDatabase::class.java,
             "gallery_db"
-        ).fallbackToDestructiveMigration()
+        ).addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+            .addCallback(LABEL_DATABASE_CALLBACK)
             .build()
     }
 
@@ -31,4 +36,8 @@ object DatabaseModule {
     fun provideMediaDao(db: GalleryDatabase): MediaDao {
         return db.mediaDao()
     }
+
+    @Provides
+    @Singleton
+    fun provideLabelDao(db: GalleryDatabase): LabelDao = db.labelDao()
 }

@@ -20,6 +20,9 @@ import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.local.entity.VaultEntry
 import com.google.gson.Gson
 import com.pixel.gallery.model.TransferDestination
+import com.pixel.gallery.model.isInsideMediaFolder
+import com.pixel.gallery.model.renamedAlbumDirectory
+import com.pixel.gallery.model.remapAlbumPath
 import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.isSameTransferDirectory
 import com.pixel.gallery.model.TransferItemFailure
@@ -31,6 +34,17 @@ import com.pixel.gallery.model.ReplacementStage
 import com.pixel.gallery.model.getAvailableTransferName
 import com.pixel.gallery.model.isVerifiedTransferSize
 import com.pixel.gallery.model.replacementRecoveryAction
+import com.pixel.gallery.model.QuickMoveCheckpoint
+import com.pixel.gallery.model.QuickMoveStage
+import com.pixel.gallery.model.TransferReceipt
+import com.pixel.gallery.model.MediaFileFingerprint
+import com.pixel.gallery.model.fingerprintMediaFile
+import com.pixel.gallery.model.verifyMediaFile
+import com.pixel.gallery.model.restoreMediaModifiedTime
+import com.pixel.gallery.model.copyVerifiedMediaBytes
+import com.pixel.gallery.model.mediaStreamSha256
+import com.pixel.gallery.model.quickMoveRecoveryDecision
+import com.pixel.gallery.model.QuickMoveRecoveryDecision
 import com.pixel.gallery.utils.StorageUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.indexedbmp.IndexedBmpStore
@@ -42,6 +56,10 @@ import io.github.indexedraw.IndexedRawStore
 import io.github.indexedtiff.IndexedTiffStore
 import io.github.indexedwebp.IndexedWebpStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -51,6 +69,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.withContext
@@ -65,6 +84,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -73,11 +93,23 @@ import javax.inject.Singleton
 class MediaRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val mediaDao: MediaDao,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    internal val readRefreshes: MediaReadRefreshCoordinator = MediaReadRefreshCoordinator(),
 ) {
+    internal data class ViewerMediaSnapshot(
+        val entries: List<MediaEntry>,
+        val sortKey: String,
+        val hiddenFolders: Set<String>,
+    )
+
     data class VaultRestoreResult(
         val restoredIds: List<Long>,
         val failedIds: List<Long>
+    )
+
+    data class VaultDeleteResult(
+        val deletedIds: List<Long>,
+        val failedIds: List<Long>,
     )
 
     private data class ReplaceJournal(
@@ -96,6 +128,8 @@ class MediaRepository @Inject constructor(
     private val replacementRecoveryComplete = CompletableDeferred<Unit>()
     private val mediaMutationMutex = Mutex()
     private val syncMutex = Mutex()
+    private val viewerMediaSnapshot = AtomicReference<ViewerMediaSnapshot?>(null)
+    private val moveJournalLock = Any()
     @Volatile private var mediaMutationInProgress = false
 
     private val jpegIndexStore by lazy { IndexedJpegStore(context) }
@@ -107,13 +141,21 @@ class MediaRepository @Inject constructor(
     private val bmpIndexStore by lazy { IndexedBmpStore(context) }
     private val jxlIndexStore by lazy { IndexedJxlStore(context) }
 
-    private suspend fun <T> withMediaMutation(block: suspend () -> T): T =
+    private companion object {
+        private const val MEDIA_QUERY_ATTEMPTS = 3
+        private val MEDIA_QUERY_RETRY_DELAYS = longArrayOf(40L, 120L)
+        private const val QUICK_MOVE_SETTLE_ATTEMPTS = 4
+        private val QUICK_MOVE_SETTLE_DELAYS = longArrayOf(80L, 160L, 320L)
+    }
+
+    internal suspend fun <T> withMediaMutation(refreshOnFinish: Boolean = true, block: suspend () -> T): T =
         mediaMutationMutex.withLock {
             mediaMutationInProgress = true
             try {
                 block()
             } finally {
                 mediaMutationInProgress = false
+                if (refreshOnFinish) readRefreshes.publish()
             }
         }
 
@@ -121,9 +163,11 @@ class MediaRepository @Inject constructor(
         repositoryScope.launch(Dispatchers.IO) {
             try {
                 recoverInterruptedReplacements()
+                recoverInterruptedMoves()
+                val protectedIds = pendingMoveSourceIds()
                 val allPaths = mediaDao.getAllMediaPaths()
                 val missingEntries = allPaths.filter { entry ->
-                    !java.io.File(entry.path).exists()
+                    entry.contentId !in protectedIds && !java.io.File(entry.path).exists()
                 }
 
                 if (missingEntries.isNotEmpty()) {
@@ -146,24 +190,52 @@ class MediaRepository @Inject constructor(
     }
 
     val allEntries: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.observeAllEntriesChanges().map { mediaDao.getAllEntriesPaged() },
+        readRefreshes.refreshes(mediaDao.observeAllEntriesChanges()).coalesceMediaInvalidations().map { mediaDao.getAllEntriesPaged() },
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         entries.filter { entry ->
-            !excluded.any { entry.path.startsWith(it) }
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.isInsideMediaFolder(it) }
         }
+    }.onEach {
+        // A real MediaStore/Room refresh invalidates the retained detail snapshot.
+        // Settings-only changes are checked against the snapshot key below.
+        viewerMediaSnapshot.set(null)
     }.stateIn(
         scope = repositoryScope,
         started = SharingStarted.Eagerly,
         initialValue = emptyList()
     )
+
+    internal fun cachedViewerMediaSnapshot(
+        sortKey: String,
+        hiddenFolders: Set<String>,
+    ): List<MediaEntry>? = viewerMediaSnapshot.get()?.takeIf {
+        it.sortKey == sortKey && it.hiddenFolders == hiddenFolders
+    }?.entries
+
+    internal fun cacheViewerMediaSnapshot(snapshot: ViewerMediaSnapshot) {
+        viewerMediaSnapshot.set(snapshot)
+    }
+
+    /** Reads the post-sync Room snapshot without waiting for the UI StateFlow to re-emit. */
+    internal suspend fun currentActiveEntries(): List<MediaEntry> = withContext(Dispatchers.IO) {
+        val excluded = settingsRepository.excludedFolders.first()
+        mediaDao.getAllEntriesPaged().filter { entry ->
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") &&
+                !excluded.any { entry.path.isInsideMediaFolder(it) }
+        }
+    }
 
     val favourites: StateFlow<List<MediaEntry>> = combine(
-        mediaDao.observeFavouritesChanges().map { mediaDao.getFavouritesPaged() },
-        settingsRepository.excludedFolders
-    ) { entries, excluded ->
+        readRefreshes.refreshes(mediaDao.observeFavouritesChanges()).coalesceMediaInvalidations().map { mediaDao.getFavouritesPaged() },
+        settingsRepository.excludedFolders,
+        settingsRepository.hiddenFolders,
+    ) { entries, excluded, hidden ->
+        // Visibility never removes the saved favourite or label memberships.
+        val invisibleFolders = excluded + hidden
         entries.filter { entry ->
-            !excluded.any { entry.path.startsWith(it) }
+            !entry.path.contains("/PixelGallery-QuickSortUndo/") &&
+                invisibleFolders.none { entry.path.isInsideMediaFolder(it) }
         }
     }.stateIn(
         scope = repositoryScope,
@@ -171,7 +243,7 @@ class MediaRepository @Inject constructor(
         initialValue = emptyList()
     )
 
-    val trash: StateFlow<List<MediaEntry>> = mediaDao.observeTrashChanges().map {
+    val trash: StateFlow<List<MediaEntry>> = readRefreshes.refreshes(mediaDao.observeTrashChanges()).coalesceMediaInvalidations().map {
         mediaDao.getTrashPaged()
     }.stateIn(
         scope = repositoryScope,
@@ -182,12 +254,126 @@ class MediaRepository @Inject constructor(
 
     fun isFavourite(id: Long): Flow<Boolean> = mediaDao.isFavourite(id)
 
-    suspend fun addFavourite(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun addFavourite(id: Long) = withValidLabelMedia(setOf(id)) {
         mediaDao.addFavourite(com.pixel.gallery.data.local.entity.FavouriteEntry(id))
     }
 
-    suspend fun removeFavourite(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun removeFavourite(id: Long) = withValidLabelMedia(setOf(id)) {
         mediaDao.removeFavourite(id)
+    }
+
+    suspend fun renameAlbum(path: String, name: String) {
+        replacementRecoveryComplete.await()
+        withMediaMutation {
+            withContext(Dispatchers.IO + NonCancellable) {
+                syncMutex.withLock {
+                    val source = File(path)
+                    require(source.isDirectory) { "This album folder is no longer available" }
+                    val target = renamedAlbumDirectory(source, name)
+                    if (source == target) return@withLock
+                    val volume = StorageUtils.getVolumePath(context, source.absolutePath)
+                    require(volume != null && source.canonicalPath != File(volume).canonicalPath) {
+                        "Storage roots cannot be renamed"
+                    }
+                    val entries = (mediaDao.getAllEntriesPaged() + mediaDao.getTrashPaged()).filter {
+                        it.path.startsWith("${source.absolutePath}/")
+                    }
+                    // Publish protection for the new path before either the file system or Room
+                    // can expose it. The existing source protection remains during the move.
+                    val temporaryHiddenPaths = settingsRepository.protectHiddenAlbumRename(
+                        source.absolutePath, target.absolutePath
+                    )
+                    val indexed = mutableListOf<Pair<MediaEntry, MediaEntry>>()
+                    var directoryRenamed = false
+                    try {
+                        if (!source.renameTo(target)) throw IOException("Could not rename this album folder")
+                        directoryRenamed = true
+                        for (entry in entries) {
+                            val newPath = remapAlbumPath(entry.path, source.absolutePath, target.absolutePath)
+                            val uri = scanFile(File(newPath), entry.sourceMimeType)
+                                ?: throw IOException("Could not update the renamed album in the media library")
+                            val id = uri.lastPathSegment?.toLongOrNull()
+                                ?: throw IOException("Could not read the renamed media identity")
+                            indexed += entry to entry.copy(contentId = id, uri = uri.toString(), path = newPath)
+                        }
+                        for ((old, updated) in indexed) {
+                            mediaDao.remapMediaLabels(old.contentId, updated.contentId)
+                            relocatePersistentIndexes(old.path, updated.path)
+                        }
+                        mediaDao.reconcileMedia(indexed.map { it.second }, indexed.filter { it.first.contentId != it.second.contentId }.map { it.first.contentId })
+                        settingsRepository.remapAlbumPaths(
+                            source.absolutePath, target.absolutePath, temporaryHiddenPaths
+                        )
+                    } catch (error: Exception) {
+                        try {
+                            if (!directoryRenamed) {
+                                settingsRepository.clearHiddenAlbumRenameProtection(temporaryHiddenPaths)
+                            } else if (target.renameTo(source)) {
+                                var restoredAllEntries = true
+                                for (entry in entries) {
+                                    val restoredUri = scanFile(File(entry.path), entry.sourceMimeType)
+                                    val restoredId = restoredUri?.lastPathSegment?.toLongOrNull()
+                                    if (restoredUri == null || restoredId == null) {
+                                        restoredAllEntries = false
+                                        continue
+                                    }
+                                    val moved = indexed.find { it.first.contentId == entry.contentId }?.second
+                                    mediaDao.remapMediaLabels(entry.contentId, restoredId)
+                                    mediaDao.remapMediaLabels(moved?.contentId ?: entry.contentId, restoredId)
+                                    moved?.let { relocatePersistentIndexes(it.path, entry.path) }
+                                    mediaDao.reconcileMedia(listOf(entry.copy(contentId = restoredId, uri = restoredUri.toString())),
+                                        listOfNotNull(entry.contentId, moved?.contentId).distinct().filter { it != restoredId })
+                                }
+                                // remapAlbumPaths is the final, atomic step in the try block;
+                                // on failure the original settings still point at the source.
+                                // Remove only paths introduced by this attempt, never an old
+                                // destination setting or another hidden album's protection.
+                                if (restoredAllEntries) {
+                                    settingsRepository.clearHiddenAlbumRenameProtection(temporaryHiddenPaths)
+                                }
+                            }
+                            // A failed/incomplete rollback retains both hidden locations.
+                        } catch (recoveryError: Exception) {
+                            error.addSuppressed(recoveryError)
+                        }
+                        throw error
+                    }
+                    // Scan the directory too, including nested and non-image files.
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
+                    entries.forEach { scanFile(File(it.path), it.sourceMimeType) }
+                }
+                syncWithMediaStore(force = true)
+            }
+        }
+    }
+
+    /** Serialize label writes with moves and reject stale IDs held by another window. */
+    suspend fun <T> withValidLabelMedia(contentIds: Set<Long>, block: suspend () -> T): T = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            val entries = contentIds.toList().chunked(400).flatMap { mediaDao.getEntriesByIds(it) }
+            val entryIds = entries.mapTo(hashSetOf()) { it.contentId }
+            val vaultItems = (contentIds - entryIds).mapNotNull { mediaDao.getVaultEntry(it) }
+            if (entryIds + vaultItems.map { it.id }.toSet() != contentIds) {
+                throw LabelMediaUnavailableException("Some selected files changed; reopen their labels")
+            }
+            for (entry in entries) {
+                val columns = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.IS_TRASHED)
+                else arrayOf(MediaStore.MediaColumns._ID)
+                val valid = runCatching {
+                    context.contentResolver.query(Uri.parse(entry.uri), columns, null, null, null)?.use { cursor ->
+                        cursor.moveToFirst() && (columns.size < 2 || cursor.getInt(1) == 0)
+                    } == true
+                }.getOrDefault(false)
+                if (!valid) throw LabelMediaUnavailableException("A selected file moved or was removed; reopen its labels")
+            }
+            for (vaultItem in vaultItems) {
+                if (!java.io.File(vaultItem.vaultPath).isFile) {
+                    throw LabelMediaUnavailableException("A selected locked file is no longer available; reopen its labels")
+                }
+            }
+            block()
+        }
     }
 
     // --- Trash ---
@@ -320,6 +506,28 @@ class MediaRepository @Inject constructor(
         }
     }
 
+    suspend fun deleteVaultBulk(ids: List<Long>): VaultDeleteResult = withMediaMutation {
+        withContext(Dispatchers.IO) {
+            val deletedIds = mutableListOf<Long>()
+            val failedIds = mutableListOf<Long>()
+            ids.distinct().forEach { id ->
+                val entry = mediaDao.getVaultEntry(id)
+                val file = entry?.let { java.io.File(it.vaultPath) }
+                val deleted = entry != null && file != null &&
+                    (!file.exists() || (file.delete() && !file.exists()))
+                if (deleted) {
+                    mediaDao.deleteVaultEntry(id)
+                    mediaDao.deleteMediaLabels(id)
+                    entry?.let { deletePersistentIndexes(listOf(it.vaultPath)) }
+                    deletedIds += id
+                } else {
+                    failedIds += id
+                }
+            }
+            VaultDeleteResult(deletedIds = deletedIds, failedIds = failedIds)
+        }
+    }
+
     // --- Vault ---
     suspend fun moveToVault(entry: MediaEntry): Boolean = withMediaMutation {
         withContext(Dispatchers.IO) {
@@ -415,23 +623,21 @@ class MediaRepository @Inject constructor(
         if (restored) {
             relocatePersistentIndexes(vaultFile.absolutePath, originalFile.absolutePath)
             val originalEntry = gson.fromJson(vaultEntry.entryJson, MediaEntry::class.java)
-            mediaDao.deleteVaultEntry(id)
-            
-            // Rescan the file to add it back to MediaStore
-            android.media.MediaScannerConnection.scanFile(context, arrayOf(originalFile.absolutePath), null) { _, uri ->
-                if (uri != null) {
-                    val values = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.MediaColumns.DATE_ADDED, originalEntry.dateAddedSecs)
-                        put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, originalEntry.dateModifiedMillis / 1000)
-                        originalEntry.sourceDateTakenMillis?.let { put("datetaken", it) }
-                    }
-                    try {
-                        context.contentResolver.update(uri, values, null, null)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
+            val uri = scanFile(originalFile, originalEntry.sourceMimeType)
+            if (uri == null) {
+                // Keep the vault record until the new ID is known, restoring the original location if possible.
+                originalFile.renameTo(vaultFile)
+                return@withContext false
             }
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DATE_ADDED, originalEntry.dateAddedSecs)
+                put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, originalEntry.dateModifiedMillis / 1000)
+                originalEntry.sourceDateTakenMillis?.let { put("datetaken", it) }
+            }
+            runCatching { context.contentResolver.update(uri, values, null, null) }
+            migrateMediaLabels(id, uri)
+            relocatePersistentIndexes(vaultFile.absolutePath, originalFile.absolutePath)
+            mediaDao.deleteVaultEntry(id)
             true
         } else {
             false
@@ -465,7 +671,8 @@ class MediaRepository @Inject constructor(
             // Update entry to point to vault path for correct rendering
             entry.copy(
                 path = it.vaultPath,
-                uri = Uri.fromFile(java.io.File(it.vaultPath)).toString()
+                uri = Uri.fromFile(java.io.File(it.vaultPath)).toString(),
+                vaultOriginalPath = it.originalPath,
             )
         }.sortedByDescending { it.bestTimestamp }
     }.stateIn(
@@ -481,7 +688,7 @@ class MediaRepository @Inject constructor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
             return null
         }
-        val uris = entries.mapNotNull { runCatching { Uri.parse(it.uri) }.getOrNull() }
+        val uris = entries.mapNotNull { runCatching { Uri.parse(it.uri) }.getOrNull() }.distinct()
         if (uris.isEmpty()) return null
 
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
@@ -557,6 +764,7 @@ class MediaRepository @Inject constructor(
     ): TransferSummary = withMediaMutation {
             withContext(Dispatchers.IO) {
             replacementRecoveryComplete.await()
+            currentCoroutineContext().ensureActive()
             val destinationDir = File(destination.path)
         if (
             destination.documentUri == null &&
@@ -574,18 +782,21 @@ class MediaRepository @Inject constructor(
         var skipped = 0
         val failures = mutableListOf<TransferItemFailure>()
 
+        try {
         entries.forEachIndexed { index, entry ->
-            val sourceFile = File(entry.path)
+            currentCoroutineContext().ensureActive()
+            val sourceFile = resolveTransferSource(entry)
             onProgress(
                 TransferProgress(
                     mode = mode,
                     completed = index,
                     total = entries.size,
-                    currentName = sourceFile.name
+                    currentName = sourceFile?.name.orEmpty()
                 )
             )
+            currentCoroutineContext().ensureActive()
 
-            if (!sourceFile.exists()) {
+            if (sourceFile == null) {
                 failures += TransferItemFailure(entry, "Source file no longer exists")
                 return@forEachIndexed
             }
@@ -593,58 +804,36 @@ class MediaRepository @Inject constructor(
             // Treat copying or moving a file into the directory it already
             // occupies as a no-op. In particular, KEEP_BOTH must never turn
             // the source itself into an accidental numbered duplicate.
-            if (isSameTransferDirectory(entry.path, destination.path)) {
+            if (isSameTransferDirectory(sourceFile.path, destination.path)) {
                 skipped++
                 return@forEachIndexed
             }
 
             try {
-                destination.documentUri?.let { documentUri ->
-                    when (
-                        transferEntryToSaf(
-                            entry = entry,
-                            sourceFile = sourceFile,
-                            destination = destination,
-                            parentUri = Uri.parse(documentUri),
-                            mode = mode,
-                            conflictPolicy = conflictPolicy
-                        )
-                    ) {
-                        TransferOutcome.COMPLETED -> succeeded++
-                        TransferOutcome.SKIPPED -> skipped++
-                    }
-                    return@forEachIndexed
+                // Complete or roll back an item that has already started, including
+                // label/index updates. Cancellation stops the next item at the boundary.
+                when (withContext(NonCancellable) {
+                    transferResolvedEntry(entry, sourceFile, destination, mode, conflictPolicy)
+                }) {
+                    TransferOutcome.COMPLETED -> succeeded++
+                    TransferOutcome.SKIPPED -> skipped++
                 }
-
-                val directTarget = File(destinationDir, sourceFile.name)
-                if (directTarget.exists() && conflictPolicy == ConflictPolicy.SKIP) {
-                    skipped++
-                    return@forEachIndexed
-                }
-                if (directTarget.exists() && conflictPolicy == ConflictPolicy.REPLACE) {
-                    if (directTarget.canonicalPath == sourceFile.canonicalPath) {
-                        skipped++
-                        return@forEachIndexed
-                    }
-                    replaceEntry(entry, sourceFile, directTarget, mode)
-                    succeeded++
-                    return@forEachIndexed
-                }
-
-                val targetFile = if (conflictPolicy == ConflictPolicy.KEEP_BOTH) {
-                    getAvailableTarget(destinationDir, sourceFile.name)
-                } else {
-                    directTarget
-                }
-                when (mode) {
-                    TransferMode.COPY -> copyEntry(entry, sourceFile, targetFile)
-                    TransferMode.MOVE -> moveEntry(entry, sourceFile, targetFile)
-                }
-                succeeded++
             } catch (error: Exception) {
+                if (error is CancellationException) throw error
                 failures += TransferItemFailure(entry, error.message ?: error.javaClass.simpleName)
             }
         }
+        } finally {
+        if ((succeeded > 0 || failures.isNotEmpty()) &&
+            (mode == TransferMode.COPY || destination.documentUri != null ||
+                conflictPolicy == ConflictPolicy.REPLACE || failures.isNotEmpty())) {
+            // Verified local moves already publish their affected rows atomically.
+            // Other adapters and failures still reconcile the provider's final state.
+            runCatching { withContext(NonCancellable) { syncWithMediaStore(force = true) } }
+                .onFailure { android.util.Log.e("MediaRepository", "Transfer succeeded but MediaStore sync failed", it) }
+        }
+        }
+        currentCoroutineContext().ensureActive()
 
         if (succeeded > 0) {
             // Do not report 100% until the final MediaStore state and Room snapshot agree.
@@ -667,10 +856,56 @@ class MediaRepository @Inject constructor(
             }
     }
 
-    fun isMediaMutationInProgress(): Boolean = mediaMutationInProgress
+    private suspend fun transferResolvedEntry(
+        entry: MediaEntry,
+        sourceFile: File,
+        destination: TransferDestination,
+        mode: TransferMode,
+        conflictPolicy: ConflictPolicy
+    ): TransferOutcome {
+        destination.documentUri?.let { uri ->
+            return transferEntryToSaf(entry, sourceFile, destination, Uri.parse(uri), mode, conflictPolicy)
+        }
+        val directory = File(destination.path)
+        val directTarget = File(directory, sourceFile.name)
+        if (directTarget.exists() && conflictPolicy == ConflictPolicy.SKIP) return TransferOutcome.SKIPPED
+        if (directTarget.exists() && conflictPolicy == ConflictPolicy.REPLACE) {
+            if (!directTarget.isFile) throw IOException("Destination is not a regular file; existing folder was kept")
+            if (directTarget.canonicalPath == sourceFile.canonicalPath) return TransferOutcome.SKIPPED
+            replaceEntry(entry, sourceFile, directTarget, mode)
+            return TransferOutcome.COMPLETED
+        }
+        when (mode) {
+            TransferMode.COPY -> {
+                val target = if (conflictPolicy == ConflictPolicy.KEEP_BOTH) getAvailableTarget(directory, sourceFile.name) else directTarget
+                copyEntry(entry, sourceFile, target)
+            }
+            TransferMode.MOVE -> {
+                try {
+                    moveOrdinaryEntry(entry, destination, conflictPolicy)
+                } catch (conflict: com.pixel.gallery.model.QuickSortNameConflictException) {
+                    if (conflictPolicy == ConflictPolicy.SKIP) return TransferOutcome.SKIPPED
+                    throw conflict
+                }
+            }
+        }
+        return TransferOutcome.COMPLETED
+    }
 
-    suspend fun syncWhenMediaMutationsIdle(force: Boolean = false) =
-        mediaMutationMutex.withLock { syncWithMediaStore(force) }
+    fun isMediaMutationInProgress(): Boolean = mediaMutationInProgress || readRefreshes.isHeld
+
+    suspend fun syncWhenMediaMutationsIdle(force: Boolean = false, fromTransferWorker: Boolean = false) {
+        while (true) {
+            if (!fromTransferWorker) readRefreshes.awaitIdle()
+            val synced = mediaMutationMutex.withLock {
+                if (!fromTransferWorker && readRefreshes.isHeld) false else {
+                    syncWithMediaStore(force)
+                    true
+                }
+            }
+            if (synced) return
+        }
+    }
 
     private data class SafChild(
         val uri: Uri,
@@ -734,12 +969,11 @@ class MediaRepository @Inject constructor(
                 ?: throw IOException("Destination could not be indexed; source was kept")
 
             if (mode == TransferMode.MOVE) {
-                val wasFavourite = mediaDao.isFavourite(entry.contentId).first()
                 if (!removeOriginal(entry, sourceFile)) {
                     throw IOException("Destination is valid, but the source could not be removed")
                 }
                 relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
-                migrateFavourite(entry.contentId, scannedUri, wasFavourite)
+                migrateMediaLabels(entry.contentId, scannedUri)
             }
             return TransferOutcome.COMPLETED
         } catch (error: Exception) {
@@ -810,7 +1044,8 @@ class MediaRepository @Inject constructor(
         targetUri: Uri,
         targetFile: File? = null
     ) {
-        val expectedBytes = sourceFile.length()
+        val fingerprint = fingerprintMediaFile(sourceFile)
+        val expectedBytes = fingerprint.bytes
         val resolver = context.contentResolver
         val source = resolver.openInputStream(Uri.parse(entry.uri)) ?: FileInputStream(sourceFile)
         source.use { input ->
@@ -834,6 +1069,10 @@ class MediaRepository @Inject constructor(
         if (!isVerifiedTransferSize(expectedBytes, actualBytes)) {
             throw IOException("Destination verification failed ($actualBytes of $expectedBytes bytes)")
         }
+        val targetHash = resolver.openInputStream(targetUri)?.use(::mediaStreamSha256)
+            ?: throw IOException("Destination could not be reopened for verification")
+        if (targetHash != fingerprint.sha256) throw IOException("Destination content verification failed; source was kept")
+        verifyMediaFile(sourceFile, fingerprint, verifyTime = true)
     }
 
     private fun queryDocumentSize(uri: Uri): Long {
@@ -852,14 +1091,11 @@ class MediaRepository @Inject constructor(
         return runCatching { sourceFile.delete() && !sourceFile.exists() }.getOrDefault(false)
     }
 
-    private suspend fun migrateFavourite(sourceId: Long, targetUri: Uri, wasFavourite: Boolean) {
-        if (!wasFavourite) return
+    private suspend fun migrateMediaLabels(sourceId: Long, targetUri: Uri) {
         val newId = targetUri.lastPathSegment?.toLongOrNull() ?: run {
-            android.util.Log.w("MediaRepository", "Could not migrate favourite for target URI $targetUri")
-            return
+            throw IOException("Could not migrate labels for target URI $targetUri")
         }
-        mediaDao.addFavourite(com.pixel.gallery.data.local.entity.FavouriteEntry(newId))
-        mediaDao.removeFavourite(sourceId)
+        if (newId != sourceId) mediaDao.remapMediaLabels(sourceId, newId)
     }
 
     private suspend fun replaceEntry(
@@ -890,7 +1126,6 @@ class MediaRepository @Inject constructor(
         var targetBackedUp = false
         var targetCommitted = false
         val sourceLastModified = sourceFile.lastModified()
-        val wasFavourite = mode == TransferMode.MOVE && mediaDao.isFavourite(entry.contentId).first()
 
         writeReplaceJournal(journalFile, journal)
         try {
@@ -922,7 +1157,7 @@ class MediaRepository @Inject constructor(
                 relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
                 journal = journal.copy(stage = ReplacementStage.SOURCE_REMOVED)
                 writeReplaceJournal(journalFile, journal)
-                migrateFavourite(entry.contentId, targetUri, wasFavourite)
+                migrateMediaLabels(entry.contentId, targetUri)
             }
 
             if (!backup.exists() || backup.delete()) {
@@ -949,16 +1184,7 @@ class MediaRepository @Inject constructor(
     }
 
     private fun copyFileVerified(sourceFile: File, targetFile: File) {
-        FileInputStream(sourceFile).use { input ->
-            FileOutputStream(targetFile, false).use { output ->
-                input.copyTo(output)
-                output.flush()
-                output.fd.sync()
-            }
-        }
-        if (!isVerifiedTransferSize(sourceFile.length(), targetFile.length())) {
-            throw IOException("Destination verification failed")
-        }
+        copyVerifiedMediaBytes(sourceFile, targetFile, fingerprintMediaFile(sourceFile))
     }
 
     private suspend fun rollbackReplacement(
@@ -1018,6 +1244,7 @@ class MediaRepository @Inject constructor(
                         target.exists() && !backup.exists() && !temporary.exists()
                     }
                     ReplacementRecoveryAction.ROLLBACK_TO_BACKUP -> {
+                        if (!backup.isFile) throw IOException("Replacement backup is unavailable; remaining files were kept")
                         if (target.exists()) target.delete()
                         if (!target.exists() && backup.exists()) backup.renameTo(target)
                         if (temporary.exists()) temporary.delete()
@@ -1037,54 +1264,451 @@ class MediaRepository @Inject constructor(
         directory.listFiles { file -> file.name.endsWith(".json.new") }?.forEach { it.delete() }
     }
 
-    private suspend fun moveEntry(entry: MediaEntry, sourceFile: File, targetFile: File) {
-        val sourceLastModified = sourceFile.lastModified()
-        val sourceVolume = StorageUtils.getVolumePath(context, sourceFile.absolutePath)
-        val targetVolume = StorageUtils.getVolumePath(context, targetFile.absolutePath)
-        val sameVolume = sourceVolume != null && sourceVolume == targetVolume
+    /** Quick classification always moves. Unsupported document providers are rejected before mutation. */
+    suspend fun quickSortReplacementEntry(path: String, fallbackMime: String): MediaEntry = withContext(Dispatchers.IO) {
+        require(Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())) {
+            "Replacing existing files requires all-files access"
+        }
+        val file = File(path)
+        val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: fallbackMime
+        val uri = scanFile(file, mime) ?: throw IOException("Existing destination could not be indexed; files were kept")
+        val id = uri.lastPathSegment?.toLongOrNull() ?: throw IOException("Existing destination has no media identity")
+        mediaDao.getEntriesByIds(listOf(id)).firstOrNull()?.takeIf { File(it.path).canonicalPath == file.canonicalPath }
+            ?: run {
+                val times = mediaTimes(uri) ?: throw IOException("Existing destination timestamps could not be read")
+                MediaEntry(id, uri.toString(), file.absolutePath, mime, 0, 0, 0, file.length(), times.first,
+                    file.lastModified(), sourceDateTakenMillis = times.third, bestTimestamp = file.lastModified())
+            }
+    }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && sameVolume) {
-            val relativePath = StorageUtils.PathSegments(context, targetFile.absolutePath).relativeDir
-                ?: throw IOException("Could not resolve destination path")
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath.replace(File.separatorChar, '/'))
-                if (targetFile.name != sourceFile.name) {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, targetFile.name)
+    suspend fun releaseQuickSortReplacementBackup(item: com.pixel.gallery.model.QuickSortQueueItem): Boolean = withMediaMutation(refreshOnFinish = false) {
+        withContext(Dispatchers.IO) {
+            val checkpoint = item.replacementCheckpoint ?: return@withContext true
+            val receipt = item.replacementReceipt ?: return@withContext false
+            val backup = File(receipt.targetPath)
+            require(backup.canonicalPath.contains("/PixelGallery-QuickSortUndo/")) { "Unexpected replacement backup location" }
+            if (!backup.exists()) return@withContext true
+            verifyMediaFile(backup, MediaFileFingerprint(checkpoint.sourceSize, checkpoint.originalModifiedMillis,
+                checkpoint.sourceSha256), verifyTime = true)
+            val entry = checkpoint.source.copy(contentId = receipt.targetId, uri = receipt.targetUri, path = receipt.targetPath)
+            require(mediaPath(Uri.parse(entry.uri))?.let { File(it).canonicalPath } == backup.canonicalPath) {
+                "Replacement backup media identity changed; file was kept"
+            }
+            val removed = removeOriginal(entry, backup)
+            if (removed) {
+                backup.parentFile?.delete() // only an empty, operation-owned directory
+                mediaDao.deleteByIds(listOf(receipt.targetId))
+            }
+            removed
+        }
+    }
+
+    suspend fun moveForQuickSort(
+        entry: MediaEntry,
+        destination: TransferDestination,
+        operationId: String,
+        restoreCheckpoint: QuickMoveCheckpoint? = null,
+        conflictPolicy: ConflictPolicy? = ConflictPolicy.KEEP_BOTH,
+        onCheckpoint: suspend (QuickMoveCheckpoint) -> Unit,
+    ): TransferReceipt = withMediaMutation(refreshOnFinish = false) {
+        replacementRecoveryComplete.await()
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            moveLocalMedia(entry, destination, operationId, restoreCheckpoint, conflictPolicy, onCheckpoint)
+        }
+    }
+
+    private suspend fun moveLocalMedia(
+        entry: MediaEntry,
+        destination: TransferDestination,
+        operationId: String,
+        restoreCheckpoint: QuickMoveCheckpoint? = null,
+        conflictPolicy: ConflictPolicy? = ConflictPolicy.KEEP_BOTH,
+        onCheckpoint: suspend (QuickMoveCheckpoint) -> Unit,
+    ): TransferReceipt {
+        return withContext(Dispatchers.IO) {
+            require(destination.documentUri == null) {
+                "This document provider cannot guarantee original timestamps; choose a local album"
+            }
+            val source = resolveTransferSource(entry)
+                ?: throw IOException("Source media record is unavailable; original was kept")
+            val directory = File(destination.path)
+            require(directory.isDirectory) { "Destination album is unavailable" }
+            require(!isSameTransferDirectory(source.path, destination.path)) { "Item is already in this album" }
+            val indexedSourcePath = mediaPath(Uri.parse(entry.uri))
+            if (indexedSourcePath != null && File(indexedSourcePath).canonicalPath != source.canonicalPath) {
+                throw IOException("Source media record changed; original was kept")
+            }
+            val originalLibraryTimes = mediaTimes(Uri.parse(entry.uri))
+                ?: throw IOException("Original media timestamps could not be read; source was kept")
+            val fingerprint = fingerprintMediaFile(source)
+            if (restoreCheckpoint != null) {
+                require(source.canonicalPath == File(restoreCheckpoint.targetPath).canonicalPath) { "Moved file path changed; undo was stopped" }
+                verifyMediaFile(source, MediaFileFingerprint(restoreCheckpoint.sourceSize,
+                    restoreCheckpoint.originalModifiedMillis, restoreCheckpoint.sourceSha256), verifyTime = true)
+            }
+            val target = if (restoreCheckpoint != null) {
+                File(restoreCheckpoint.source.path).also {
+                    require(it.parentFile?.canonicalPath == directory.canonicalPath) { "Original album changed; undo was stopped" }
+                    if (it.exists()) throw IOException("Original filename is occupied: ${it.path}; both files were kept")
+                }
+            } else if (conflictPolicy == ConflictPolicy.KEEP_BOTH) {
+                getAvailableTarget(directory, source.name)
+            } else {
+                File(directory, source.name).also {
+                    if (it.exists()) throw com.pixel.gallery.model.QuickSortNameConflictException(it.path)
                 }
             }
-            val updated = context.contentResolver.update(Uri.parse(entry.uri), values, null, null)
-            if (updated > 0) return
-        }
+            val sameVolume = StorageUtils.getVolumePath(context, source.path)?.let {
+                it == StorageUtils.getVolumePath(context, target.path)
+            } == true
+            val temporary = File(directory, ".pixel-transfer-$operationId.tmp")
+            val verifiedSource = entry.copy(path = source.canonicalPath, dateAddedSecs = originalLibraryTimes.first,
+                sourceDateTakenMillis = originalLibraryTimes.third?.takeIf { it > 0L })
+            var checkpoint = QuickMoveCheckpoint(verifiedSource, target.absolutePath, temporary.absolutePath,
+                fingerprint.modifiedMillis, fingerprint.bytes, fingerprint.sha256)
+            onCheckpoint(checkpoint)
 
-        val wasFavourite = mediaDao.isFavourite(entry.contentId).first()
-        if (sameVolume && sourceFile.renameTo(targetFile)) {
-            targetFile.setLastModified(sourceLastModified)
-            val scannedUri = scanFile(targetFile, entry.sourceMimeType)
-            if (scannedUri == null) {
-                if (targetFile.renameTo(sourceFile)) scanFile(sourceFile, entry.sourceMimeType)
-                throw IOException("Move was rolled back because the destination could not be indexed")
+            // MediaProvider rebuilds names using the indexed MIME, even for a path-only
+            // update. A valid MOV may be indexed as video/mp4 and acquire a .mp4 suffix.
+            // Use the verified file path for those names, including conflicts and undo.
+            val providerMime = runCatching { context.contentResolver.getType(Uri.parse(entry.uri)) }
+                .getOrNull() ?: entry.sourceMimeType
+            val extension = target.extension.lowercase(java.util.Locale.ROOT)
+            val mimeMap = android.webkit.MimeTypeMap.getSingleton()
+            val providerKeepsName = mimeMap.getMimeTypeFromExtension(extension) == providerMime ||
+                mimeMap.getExtensionFromMimeType(providerMime) == extension
+            // Preserve the existing MediaStore row (including DATE_ADDED) when its name is stable.
+            if (sameVolume && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && providerKeepsName) {
+                val relative = StorageUtils.PathSegments(context, target.path).relativeDir
+                    ?: throw IOException("Could not resolve destination album")
+                if (target.exists()) throw IOException("Destination changed; source was kept")
+                val updated = context.contentResolver.update(Uri.parse(entry.uri), ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relative.replace(File.separatorChar, '/'))
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, target.name)
+                }, null, null)
+                if (updated > 0) {
+                    val actualTarget = awaitQuickMoveTarget(
+                        uri = Uri.parse(entry.uri),
+                        expectedTarget = target,
+                        source = source,
+                        expectedDirectory = directory,
+                    )
+                    checkpoint = checkpoint.copy(targetPath = actualTarget.absolutePath,
+                        targetUri = entry.uri, stage = QuickMoveStage.SourceRemoved)
+                    onCheckpoint(checkpoint)
+                    try {
+                        if (actualTarget.parentFile?.canonicalPath != directory.canonicalPath || source.exists() ||
+                            ((restoreCheckpoint != null || conflictPolicy != ConflictPolicy.KEEP_BOTH) &&
+                                actualTarget.canonicalPath != target.canonicalPath)) {
+                            throw IOException("Media provider did not complete the requested directory move")
+                        }
+                        verifyMediaFile(actualTarget, fingerprint)
+                        restoreMediaModifiedTime(actualTarget, fingerprint.modifiedMillis)
+                    } catch (failure: Exception) {
+                        // An in-place move already changed the directory. Try to restore it without overwriting.
+                        if (!source.exists()) {
+                            runCatching {
+                                val originalRelative = StorageUtils.PathSegments(context, source.path).relativeDir
+                                    ?: throw IOException("Original directory is unavailable")
+                                context.contentResolver.update(Uri.parse(entry.uri), ContentValues().apply {
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, originalRelative.replace(File.separatorChar, '/'))
+                                    put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+                                }, null, null)
+                                restoreMediaModifiedTime(source, fingerprint.modifiedMillis)
+                                verifyMediaFile(source, fingerprint, verifyTime = true)
+                            }
+                        }
+                        throw IOException(if (source.exists()) "Move could not be verified; inspect original and destination: ${failure.message}"
+                            else "File is at ${actualTarget.path}; verification needs attention: ${failure.message}", failure)
+                    }
+                    val receipt = finishQuickMove(checkpoint, Uri.parse(entry.uri))
+                    onCheckpoint(checkpoint.copy(stage = QuickMoveStage.Completed))
+                    return@withContext receipt
+                }
             }
-            val sourceUri = Uri.parse(entry.uri)
-            if (scannedUri != sourceUri) {
-                runCatching { context.contentResolver.delete(sourceUri, null, null) }
-                migrateFavourite(entry.contentId, scannedUri, wasFavourite)
+
+            // Direct local fallback uses exclusive owned files. No provider fallback silently loses timestamps.
+            if (!directory.canWrite()) throw IOException("Destination cannot preserve timestamps with current storage access")
+            if (!temporary.createNewFile()) throw IOException("A previous transfer needs recovery; source was kept")
+            var ownsTarget = false
+            try {
+                copyVerifiedMediaBytes(source, temporary, fingerprint)
+                if (!target.createNewFile()) throw IOException("Destination changed; source was kept")
+                ownsTarget = true
+                // A second verified copy avoids rename-overwrite races on filesystems without hard links.
+                copyVerifiedMediaBytes(temporary, target, fingerprint)
+                val targetUri = scanFile(target, entry.sourceMimeType)
+                    ?: throw IOException("Destination could not be indexed; source was kept")
+                checkpoint = checkpoint.copy(targetUri = targetUri.toString(), stage = QuickMoveStage.TargetReady)
+                onCheckpoint(checkpoint)
+                verifyQuickMoveTimes(checkpoint, targetUri)
+                verifyMediaFile(target, fingerprint, verifyTime = true)
+                // Recheck the source last, immediately before authorizing its removal.
+                verifyMediaFile(source, fingerprint, verifyTime = true)
+                if (!removeOriginal(entry, source)) throw IOException("Source could not be removed; source was kept")
+                checkpoint = checkpoint.copy(stage = QuickMoveStage.SourceRemoved)
+                onCheckpoint(checkpoint)
+                val receipt = finishQuickMove(checkpoint, targetUri)
+                onCheckpoint(checkpoint.copy(stage = QuickMoveStage.Completed))
+                temporary.delete()
+                receipt
+            } catch (failure: Exception) {
+                // Never remove the sole verified copy. A retained target is recorded in the checkpoint.
+                if (source.exists()) {
+                    if (ownsTarget) {
+                        checkpoint.targetUri?.let { runCatching { context.contentResolver.delete(Uri.parse(it), null, null) } }
+                        runCatching { target.delete() }
+                    }
+                    runCatching { temporary.delete() }
+                }
+                throw failure
             }
-            relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
-            return
+        }
+    }
+
+    /** Recovery never deletes an original. Both copies present is an explicit review state. */
+    suspend fun recoverQuickMove(checkpoint: QuickMoveCheckpoint): TransferReceipt = withMediaMutation(refreshOnFinish = false) {
+        replacementRecoveryComplete.await()
+        withContext(Dispatchers.IO + NonCancellable) { recoverLocalMove(checkpoint) }
+    }
+
+    private suspend fun recoverLocalMove(checkpoint: QuickMoveCheckpoint): TransferReceipt {
+        return withContext(Dispatchers.IO) {
+            val source = File(checkpoint.source.path)
+            val fingerprint = MediaFileFingerprint(checkpoint.sourceSize, checkpoint.originalModifiedMillis, checkpoint.sourceSha256)
+            if (source.exists()) {
+                val sourceVerified = runCatching { verifyMediaFile(source, fingerprint, verifyTime = true) }.isSuccess
+                if (quickMoveRecoveryDecision(true, sourceVerified, File(checkpoint.targetPath).exists(), false) == QuickMoveRecoveryDecision.NeedsReview) {
+                    throw IOException("Interrupted move: original changed; both locations were left untouched")
+                }
+                throw IOException(if (File(checkpoint.targetPath).exists())
+                    "Interrupted move: both source and destination were kept; review before retrying"
+                else "Interrupted before source removal; original was kept")
+            }
+            val knownUri = checkpoint.targetUri?.let(Uri::parse) ?: Uri.parse(checkpoint.source.uri)
+            val candidates = listOfNotNull(checkpoint.targetPath, mediaPath(knownUri)?.takeIf { it != checkpoint.source.path }).distinct()
+            val actualPath = candidates.firstOrNull { path ->
+                runCatching { verifyMediaFile(File(path), fingerprint, verifyTime = true) }.isSuccess
+            }
+            if (quickMoveRecoveryDecision(false, false, actualPath != null, actualPath != null) != QuickMoveRecoveryDecision.RepairCommitted) {
+                throw IOException("Interrupted move: destination could not be verified; no files were removed")
+            }
+            val recovered = checkpoint.copy(targetPath = requireNotNull(actualPath))
+            val targetUri = scanFile(File(actualPath), checkpoint.source.sourceMimeType)
+                ?: throw IOException("Verified destination exists but cannot yet be indexed: $actualPath")
+            val receipt = finishQuickMove(recovered, targetUri)
+            checkpoint.temporaryPath?.let { path ->
+                // Only remove our own verified temporary after the committed target is confirmed.
+                val temp = File(path)
+                if (temp.isFile && temp.name.startsWith(".pixel-transfer-")) {
+                    runCatching { verifyMediaFile(temp, fingerprint); temp.delete() }
+                }
+            }
+            receipt
+        }
+    }
+
+    /**
+     * Resolve the physical source again when a list item outlives a MediaStore
+     * relocation. The gallery deliberately keeps a cached path for fast grid
+     * rendering, but that path can lag behind the provider after another move
+     * or after a batch update. A URI query is the authoritative fallback.
+     */
+    private fun resolveTransferSource(entry: MediaEntry): File? {
+        val cached = File(entry.path)
+        val indexed = mediaPath(Uri.parse(entry.uri))?.let(::File)
+        return when {
+            indexed?.isFile == true -> indexed
+            cached.isFile -> cached
+            else -> null
+        }
+    }
+
+    /** MediaProvider may briefly publish an empty row while a previous item is moving. */
+    private fun mediaPath(uri: Uri): String? {
+        repeat(MEDIA_QUERY_ATTEMPTS) { attempt ->
+            val path = runCatching {
+                context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use {
+                    if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
+                }
+            }.getOrNull()
+            if (!path.isNullOrBlank()) return path
+            if (attempt + 1 < MEDIA_QUERY_ATTEMPTS) Thread.sleep(MEDIA_QUERY_RETRY_DELAYS[attempt])
+        }
+        return null
+    }
+
+    /** Same bounded retry for timestamps, which are read immediately after a batch move. */
+    private fun mediaTimes(uri: Uri): Triple<Long, Long, Long?>? {
+        repeat(MEDIA_QUERY_ATTEMPTS) { attempt ->
+            val times = runCatching {
+                context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_ADDED,
+                    MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.Images.Media.DATE_TAKEN), null, null, null)?.use {
+                    if (!it.moveToFirst()) null else Triple(it.getLong(0), it.getLong(1),
+                        if (it.isNull(2)) null else it.getLong(2))
+                }
+            }.getOrNull()
+            if (times != null) return times
+            if (attempt + 1 < MEDIA_QUERY_ATTEMPTS) Thread.sleep(MEDIA_QUERY_RETRY_DELAYS[attempt])
+        }
+        return null
+    }
+
+    /**
+     * A MediaStore RELATIVE_PATH update can publish the row before the provider
+     * has finished moving a large video on disk. Do not let the next item in a
+     * batch observe that intermediate state as an unavailable source.
+     */
+    private fun awaitQuickMoveTarget(
+        uri: Uri,
+        expectedTarget: File,
+        source: File,
+        expectedDirectory: File,
+    ): File {
+        var candidate = expectedTarget
+        repeat(QUICK_MOVE_SETTLE_ATTEMPTS) { attempt ->
+            mediaPath(uri)?.let { candidate = File(it) }
+            val inExpectedDirectory = runCatching {
+                candidate.parentFile?.canonicalPath == expectedDirectory.canonicalPath
+            }.getOrDefault(false)
+            if (inExpectedDirectory && !source.exists() && candidate.isFile) return candidate
+            if (attempt + 1 < QUICK_MOVE_SETTLE_ATTEMPTS) {
+                Thread.sleep(QUICK_MOVE_SETTLE_DELAYS[attempt])
+            }
+        }
+        return candidate
+    }
+
+    private suspend fun verifyQuickMoveTimes(checkpoint: QuickMoveCheckpoint, targetUri: Uri): Boolean {
+        val source = checkpoint.source
+        val target = File(checkpoint.targetPath)
+        restoreMediaModifiedTime(target, checkpoint.originalModifiedMillis)
+        val expectedTaken = source.sourceDateTakenMillis?.takeIf { it > 0 }
+        val before = mediaTimes(targetUri)
+        val changes = ContentValues().apply {
+            if (before?.first != source.dateAddedSecs && source.dateAddedSecs > 0) put(MediaStore.MediaColumns.DATE_ADDED, source.dateAddedSecs)
+            if (before?.second != checkpoint.originalModifiedMillis / 1000) put(MediaStore.MediaColumns.DATE_MODIFIED, checkpoint.originalModifiedMillis / 1000)
+            if (expectedTaken != null && before?.third != expectedTaken) put(MediaStore.Images.Media.DATE_TAKEN, expectedTaken)
+        }
+        if (changes.size() > 0) runCatching { context.contentResolver.update(targetUri, changes, null, null) }
+        var after = mediaTimes(targetUri)
+        // Modern MediaProvider treats derived date columns as read-only. Rescan the unchanged
+        // embedded metadata and restored filesystem mtime instead of trusting an ignored update.
+        if (after?.second != checkpoint.originalModifiedMillis / 1000 ||
+            after?.third?.takeIf { it > 0L } != expectedTaken) {
+            val scannedUri = scanFile(target, source.sourceMimeType)
+                ?: throw IOException("Destination timestamps could not be refreshed; source was kept where possible")
+            if (scannedUri != targetUri) throw IOException("Destination media identity changed during timestamp verification")
+            after = mediaTimes(targetUri)
+        }
+        after ?: throw IOException("Destination media timestamps could not be read back; source was kept where possible")
+        if (after.third?.takeIf { it > 0L } != expectedTaken) throw IOException("Original capture time could not be preserved")
+        if (after.second != checkpoint.originalModifiedMillis / 1000) throw IOException("Media library modification time could not be preserved")
+        restoreMediaModifiedTime(target, checkpoint.originalModifiedMillis)
+        return after.first == source.dateAddedSecs
+    }
+
+    private suspend fun finishQuickMove(checkpoint: QuickMoveCheckpoint, targetUri: Uri): TransferReceipt {
+        val addedPreserved = verifyQuickMoveTimes(checkpoint, targetUri)
+        verifyMediaFile(File(checkpoint.targetPath), MediaFileFingerprint(checkpoint.sourceSize,
+            checkpoint.originalModifiedMillis, checkpoint.sourceSha256), verifyTime = true)
+        val originalTaken = checkpoint.source.sourceDateTakenMillis?.takeIf { it > 0L }
+        val finalTimes = mediaTimes(targetUri) ?: throw IOException("Destination timestamps could not be confirmed")
+        val capturePreserved = finalTimes.third?.takeIf { it > 0L } == originalTaken
+        if (!capturePreserved) throw IOException("Capture timestamp changed during final verification")
+        val newId = targetUri.lastPathSegment?.toLongOrNull() ?: throw IOException("Destination media ID is unavailable")
+        syncMutex.withLock {
+            if (!relocatePersistentIndexes(checkpoint.source.path, checkpoint.targetPath)) {
+                throw IOException("Moved file is verified but its viewing index needs recovery: ${checkpoint.targetPath}")
+            }
+            mediaDao.commitTransferredMedia(checkpoint.source.contentId, checkpoint.source.copy(
+                contentId = newId,
+                uri = targetUri.toString(),
+                path = checkpoint.targetPath,
+                sizeBytes = checkpoint.sourceSize,
+                dateAddedSecs = finalTimes.first,
+                dateModifiedMillis = checkpoint.originalModifiedMillis,
+                sourceDateTakenMillis = finalTimes.third?.takeIf { it > 0L },
+            ))
+        }
+        return TransferReceipt(checkpoint.source.contentId, checkpoint.source.uri, checkpoint.source.path,
+            newId, targetUri.toString(), checkpoint.targetPath, checkpoint.originalModifiedMillis,
+            originalTaken, true, true, capturePreserved, addedPreserved,
+            listOfNotNull(
+                if (originalTaken == null) "No capture timestamp was present; the empty value was checked" else null,
+                if (!addedPreserved) "Android assigned a new library-added time; content and original modification time were verified" else null,
+            ).takeIf { it.isNotEmpty() }?.joinToString("; "))
+    }
+
+    private suspend fun moveOrdinaryEntry(
+        entry: MediaEntry,
+        destination: TransferDestination,
+        conflictPolicy: ConflictPolicy,
+    ) {
+        val token = UUID.randomUUID().toString()
+        val journal = android.util.AtomicFile(File(moveJournalDirectory(), "$token.json"))
+        var checkpoint: QuickMoveCheckpoint? = null
+        try {
+            moveLocalMedia(entry, destination, token, conflictPolicy = conflictPolicy) { next ->
+                synchronized(moveJournalLock) {
+                    val output = journal.startWrite()
+                    try {
+                        output.write(gson.toJson(next).toByteArray(Charsets.UTF_8))
+                        journal.finishWrite(output)
+                    } catch (error: Exception) {
+                        journal.failWrite(output)
+                        throw error
+                    }
+                }
+                checkpoint = next
+            }
+            journal.delete()
+        } catch (error: Exception) {
+            val saved = checkpoint
+            if (saved != null && File(saved.source.path).isFile &&
+                !File(saved.targetPath).exists() && saved.temporaryPath?.let { !File(it).exists() } != false) {
+                journal.delete()
+            }
+            throw error
+        }
+    }
+
+    private fun moveJournalDirectory(): File =
+        File(context.filesDir, "media-move-journal").apply { mkdirs() }
+
+    private fun moveJournals(): List<android.util.AtomicFile> =
+        moveJournalDirectory().listFiles().orEmpty()
+            .map { it.name.removeSuffix(".bak") }.filter { it.endsWith(".json") }.distinct()
+            .map { android.util.AtomicFile(File(moveJournalDirectory(), it)) }
+
+    private fun readMoveJournal(journal: android.util.AtomicFile): QuickMoveCheckpoint =
+        synchronized(moveJournalLock) {
+            journal.openRead().bufferedReader().use { gson.fromJson(it, QuickMoveCheckpoint::class.java) }
         }
 
-        val copiedUri = copyEntry(entry, sourceFile, targetFile)
+    private fun pendingMoveSourceIds(): Set<Long> = moveJournals().mapNotNull {
+        runCatching { readMoveJournal(it).source.contentId }.getOrNull()
+    }.toSet()
 
-        if (!removeOriginal(entry, sourceFile)) {
-            // Restore the pre-move state when possible. If cleanup fails, both the
-            // verified destination and source remain, which is still content-safe.
-            runCatching { context.contentResolver.delete(copiedUri, null, null) }
-            scanFile(sourceFile, entry.sourceMimeType)
-            throw IOException("Move was rolled back because the source could not be removed")
+    private suspend fun recoverInterruptedMoves() {
+        moveJournals().forEach { journal ->
+            runCatching {
+                val checkpoint = readMoveJournal(journal)
+                val source = File(checkpoint.source.path)
+                if (source.exists()) {
+                    verifyMediaFile(source, MediaFileFingerprint(checkpoint.sourceSize,
+                        checkpoint.originalModifiedMillis, checkpoint.sourceSha256), verifyTime = true)
+                    if (File(checkpoint.targetPath).exists() || checkpoint.temporaryPath?.let { File(it).exists() } == true) {
+                        throw IOException("Interrupted move has multiple files; retained for review")
+                    }
+                } else {
+                    recoverLocalMove(checkpoint)
+                }
+                journal.delete()
+            }.onFailure { android.util.Log.e("MediaRepository", "Move recovery retained files and journal", it) }
         }
-
-        relocatePersistentIndexes(sourceFile.absolutePath, targetFile.absolutePath)
-        migrateFavourite(entry.contentId, copiedUri, wasFavourite)
     }
 
     private suspend fun copyEntry(entry: MediaEntry, sourceFile: File, targetFile: File): Uri {
@@ -1231,14 +1855,16 @@ class MediaRepository @Inject constructor(
                 failedRelocationIds.add(relocation.contentId)
             }
         }
+        val protectedMoveIds = pendingMoveSourceIds()
         val deletedSourcePaths = deletedIndexSourcePaths(
-            knownEntries = knownEntries.values,
+            knownEntries = knownEntries.values.filter { it.contentId !in protectedMoveIds },
             currentIds = currentIds,
             currentPaths = currentPaths,
         )
         val clearedPaths = deletePersistentIndexes(deletedSourcePaths)
         val obsoleteIds = knownEntries.values.asSequence()
             .filter { known -> known.contentId !in currentIds }
+            .filter { known -> known.contentId !in protectedMoveIds }
             .filter { known ->
                 known.path.isBlank() || known.path in currentPaths || known.path in clearedPaths
             }
@@ -1392,7 +2018,12 @@ class MediaRepository @Inject constructor(
                             sourceDateTakenMillis = if (mediaStoreTaken > 0) mediaStoreTaken else null,
                             durationMillis = cursor.getLong(durationColumn),
                             isTrashed = queryTrashed,
-                            bestTimestamp = bestTime
+                            bestTimestamp = bestTime,
+                            trashedAtMillis = when {
+                                !queryTrashed -> 0L
+                                knownEntry?.isTrashed == true -> knownEntry.trashedAtMillis
+                                else -> System.currentTimeMillis()
+                            },
                         )
                     )
                 }
