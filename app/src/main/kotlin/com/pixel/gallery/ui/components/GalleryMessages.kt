@@ -1,7 +1,6 @@
 package com.pixel.gallery.ui.components
 
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.border
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
@@ -84,11 +83,6 @@ internal fun GalleryMessageHost(modifier: Modifier = Modifier, modal: Boolean = 
                     },
                 ) {
                     Snackbar(
-                        modifier = Modifier.border(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                            MaterialTheme.shapes.large,
-                        ),
                         shape = MaterialTheme.shapes.large,
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = MaterialTheme.colorScheme.onSurface,
