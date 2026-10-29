@@ -52,6 +52,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var confirmationSuite = false
     private var scrollbarSuite = false
     private var uiSuite = false
+    private var toastSuite = false
+    private var labelLoadingSuite = false
     private var duplicateSuite = false
     private var undoHandednessSuite = false
     private var labelBackupSuite = false
@@ -93,6 +95,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         confirmationSuite = arguments?.getString("suite") == "confirmations"
         scrollbarSuite = arguments?.getString("suite") == "scrollbar"
         uiSuite = arguments?.getString("suite") == "redesign"
+        toastSuite = arguments?.getString("suite") == "toasts"
+        labelLoadingSuite = arguments?.getString("suite") == "label-loading"
         duplicateSuite = arguments?.getString("suite") == "duplicates"
         undoHandednessSuite = arguments?.getString("suite") == "undo-handedness"
         labelBackupSuite = arguments?.getString("suite") == "label-backup"
@@ -155,15 +159,17 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 undoHandednessSuite -> UndoHandednessTouchChecks(this).exercise()
                 confirmationSuite -> ConfirmationTouchChecks(this).exercise()
                 duplicateSuite -> DuplicateTouchChecks(this).exercise()
+                toastSuite -> ToastTouchChecks(this).exercise()
+                labelLoadingSuite -> LabelLoadingChecks(this).exercise()
                 uiSuite -> RedesignTouchChecks(this).exercise()
                 scrollbarSuite -> ScrollbarTouchChecks(this).exercise()
                 else -> runBlocking { exercise() }
             }
-            val suite = when { mediaMemorySuite -> "Media browse memory"; mediaPerformanceSuite -> "Media browse performance"; mediaTypeSuite -> "Media type UI"; confirmationSuite -> "Confirmation and transfer UI"; duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort synthetic safety" }
+            val suite = when { toastSuite -> "Toast gesture"; mediaMemorySuite -> "Media browse memory"; mediaPerformanceSuite -> "Media browse performance"; mediaTypeSuite -> "Media type UI"; confirmationSuite -> "Confirmation and transfer UI"; duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort synthetic safety" }
             results.putString("stream", "\n$suite checks passed:\n$report\n")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {
-            results.putString("stream", "\n${when { duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort safety" }} check failed:\n${error.stackTraceToString()}\n")
+            results.putString("stream", "\n${when { toastSuite -> "Toast gesture"; duplicateSuite -> "Duplicate emulator"; uiSuite -> "UI redesign"; scrollbarSuite -> "Scrollbar touch"; else -> "Quick-sort safety" }} check failed:\n${error.stackTraceToString()}\n")
             finish(Activity.RESULT_CANCELED, results)
         }
     }

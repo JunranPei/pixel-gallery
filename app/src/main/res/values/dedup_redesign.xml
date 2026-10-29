@@ -1,0 +1,8 @@
+<resources>
+    <string name="duplicate_groups_count">%1$d duplicate groups</string>
+    <string name="duplicate_select_all_short">Select copies</string>
+    <string name="duplicate_clear_all_short">Deselect all</string>
+    <string name="duplicate_selected_count">%1$d selected</string>
+    <string name="duplicate_selected_size">%1$s to reclaim</string>
+    <string name="duplicate_move_to_bin_short">Move to bin</string>
+</resources>

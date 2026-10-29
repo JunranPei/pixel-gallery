@@ -33,7 +33,7 @@ import com.pixel.gallery.ui.gallery.filterAlbumGridItems
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LabelPhotosScreen(
-    label: LabelEntry?, items: List<GridItem>, selectedIds: Set<Long>, columns: Int,
+    label: LabelEntry?, items: List<GridItem>?, selectedIds: Set<Long>, columns: Int,
     gridState: LazyGridState, onBack: () -> Unit, onNavigateToViewer: (Long) -> Unit,
     onSelectionChange: (Set<Long>) -> Unit, onToggleSelection: (Long) -> Unit,
     onColumnsChange: (Int) -> Unit, quickSort: QuickSortUiConfig?,
@@ -50,7 +50,7 @@ fun LabelPhotosScreen(
     var searchFocusRequested by remember(label?.id) { mutableStateOf(false) }
     var mediaType by rememberSaveable(label?.id) { mutableStateOf(MediaTypeFilter.ALL) }
     val displayedItems = remember(items, searchQuery, mediaType) {
-        filterAlbumGridItems(items, searchQuery, mediaType)
+        filterAlbumGridItems(items.orEmpty(), searchQuery, mediaType)
     }
     return GalleryPage(topBar = {
         GalleryHeader(
@@ -79,7 +79,7 @@ fun LabelPhotosScreen(
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
                         val count = displayedItems.count { it is GridItem.Photo }
-                        Text(
+                        if (items != null) Text(
                             androidx.compose.ui.res.pluralStringResource(
                                 when (mediaType) {
                                     MediaTypeFilter.ALL -> R.plurals.media_type_item_count
@@ -116,7 +116,11 @@ fun LabelPhotosScreen(
                 onSelectionChange = onSelectionChange, onToggleSelection = onToggleSelection,
                 columns = columns, onColumnsChange = onColumnsChange, state = gridState,
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
-                emptyMessage = if (searchQuery.isNotBlank()) "No matching files" else stringResource(R.string.labels_empty_contents), quickSort = quickSort)
+                emptyMessage = when {
+                    items == null -> null
+                    searchQuery.isNotBlank() -> "No matching files"
+                    else -> stringResource(R.string.labels_empty_contents)
+                }, quickSort = quickSort)
         }
     }
 }

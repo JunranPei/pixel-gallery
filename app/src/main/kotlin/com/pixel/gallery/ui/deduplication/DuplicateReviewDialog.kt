@@ -7,8 +7,10 @@ import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,16 +22,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.rounded.Check
 import com.pixel.gallery.model.DuplicateScanStage
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -39,10 +45,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,9 +56,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,6 +72,8 @@ import com.pixel.gallery.R
 import com.pixel.gallery.ui.GalleryHeader
 import com.pixel.gallery.ui.GalleryPage
 import com.pixel.gallery.ui.GalleryPageContent
+import com.pixel.gallery.ui.components.galleryContentEdge
+import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.model.duplicateMediaTimestamp
 import com.pixel.gallery.data.local.entity.MediaEntry
 import java.io.File
@@ -91,30 +103,29 @@ fun DuplicateReviewDialog(
     val canDismiss = state.phase != DuplicatePhase.AWAITING_PERMISSION &&
         state.phase != DuplicatePhase.VERIFYING
     val showFooter = state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()
+    var footerHeightPx by remember { mutableIntStateOf(0) }
+    val footerInset = if (showFooter) with(LocalDensity.current) { footerHeightPx.toDp() } else 0.dp
 
 
     return GalleryPage(
         topBar = {
             GalleryHeader(
-                title = { Text(stringResource(R.string.duplicate_review_title)) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                ),
+                title = { Text(stringResource(R.string.duplicate_review_title), style = EmphasizedTypography.TitleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss, enabled = canDismiss) {
-                        Icon(Icons.Default.Close, stringResource(R.string.duplicate_close))
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.duplicate_close))
                     }
                 },
             )
         },
+        modifier = Modifier.background(MaterialTheme.colorScheme.surface).galleryContentEdge(),
     ) { _ ->
         BackHandler { if (canDismiss) onDismiss() }
-        Column(
+        Box(
             Modifier.fillMaxSize()
                 .then(if (showFooter) Modifier else Modifier.navigationBarsPadding()),
         ) {
-            Box(Modifier.fillMaxWidth().weight(1f)) {
+            Box(Modifier.fillMaxSize()) {
                 when {
                     state.phase == DuplicatePhase.REVIEW && groups.isEmpty() -> {
                         val checked = ((state.result?.scannedCount ?: 0) - (state.result?.skippedCount ?: 0)).coerceAtLeast(0)
@@ -192,21 +203,26 @@ fun DuplicateReviewDialog(
                     state.phase == DuplicatePhase.REVIEW || cachedPreview -> {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = footerInset),
                         ) {
                             item("summary") {
                                 Column(
                                     modifier = Modifier.padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Text(state.title, style = MaterialTheme.typography.titleMedium)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(stringResource(R.string.duplicate_groups_count, groups.size), style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                                    }
                                     if (cachedPreview) {
                                         Text(stringResource(R.string.duplicate_index_updating), style = MaterialTheme.typography.bodyMedium)
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                     }
-                                    Text(stringResource(R.string.duplicate_scan_short), style = MaterialTheme.typography.bodyMedium)
-                                    Text(stringResource(R.string.duplicate_keeper_rule), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    if (!cachedPreview) {
-                                        Text(stringResource(R.string.duplicate_scan_summary, state.result?.scannedCount ?: 0, groups.size), style = MaterialTheme.typography.bodyMedium)
+                                    if (!state.canTrash) {
+                                        Text(stringResource(R.string.duplicate_trash_unavailable), style = MaterialTheme.typography.bodySmall)
                                     }
                                     val skipped = state.result?.skippedCount ?: 0
                                     if (skipped > 0) {
@@ -225,7 +241,7 @@ fun DuplicateReviewDialog(
                             }
                             groups.forEachIndexed { index, group ->
                                 item("group-${group.keeper.contentId}") {
-                                    DuplicateGroupCard(
+                                    DuplicateGroupStrip(
                                         index = index,
                                         group = group,
                                         selectedIds = state.selectedIds,
@@ -275,53 +291,55 @@ fun DuplicateReviewDialog(
                 }
             }
             if (showFooter) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                // Only the island paints a surface. Content continues underneath
+                // the surrounding transparent space, including the navigation inset.
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .onSizeChanged { footerHeightPx = it.height }
+                        .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shadowElevation = 1.dp,
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            stringResource(
-                                R.string.duplicate_selection_summary,
-                                selectedEntries.size,
-                                Formatter.formatShortFileSize(context, selectedBytes),
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(
-                            onClick = {
-                                toggleCopySelection(copyIds, state.selectedIds, onToggle)
-                            },
-                        ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
-                                stringResource(
-                                    if (allCopiesSelected) {
-                                        R.string.duplicate_clear_selection
-                                    } else {
-                                        R.string.duplicate_select_copies
-                                    },
-                                ),
+                                stringResource(R.string.duplicate_selected_count, selectedEntries.size),
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                Formatter.formatShortFileSize(context, selectedBytes),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                         }
-                    }
-                    if (!state.canTrash) {
-                        Text(
-                            stringResource(R.string.duplicate_trash_unavailable),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Button(
-                        onClick = { showConfirmation = true },
-                        enabled = selectedEntries.isNotEmpty() && state.canTrash,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.duplicate_move_to_bin))
+                        FilledTonalButton(
+                            onClick = { toggleCopySelection(copyIds, state.selectedIds, onToggle) },
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                            shape = CircleShape,
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ),
+                        ) {
+                            Text(stringResource(if (allCopiesSelected) R.string.duplicate_clear_all_short else R.string.duplicate_select_all_short),
+                                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { showConfirmation = true },
+                            enabled = selectedEntries.isNotEmpty() && state.canTrash,
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Icon(Icons.Outlined.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.duplicate_move_to_bin_short))
+                        }
                     }
                 }
             }
@@ -371,7 +389,7 @@ private fun toggleCopySelection(
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-private fun DuplicateGroupCard(
+private fun DuplicateGroupStrip(
     index: Int,
     group: com.pixel.gallery.model.DuplicateGroup,
     selectedIds: Set<Long>,
@@ -381,49 +399,38 @@ private fun DuplicateGroupCard(
     val entries = group.entries
     val copyIds = entries.drop(1).map(MediaEntry::contentId)
     val allCopiesSelected = copyIds.isNotEmpty() && copyIds.all { it in selectedIds }
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 1.dp,
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(modifier = Modifier.padding(vertical = 8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.duplicate_group_title, index + 1, entries.size), style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        stringResource(R.string.duplicate_group_size, Formatter.formatShortFileSize(LocalContext.current, entries.sumOf { it.sizeBytes })),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                TextButton(enabled = enabled, onClick = {
-                    toggleCopySelection(copyIds, selectedIds, onToggle)
-                }) {
-                    Text(
-                        stringResource(
-                            if (allCopiesSelected) {
-                                R.string.duplicate_clear_selection
-                            } else {
-                                R.string.duplicate_select_copies
-                            },
-                        ),
-                    )
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(stringResource(R.string.duplicate_group_title, index + 1, entries.size),
+                style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TextButton(enabled = enabled, onClick = { toggleCopySelection(copyIds, selectedIds, onToggle) }) {
+                Text(stringResource(if (allCopiesSelected) R.string.duplicate_clear_all_short else R.string.duplicate_select_all_short))
             }
-            entries.forEachIndexed { position, entry ->
-                val entrySelected = entry.contentId in selectedIds
-                val unselected = entries.count { it.contentId !in selectedIds }
-                DuplicateMediaRow(
+        }
+        val unselected = entries.count { it.contentId !in selectedIds }
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            itemsIndexed(entries, key = { _, entry -> entry.contentId }) { position, entry ->
+                val selected = entry.contentId in selectedIds
+                DuplicateMediaTile(
                     entry = entry,
                     recommended = position == 0,
-                    selected = entrySelected,
-                    disabled = !enabled || (!entrySelected && unselected == 1),
+                    selected = selected,
+                    disabled = !enabled || (!selected && unselected == 1),
                     onToggle = { onToggle(entry.contentId) },
                 )
-                if (position < entries.lastIndex) Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -431,69 +438,66 @@ private fun DuplicateGroupCard(
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-private fun DuplicateMediaRow(
+private fun DuplicateMediaTile(
     entry: MediaEntry,
     recommended: Boolean,
     selected: Boolean,
     disabled: Boolean,
-    onToggle: () -> Unit = {},
+    onToggle: () -> Unit,
 ) {
     val context = LocalContext.current
-    val rowModifier = Modifier.toggleable(
-        value = selected,
-        role = Role.Checkbox,
-        enabled = !disabled,
-        onValueChange = { onToggle() },
-    )
-    Row(
-        modifier = rowModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val folder = File(entry.path).parentFile?.name?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.duplicate_unknown_folder)
+    val date = duplicateMediaTimestamp(entry)?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    }
+    val status = stringResource(if (selected) R.string.duplicate_move_status else R.string.duplicate_keep_status)
+    Surface(
+        modifier = Modifier.width(148.dp).semantics { stateDescription = status }.toggleable(
+            value = selected, role = Role.Checkbox, enabled = !disabled,
+            onValueChange = { onToggle() },
+        ),
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Box(
-            modifier = Modifier.size(56.dp).clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-        ) {
-            GlideImage(
-                model = entry.uri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                stringResource(if (recommended && !selected) R.string.duplicate_recommended else R.string.duplicate_copy),
-                color = if (recommended && !selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (recommended && !selected) FontWeight.Bold else FontWeight.Normal,
-            )
-            Text(File(entry.path).name.ifBlank { entry.uri }, style = MaterialTheme.typography.bodyMedium)
-            val folder = File(entry.path).parentFile?.name
-                ?.takeIf { it.isNotBlank() }
-                ?: stringResource(R.string.duplicate_unknown_folder)
-            val timestamp = duplicateMediaTimestamp(entry)
-            val date = timestamp?.let {
-                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Box(Modifier.fillMaxWidth().height(116.dp).clip(RoundedCornerShape(11.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
+                GlideImage(
+                    model = entry.uri, contentDescription = null,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                )
+                if (selected) {
+                    Box(
+                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(26.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp))
+                    }
+                }
+                if (recommended && !selected) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomStart).padding(5.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    ) {
+                        Text(stringResource(R.string.duplicate_keep_status),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
-            Text(
-                listOfNotNull(
-                    folder,
-                    Formatter.formatShortFileSize(context, entry.sizeBytes),
-                    date,
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Checkbox(checked = selected, enabled = !disabled, onCheckedChange = null)
-            Text(
-                stringResource(if (selected) R.string.duplicate_move_status else R.string.duplicate_keep_status),
-                style = MaterialTheme.typography.labelSmall,
-                color = if (selected) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            )
+            Text(File(entry.path).name.ifBlank { entry.uri }, style = MaterialTheme.typography.bodySmall,
+                minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("$folder · ${Formatter.formatShortFileSize(context, entry.sizeBytes)}", style = MaterialTheme.typography.bodySmall,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (date != null) {
+                Text(date, style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
