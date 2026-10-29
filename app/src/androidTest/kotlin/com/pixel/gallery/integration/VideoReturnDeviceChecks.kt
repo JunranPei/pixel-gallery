@@ -12,13 +12,17 @@ import com.pixel.gallery.data.repository.VideoBackgroundAction
 import com.pixel.gallery.ui.viewer.VideoPlaybackSession
 
 /** Real viewer/task lifecycle. Fixed seek positions make codec comparisons reproducible. */
-internal class VideoReturnDeviceChecks(private val instrumentation: Instrumentation) {
+internal class VideoReturnDeviceChecks(
+    private val instrumentation: Instrumentation,
+    private val mediaId: String = "1047",
+    private val backgroundMs: Long = 300L,
+) {
     fun exercise(): String {
         val context = instrumentation.targetContext
         check(context.packageName == "com.pixel.gallery.viewertrace")
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)
-            .setDataAndType(Uri.parse("content://media/external/video/media/1047"), "video/mp4")
+            .setDataAndType(Uri.parse("content://media/external/video/media/$mediaId"), "video/mp4")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT)) as MainActivity
         lateinit var session: VideoPlaybackSession
         val report = mutableListOf<String>()
@@ -39,7 +43,14 @@ internal class VideoReturnDeviceChecks(private val instrumentation: Instrumentat
                     Log.i("VideoQA", "LISTENER_BEGIN_$label")
                     shell("input keyevent KEYCODE_HOME")
                     await { session.player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO) }
-                    SystemClock.sleep(300)
+                    SystemClock.sleep(backgroundMs)
+                    var bufferingEvents = 0
+                    val listener = object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_BUFFERING) bufferingEvents++
+                        }
+                    }
+                    instrumentation.runOnMainSync { session.player.addListener(listener) }
                     val start = SystemClock.elapsedRealtime()
                     shell("am task focus ${activity.taskId}")
                     await { session.retainedFrameMayClear && session.outputReadiness.isBuffered &&
@@ -49,9 +60,10 @@ internal class VideoReturnDeviceChecks(private val instrumentation: Instrumentat
                         check(session.player.playWhenReady == !paused)
                         if (paused) check(kotlin.math.abs(session.player.currentPosition - position) < 60)
                     }
-                    report += "$label handoffMs=${SystemClock.elapsedRealtime() - start}"
+                    report += "$label handoffMs=${SystemClock.elapsedRealtime() - start} bufferingEvents=$bufferingEvents"
                     SystemClock.sleep(3000)
                     Log.i("VideoQA", "LISTENER_END_$label")
+                    instrumentation.runOnMainSync { session.player.removeListener(listener) }
                 }
             }
             return report.joinToString("\n")

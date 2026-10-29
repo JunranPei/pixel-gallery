@@ -39,6 +39,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var bulkTransferSuite = false
     private var videoHandoffSuite = false
     private var videoReturnSuite = false
+    private var returnMediaId = "1047"
+    private var returnBackgroundMs = 300L
     private var videoPipSuite = false
     private var pipFixed = false
     private var pipMediaId = "1047"
@@ -78,6 +80,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         bulkTransferSuite = arguments?.getString("suite") == "bulk-transfer"
         videoHandoffSuite = arguments?.getString("suite") == "video-handoff"
         videoReturnSuite = arguments?.getString("suite") == "video-return"
+        returnMediaId = arguments?.getString("returnMediaId") ?: "1047"
+        returnBackgroundMs = arguments?.getString("returnBackgroundMs")?.toLong() ?: 300L
         videoPipSuite = arguments?.getString("suite") == "video-pip"
         pipFixed = arguments?.getString("pipFixed") == "true"
         pipMediaId = arguments?.getString("pipMediaId") ?: "1047"
@@ -123,7 +127,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 imageRotationAudit -> ImageRotationAudit(this).exercise()
                 bulkTransferSuite -> BulkTransferDeviceChecks(this, bulkToken).exercise()
                 videoHandoffSuite -> VideoHandoffDeviceChecks(this).exercise()
-                videoReturnSuite -> VideoReturnDeviceChecks(this).exercise()
+                videoReturnSuite -> VideoReturnDeviceChecks(this, returnMediaId, returnBackgroundMs).exercise()
                 videoPipSuite -> VideoPipDeviceChecks(this, pipFixed, pipMediaId).exercise()
                 labelMultiSelectionSuite -> LabelMultiSelectionChecks(targetContext).exercise()
                 albumSelectionSuite -> AlbumSelectionChecks(this).exercise()

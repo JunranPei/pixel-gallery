@@ -146,8 +146,12 @@ internal class VideoSurfaceHost(context: Context, private val session: VideoPlay
         session.surface = ordinary
         session.texture = if (wantTexture) textureView else null
         session.outputReadiness.bind(output, wantTexture)
+        val bindStart = System.nanoTime()
         if (native == null) session.player.setVideoSurface(output) else native.setSurface(output)
         bound = output
+        session.onVideoOutputAttached(true)
+        ViewerLoadMetrics.event("VIDEO_OUTPUT_BIND_DONE",
+            "session=${session.id} durationNs=${System.nanoTime() - bindStart}")
         if (native != null) {
             if (wantTexture) native.refreshPausedFrame() else session.nativeSurfaceBound(ordinary)
         }
@@ -163,6 +167,7 @@ internal class VideoSurfaceHost(context: Context, private val session: VideoPlay
         else if (session.outputReadiness.owns(output)) native.setSurface(null)
         session.outputReadiness.unbind(output)
         bound = null
+        session.onVideoOutputAttached(false)
     }
 
     private fun releaseTexture() {

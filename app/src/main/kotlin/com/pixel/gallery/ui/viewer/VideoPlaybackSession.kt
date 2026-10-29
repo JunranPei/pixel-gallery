@@ -14,7 +14,7 @@ import android.view.Surface
 import android.view.SurfaceView
 import androidx.compose.runtime.*
 import androidx.media3.common.*
-import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -70,6 +70,8 @@ class VideoPlaybackSession(
     private var activityVisible = true
     private var inPip = false
     private var pipEntering = false
+    private var videoOutputAttached = false
+    private var awaitingAudioReturnOutput = false
     private var pipSourceRect: Rect? = null
     private var lastPipParams: PictureInPictureParams? = null
 
@@ -82,8 +84,11 @@ class VideoPlaybackSession(
     private var audioRegistered = false
     private var initialPosition = if (!motionPhoto && initialSettings.rememberPosition) repository.position(sourceKey) else 0L
 
-    val player: ExoPlayer = ExoPlayer.Builder(context, DefaultRenderersFactory(context)
-        .setEnableDecoderFallback(true))
+    val player: ExoPlayer = ExoPlayer.Builder(context, VideoRenderersFactory(context))
+        // Keep the current compressed GOP seekable when the video track is disabled.
+        // Otherwise enabling it can reset the audio stream as well. The allocator's
+        // existing byte budget and Media3's back-buffer pressure fallback still apply.
+        .setLoadControl(DefaultLoadControl.Builder().setBackBuffer(0, true).build())
         .setMediaSourceFactory(DefaultMediaSourceFactory(context, DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
             .setMp4ExtractorFlags(Mp4Extractor.FLAG_READ_MOTION_PHOTO_METADATA)))
@@ -366,17 +371,27 @@ class VideoPlaybackSession(
         native?.setPlaying(allowed && wantsPlay)
         // Audio-only playback must not keep decoding an invisible video track.
         val audioOnly = !activityVisible && !inPip && !pipEntering && settings.backgroundAction == VideoBackgroundAction.AUDIO
-        if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO) != audioOnly) {
+        if (audioOnly) awaitingAudioReturnOutput = true
+        if (!audioOnly && videoOutputAttached) awaitingAudioReturnOutput = false
+        val disableVideo = audioOnly || awaitingAudioReturnOutput
+        if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO) != disableVideo) {
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, audioOnly).build()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, disableVideo).build()
         }
         applyingPolicy = false
         ViewerLoadMetrics.event(
             "VIDEO_POLICY",
-            "allowed=$allowed audioOnly=$audioOnly wantsPlay=$wantsPlay applying=$applyingPolicy " +
+            "allowed=$allowed audioOnly=$audioOnly waitingOutput=$awaitingAudioReturnOutput wantsPlay=$wantsPlay applying=$applyingPolicy " +
                 "${videoDiagnostics()}",
         )
         refreshAudioService()
+    }
+
+    internal fun onVideoOutputAttached(attached: Boolean) {
+        videoOutputAttached = attached
+        // Queue the real output before re-enabling the video renderer. Audio continues
+        // while Android recreates the window; no placeholder decoder is needed.
+        if (attached && awaitingAudioReturnOutput) applyPolicy()
     }
 
     fun togglePlay() {

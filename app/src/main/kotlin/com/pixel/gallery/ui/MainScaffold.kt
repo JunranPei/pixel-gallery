@@ -893,8 +893,12 @@ private fun MainScaffoldContent(
         }
     }
     // Window Insets
-    val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
-    val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // The full-screen viewer overlays this content. Keep the underlying grid's
+    // geometry stable while Android animates the system bars on task return.
+    val navigationInsets = if (currentScreen is Screen.Viewer) {
+        WindowInsets.navigationBarsIgnoringVisibility
+    } else WindowInsets.navigationBars
+    val navBarPadding = navigationInsets.asPaddingValues().calculateBottomPadding()
     val contentPaddingScreen = navigationStack.lastOrNull {
         it !is Screen.Viewer && it !is Screen.TransferDestination
     } ?: currentScreen
