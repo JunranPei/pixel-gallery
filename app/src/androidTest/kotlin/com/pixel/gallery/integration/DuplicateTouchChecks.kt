@@ -152,7 +152,7 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             settle(500)
             instrumentation.runOnMainSync { resultOverride.value = DuplicateScanResult(emptyList(), emptyList(), 2500) }
             settle(250)
-            check(find(context.getString(R.string.duplicate_none_found)) != null)
+            check(find(context.getString(R.string.duplicate_no_duplicates_short)) != null)
             check(find(context.getString(R.string.duplicate_keeper_rule)) == null)
             check(find(context.getString(R.string.duplicate_scan_short)) == null)
             screenshot("empty-result-dark", 0x121212)
@@ -163,7 +163,7 @@ internal class DuplicateTouchChecks(private val instrumentation: Instrumentation
             }
             settle(250)
             check(find(context.getString(R.string.duplicate_check_incomplete)) != null)
-            check(find(context.getString(R.string.duplicate_none_found)) == null)
+            check(find(context.getString(R.string.duplicate_no_duplicates_short)) == null)
             screenshot("unverified-result-light", 0xffffff)
             instrumentation.runOnMainSync { resultOverride.value = null; dark.value = true }
             settle(250)

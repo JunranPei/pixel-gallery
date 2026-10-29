@@ -5,4 +5,13 @@
     <string name="duplicate_selected_count">已选 %1$d 项</string>
     <string name="duplicate_selected_size">可释放 %1$s</string>
     <string name="duplicate_move_to_bin_short">删除</string>
+    <string name="duplicate_no_duplicates_short">没有重复</string>
+    <string name="duplicate_status_preparing">准备中</string>
+    <string name="duplicate_status_inventory">正在检查</string>
+    <string name="duplicate_status_sampling">正在比对候选文件</string>
+    <string name="duplicate_status_comparing">正在比对</string>
+    <string name="duplicate_status_validating">正在检查所选文件</string>
+    <string name="duplicate_status_permission">等待授权</string>
+    <string name="duplicate_status_moving">正在移入回收站</string>
+    <string name="duplicate_status_incomplete">部分文件未能完成检查。</string>
 </resources>

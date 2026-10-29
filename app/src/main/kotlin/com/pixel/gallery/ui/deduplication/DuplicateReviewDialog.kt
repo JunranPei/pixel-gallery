@@ -27,20 +27,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Restore
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.rounded.Check
-import com.pixel.gallery.model.DuplicateScanStage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -130,76 +125,16 @@ fun DuplicateReviewDialog(
             Box(Modifier.fillMaxSize()) {
                 when {
                     state.phase == DuplicatePhase.REVIEW && groups.isEmpty() -> {
-                        val checked = ((state.result?.scannedCount ?: 0) - (state.result?.skippedCount ?: 0)).coerceAtLeast(0)
-                        val skipped = state.result?.skippedCount ?: 0
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(if (skipped > 0 || checked == 0) Icons.Outlined.Info else Icons.Outlined.CheckCircle,
-                                contentDescription = null, modifier = Modifier.size(40.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(16.dp))
-                            Text(stringResource(if (skipped > 0 || checked == 0) R.string.duplicate_check_incomplete else R.string.duplicate_none_found),
-                                style = MaterialTheme.typography.titleMedium,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                            Spacer(Modifier.height(8.dp))
-                            Text(stringResource(if (skipped > 0) R.string.duplicate_empty_partial else R.string.duplicate_empty_checked,
-                                checked, skipped), style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        }
+                        val incomplete = (state.result?.skippedCount ?: 0) > 0
+                        DuplicateResultContent(
+                            title = stringResource(if (incomplete) R.string.duplicate_check_incomplete else R.string.duplicate_no_duplicates_short),
+                            noDuplicates = !incomplete,
+                            detail = if (incomplete) stringResource(R.string.duplicate_status_incomplete) else null,
+                        )
                     }
-                    !cachedPreview && state.phase in setOf(DuplicatePhase.IDLE, DuplicatePhase.SCANNING,
+                    !cachedPreview && state.phase in setOf(DuplicatePhase.SCANNING,
                         DuplicatePhase.VALIDATING, DuplicatePhase.AWAITING_PERMISSION, DuplicatePhase.VERIFYING) -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Text(state.title, style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(24.dp))
-                            val progress = state.progress
-                            if (state.phase == DuplicatePhase.SCANNING && progress != null && progress.total > 0 && progress.stage != DuplicateScanStage.PREPARING) {
-                                LinearProgressIndicator(
-                                    progress = { (progress.completed.toFloat() / progress.total).coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    drawStopIndicator = {},
-                                )
-                                Spacer(Modifier.height(12.dp))
-                                Text(stringResource(R.string.duplicate_scan_progress, progress.completed, progress.total))
-                                if (progress.bytesRead > 0) {
-                                    Text(Formatter.formatShortFileSize(context, progress.bytesRead),
-                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            } else {
-                                CircularProgressIndicator()
-                            }
-                            Spacer(Modifier.height(16.dp))
-                            Text(
-                                stringResource(
-                                    when (state.phase) {
-                                        DuplicatePhase.VALIDATING -> R.string.duplicate_validating
-                                        DuplicatePhase.AWAITING_PERMISSION -> R.string.duplicate_awaiting_permission
-                                        DuplicatePhase.VERIFYING -> R.string.duplicate_verifying
-                                        else -> when (progress?.stage) {
-                                            DuplicateScanStage.PREPARING -> R.string.duplicate_preparing
-                                            DuplicateScanStage.INVENTORY -> R.string.duplicate_inventory
-                                            DuplicateScanStage.SAMPLING -> R.string.duplicate_sampling
-                                            else -> R.string.duplicate_scanning
-                                        }
-                                    },
-                                ),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                stringResource(R.string.duplicate_scan_short),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
+                        DuplicateScanContent(state)
                     }
 
                     state.phase == DuplicatePhase.REVIEW || cachedPreview -> {
@@ -221,7 +156,7 @@ fun DuplicateReviewDialog(
                                     }
                                     if (cachedPreview) {
                                         Text(stringResource(R.string.duplicate_index_updating), style = MaterialTheme.typography.bodyMedium)
-                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                        DuplicateProgressBar(null, Modifier.fillMaxWidth())
                                     }
                                     if (!state.canTrash) {
                                         Text(stringResource(R.string.duplicate_trash_unavailable), style = MaterialTheme.typography.bodySmall)
@@ -257,38 +192,22 @@ fun DuplicateReviewDialog(
                     }
 
                     state.phase == DuplicatePhase.COMPLETE || state.phase == DuplicatePhase.ERROR -> {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            item {
-                                Column(
-                                    modifier = Modifier.padding(24.dp),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                                ) {
-                                    Text(state.title, style = MaterialTheme.typography.titleMedium)
-                                    if (state.phase == DuplicatePhase.ERROR) {
-                                        Text(
-                                            stringResource(R.string.duplicate_failed),
-                                            style = MaterialTheme.typography.headlineSmall,
-                                        )
-                                        state.error?.let { Text(it) }
-                                    } else {
-                                        Text(
-                                            stringResource(
-                                                if (state.cancelled) R.string.duplicate_cleanup_cancelled
-                                                else R.string.duplicate_cleanup_complete,
-                                            ),
-                                            style = MaterialTheme.typography.headlineSmall,
-                                        )
-                                    }
-                                    Text(stringResource(R.string.duplicate_removed_summary, state.removedCount))
-                                    if (state.skippedCount > 0) {
-                                        Text(stringResource(R.string.duplicate_cleanup_skipped, state.skippedCount))
-                                    }
-                                    if (state.removedCount > 0) {
-                                        Text(stringResource(R.string.duplicate_restore_hint))
-                                    }
-                                }
-                            }
-                        }
+                        val noDuplicates = state.phase == DuplicatePhase.COMPLETE && !state.cancelled &&
+                            state.skippedCount == 0 && groups.isEmpty()
+                        DuplicateResultContent(
+                            title = stringResource(when {
+                                state.phase == DuplicatePhase.ERROR -> R.string.duplicate_failed
+                                state.cancelled -> R.string.duplicate_cleanup_cancelled
+                                noDuplicates -> R.string.duplicate_no_duplicates_short
+                                else -> R.string.duplicate_check_incomplete
+                            }),
+                            noDuplicates = noDuplicates,
+                            detail = when {
+                                state.phase == DuplicatePhase.ERROR -> state.error
+                                !state.cancelled && !noDuplicates -> stringResource(R.string.duplicate_status_incomplete)
+                                else -> null
+                            },
+                        )
                     }
                 }
             }

@@ -5,4 +5,13 @@
     <string name="duplicate_selected_count">%1$d selected</string>
     <string name="duplicate_selected_size">%1$s to reclaim</string>
     <string name="duplicate_move_to_bin_short">Delete</string>
+    <string name="duplicate_no_duplicates_short">No duplicates</string>
+    <string name="duplicate_status_preparing">Preparing</string>
+    <string name="duplicate_status_inventory">Checking files</string>
+    <string name="duplicate_status_sampling">Comparing candidates</string>
+    <string name="duplicate_status_comparing">Comparing files</string>
+    <string name="duplicate_status_validating">Checking selection</string>
+    <string name="duplicate_status_permission">Waiting for permission</string>
+    <string name="duplicate_status_moving">Moving to Bin</string>
+    <string name="duplicate_status_incomplete">Some files could not be checked.</string>
 </resources>

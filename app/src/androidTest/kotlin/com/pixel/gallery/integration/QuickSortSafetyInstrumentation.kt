@@ -54,6 +54,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var uiSuite = false
     private var toastSuite = false
     private var labelLoadingSuite = false
+    private var duplicateStatusSuite = false
     private var duplicateSuite = false
     private var undoHandednessSuite = false
     private var labelBackupSuite = false
@@ -97,6 +98,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         uiSuite = arguments?.getString("suite") == "redesign"
         toastSuite = arguments?.getString("suite") == "toasts"
         labelLoadingSuite = arguments?.getString("suite") == "label-loading"
+        duplicateStatusSuite = arguments?.getString("suite") == "duplicate-status"
         duplicateSuite = arguments?.getString("suite") == "duplicates"
         undoHandednessSuite = arguments?.getString("suite") == "undo-handedness"
         labelBackupSuite = arguments?.getString("suite") == "label-backup"
@@ -161,6 +163,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 duplicateSuite -> DuplicateTouchChecks(this).exercise()
                 toastSuite -> ToastTouchChecks(this).exercise()
                 labelLoadingSuite -> LabelLoadingChecks(this).exercise()
+                duplicateStatusSuite -> DuplicateStatusChecks(this).exercise()
                 uiSuite -> RedesignTouchChecks(this).exercise()
                 scrollbarSuite -> ScrollbarTouchChecks(this).exercise()
                 else -> runBlocking { exercise() }

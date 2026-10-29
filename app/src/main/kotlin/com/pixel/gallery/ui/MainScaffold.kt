@@ -108,6 +108,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.LabelOff
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.model.DeduplicationScope
 import com.pixel.gallery.ui.deduplication.DuplicateReviewDialog
@@ -1576,7 +1577,7 @@ private fun MainScaffoldContent(
                                         }
                                     },
                                 ) {
-                                    Icon(Icons.Outlined.Label, contentDescription = "Remove from label")
+                                    Icon(Icons.Outlined.LabelOff, contentDescription = "Remove from label")
                                 }
                                 GalleryOverflowButton(
                                     expanded = showSelectionMenu,

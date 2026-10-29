@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.LabelOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -99,7 +100,7 @@ fun LabelPhotosScreen(
                         GalleryMenuRow("Sort Photos", Icons.Default.Sort, accented = true, onClick = { showMenu = false; onSortPhotos() })
                         GalleryMenuRow("Edit label", Icons.Outlined.Label, accented = true, onClick = { showMenu = false; onEditLabel() })
                         if (selectedIds.isNotEmpty()) GalleryMenuRow(
-                            "Remove selected from label", Icons.Outlined.Label, accented = true,
+                            "Remove selected from label", Icons.Outlined.LabelOff, accented = true,
                             onClick = { showMenu = false; onRemoveFromLabel(selectedIds) },
                         )
                         if (quickSort == null) GalleryMenuRow(
