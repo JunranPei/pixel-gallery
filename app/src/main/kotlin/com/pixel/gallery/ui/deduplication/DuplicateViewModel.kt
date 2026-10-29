@@ -9,6 +9,7 @@ import com.pixel.gallery.model.DeduplicationScope
 import com.pixel.gallery.model.DuplicateScanProgress
 import com.pixel.gallery.model.DuplicateScanResult
 import com.pixel.gallery.model.DuplicateGroup
+import com.pixel.gallery.model.toggleDuplicateSelection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -94,8 +95,7 @@ class DuplicateViewModel @Inject constructor(private val repository: DuplicateRe
         val current = _state.value
         if (current.phase != DuplicatePhase.REVIEW) return
         val group = current.result?.groups?.firstOrNull { group -> group.entries.any { it.contentId == id } } ?: return
-        if (id !in current.selectedIds && group.entries.count { it.contentId !in current.selectedIds } <= 1) return
-        _state.update { it.copy(selectedIds = if (id in it.selectedIds) it.selectedIds - id else it.selectedIds + id) }
+        _state.update { it.copy(selectedIds = toggleDuplicateSelection(group, it.selectedIds, id)) }
     }
 
     fun confirm() {

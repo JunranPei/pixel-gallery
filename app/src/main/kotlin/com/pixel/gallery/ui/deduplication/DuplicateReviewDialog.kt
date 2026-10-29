@@ -75,6 +75,9 @@ import com.pixel.gallery.ui.GalleryPageContent
 import com.pixel.gallery.ui.components.galleryContentEdge
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.model.duplicateMediaTimestamp
+import com.pixel.gallery.model.DuplicateGroup
+import com.pixel.gallery.model.allDuplicateCopiesSelected
+import com.pixel.gallery.model.toggleAllDuplicateSelection
 import com.pixel.gallery.data.local.entity.MediaEntry
 import java.io.File
 import java.text.DateFormat
@@ -98,8 +101,7 @@ fun DuplicateReviewDialog(
     val selectedEntries = groups.flatMap { it.entries }
         .filter { it.contentId in state.selectedIds }
     val selectedBytes = selectedEntries.sumOf { it.sizeBytes }
-    val copyIds = groups.flatMap { group -> group.entries.drop(1).map(MediaEntry::contentId) }
-    val allCopiesSelected = copyIds.isNotEmpty() && copyIds.all { it in state.selectedIds }
+    val allCopiesSelected = allDuplicateCopiesSelected(groups, state.selectedIds)
     val canDismiss = state.phase != DuplicatePhase.AWAITING_PERMISSION &&
         state.phase != DuplicatePhase.VERIFYING
     val showFooter = state.phase == DuplicatePhase.REVIEW && groups.isNotEmpty()
@@ -320,7 +322,7 @@ fun DuplicateReviewDialog(
                             )
                         }
                         FilledTonalButton(
-                            onClick = { toggleCopySelection(copyIds, state.selectedIds, onToggle) },
+                            onClick = { toggleCopySelection(groups, state.selectedIds, onToggle) },
                             contentPadding = PaddingValues(horizontal = 10.dp),
                             shape = CircleShape,
                             colors = ButtonDefaults.filledTonalButtonColors(
@@ -335,9 +337,8 @@ fun DuplicateReviewDialog(
                             onClick = { showConfirmation = true },
                             enabled = selectedEntries.isNotEmpty() && state.canTrash,
                             shape = RoundedCornerShape(14.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp),
                         ) {
-                            Icon(Icons.Outlined.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
                             Text(stringResource(R.string.duplicate_move_to_bin_short))
                         }
                     }
@@ -352,7 +353,6 @@ fun DuplicateReviewDialog(
                 icon = Icons.Outlined.DeleteOutline,
                 text = {
                     ConfirmationFact(stringResource(R.string.dialog_selected_copies), pluralStringResource(R.plurals.dialog_item_count, selectedEntries.size, selectedEntries.size))
-                    ConfirmationFact(stringResource(R.string.dialog_scope), state.title)
                     ConfirmationReminder(stringResource(R.string.dialog_duplicate_action), Icons.Outlined.DeleteOutline)
                     ConfirmationReminder(stringResource(R.string.dialog_duplicate_safety))
                     ConfirmationReminder(stringResource(R.string.dialog_restore), Icons.Outlined.Restore)
@@ -377,14 +377,13 @@ fun DuplicateReviewDialog(
 }
 
 private fun toggleCopySelection(
-    copyIds: List<Long>,
+    groups: List<DuplicateGroup>,
     selectedIds: Set<Long>,
     onToggle: (Long) -> Unit,
 ) {
-    val selectAll = copyIds.any { it !in selectedIds }
-    copyIds
-        .filter { if (selectAll) it !in selectedIds else it in selectedIds }
-        .forEach(onToggle)
+    val next = toggleAllDuplicateSelection(groups, selectedIds)
+    (selectedIds - next).forEach(onToggle)
+    (next - selectedIds).forEach(onToggle)
 }
 
 @OptIn(ExperimentalGlideComposeApi::class)
@@ -397,8 +396,7 @@ private fun DuplicateGroupStrip(
     enabled: Boolean = true,
 ) {
     val entries = group.entries
-    val copyIds = entries.drop(1).map(MediaEntry::contentId)
-    val allCopiesSelected = copyIds.isNotEmpty() && copyIds.all { it in selectedIds }
+    val allCopiesSelected = allDuplicateCopiesSelected(listOf(group), selectedIds)
     Column(
         modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -411,11 +409,10 @@ private fun DuplicateGroupStrip(
                 style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            TextButton(enabled = enabled, onClick = { toggleCopySelection(copyIds, selectedIds, onToggle) }) {
+            TextButton(enabled = enabled, onClick = { toggleCopySelection(listOf(group), selectedIds, onToggle) }) {
                 Text(stringResource(if (allCopiesSelected) R.string.duplicate_clear_all_short else R.string.duplicate_select_all_short))
             }
         }
-        val unselected = entries.count { it.contentId !in selectedIds }
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -428,7 +425,7 @@ private fun DuplicateGroupStrip(
                     entry = entry,
                     recommended = position == 0,
                     selected = selected,
-                    disabled = !enabled || (!selected && unselected == 1),
+                    disabled = !enabled,
                     onToggle = { onToggle(entry.contentId) },
                 )
             }
