@@ -476,7 +476,9 @@ private fun MainScaffoldContent(
     var labelEditorFromGrid by rememberSaveable { mutableStateOf(false) }
     var gridTransferSession by rememberSaveable { mutableStateOf<String?>(null) }
     var selectionPanelHeight by remember { mutableStateOf(0.dp) }
-    var pickerGridColumns by rememberSaveable { mutableIntStateOf(gridColumns) }
+    val moveSheetColumns by photosViewModel.moveSheetColumns.collectAsState()
+    val labelSheetColumns by photosViewModel.labelSheetColumns.collectAsState()
+    val quickSortSheetColumns by photosViewModel.quickSortSheetColumns.collectAsState()
     var ordinaryTransferIds by remember { mutableStateOf(emptySet<Long>()) }
     val moveVisibility = remember(gridTransferSession) { com.pixel.gallery.ui.quicksort.QuickSortBatchVisibility() }
     val movedBatchPaths = remember(quickQueue.jobs, gridTransferSession) { moveVisibility.update(quickQueue.jobs, gridTransferSession) }
@@ -1956,8 +1958,8 @@ private fun MainScaffoldContent(
                         if (transferScreen == null) gridTransferSession = null
                         else navigateToStack(navigationStack.dropLast(1))
                     },
-                    columns = pickerGridColumns,
-                    onColumnsChange = { pickerGridColumns = it },
+                    columns = moveSheetColumns,
+                    onColumnsChange = photosViewModel::setMoveSheetColumns,
                     onFinished = { summary ->
                         val action = if (summary.mode == TransferMode.MOVE) "Moved" else "Copied"
                         val message = buildString {
@@ -2023,8 +2025,8 @@ private fun MainScaffoldContent(
         val labelBatchIds = if (labelEditorFromGrid) selectedIds else editingLabelIds
         LabelEditorSheet(
             labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = labelBatchIds, recentLabelIds = recentLabelIds,
-            columns = pickerGridColumns,
-            onColumnsChange = { pickerGridColumns = it },
+            columns = labelSheetColumns,
+            onColumnsChange = photosViewModel::setLabelSheetColumns,
             onDismiss = {
                 showLabelEditor = false
                 editingLabelIds = emptySet()
@@ -2054,8 +2056,8 @@ private fun MainScaffoldContent(
             },
             onTargetsChange = photosViewModel::setQuickSortTargets,
             onCreateAlbum = { parent, name, onResult -> photosViewModel.createTransferFolder(parent, name, onResult) },
-            columns = pickerGridColumns,
-            onColumnsChange = { pickerGridColumns = it },
+            columns = quickSortSheetColumns,
+            onColumnsChange = photosViewModel::setQuickSortSheetColumns,
         )
     }
 

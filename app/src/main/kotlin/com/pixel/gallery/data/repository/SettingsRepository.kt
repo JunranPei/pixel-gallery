@@ -51,6 +51,9 @@ class SettingsRepository @Inject constructor(
     private val HIDDEN_RENAME_PROTECTION = stringSetPreferencesKey("hidden_rename_protection")
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
     private val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
+    private val MOVE_SHEET_COLUMNS = intPreferencesKey("move_sheet_columns")
+    private val LABEL_SHEET_COLUMNS = intPreferencesKey("label_sheet_columns")
+    private val QUICK_SORT_SHEET_COLUMNS = intPreferencesKey("quick_sort_sheet_columns")
     private val PHOTO_SORT_ORDER = stringPreferencesKey("photo_sort_order")
     private val TRASH_SORT_ORDER = stringPreferencesKey("trash_sort_order")
     private val ALBUM_SORT_ORDER = stringPreferencesKey("album_sort_order")
@@ -247,6 +250,33 @@ class SettingsRepository @Inject constructor(
     suspend fun setAlbumGridColumns(value: Int) {
         context.dataStore.edit { preferences ->
             preferences[ALBUM_GRID_COLUMNS] = value
+        }
+    }
+
+    val moveSheetColumns: Flow<Int> = context.dataStore.data
+        .map { preferences -> (preferences[MOVE_SHEET_COLUMNS] ?: 3).coerceIn(2, 6) }
+
+    suspend fun setMoveSheetColumns(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[MOVE_SHEET_COLUMNS] = value.coerceIn(2, 6)
+        }
+    }
+
+    val labelSheetColumns: Flow<Int> = context.dataStore.data
+        .map { preferences -> (preferences[LABEL_SHEET_COLUMNS] ?: 3).coerceIn(2, 6) }
+
+    suspend fun setLabelSheetColumns(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[LABEL_SHEET_COLUMNS] = value.coerceIn(2, 6)
+        }
+    }
+
+    val quickSortSheetColumns: Flow<Int> = context.dataStore.data
+        .map { preferences -> (preferences[QUICK_SORT_SHEET_COLUMNS] ?: 3).coerceIn(2, 6) }
+
+    suspend fun setQuickSortSheetColumns(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[QUICK_SORT_SHEET_COLUMNS] = value.coerceIn(2, 6)
         }
     }
 

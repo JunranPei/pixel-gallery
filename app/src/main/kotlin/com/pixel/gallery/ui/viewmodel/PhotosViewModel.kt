@@ -25,7 +25,6 @@ import com.pixel.gallery.model.ConflictPolicy
 import com.pixel.gallery.model.TransferMode
 import com.pixel.gallery.model.TransferProgress
 import com.pixel.gallery.model.TransferSummary
-import com.pixel.gallery.model.buildTransferDestinations
 import com.pixel.gallery.model.ThemeMode
 import javax.inject.Inject
 
@@ -147,11 +146,6 @@ class PhotosViewModel @Inject constructor(
     /** Keeps ordering and time headers on the same effective timestamp. */
     fun sortMedia(entries: List<MediaEntry>, sort: PhotoSortOrder): List<MediaEntry> =
         sortMediaEntries(entries, sort)
-
-    val transferDestinations: StateFlow<List<TransferDestination>> = photos
-        .map(::buildTransferDestinations)
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val quickSortPreferences = settingsRepository.quickSortPreferences
         .stateIn(viewModelScope, SharingStarted.Eagerly, com.pixel.gallery.model.QuickSortPreferences())
@@ -280,6 +274,15 @@ class PhotosViewModel @Inject constructor(
     val albumGridColumns: StateFlow<Int> = settingsRepository.albumGridColumns
         .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
 
+    val moveSheetColumns: StateFlow<Int> = settingsRepository.moveSheetColumns
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+
+    val labelSheetColumns: StateFlow<Int> = settingsRepository.labelSheetColumns
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+
+    val quickSortSheetColumns: StateFlow<Int> = settingsRepository.quickSortSheetColumns
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+
     internal val browsingIndex: StateFlow<MediaBrowseIndex> = combine(
         orderedMedia, gridColumns.map { it >= 6 }.distinctUntilChanged(), browseTimeZone,
     ) { media, monthly, zone -> Triple(media, monthly, zone) }.mapLatest { (media, monthly, zone) ->
@@ -386,6 +389,20 @@ class PhotosViewModel @Inject constructor(
 
     val albums: StateFlow<List<Album>> = combine(browsingIndex, albumSortOrder) { index, sort ->
         index.library[com.pixel.gallery.model.MediaTypeFilter.ALL].albums(sort)
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val transferDestinations: StateFlow<List<TransferDestination>> = albums.map { orderedAlbums ->
+        orderedAlbums.map { album ->
+            TransferDestination(
+                stableKey = album.path,
+                displayName = album.name,
+                path = album.path,
+                coverUri = album.coverUri,
+                itemCount = album.itemCount,
+                lastModified = album.lastModified,
+            )
+        }
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -717,6 +734,24 @@ class PhotosViewModel @Inject constructor(
     fun setAlbumGridColumns(value: Int) {
         viewModelScope.launch {
             settingsRepository.setAlbumGridColumns(value)
+        }
+    }
+
+    fun setMoveSheetColumns(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setMoveSheetColumns(value)
+        }
+    }
+
+    fun setLabelSheetColumns(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setLabelSheetColumns(value)
+        }
+    }
+
+    fun setQuickSortSheetColumns(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setQuickSortSheetColumns(value)
         }
     }
 
