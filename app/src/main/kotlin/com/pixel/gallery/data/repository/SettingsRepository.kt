@@ -264,6 +264,14 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    /** Every collection has its own persisted density, including individual albums and labels. */
+    fun pageGridColumns(page: String, default: Int = 3): Flow<Int> = context.dataStore.data
+        .map { preferences -> (preferences[intPreferencesKey("page_grid_columns:$page")] ?: default).coerceIn(2, 6) }
+
+    suspend fun setPageGridColumns(page: String, value: Int) {
+        context.dataStore.edit { it[intPreferencesKey("page_grid_columns:$page")] = value.coerceIn(2, 6) }
+    }
+
     val moveSheetColumns: Flow<Int> = context.dataStore.data
         .map { preferences -> (preferences[MOVE_SHEET_COLUMNS] ?: 3).coerceIn(2, 6) }
 

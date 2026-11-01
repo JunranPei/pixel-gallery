@@ -69,3 +69,79 @@ scratch/album-groups-evidence/08-matching-corners-visible.png. The visible emula
 is left open with Labels and a Travel demonstration group expanded. This demonstration
 only groups existing test-emulator albums; no media files were moved.
 Updated APK SHA-256: 5C3BAE3BB101D1D459B5867A35001A77CCB229F1256A90361A29BBDFB7CFBA0A.
+
+
+## Dialog consistency and top overscroll follow-up
+
+Baseline feature committed as 7d10911c before this UI work. Group actions, label
+management and assignment now use a compact dialog with the existing GalleryMenuRow
+icon/typography/surface treatment. Name dialogs use contextual folder/edit icons and
+the same filled Save button as the existing album/label rename UI. Dissolve uses the
+existing confirmation family with the group name and file-preservation reminder.
+No global dialog or menu styling was changed.
+
+The former decoration lived outside LazyVerticalGrid's visual overscroll node. It
+tracked layout offsets but did not receive Android's stretch transform. AlbumGrid
+now attaches a single overscroll visual node around both grid and background and
+passes withoutVisualEffect() to the grid for event handling. Scrollbar stays outside
+that transform. Reference:
+https://developer.android.com/reference/kotlin/androidx/compose/foundation/package-summary
+
+A held top-pull probe compares a solid fixture album's upper edge with the matching
+background edge on the same scanline. Old APK: rest cover=808/background=792;
+held cover=829/background=792; relative drift=21 px. Fixed APK: rest=808/792;
+held=829/813; relative drift=0 px. Baseline failure log:
+scratch/album-groups-stretch-before-device.log. Full repaired suite:
+scratch/album-groups-dialog-scroll-verified-device.log (PASS). Native screenshots and
+metrics: scratch/album-groups-dialog-scroll-evidence/; includes all five dialog states.
+Final build: scratch/album-groups-dialog-scroll-final-build.log.
+
+An intermediate run exposed a queued system-back callback attempting to pop the
+last route. The final branch now checks stack size before popping. The test also
+waits for the album's unique Back control rather than the More button shared with
+Home. The intermediate process exit skipped test cleanup; its five media fixtures
+were removed by their exact IDs, and test-app groups 1 (1 member), Travel (3), 3 (8)
+were reconstructed from the pre-run screenshots and MediaStore paths, retaining names,
+members and order with new internal IDs. No source media was moved. Subsequent tests
+write original-grouping.json before mutation; the final run restored that saved state
+and its IDs, verified from the persisted DataStore file.
+
+Updated independent preview APK SHA256:
+34114e2fe9a036ba8e91510c716ce71fbeb778f064e274ea6fddf7ce1faf423b.
+
+Final JVM regression: 353 tests, 0 failures/errors; scratch/album-groups-dialog-scroll-unit.log.
+
+
+## Picker uses existing label selection components
+
+The assignment picker now uses SelectionBottomSheet, SelectionSearchField,
+SelectionGrid and AlbumCoverCard directly, following LabelEditorSheet's layout
+and immediate-save interaction. No shared container implementation was changed.
+The custom header close button, search-adjacent plus button, result counter and
+membership status row were removed. A shared current group appears as a removable
+AssistChip; selecting that same grid card removes membership, selecting another
+card switches groups, and creating from the search query clears that query only
+after persistence succeeds. The sheet and album selection remain open after saving.
+
+Build: scratch/album-group-existing-sheet-build.log (PASS).
+Device: scratch/album-group-existing-sheet-device.log (PASS), including 100 lazy
+candidates, searching GroupQA099 and verifying only that group's stored membership,
+create-from-search, remove and dismiss. Existing full grid regression also passed:
+columns 2/3/4/6, multiple expanded groups, label group, reopen persistence, album
+navigation, dark theme, 150% font and dissolve. The held overscroll probe passed.
+An initial test run received an extra character through the system IME; the test
+now uses the existing project's accessibility text-entry method. No production
+UI change was needed for that test-input issue.
+
+Original emulator groups 1 (1 album), Travel (3), 3 (8), including their IDs and
+expanded state, were verified against persisted settings after cleanup. The normal
+preview is left open on Travel membership in the visible emulator. Screenshots:
+scratch/album-group-existing-sheet-evidence/. Independent APK updated at
+build_apks/PixelGallery-album-groups-preview.apk. These follow-up edits are uncommitted.
+
+
+Density follow-up: per-page persisted column settings now separate home photos, home albums, each album and label detail, label overview, hidden albums, favourites, trash, vault and group picker. Shared pinch recognizer survives column changes; picker parent owns two-finger gestures. Native test passed 3-to-6-to-2 pinch, unchanged home densities and no accidental membership edits. Album titles/captions use density-dependent font sizes; album page header also scales. Joined membership is indicated on the destination card, with a No group destination for removal. Build: scratch/album-density-build.log; device: scratch/album-density-device.log; screenshots: scratch/album-density-evidence/. Original grouping restored and independent preview APK updated.
+
+Soft group backgrounds blend active container hues into the app surface: 30% tint in light mode, 40% in dark mode. Both collapsed and expanded groups follow app theme and dynamic colors. Build/device checks passed; light/dark screenshots visually reviewed in scratch/album-soft-colors-evidence/. Original grouping verified restored.
+
+Dedicated palette replaces theme-container mixing: light F0F4F8/EFF5F1/F4F1F8/F6F3EF paired with dark 1C232A/1D2621/24212B/28231F. Labels use grey violet. New groups persist colorIndex selected from least-used colors excluding the previous group; legacy groups derive a stable fallback from ID. Rename/reorder/removal and JSON persistence tests pass. Build/unit log: scratch/album-palette-build.log. Native regression PASS: scratch/album-palette-device.log. Light and dark screenshots visually reviewed in scratch/album-palette-evidence/. Original group state verified restored; preview APK updated.

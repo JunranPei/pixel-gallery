@@ -46,7 +46,7 @@ fun LockedFolderScreen(
     items: List<GridItem> = emptyList(),
     viewModel: com.pixel.gallery.ui.viewmodel.PhotosViewModel = hiltViewModel()
 ): GalleryPageContent {
-    val gridColumns by viewModel.gridColumns.collectAsState()
+    val gridColumns by viewModel.vaultGridColumns.collectAsState()
     val context = LocalContext.current
     var isAuthenticated by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
@@ -176,7 +176,7 @@ fun LockedFolderScreen(
                     onSelectionChange = onSelectionChange,
                     onToggleSelection = onToggleSelection,
                     columns = gridColumns,
-                    onColumnsChange = { viewModel.setGridColumns(it) }
+                    onColumnsChange = { viewModel.setPageGridColumns("vault", it) }
                 )
             }
         }

@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -43,10 +44,13 @@ fun GroupedAlbumsScreen(
     val gridColumns = columns.coerceIn(2, 6)
     val rows = remember(albums, labels, grouping, search) { groupedAlbumRows(albums, grouping, labels, search) }
     val backgrounds = remember(rows) { rows.associate { it.key to it.backgroundGroup } }
-    val colors = listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.tertiaryContainer,
-        MaterialTheme.colorScheme.secondaryContainer)
+    val scheme = MaterialTheme.colorScheme
+    val dark = scheme.surface.luminance() < 0.5f
+    // Dedicated paired hues: mist blue, grey green, grey violet, warm grey.
+    val colors = if (dark) listOf(Color(0xFF1C232A), Color(0xFF1D2621), Color(0xFF24212B), Color(0xFF28231F))
+        else listOf(Color(0xFFF0F4F8), Color(0xFFEFF5F1), Color(0xFFF4F1F8), Color(0xFFF6F3EF))
     val groupColors = remember(grouping.groups, colors) {
-        (listOf(LABELS_ALBUM_GROUP) + grouping.groups.map { it.id }).mapIndexed { index, id -> id to colors[index % colors.size] }.toMap()
+        mapOf(LABELS_ALBUM_GROUP to colors[2]) + grouping.groups.associate { it.id to colors[it.resolvedColorIndex] }
     }
     var managing by remember { mutableStateOf<AlbumGroup?>(null) }
     var renaming by remember { mutableStateOf<AlbumGroup?>(null) }
@@ -54,7 +58,8 @@ fun GroupedAlbumsScreen(
     AlbumGrid(
         columns = gridColumns, onColumnsChange = onColumnsChange, state = gridState,
         bottomPadding = bottomPadding, emptyMessage = if (albums.isEmpty()) emptyMessage else null,
-        modifier = Modifier.testTag("grouped-albums-grid").groupBackgrounds(gridState, backgrounds, groupColors),
+        modifier = Modifier.testTag("grouped-albums-grid"),
+        contentBackground = Modifier.groupBackgrounds(gridState, backgrounds, groupColors),
     ) {
         items(rows, key = { it.key }, contentType = { "album-card" }) { row ->
             when {
@@ -122,25 +127,30 @@ fun GroupedAlbumsScreen(
         }
     }
     managing?.let { group ->
-        GalleryDialog(onDismissRequest = { managing = null }, title = { Text(if (group.id == LABELS_ALBUM_GROUP) stringResource(R.string.qs_labels_title) else group.name) },
-            text = { Column {
-                if (group.id == LABELS_ALBUM_GROUP) {
-                    TextButton(onClick = { managing = null; onLabels() }) { Text(stringResource(R.string.album_group_manage)) }
-                } else {
-                    TextButton(onClick = { managing = null; renaming = group }) { Text(stringResource(R.string.album_group_rename)) }
-                    TextButton(onClick = { managing = null; dissolving = group }) { Text(stringResource(R.string.album_group_dissolve)) }
-                }
-            } }, confirmButton = { TextButton(onClick = { managing = null }) { Text(stringResource(R.string.album_group_cancel)) } })
+        AlbumGroupActionDialog(
+            title = if (group.id == LABELS_ALBUM_GROUP) stringResource(R.string.qs_labels_title) else group.name,
+            icon = if (group.id == LABELS_ALBUM_GROUP) Icons.Outlined.Label else Icons.Outlined.Folder,
+            onDismiss = { managing = null },
+        ) {
+            if (group.id == LABELS_ALBUM_GROUP) {
+                com.pixel.gallery.ui.components.GalleryMenuRow(stringResource(R.string.album_group_manage), Icons.Outlined.Label,
+                    accented = true, onClick = { managing = null; onLabels() })
+            } else {
+                com.pixel.gallery.ui.components.GalleryMenuRow(stringResource(R.string.album_group_rename), Icons.Outlined.Edit,
+                    accented = true, onClick = { managing = null; renaming = group })
+                com.pixel.gallery.ui.components.GalleryMenuRow(stringResource(R.string.album_group_dissolve), Icons.Outlined.FolderOff,
+                    onClick = { managing = null; dissolving = group })
+            }
+        }
     }
     renaming?.let { group -> AlbumGroupNameDialog(grouping.groups, group, { renaming = null }) { name ->
         onRenameGroup(group.id, name); renaming = null
     } }
     dissolving?.let { group ->
-        GalleryDialog(onDismissRequest = { dissolving = null }, title = { Text(stringResource(R.string.album_group_dissolve)) },
-            text = { Text(stringResource(R.string.album_group_dissolve_message)) },
-            confirmButton = { TextButton(onClick = { onDissolveGroup(group.id); dissolving = null }) { Text(stringResource(R.string.album_group_dissolve)) } },
-            dismissButton = { TextButton(onClick = { dissolving = null }) { Text(stringResource(R.string.album_group_cancel)) } })
+        AlbumGroupDissolveDialog(group.name, onDismiss = { dissolving = null },
+            onConfirm = { onDissolveGroup(group.id); dissolving = null })
     }
+
 }
 
 /** Paint only behind the existing grid. Measuring/placing album cards is never affected. */

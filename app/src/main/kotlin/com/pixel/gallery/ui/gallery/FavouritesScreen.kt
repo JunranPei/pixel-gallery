@@ -34,7 +34,7 @@ fun FavouritesScreen(
     gridState: LazyGridState = rememberLazyGridState(),
     viewModel: PhotosViewModel = hiltViewModel()
 ): GalleryPageContent {
-    val gridColumns by viewModel.gridColumns.collectAsState()
+    val gridColumns by viewModel.favouritesGridColumns.collectAsState()
 
     return GalleryPage(
         topBar = {
@@ -86,7 +86,7 @@ fun FavouritesScreen(
                     onSelectionChange = onSelectionChange,
                     onToggleSelection = onToggleSelection,
                     columns = gridColumns,
-                    onColumnsChange = { viewModel.setGridColumns(it) },
+                    onColumnsChange = { viewModel.setPageGridColumns("favourites", it) },
                     state = gridState
                 )
             }

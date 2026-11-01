@@ -1,5 +1,8 @@
 package com.pixel.gallery.ui.home
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -744,6 +747,9 @@ fun AlbumCoverCard(
     titleMaxLines: Int = Int.MAX_VALUE,
     coverContent: (@Composable BoxScope.() -> Unit)? = null,
     coverBackground: Color? = null,
+    coverBorder: BorderStroke? = null,
+    coverBadge: (@Composable BoxScope.() -> Unit)? = null,
+    onClickLabel: String? = null,
     captionContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -779,19 +785,13 @@ fun AlbumCoverCard(
         }
     }
 
-    val titleStyle = when (columns) {
-        1 -> EmphasizedTypography.TitleLarge
-        2 -> EmphasizedTypography.TitleLarge
-        3 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-        else -> EmphasizedTypography.LabelLarge
+    val titleStyle = when {
+        columns <= 4 -> EmphasizedTypography.LabelLarge
+        columns == 5 -> EmphasizedTypography.LabelLarge.copy(fontSize = 12.sp, lineHeight = 16.sp)
+        else -> EmphasizedTypography.LabelLarge.copy(fontSize = 11.sp, lineHeight = 14.sp)
     }
-
-    val subtitleStyle = when (columns) {
-        1 -> MaterialTheme.typography.bodyMedium
-        2 -> MaterialTheme.typography.bodyMedium
-        3 -> MaterialTheme.typography.bodySmall
-        else -> MaterialTheme.typography.labelSmall
-    }
+    val subtitleStyle = if (columns <= 4) MaterialTheme.typography.labelSmall
+        else MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp)
 
     val spacerHeight = when (columns) {
         1, 2 -> 12.dp
@@ -838,6 +838,7 @@ fun AlbumCoverCard(
             indication = null,
             enabled = enabled,
             onClick = onClick,
+            onClickLabel = onClickLabel,
             onLongClick = onLongClick
         )
     ) {
@@ -855,7 +856,8 @@ fun AlbumCoverCard(
                     color = coverBackground ?: MaterialTheme.colorScheme.surfaceVariant,
                     shape = animatedCoverShape
                 )
-                .clip(animatedCoverShape),
+                .clip(animatedCoverShape)
+                .then(if (coverBorder != null) Modifier.border(coverBorder, animatedCoverShape) else Modifier),
             contentAlignment = Alignment.Center
         ) {
             if (coverContent != null) {
@@ -873,7 +875,7 @@ fun AlbumCoverCard(
                     imageVector = emptyIcon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(if (columns <= 2) 56.dp else 36.dp)
+                    modifier = Modifier.size(when (columns) { 1, 2 -> 56.dp; 3 -> 36.dp; 4 -> 28.dp; else -> 20.dp })
                 )
             }
             if (selectedOverlayAlpha > 0f) {
@@ -920,6 +922,7 @@ fun AlbumCoverCard(
                     )
                 }
             }
+            coverBadge?.invoke(this)
         }
         Spacer(Modifier.height(spacerHeight))
         Column(modifier = Modifier.fillMaxWidth().heightIn(min = captionMinHeight)) {

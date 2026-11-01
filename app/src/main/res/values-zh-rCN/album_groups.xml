@@ -16,4 +16,12 @@
     <string name="album_group_save">保存</string>
     <string name="album_group_cancel">取消</string>
     <string name="album_group_trash">回收站</string>
+    <string name="album_group_search">搜索分组</string>
+    <string name="album_group_selected_count">已选 %1$d 个相册</string>
+    <string name="album_group_no_results">没有匹配的分组</string>
+    <string name="album_group_new_from_query">新建分组“%1$s”</string>
+    <string name="album_group_all">全部分组</string>
+    <string name="album_group_ungrouped">未分组</string>
+    <string name="album_group_joined">已加入</string>
+    <string name="album_group_partial">部分加入</string>
 </resources>

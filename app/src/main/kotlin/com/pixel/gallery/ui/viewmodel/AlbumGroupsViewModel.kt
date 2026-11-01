@@ -20,14 +20,31 @@ class AlbumGroupsViewModel @Inject constructor(private val settings: SettingsRep
             runCatching { settings.updateAlbumGrouping(change) }.onFailure { _error.value = true }
         }
     }
+    private val _isSaving = MutableStateFlow(false)
+    val isSaving = _isSaving.asStateFlow()
+    private fun save(onSaved: () -> Unit, change: (AlbumGrouping) -> AlbumGrouping) {
+        if (_isSaving.value) return
+        _isSaving.value = true
+        _error.value = false
+        viewModelScope.launch {
+            try {
+                settings.updateAlbumGrouping(change)
+                onSaved()
+            } catch (_: Exception) {
+                _error.value = true
+            } finally {
+                _isSaving.value = false
+            }
+        }
+    }
     fun clearError() { _error.value = false }
     fun toggle(id: String) = update { it.copy(collapsedIds = if (id in it.collapsedIds) it.collapsedIds - id else it.collapsedIds + id) }
-    fun assign(paths: Set<String>, id: String?) = update { it.assign(paths, id) }
-    fun create(name: String, paths: Set<String>) = update { state ->
+    fun assign(paths: Set<String>, id: String?, onSaved: () -> Unit = {}) = save(onSaved) { it.assign(paths, id) }
+    fun create(name: String, paths: Set<String>, onSaved: () -> Unit = {}) = save(onSaved) { state ->
         val cleaned = name.trim()
         require(cleaned.isNotEmpty() && cleaned.length <= 60 && state.groups.none { it.name.equals(cleaned, true) })
         val id = UUID.randomUUID().toString()
-        state.copy(groups = state.groups + AlbumGroup(id, cleaned)).assign(paths, id)
+        state.copy(groups = state.groups + AlbumGroup(id, cleaned, colorIndex = state.nextColorIndex())).assign(paths, id)
     }
     fun rename(id: String, name: String) = update { state ->
         val cleaned = name.trim()

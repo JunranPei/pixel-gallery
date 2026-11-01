@@ -65,16 +65,16 @@ fun SelectionGrid(
     cornerRadius: androidx.compose.ui.unit.Dp = ExpressiveShapes.AlbumCornerRadius,
     content: LazyGridScope.() -> Unit,
 ) {
-    Box(modifier.fillMaxWidth()) {
+    Box(modifier.fillMaxWidth().pinchToZoomColumns(
+        currentColumns = columns.coerceIn(2, 6),
+        onColumnsChange = onColumnsChange,
+        minColumns = 2,
+        maxColumns = 6,
+    )) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns.coerceIn(2, 6)),
             state = state,
-            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(cornerRadius)).pinchToZoomColumns(
-                currentColumns = columns.coerceIn(2, 6),
-                onColumnsChange = onColumnsChange,
-                minColumns = 2,
-                maxColumns = 6,
-            ),
+            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(cornerRadius)),
             contentPadding = PaddingValues(top = 4.dp, bottom = bottomPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

@@ -114,7 +114,8 @@ fun PhotoScreen(
     isHiddenAlbum: Boolean = false,
 ): GalleryPageContent {
     val browsingIndex by (if (isHiddenAlbum) viewModel.hiddenBrowsingIndex else viewModel.browsingIndex).collectAsState()
-    val gridColumns by viewModel.gridColumns.collectAsState()
+    val columnsPage = "${if (isHiddenAlbum) "hidden-album" else "album"}:$albumName"
+    val gridColumns by remember(columnsPage, viewModel) { viewModel.pageGridColumns(columnsPage) }.collectAsState(initial = 3)
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
     var searchMode by rememberSaveable(albumName) { mutableStateOf(false) }
@@ -149,7 +150,11 @@ fun PhotoScreen(
     } else if (albumResult.mediaType == mediaType && albumResult.query == normalizedSearchQuery) {
         albumResult.media
     } else MediaBrowseResult()
-    val displayedAlbumItems = visibleMedia.gridItems
+    val displayedAlbumItems by key(albumName, visibleMedia.photos, gridColumns >= 6, photoSortOrder) {
+        produceState<List<GridItem>>(emptyList()) {
+            value = withContext(Dispatchers.Default) { viewModel.groupMedia(visibleMedia.photos, gridColumns, photoSortOrder) }
+        }
+    }
     val displayedAlbumPhotos = visibleMedia.photos
     LaunchedEffect(albumName, displayedAlbumPhotos) {
         onAlbumPhotosChanged(displayedAlbumPhotos)
@@ -285,7 +290,7 @@ fun PhotoScreen(
                 bottomPadding = if (quickSort != null) WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
                 items = displayedAlbumItems,
                 gridContextKey = Triple(normalizedSearchQuery, mediaType, photoSortOrder),
-                positionLabels = visibleMedia.positionLabels,
+
                 onNavigateToViewer = { id ->
                     // Publish this exact displayed snapshot before the parent opens its viewer.
                     onAlbumPhotosChanged(displayedAlbumPhotos)
@@ -296,7 +301,7 @@ fun PhotoScreen(
                 onSelectionChange = onSelectionChange,
                 onToggleSelection = onToggleSelection,
                 columns = gridColumns,
-                onColumnsChange = { viewModel.setGridColumns(it) },
+                onColumnsChange = { viewModel.setPageGridColumns(columnsPage, it) },
                 state = gridState,
                 emptyMessage = if (normalizedSearchQuery.isNotEmpty()) {
                     stringResource(R.string.album_no_matching_files)

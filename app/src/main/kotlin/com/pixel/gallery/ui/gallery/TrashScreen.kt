@@ -37,7 +37,7 @@ fun TrashScreen(
     gridState: LazyGridState = rememberLazyGridState(),
     viewModel: PhotosViewModel = hiltViewModel()
 ): GalleryPageContent {
-    val gridColumns by viewModel.gridColumns.collectAsState()
+    val gridColumns by viewModel.trashGridColumns.collectAsState()
 
     return GalleryPage(
         topBar = {
@@ -89,7 +89,7 @@ fun TrashScreen(
                     onSelectionChange = onSelectionChange,
                     onToggleSelection = onToggleSelection,
                     columns = gridColumns,
-                    onColumnsChange = { viewModel.setGridColumns(it) },
+                    onColumnsChange = { viewModel.setPageGridColumns("trash", it) },
                     state = gridState
                 )
             }

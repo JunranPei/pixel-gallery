@@ -1,5 +1,9 @@
 package com.pixel.gallery.ui.home
 
+import androidx.compose.foundation.overscroll
+import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.foundation.withoutVisualEffect
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -40,14 +44,21 @@ fun AlbumGrid(
     horizontalArrangement: Arrangement.Horizontal = Arrangement.spacedBy(16.dp),
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(16.dp),
     emptyMessage: String? = null,
+    contentBackground: Modifier = Modifier,
     content: LazyGridScope.() -> Unit,
 ) {
     val gridColumns = columns.coerceIn(2, 6)
     val layoutDirection = LocalLayoutDirection.current
+    val overscroll = rememberOverscrollEffect()
+    val scrollEvents = remember(overscroll) { overscroll?.withoutVisualEffect() }
     Box(modifier.fillMaxSize()) {
+        // The grid and its decoration share one visual overscroll transform.
+        // Only the lazy grid supplies gesture events; its own visual effect is detached.
+        Box(Modifier.fillMaxSize().overscroll(overscroll).then(contentBackground)) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(gridColumns),
             state = state,
+            overscrollEffect = scrollEvents,
             modifier = Modifier
                 .fillMaxSize()
                 .pinchToZoomColumns(
@@ -66,6 +77,7 @@ fun AlbumGrid(
             verticalArrangement = verticalArrangement,
             content = content,
         )
+        }
 
         if (emptyMessage != null) {
             Text(

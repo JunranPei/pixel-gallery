@@ -1,5 +1,6 @@
 package com.pixel.gallery.ui.utils
 
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -206,62 +207,55 @@ fun Modifier.pinchToZoomColumns(
     maxColumns: Int = 6,
     isEnabled: () -> Boolean = { true },
 ): Modifier = composed {
-    var zoomAccumulator by remember { mutableFloatStateOf(1f) }
-    val currentIsEnabled by rememberUpdatedState(isEnabled)
-    
-    LaunchedEffect(currentColumns) {
-        zoomAccumulator = 1f
-    }
+    val columnsNow by rememberUpdatedState(currentColumns)
+    val onChangeNow by rememberUpdatedState(onColumnsChange)
+    val enabledNow by rememberUpdatedState(isEnabled)
 
-    this.pointerInput(currentColumns) {
-        awaitPointerEventScope {
-            while (true) {
-                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
-                val changes = event.changes.filter { it.pressed }
-
-                if (!currentIsEnabled()) {
-                    zoomAccumulator = 1f
+    // Keep the same recognizer alive as the grid reflows. Restarting pointerInput on
+    // each column change loses the active two-finger gesture partway through a pinch.
+    this.pointerInput(minColumns, maxColumns) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var requestedColumns = columnsNow.coerceIn(minColumns, maxColumns)
+            var accumulated = 1f
+            var multiTouch = false
+            do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val fingers = event.changes.filter { it.pressed }
+                if (!enabledNow()) {
+                    accumulated = 1f
                     continue
                 }
-                
-                if (changes.size >= 2) {
-                    val change1 = changes[0]
-                    val change2 = changes[1]
-                    
-                    val prevDistance = (change1.previousPosition - change2.previousPosition).getDistance()
-                    val currDistance = (change1.position - change2.position).getDistance()
-                    
-                    if (prevDistance > 0) {
-                        val zoom = currDistance / prevDistance
-                        
-                        // Sensitivity threshold to trigger consumption
-                        // If it's a pinch, we consume it to block scrolling/paging
-                        if (kotlin.math.abs(1f - zoom) > 0.001f) {
-                            changes.forEach { it.consume() }
-                            zoomAccumulator *= zoom
-                            
-                            if (zoomAccumulator > 1.35f) {
-                                if (currentColumns > minColumns) {
-                                    onColumnsChange(currentColumns - 1)
-                                    zoomAccumulator = 1f
-                                } else {
-                                    zoomAccumulator = 1.15f
-                                }
-                            } else if (zoomAccumulator < 0.65f) {
-                                if (currentColumns < maxColumns) {
-                                    onColumnsChange(currentColumns + 1)
-                                    zoomAccumulator = 1f
-                                } else {
-                                    zoomAccumulator = 0.85f
-                                }
+                if (fingers.size >= 2) {
+                    multiTouch = true
+                    event.changes.forEach { it.consume() }
+                    val first = fingers[0]
+                    val second = fingers[1]
+                    if (first.previousPressed && second.previousPressed) {
+                        val previous = (first.previousPosition - second.previousPosition).getDistance()
+                        val distance = (first.position - second.position).getDistance()
+                        if (previous > 0f && distance > 0f) {
+                            accumulated *= distance / previous
+                            while (accumulated >= 1.25f && requestedColumns > minColumns) {
+                                requestedColumns--
+                                accumulated /= 1.25f
+                                onChangeNow(requestedColumns)
                             }
+                            while (accumulated <= 0.8f && requestedColumns < maxColumns) {
+                                requestedColumns++
+                                accumulated /= 0.8f
+                                onChangeNow(requestedColumns)
+                            }
+                            if ((requestedColumns == minColumns && accumulated > 1f) ||
+                                (requestedColumns == maxColumns && accumulated < 1f)) accumulated = 1f
                         }
                     }
                 } else {
-                    // Reset if less than 2 fingers
-                    zoomAccumulator = 1f
+                    accumulated = 1f
+                    // Releasing the second finger must never click the album underneath.
+                    if (multiTouch) event.changes.forEach { it.consume() }
                 }
-            }
+            } while (event.changes.any { it.pressed })
         }
     }
 }

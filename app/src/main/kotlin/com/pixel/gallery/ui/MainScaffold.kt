@@ -333,6 +333,8 @@ private fun MainScaffoldContent(
     val albumGroupsViewModel: com.pixel.gallery.ui.viewmodel.AlbumGroupsViewModel = hiltViewModel()
     val albumGrouping by albumGroupsViewModel.grouping.collectAsState()
     val albumGroupError by albumGroupsViewModel.error.collectAsState()
+    val albumGroupSaving by albumGroupsViewModel.isSaving.collectAsState()
+    val albumGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("groups:picker") }.collectAsState(initial = 3)
     var showAlbumGroupPicker by remember { mutableStateOf(false) }
     val labelsViewModel: LabelsViewModel = hiltViewModel()
     val quickSortViewModel: QuickSortViewModel = hiltViewModel()
@@ -461,6 +463,9 @@ private fun MainScaffoldContent(
     val groupedVault by photosViewModel.groupedVaultEntries.collectAsState()
     val albums by photosViewModel.albums.collectAsState()
     val gridColumns by photosViewModel.gridColumns.collectAsState()
+    val albumGridColumns by photosViewModel.albumGridColumns.collectAsState()
+    val labelsGridColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("labels") }.collectAsState(initial = 3)
+    val hiddenAlbumsColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("hidden-albums") }.collectAsState(initial = 3)
     val externalMedia by photosViewModel.externalMedia.collectAsState()
 
     val photoSortOrder by photosViewModel.photoSortOrder.collectAsState()
@@ -861,7 +866,8 @@ private fun MainScaffoldContent(
             homeHeaderTransition = HomeHeaderTransitionState()
         } else if (currentScreen == Screen.Home && navigationExpanded) {
             navigationReveal.settle(0)
-        } else {
+        } else if (navigationStack.size > 1) {
+            // A back callback can still be queued while the previous route is disappearing.
             if (currentScreen == Screen.LockedFolder || currentScreen == Screen.HiddenAlbums) navigationReveal.settle(0)
             navigateToStack(navigationStack.dropLast(1))
         }
@@ -1158,8 +1164,8 @@ private fun MainScaffoldContent(
                                 selectedPaths = selectedAlbumPaths,
                                 selectionMode = albumSelectionMode,
                                 onToggleSelection = toggleAlbumPath,
-                                columns = gridColumns,
-                                onColumnsChange = { photosViewModel.setGridColumns(it) },
+                                columns = albumGridColumns,
+                                onColumnsChange = { photosViewModel.setAlbumGridColumns(it) },
                                 search = normalizedAlbumSearchQuery.isNotEmpty(),
                                 emptyMessage = if (normalizedAlbumSearchQuery.isNotEmpty()) {
                                     "No matching albums"
@@ -1190,8 +1196,8 @@ private fun MainScaffoldContent(
                 Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigateToStack(navigationStack + Screen.ExcludedFolders) })
                 Screen.Labels -> LabelsScreen(
-                    columns = gridColumns,
-                    onColumnsChange = photosViewModel::setGridColumns,
+                    columns = labelsGridColumns,
+                    onColumnsChange = { photosViewModel.setPageGridColumns("labels", it) },
                     labels = labelSummaries,
                     onBack = navigateBack,
                     onLabelClick = { navigateToStack(navigationStack + Screen.Label(it)) },
@@ -1207,6 +1213,9 @@ private fun MainScaffoldContent(
                 )
                 is Screen.Label -> {
                     val labelId = screen.labelId
+                    val labelColumns by remember(labelId, photosViewModel) {
+                        photosViewModel.pageGridColumns("label:$labelId")
+                    }.collectAsState(initial = 3)
                     val labelState = remember(labelId) { albumGridStates.getOrPut("label:$labelId") { LazyGridState() } }
                     val routeLabelPhotos = remember(labelId, allPhotos, labelMemberships, vault) {
                         val ids = labelMemberships.filter { it.labelId == labelId }.mapTo(hashSetOf()) { it.contentId }
@@ -1215,20 +1224,20 @@ private fun MainScaffoldContent(
                     }
                     // null means grouping is pending; an empty result means the label is empty.
                     // Reset for each input so another label's result cannot appear during loading.
-                    val routeGroupedLabelPhotos by key(labelId, routeLabelPhotos, gridColumns, photoSortOrder) {
+                    val routeGroupedLabelPhotos by key(labelId, routeLabelPhotos, labelColumns, photoSortOrder) {
                         produceState<List<GridItem>?>(null) {
                             value = withContext(Dispatchers.Default) {
-                                photosViewModel.groupMedia(routeLabelPhotos, gridColumns, photoSortOrder)
+                                photosViewModel.groupMedia(routeLabelPhotos, labelColumns, photoSortOrder)
                             }
                         }
                     }
                     LabelPhotosScreen(
                         label = labelEntries.find { it.id == labelId }, items = routeGroupedLabelPhotos,
-                        selectedIds = selectedIds, selectionMode = selectionMode, columns = gridColumns, gridState = labelState,
+                        selectedIds = selectedIds, selectionMode = selectionMode, columns = labelColumns, gridState = labelState,
                         onBack = navigateBack,
                         onNavigateToViewer = { id -> navigateToStack(navigationStack + Screen.Viewer(id, Screen.ViewerSource.Label, labelId = labelId)) },
                         onSelectionChange = updateSelection, onToggleSelection = toggleSelection,
-                        onColumnsChange = photosViewModel::setGridColumns,
+                        onColumnsChange = { photosViewModel.setPageGridColumns("label:$labelId", it) },
                         quickSort = quickSortConfig, onToggleQuickSort = toggleQuickSort,
                         onSortPhotos = { showPhotoSortDialog = true },
                         onRemoveFromLabel = { ids ->
@@ -1297,8 +1306,8 @@ private fun MainScaffoldContent(
                         MediaTypeFilter.IMAGES -> stringResource(R.string.media_type_no_image_albums)
                         MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_video_albums)
                     },
-                    columns = gridColumns,
-                    onColumnsChange = photosViewModel::setGridColumns,
+                    columns = hiddenAlbumsColumns,
+                    onColumnsChange = { photosViewModel.setPageGridColumns("hidden-albums", it) },
                     gridState = hiddenAlbumsGridState,
                     bottomPadding = contentBottomPadding,
                     selectedPaths = selectedAlbumPaths,
@@ -1384,23 +1393,7 @@ private fun MainScaffoldContent(
         }
     }
 
-    if (showAlbumGroupPicker) {
-        com.pixel.gallery.ui.home.AlbumGroupPickerDialog(
-            groups = albumGrouping.groups,
-            onDismiss = { showAlbumGroupPicker = false },
-            onAssign = { id ->
-                albumGroupsViewModel.assign(selectedAlbumPaths, id)
-                showAlbumGroupPicker = false
-                selectedAlbumPaths = emptySet()
-            },
-            onCreate = { name ->
-                albumGroupsViewModel.create(name, selectedAlbumPaths)
-                showAlbumGroupPicker = false
-                selectedAlbumPaths = emptySet()
-            },
-        )
-    }
-    if (albumGroupError) {
+    if (albumGroupError && !showAlbumGroupPicker) {
         com.pixel.gallery.ui.components.GalleryDialog(
             onDismissRequest = albumGroupsViewModel::clearError,
             title = { Text(stringResource(R.string.album_group_error)) },
@@ -2054,6 +2047,25 @@ private fun MainScaffoldContent(
             }
             }
 
+    if (showAlbumGroupPicker) {
+        com.pixel.gallery.ui.home.AlbumGroupPickerSheet(
+            groups = albumGrouping.groups,
+            albums = albums,
+            selectedPaths = selectedAlbumPaths,
+            columns = albumGroupPickerColumns,
+            onColumnsChange = { photosViewModel.setPageGridColumns("groups:picker", it) },
+            isSaving = albumGroupSaving,
+            errorMessage = if (albumGroupError) stringResource(R.string.album_group_error) else null,
+            onPanelHeightChange = { selectionPanelHeight = it },
+            onDismiss = {
+                if (!albumGroupSaving) { showAlbumGroupPicker = false; selectionPanelHeight = 0.dp; albumGroupsViewModel.clearError() }
+            },
+            onAssign = { id -> albumGroupsViewModel.assign(selectedAlbumPaths.toSet(), id) },
+            onCreate = { name, onSaved ->
+                albumGroupsViewModel.create(name, selectedAlbumPaths.toSet(), onSaved)
+            },
+        )
+    }
     if (showLabelEditor) {
         val labelBatchIds = if (labelEditorFromGrid) selectedIds else editingLabelIds
         LabelEditorSheet(

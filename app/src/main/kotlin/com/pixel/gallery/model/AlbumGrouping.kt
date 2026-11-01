@@ -2,11 +2,24 @@ package com.pixel.gallery.model
 
 const val LABELS_ALBUM_GROUP = "system:labels"
 
-data class AlbumGroup(val id: String, val name: String, val paths: List<String> = emptyList())
+data class AlbumGroup(
+    val id: String, val name: String, val paths: List<String> = emptyList(),
+    val colorIndex: Int? = null,
+) {
+    // Legacy groups keep a stable ID-based color without rewriting their data.
+    val resolvedColorIndex: Int get() = colorIndex?.takeIf { it in 0..3 } ?: Math.floorMod(id.hashCode(), 4)
+}
 data class AlbumGrouping(
     val groups: List<AlbumGroup> = emptyList(),
     val collapsedIds: Set<String> = setOf(LABELS_ALBUM_GROUP),
 )
+
+/** Allocate once; avoid the previous group and balance the four quiet hues. */
+fun AlbumGrouping.nextColorIndex(): Int {
+    val previous = groups.lastOrNull()?.resolvedColorIndex ?: 2 // labels use grey violet
+    return (0..3).filter { it != previous }
+        .minBy { candidate -> groups.count { it.resolvedColorIndex == candidate } }
+}
 
 /** A path belongs to at most one group. Missing/hidden albums retain their stored membership. */
 fun AlbumGrouping.assign(paths: Set<String>, groupId: String?): AlbumGrouping {

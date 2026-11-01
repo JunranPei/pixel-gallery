@@ -16,4 +16,12 @@
     <string name="album_group_save">Save</string>
     <string name="album_group_cancel">Cancel</string>
     <string name="album_group_trash">Recycle Bin</string>
+    <string name="album_group_search">Search groups</string>
+    <string name="album_group_selected_count">Selected albums: %1$d</string>
+    <string name="album_group_no_results">No matching groups</string>
+    <string name="album_group_new_from_query">Create group “%1$s”</string>
+    <string name="album_group_all">All groups</string>
+    <string name="album_group_ungrouped">No group</string>
+    <string name="album_group_joined">Joined</string>
+    <string name="album_group_partial">Partial</string>
 </resources>

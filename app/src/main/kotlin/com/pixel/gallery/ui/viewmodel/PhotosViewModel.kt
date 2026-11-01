@@ -274,6 +274,14 @@ class PhotosViewModel @Inject constructor(
     val albumGridColumns: StateFlow<Int> = settingsRepository.albumGridColumns
         .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
 
+    fun pageGridColumns(page: String, default: Int = 3) = settingsRepository.pageGridColumns(page, default)
+    fun setPageGridColumns(page: String, value: Int) {
+        viewModelScope.launch { settingsRepository.setPageGridColumns(page, value) }
+    }
+    val favouritesGridColumns = pageGridColumns("favourites").stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+    val trashGridColumns = pageGridColumns("trash").stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+    val vaultGridColumns = pageGridColumns("vault").stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+
     val moveSheetColumns: StateFlow<Int> = settingsRepository.moveSheetColumns
         .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
 
@@ -313,7 +321,7 @@ class PhotosViewModel @Inject constructor(
         if (resumed) repository.favourites else emptyFlow()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, gridColumns, photoSortOrder) { media, cols, sort ->
+    val groupedFavourites: StateFlow<List<GridItem>> = combine(favourites, favouritesGridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
     }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
@@ -323,7 +331,7 @@ class PhotosViewModel @Inject constructor(
         if (resumed) repository.trash else emptyFlow()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, gridColumns, trashSortOrder) { media, cols, sort ->
+    val groupedTrashedMedia: StateFlow<List<GridItem>> = combine(trashedMedia, trashGridColumns, trashSortOrder) { media, cols, sort ->
         groupTrashMedia(media, cols, sort)
     }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
@@ -333,7 +341,7 @@ class PhotosViewModel @Inject constructor(
         if (resumed) repository.vaultEntries else emptyFlow()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, gridColumns, photoSortOrder) { media, cols, sort ->
+    val groupedVaultEntries: StateFlow<List<GridItem>> = combine(vaultEntries, vaultGridColumns, photoSortOrder) { media, cols, sort ->
         groupMedia(media, cols, sort)
     }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
