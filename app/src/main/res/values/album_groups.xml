@@ -1,0 +1,19 @@
+<resources>
+    <string name="album_group_add">Add to group</string>
+    <string name="album_group_new">New group</string>
+    <string name="album_group_name">Group name</string>
+    <string name="album_group_name_error">Use a unique name of 1–60 characters.</string>
+    <string name="album_group_remove">Remove from group</string>
+    <string name="album_group_rename">Rename group</string>
+    <string name="album_group_dissolve">Dissolve group</string>
+    <string name="album_group_dissolve_message">Albums will return to the normal grid. Files stay in their current folders.</string>
+    <string name="album_group_count">%1$d albums</string>
+    <string name="album_group_label_count">%1$d labels</string>
+    <string name="album_group_expand">Expand %1$s</string>
+    <string name="album_group_collapse">Collapse %1$s</string>
+    <string name="album_group_manage">Manage labels</string>
+    <string name="album_group_error">Could not save groups. Please try again.</string>
+    <string name="album_group_save">Save</string>
+    <string name="album_group_cancel">Cancel</string>
+    <string name="album_group_trash">Recycle Bin</string>
+</resources>

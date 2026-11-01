@@ -742,6 +742,8 @@ fun AlbumCoverCard(
     emptyIcon: ImageVector = Icons.Outlined.Folder,
     coverShape: androidx.compose.ui.graphics.Shape = ExpressiveShapes.ExtraLargeIncreased,
     titleMaxLines: Int = Int.MAX_VALUE,
+    coverContent: (@Composable BoxScope.() -> Unit)? = null,
+    coverBackground: Color? = null,
     captionContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -850,13 +852,15 @@ fun AlbumCoverCard(
                     shape = animatedCoverShape
                 }
                 .background(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = coverBackground ?: MaterialTheme.colorScheme.surfaceVariant,
                     shape = animatedCoverShape
                 )
                 .clip(animatedCoverShape),
             contentAlignment = Alignment.Center
         ) {
-            if (coverUri != null) {
+            if (coverContent != null) {
+                coverContent()
+            } else if (coverUri != null) {
                 GlideImage(
                     model = model,
                     contentDescription = null,

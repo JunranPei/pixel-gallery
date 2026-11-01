@@ -1,0 +1,19 @@
+<resources>
+    <string name="album_group_add">加入分组</string>
+    <string name="album_group_new">新建分组</string>
+    <string name="album_group_name">分组名称</string>
+    <string name="album_group_name_error">名称须为 1–60 个字符，且不能重复。</string>
+    <string name="album_group_remove">移出分组</string>
+    <string name="album_group_rename">重命名分组</string>
+    <string name="album_group_dissolve">解散分组</string>
+    <string name="album_group_dissolve_message">相册将回到普通网格，文件仍在原来的文件夹中。</string>
+    <string name="album_group_count">%1$d 个相册</string>
+    <string name="album_group_label_count">%1$d 个标签</string>
+    <string name="album_group_expand">展开%1$s</string>
+    <string name="album_group_collapse">收起%1$s</string>
+    <string name="album_group_manage">管理标签</string>
+    <string name="album_group_error">分组保存失败，请重试。</string>
+    <string name="album_group_save">保存</string>
+    <string name="album_group_cancel">取消</string>
+    <string name="album_group_trash">回收站</string>
+</resources>

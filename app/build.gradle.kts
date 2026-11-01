@@ -50,6 +50,7 @@ android {
 
     defaultConfig {
         applicationId = when (viewerTestVariant) {
+            "albumgroups" -> "com.pixel.gallery.albumgroups.test"
             "test" -> "com.pixel.gallery.multitask.test"
             "simplemerge" -> "com.pixel.gallery.simplegallerymerge"
             "trace" -> "com.pixel.gallery.viewertrace"
@@ -64,6 +65,7 @@ android {
             else -> "com.pixel.gallery.multitask"
         }
         manifestPlaceholders["appLabel"] = when (viewerTestVariant) {
+            "albumgroups" -> "Gallery Groups Test"
             "test" -> "Gallery Test"
             "simplemerge" -> "Gallery Test"
             "trace" -> "Pixel Trace"

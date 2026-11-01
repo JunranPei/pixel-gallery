@@ -330,6 +330,10 @@ private fun MainScaffoldContent(
     photosViewModel: PhotosViewModel,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val albumGroupsViewModel: com.pixel.gallery.ui.viewmodel.AlbumGroupsViewModel = hiltViewModel()
+    val albumGrouping by albumGroupsViewModel.grouping.collectAsState()
+    val albumGroupError by albumGroupsViewModel.error.collectAsState()
+    var showAlbumGroupPicker by remember { mutableStateOf(false) }
     val labelsViewModel: LabelsViewModel = hiltViewModel()
     val quickSortViewModel: QuickSortViewModel = hiltViewModel()
     val labelEntries by labelsViewModel.labelEntries.collectAsState()
@@ -1134,26 +1138,29 @@ private fun MainScaffoldContent(
                                     MediaTypeFilter.VIDEOS -> stringResource(R.string.media_type_no_videos)
                                 },
                             )
-                            1 -> AlbumsScreen(
+                            1 -> com.pixel.gallery.ui.home.GroupedAlbumsScreen(
                                 albums = searchedAlbums,
+                                labels = labelSummaries,
+                                grouping = albumGrouping,
+                                onToggleGroup = albumGroupsViewModel::toggle,
+                                onRenameGroup = albumGroupsViewModel::rename,
+                                onDissolveGroup = albumGroupsViewModel::dissolve,
+                                onLabel = { id -> navigateToStack(navigationStack + Screen.Label(id)) },
                                 bottomPadding = contentBottomPadding,
                                 gridState = if (normalizedAlbumSearchQuery.isEmpty()) {
                                     albumsGridState
                                 } else {
                                     albumSearchGridState
                                 },
-                                onNavigateToFavourites = { navigateToStack(navigationStack + Screen.Labels) },
-                                onNavigateToTrash = { navigateToStack(navigationStack + Screen.Trash) },
-                                onNavigateToAlbum = { name -> navigateToStack(navigationStack + Screen.Photo(name, homeMediaType)) },
-                                onExclude = { path -> photosViewModel.addExcludedFolder(path) },
-                                onHide = { path -> photosViewModel.addHiddenFolder(path) },
-                                onRename = photosViewModel::renameAlbum,
+                                onLabels = { navigateToStack(navigationStack + Screen.Labels) },
+                                onTrash = { navigateToStack(navigationStack + Screen.Trash) },
+                                onAlbum = { name -> navigateToStack(navigationStack + Screen.Photo(name, homeMediaType)) },
                                 selectedPaths = selectedAlbumPaths,
                                 selectionMode = albumSelectionMode,
-                                onToggleAlbumSelection = toggleAlbumPath,
+                                onToggleSelection = toggleAlbumPath,
                                 columns = gridColumns,
                                 onColumnsChange = { photosViewModel.setGridColumns(it) },
-                                showHeaderButtons = normalizedAlbumSearchQuery.isEmpty(),
+                                search = normalizedAlbumSearchQuery.isNotEmpty(),
                                 emptyMessage = if (normalizedAlbumSearchQuery.isNotEmpty()) {
                                     "No matching albums"
                                 } else when (homeMediaType) {
@@ -1377,11 +1384,36 @@ private fun MainScaffoldContent(
         }
     }
 
+    if (showAlbumGroupPicker) {
+        com.pixel.gallery.ui.home.AlbumGroupPickerDialog(
+            groups = albumGrouping.groups,
+            onDismiss = { showAlbumGroupPicker = false },
+            onAssign = { id ->
+                albumGroupsViewModel.assign(selectedAlbumPaths, id)
+                showAlbumGroupPicker = false
+                selectedAlbumPaths = emptySet()
+            },
+            onCreate = { name ->
+                albumGroupsViewModel.create(name, selectedAlbumPaths)
+                showAlbumGroupPicker = false
+                selectedAlbumPaths = emptySet()
+            },
+        )
+    }
+    if (albumGroupError) {
+        com.pixel.gallery.ui.components.GalleryDialog(
+            onDismissRequest = albumGroupsViewModel::clearError,
+            title = { Text(stringResource(R.string.album_group_error)) },
+            text = {},
+            confirmButton = { TextButton(onClick = albumGroupsViewModel::clearError) { Text(stringResource(R.string.album_group_cancel)) } },
+        )
+    }
     val selectionHeader: GalleryHeaderSpec? = run {
 
             if (albumSelectionMode) {
                 AlbumSelectionTopBar(
                     count = selectedAlbumPaths.size,
+                    onAddToGroup = if (currentScreen == Screen.Home) ({ showAlbumGroupPicker = true }) else null,
                     onClear = { selectedAlbumPaths = emptySet() },
                     onRename = {
                         val source = if (currentScreen == Screen.HiddenAlbums) hiddenAlbums else searchedAlbums

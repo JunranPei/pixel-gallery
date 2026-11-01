@@ -64,6 +64,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var settingsSelectionSuite = false
     private var albumRegressionSuite = false
     private var albumRenameSuite = false
+    private var albumGroupsSuite = false
     private var albumSelectionSuite = false
     private var labelBackupEdgesSuite = false
     private var labelBackupUiSuite = false
@@ -108,6 +109,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         settingsSelectionSuite = arguments?.getString("suite") == "settings-selection"
         albumRegressionSuite = arguments?.getString("suite") == "album-regressions"
         albumRenameSuite = arguments?.getString("suite") == "album-rename"
+        albumGroupsSuite = arguments?.getString("suite") == "album-groups"
         albumSelectionSuite = arguments?.getString("suite") == "album-selection"
         labelBackupEdgesSuite = arguments?.getString("suite") == "label-backup-edges"
         labelBackupUiSuite = arguments?.getString("suite") == "label-backup-ui"
@@ -136,6 +138,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 videoReturnSuite -> VideoReturnDeviceChecks(this, returnMediaId, returnBackgroundMs).exercise()
                 videoPipSuite -> VideoPipDeviceChecks(this, pipFixed, pipMediaId).exercise()
                 labelMultiSelectionSuite -> LabelMultiSelectionChecks(targetContext).exercise()
+                albumGroupsSuite -> AlbumGroupsChecks(this).exercise()
                 albumSelectionSuite -> AlbumSelectionChecks(this).exercise()
                 albumRenameSuite -> AlbumRenameChecks(targetContext).exercise()
                 viewerCompressionSuite -> ViewerCompressionDeviceChecks(targetContext).exercise()

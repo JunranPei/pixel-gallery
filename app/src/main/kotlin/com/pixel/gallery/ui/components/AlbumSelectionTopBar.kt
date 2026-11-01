@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileCopy
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -40,6 +41,7 @@ fun AlbumSelectionTopBar(
     canFindDuplicates: Boolean = true,
     onFindDuplicates: (() -> Unit)? = null,
     onUnhide: (() -> Unit)? = null,
+    onAddToGroup: (() -> Unit)? = null,
 ): GalleryHeaderSpec {
     var showMenu by remember { mutableStateOf(false) }
     return GalleryHeader(
@@ -77,13 +79,17 @@ fun AlbumSelectionTopBar(
                         Icon(Icons.Outlined.Delete, stringResource(R.string.delete))
                     }
                 }
-                if (onFindDuplicates != null) {
+                if (onFindDuplicates != null || onAddToGroup != null) {
                     androidx.compose.foundation.layout.Box(Modifier.size(48.dp)) {
                         GalleryOverflowButton(
                             expanded = showMenu,
                             onExpandedChange = { showMenu = it },
                         ) {
-                            GalleryMenuRow(
+                            onAddToGroup?.let { action ->
+                                GalleryMenuRow(stringResource(R.string.album_group_add), Icons.Outlined.Folder,
+                                    enabled = enabled, onClick = { showMenu = false; action() })
+                            }
+                            if (onFindDuplicates != null) GalleryMenuRow(
                                 stringResource(R.string.duplicate_find_selected_albums),
                                 Icons.Outlined.FileCopy,
                                 accented = true,

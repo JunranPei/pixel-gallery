@@ -20,6 +20,7 @@ import com.pixel.gallery.model.Handedness
 import com.pixel.gallery.model.QuickSortPreferences
 import com.pixel.gallery.model.TransferDestination
 import com.pixel.gallery.model.remapAlbumPath
+import com.pixel.gallery.model.remap
 import com.google.gson.Gson
 
 import androidx.datastore.preferences.SharedPreferencesMigration
@@ -61,6 +62,15 @@ class SettingsRepository @Inject constructor(
     private val RECENT_LABEL_IDS = stringPreferencesKey("recent_label_ids")
     private val GLIDE_THREAD_COUNT = intPreferencesKey("glide_thread_count")
     private val GLIDE_CACHE_SIZE = intPreferencesKey("glide_cache_size")
+    private val ALBUM_GROUPING = stringPreferencesKey("album_grouping")
+    private fun decodeGrouping(json: String?): com.pixel.gallery.model.AlbumGrouping = runCatching {
+        Gson().fromJson(json, com.pixel.gallery.model.AlbumGrouping::class.java)
+            ?: com.pixel.gallery.model.AlbumGrouping()
+    }.getOrDefault(com.pixel.gallery.model.AlbumGrouping())
+    val albumGrouping = context.dataStore.data.map { decodeGrouping(it[ALBUM_GROUPING]) }
+    suspend fun updateAlbumGrouping(change: (com.pixel.gallery.model.AlbumGrouping) -> com.pixel.gallery.model.AlbumGrouping) {
+        context.dataStore.edit { it[ALBUM_GROUPING] = Gson().toJson(change(decodeGrouping(it[ALBUM_GROUPING]))) }
+    }
     private val QUICK_SORT_TARGETS = stringPreferencesKey("quick_sort_targets")
     private val QUICK_SORT_DOCK_TOP = booleanPreferencesKey("quick_sort_dock_top")
     private val QUICK_SORT_ALBUM_ROWS = intPreferencesKey("quick_sort_album_rows")
@@ -95,6 +105,7 @@ class SettingsRepository @Inject constructor(
         renameProtectionPaths: Set<String> = emptySet(),
     ) {
         context.dataStore.edit { preferences ->
+            preferences[ALBUM_GROUPING] = Gson().toJson(decodeGrouping(preferences[ALBUM_GROUPING]).remap(source, target))
             listOf(EXCLUDED_FOLDERS, HIDDEN_FOLDERS).forEach { key ->
                 preferences[key]?.let { paths ->
                     preferences[key] = paths.map { remapAlbumPath(it, source, target) }.toSet()
