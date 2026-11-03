@@ -8,6 +8,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import com.pixel.gallery.ui.utils.albumGridDragSelect
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -65,6 +68,15 @@ class AlbumCollectionGrid private constructor() {
             onColumnsChange = onColumnsChange,
             state = state,
             modifier = modifier,
+            gridGestures = Modifier.albumGridDragSelect(
+                state = state,
+                keys = entries.filter { it.selectable }.map { it.key },
+                selected = selectedKeys,
+                onToggle = onToggleSelection,
+                leftPaddingPx = with(LocalDensity.current) { contentPadding.calculateLeftPadding(LocalLayoutDirection.current).toPx() },
+                columns = gridColumns,
+                enabled = enabled,
+            ),
             bottomPadding = bottomPadding,
             contentPadding = contentPadding,
             horizontalArrangement = horizontalArrangement,
@@ -90,7 +102,7 @@ class AlbumCollectionGrid private constructor() {
                         if (!selectionMode) onOpen(entry.key)
                         else if (entry.selectable) onToggleSelection(entry.key)
                     },
-                    onLongClick = if (entry.selectable) ({ onToggleSelection(entry.key) }) else null,
+                    onLongClick = null,
                 )
             }
             afterItems()

@@ -64,7 +64,11 @@ class SettingsRepository @Inject constructor(
     private val GLIDE_CACHE_SIZE = intPreferencesKey("glide_cache_size")
     private val ALBUM_GROUPING = stringPreferencesKey("album_grouping")
     private fun decodeGrouping(json: String?): com.pixel.gallery.model.AlbumGrouping = runCatching {
-        Gson().fromJson(json, com.pixel.gallery.model.AlbumGrouping::class.java)
+        Gson().fromJson(json, com.pixel.gallery.model.AlbumGrouping::class.java)?.let { state ->
+            state.copy(groups = state.groups.map { group -> group.copy(labelIds = group.labelIds?.filterNot {
+                it == com.pixel.gallery.data.local.entity.FAVOURITES_LABEL_ID
+            }) })
+        }
             ?: com.pixel.gallery.model.AlbumGrouping()
     }.getOrDefault(com.pixel.gallery.model.AlbumGrouping())
     val albumGrouping = context.dataStore.data.map { decodeGrouping(it[ALBUM_GROUPING]) }

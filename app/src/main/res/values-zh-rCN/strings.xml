@@ -170,4 +170,5 @@
         <item>莓紫</item>
         <item>胭脂</item>
     </string-array>
+    <string name="label_group_selected_count">已选标签相册：%1$d</string>
 </resources>

@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.*
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -38,6 +39,9 @@ fun TrashScreen(
     viewModel: PhotosViewModel = hiltViewModel()
 ): GalleryPageContent {
     val gridColumns by viewModel.trashGridColumns.collectAsState()
+    LaunchedEffect(items.isEmpty()) {
+        if (items.isEmpty()) gridState.scrollToItem(0)
+    }
 
     return GalleryPage(
         topBar = {

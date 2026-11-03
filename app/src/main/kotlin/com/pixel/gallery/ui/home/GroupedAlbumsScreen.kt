@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
+import com.pixel.gallery.ui.utils.albumGridDragSelect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -41,7 +43,7 @@ import com.pixel.gallery.model.*
 import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 
-@OptIn(ExperimentalGlideComposeApi::class)
+@OptIn(ExperimentalGlideComposeApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun GroupedAlbumsScreen(
     albums: List<Album>, labels: List<LabelSummary>, grouping: AlbumGrouping,
@@ -71,6 +73,16 @@ fun GroupedAlbumsScreen(
         columns = gridColumns, onColumnsChange = onColumnsChange, state = gridState,
         bottomPadding = bottomPadding, emptyMessage = if (albums.isEmpty()) emptyMessage else null,
         modifier = Modifier.testTag("grouped-albums-grid"),
+        gridGestures = Modifier.albumGridDragSelect(
+            state = gridState,
+            keys = rows.mapNotNull { it.album?.path },
+            selected = selectedPaths,
+            onToggle = onToggleSelection,
+            leftPaddingPx = with(LocalDensity.current) { 16.dp.toPx() },
+            columns = gridColumns,
+            enabled = coverPickingGroupId == null,
+            keyForGridKey = { key -> rows.firstOrNull { it.key == key }?.album?.path },
+        ),
         contentBackground = Modifier.groupBackgrounds(gridState, backgrounds, groupColors,
             selectedCollectionKey?.takeIf { it.startsWith("group:") }?.removePrefix("group:"), scheme.primary)
             .pointerInput(rows, selectedCollectionKey, coverPickingGroupId) {
@@ -100,21 +112,48 @@ fun GroupedAlbumsScreen(
                 )
             },
     ) {
-        items(rows, key = { it.key }, contentType = { "album-card" }) { row ->
+        items(rows, key = { it.key }, contentType = { if (it.favourite != null) "favourites-entry" else "album-card" }) { row ->
             val rowEnabled = coverPickingGroupId == null ||
                 row.group?.id == coverPickingGroupId ||
                 (row.album != null && grouping.groups.any { it.id == coverPickingGroupId && row.album.path in it.paths }) ||
-                (row.label != null && coverPickingGroupId == LABELS_ALBUM_GROUP)
+                (row.label != null && grouping.labelGroupId(row.label.label.id) == coverPickingGroupId)
             // The active group remains an exit target, but only member albums stay visually emphasized.
             val rowDimmed = !rowEnabled || (coverPickingGroupId != null && row.group != null)
             Box(Modifier.animateItem(placementSpec = tween(350)).alpha(if (rowDimmed) 0.3f else 1f)) {
             when {
+                row.favourite != null -> {
+                    AlbumCoverCard(
+                        title = stringResource(R.string.favourites),
+                        subtitle = stringResource(R.string.labels_count, row.favourite.count),
+                        coverUri = null, coverModifiedMillis = 0L, columns = gridColumns,
+                        onClick = { onLabel(row.favourite.label.id) },
+                        enabled = !selectionMode && coverPickingGroupId == null,
+                        coverBackground = Color.Transparent,
+                        coverShape = androidx.compose.ui.graphics.RectangleShape,
+                        coverContent = {
+                            // Official Material flower-like cookie silhouette, within one grid cell.
+                            val badgeShape = MaterialShapes.Cookie9Sided.toShape()
+                            Box(
+                                modifier = Modifier.fillMaxSize(0.88f)
+                                    .background(scheme.secondaryContainer, badgeShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Favorite,
+                                    contentDescription = null,
+                                    tint = scheme.onSecondaryContainer,
+                                    modifier = Modifier.fillMaxSize(0.42f),
+                                )
+                            }
+                        },
+                    )
+                }
                 row.group != null -> {
                     val group = row.group
-                    val isLabels = group.id == LABELS_ALBUM_GROUP
-                    val title = if (isLabels) stringResource(R.string.qs_labels_title) else group.name
+                    val isLabels = group.isLabelGroup
+                    val title = if (group.id == LABELS_ALBUM_GROUP) stringResource(R.string.qs_labels_title) else group.name
                     val open = group.id !in grouping.collapsedIds
-                    val members = if (isLabels) labels.map { it.cover?.uri } else albums.filter { it.path in group.paths }.map { it.coverUri }
+                    val members = if (isLabels) labels.filter { grouping.labelGroupId(it.label.id) == group.id }.map { it.cover?.uri } else albums.filter { it.path in group.paths }.map { it.coverUri }
                     AlbumCoverCard(
                         title = title,
                         subtitle = stringResource(if (isLabels) R.string.album_group_label_count else R.string.album_group_count, members.size),
@@ -128,7 +167,7 @@ fun GroupedAlbumsScreen(
                         coverBackground = Color.Transparent,
                         coverShape = androidx.compose.ui.graphics.RectangleShape,
                         coverContent = {
-                            GroupIllustration(group.id, Modifier.fillMaxSize().padding(8.dp))
+                            GroupIllustration(group.id, Modifier.fillMaxSize().padding(8.dp), labelGroup = isLabels)
                         },
                     )
                 }
@@ -138,7 +177,7 @@ fun GroupedAlbumsScreen(
                         onClick = { if (selectionMode) onToggleSelection(album.path) else onAlbum(album.path) },
                         coverInset = if (row.backgroundGroup != null) 6.dp else 0.dp,
                         columns = gridColumns, enabled = rowEnabled, selected = album.path in selectedPaths, selectionMode = selectionMode,
-                        onLongClick = { onToggleSelection(album.path) })
+                        onLongClick = null)
                 }
                 row.label != null -> {
                     val summary = row.label

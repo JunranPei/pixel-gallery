@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Label
 import com.pixel.gallery.R
 
 internal val groupArt = listOf(
@@ -66,6 +67,61 @@ internal val groupArt = listOf(
     R.drawable.group_art_49,
     R.drawable.group_art_50
 )
+internal val labelGroupArt = listOf(
+    R.drawable.label_group_art_01,
+    R.drawable.label_group_art_02,
+    R.drawable.label_group_art_03,
+    R.drawable.label_group_art_04,
+    R.drawable.label_group_art_05,
+    R.drawable.label_group_art_06,
+    R.drawable.label_group_art_07,
+    R.drawable.label_group_art_08,
+    R.drawable.label_group_art_09,
+    R.drawable.label_group_art_10,
+    R.drawable.label_group_art_11,
+    R.drawable.label_group_art_12,
+    R.drawable.label_group_art_13,
+    R.drawable.label_group_art_14,
+    R.drawable.label_group_art_15,
+    R.drawable.label_group_art_16,
+    R.drawable.label_group_art_17,
+    R.drawable.label_group_art_18,
+    R.drawable.label_group_art_19,
+    R.drawable.label_group_art_20,
+    R.drawable.label_group_art_21,
+    R.drawable.label_group_art_22,
+    R.drawable.label_group_art_23,
+    R.drawable.label_group_art_24,
+    R.drawable.label_group_art_25,
+    R.drawable.label_group_art_26,
+    R.drawable.label_group_art_27,
+    R.drawable.label_group_art_28,
+    R.drawable.label_group_art_29,
+    R.drawable.label_group_art_30,
+    R.drawable.label_group_art_31,
+    R.drawable.label_group_art_32,
+    R.drawable.label_group_art_33,
+    R.drawable.label_group_art_34,
+    R.drawable.label_group_art_35,
+    R.drawable.label_group_art_36,
+    R.drawable.label_group_art_37,
+    R.drawable.label_group_art_38,
+    R.drawable.label_group_art_39,
+    R.drawable.label_group_art_40,
+    R.drawable.label_group_art_41,
+    R.drawable.label_group_art_42,
+    R.drawable.label_group_art_43,
+    R.drawable.label_group_art_44,
+    R.drawable.label_group_art_45,
+    R.drawable.label_group_art_46,
+    R.drawable.label_group_art_47,
+    R.drawable.label_group_art_48,
+    R.drawable.label_group_art_49,
+    R.drawable.label_group_art_50
+)
+internal fun groupIllustrationResource(choice: Int, labelGroup: Boolean): Int =
+    (if (labelGroup) labelGroupArt else groupArt)[choice]
+
 @Composable
 private fun illustrationChoice(id: String): Pair<Int, (Int) -> Unit> {
     val context = LocalContext.current
@@ -81,9 +137,10 @@ private fun illustrationChoice(id: String): Pair<Int, (Int) -> Unit> {
     return choice to { value -> prefs.edit().putInt(id, value).apply(); choice = value }
 }
 @Composable
-fun GroupIllustration(id: String, modifier: Modifier = Modifier) {
+fun GroupIllustration(id: String, modifier: Modifier = Modifier, labelGroup: Boolean = false) {
     val (choice, _) = illustrationChoice(id)
-    Image(painterResource(groupArt[choice]), contentDescription = null, modifier = modifier)
+    Image(painterResource(groupIllustrationResource(choice, labelGroup)),
+        contentDescription = null, modifier = modifier)
 }
 // Stable illustration IDs may be appended to any category without changing saved choices.
 private val illustrationCategories = listOf(
@@ -99,7 +156,7 @@ private val illustrationCategories = listOf(
     listOf(45, 46, 47, 48, 49)
 )
 @Composable
-fun GroupIllustrationPicker(choice: Int, onSelect: (Int) -> Unit, onBack: () -> Unit) {
+fun GroupIllustrationPicker(choice: Int, onSelect: (Int) -> Unit, onBack: () -> Unit, labelGroup: Boolean = false) {
     val categories = androidx.compose.ui.res.stringArrayResource(R.array.group_art_categories)
     androidx.compose.ui.window.Dialog(onDismissRequest = onBack,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -124,7 +181,7 @@ fun GroupIllustrationPicker(choice: Int, onSelect: (Int) -> Unit, onBack: () -> 
                                     shape = MaterialTheme.shapes.large,
                                     border = if (index == choice) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                                     color = if (index == choice) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
-                                    Image(painterResource(groupArt[index]), contentDescription = "${categories[category]} ${position + 1}",
+                                    Image(painterResource(groupIllustrationResource(index, labelGroup)), contentDescription = "${categories[category]} ${position + 1}",
                                         modifier = Modifier.padding(10.dp))
                                 }
                             }
@@ -138,23 +195,23 @@ fun GroupIllustrationPicker(choice: Int, onSelect: (Int) -> Unit, onBack: () -> 
 
 @Composable
 fun GroupCreateDialog(groups: List<com.pixel.gallery.model.AlbumGroup>, initialName: String,
-    saving: Boolean, error: String?, onBack: () -> Unit, onCreate: (String, Int) -> Unit) {
+    saving: Boolean, error: String?, onBack: () -> Unit, labelGroup: Boolean = false, onCreate: (String, Int) -> Unit) {
     var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialName) }
     var art by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var choosing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     if (choosing) {
-        GroupIllustrationPicker(art, { art = it; choosing = false }, { choosing = false })
+        GroupIllustrationPicker(art, { art = it; choosing = false }, { choosing = false }, labelGroup)
         return
     }
     val valid = name.trim().isNotEmpty() && name.trim().length <= 60 && groups.none { it.name.equals(name.trim(), true) }
     com.pixel.gallery.ui.components.GalleryDialog(onDismissRequest = { if (!saving) onBack() },
-        icon = androidx.compose.material.icons.Icons.Outlined.CreateNewFolder,
+        icon = if (labelGroup) androidx.compose.material.icons.Icons.Outlined.Label else androidx.compose.material.icons.Icons.Outlined.CreateNewFolder,
         title = { Text(androidx.compose.ui.res.stringResource(R.string.album_group_new)) }, dismissEnabled = !saving,
         text = {
             Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Surface(onClick = { choosing = true }, enabled = !saving, modifier = Modifier.size(112.dp),
                     shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    Image(painterResource(groupArt[art]), androidx.compose.ui.res.stringResource(R.string.group_choose_illustration), Modifier.padding(8.dp))
+                    Image(painterResource(groupIllustrationResource(art, labelGroup)), androidx.compose.ui.res.stringResource(R.string.group_choose_illustration), Modifier.padding(8.dp))
                 }
                 OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, enabled = !saving,
                     modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,

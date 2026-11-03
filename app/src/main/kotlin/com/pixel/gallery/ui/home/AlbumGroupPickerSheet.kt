@@ -31,6 +31,8 @@ import com.pixel.gallery.ui.components.SelectionSearchField
 fun AlbumGroupPickerSheet(
     groups: List<AlbumGroup>, albums: List<Album>, selectedPaths: Set<String>,
     groupCovers: Map<String, String> = emptyMap(),
+    labelMode: Boolean = false,
+    nameValidationGroups: List<AlbumGroup> = groups,
     columns: Int, onColumnsChange: (Int) -> Unit,
     isSaving: Boolean, errorMessage: String?, onPanelHeightChange: (Dp) -> Unit,
     onDismiss: () -> Unit, onAssign: (String?) -> Unit, onCreate: (String, Int, () -> Unit) -> Unit,
@@ -41,20 +43,20 @@ fun AlbumGroupPickerSheet(
     val matching = remember(groups, normalized) { groups.filter { normalizeLabelName(it.name).contains(normalized) } }
     val current = remember(groups, selectedPaths) { groups.filter { group -> group.paths.any { it in selectedPaths } } }
     val common = current.singleOrNull()?.takeIf { it.paths.containsAll(selectedPaths) }
-    val canCreate = query.trim().isNotEmpty() && query.trim().length <= 60 && groups.none { normalizeLabelName(it.name) == normalized }
+    val canCreate = query.trim().isNotEmpty() && query.trim().length <= 60 && nameValidationGroups.none { normalizeLabelName(it.name) == normalized }
     val byPath = remember(albums) { albums.associateBy { it.path } }
     val gridState = rememberLazyGridState()
     LaunchedEffect(normalized) { gridState.scrollToItem(0) }
 
     if (creating) {
-        GroupCreateDialog(groups, query, isSaving, errorMessage, { creating = false }) { name, art ->
+        GroupCreateDialog(nameValidationGroups, query, isSaving, errorMessage, { creating = false }, labelMode) { name, art ->
             onCreate(name, art) { creating = false; query = "" }
         }
         return
     }
     SelectionBottomSheet(
         title = stringResource(R.string.album_group_add), centerTitle = true, showBackButton = false,
-        subtitle = stringResource(R.string.album_group_selected_count, selectedPaths.size),
+        subtitle = stringResource(if (labelMode) R.string.label_group_selected_count else R.string.album_group_selected_count, selectedPaths.size),
         onDismiss = onDismiss, confirmDismiss = { !isSaving }, onPanelHeightChange = onPanelHeightChange,
     ) {
         if (isSaving) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -71,7 +73,7 @@ fun AlbumGroupPickerSheet(
             }
             if (normalized.isEmpty()) item(key = "ungrouped") {
                 AlbumCoverCard(
-                    title = stringResource(R.string.album_group_ungrouped),
+                    title = stringResource(if (labelMode) R.string.qs_labels_title else R.string.album_group_ungrouped),
                     subtitle = stringResource(R.string.album_group_remove),
                     coverUri = null, coverModifiedMillis = 0L, columns = columns,
                     emptyIcon = Icons.Outlined.FolderOff, enabled = !isSaving && selectedPaths.isNotEmpty(),
@@ -83,9 +85,10 @@ fun AlbumGroupPickerSheet(
             items(matching, key = { it.id }, contentType = { "group" }) { group ->
                 val cover = group.paths.firstNotNullOfOrNull { byPath[it]?.takeIf { album -> album.coverUri.isNotBlank() } }
                 AlbumCoverCard(
-                    title = group.name, subtitle = stringResource(R.string.album_group_count, group.paths.size),
+                    title = group.name, subtitle = stringResource(if (labelMode) R.string.album_group_label_count else R.string.album_group_count, group.paths.size),
                     coverUri = groupCovers[group.id] ?: cover?.coverUri, coverModifiedMillis = cover?.lastModified ?: 0L,
                     columns = columns,
+                    coverContent = { GroupIllustration(group.id, Modifier.fillMaxSize().padding(8.dp), labelMode) },
                     coverBorder = if (group in current) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     coverBadge = if (group in current) ({
                         Surface(

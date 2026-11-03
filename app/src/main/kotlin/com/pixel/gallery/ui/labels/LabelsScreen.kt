@@ -61,6 +61,7 @@ fun LabelsScreen(
     onRenameLabel: (Long, String) -> Unit,
     onDeleteLabels: (Set<Long>) -> Unit,
     onSetCover: (Long) -> Unit = {},
+    onAddToGroup: (Set<Long>, () -> Unit) -> Unit = { _, _ -> },
     errorMessage: String? = null,
     onClearError: () -> Unit = {},
     isSaving: Boolean = false,
@@ -69,6 +70,7 @@ fun LabelsScreen(
     sortMode: AlbumSortOrder = AlbumSortOrder.NAME_ASC,
     onSortModeChange: (AlbumSortOrder) -> Unit = {},
     isForeground: Boolean = true,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState = rememberLazyGridState(),
 ): GalleryPageContent {
     var showNameDialog by remember { mutableStateOf(false) }
     var editingLabel by remember { mutableStateOf<LabelEntry?>(null) }
@@ -87,11 +89,10 @@ fun LabelsScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchMode by rememberSaveable { mutableStateOf(false) }
     var searchFocusRequested by remember { mutableStateOf(false) }
-    val gridState = rememberLazyGridState()
     val gridColumns = columns.coerceIn(2, 6)
     val sortedLabels = remember(labels, searchQuery) {
         val query = searchQuery.trim()
-        labels.filter { query.isEmpty() || it.label.name.contains(query, ignoreCase = true) }
+        labels.filter { !it.label.isSystem && (query.isEmpty() || it.label.name.contains(query, ignoreCase = true)) }
     }
 
     val entries = sortedLabels.map { summary ->
@@ -105,7 +106,7 @@ fun LabelsScreen(
             coverSizeBytes = summary.cover?.sizeBytes,
             coverRotationDegrees = summary.cover?.sourceRotationDegrees ?: 0,
             emptyIcon = if (summary.label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
-            selectable = !summary.label.isSystem,
+            selectable = true,
         )
     }
 
@@ -116,9 +117,10 @@ fun LabelsScreen(
                     count = selectedIds.size,
                     enabled = !isSaving,
                     onClear = { selectedIds = emptySet() },
+                    onAddToGroup = { onAddToGroup(selectedIds.toSet()) { selectedIds = emptySet() } },
                     renameDescription = stringResource(R.string.collection_settings),
                     onRename = { selectedIds.singleOrNull()?.let(onSetCover) },
-                    onDelete = { deletingLabels = labels.filter { it.label.id in selectedIds }.map { it.label } },
+                    onDelete = if (labels.any { it.label.id in selectedIds && it.label.isSystem }) null else ({ deletingLabels = labels.filter { it.label.id in selectedIds }.map { it.label } }),
                 )
             } else {
             GalleryHeader(

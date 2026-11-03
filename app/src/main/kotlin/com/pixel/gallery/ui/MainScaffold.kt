@@ -36,6 +36,8 @@ import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import com.pixel.gallery.ui.gallery.matchesAlbumSearch
 import com.pixel.gallery.model.Album
+import com.pixel.gallery.model.labelGroupId
+import com.pixel.gallery.model.canGroupAlbumSelection
 import com.pixel.gallery.model.CoverTarget
 import com.pixel.gallery.model.albumCoverKey
 import com.pixel.gallery.model.labelCoverKey
@@ -356,7 +358,10 @@ private fun MainScaffoldContent(
     val albumGroupError by albumGroupsViewModel.error.collectAsState()
     val albumGroupSaving by albumGroupsViewModel.isSaving.collectAsState()
     val albumGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("groups:picker") }.collectAsState(initial = 3)
+    val labelGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("label-groups:picker") }.collectAsState(initial = 3)
     var showAlbumGroupPicker by remember { mutableStateOf(false) }
+    var labelGroupSelection by remember { mutableStateOf<Set<Long>?>(null) }
+    var clearLabelGroupSelection by remember { mutableStateOf<(() -> Unit)?>(null) }
     val labelsViewModel: LabelsViewModel = hiltViewModel()
     val quickSortViewModel: QuickSortViewModel = hiltViewModel()
     val labelEntries by labelsViewModel.labelEntries.collectAsState()
@@ -633,6 +638,7 @@ private fun MainScaffoldContent(
     val recentsGridState = rememberLazyGridState()
     val albumsGridState = rememberLazyGridState()
     val hiddenAlbumsGridState = rememberLazyGridState()
+    val labelsGridState = rememberLazyGridState()
     val favouritesGridState = rememberLazyGridState()
     val trashGridState = rememberLazyGridState()
     val vaultGridState = rememberLazyGridState()
@@ -680,13 +686,15 @@ private fun MainScaffoldContent(
     }
     val groupCoverCandidates = remember(coverVisibleMedia, albums, albumGrouping, labelMemberships) {
         val visiblePaths = albums.mapTo(hashSetOf()) { it.path }
-        val labeledIds = labelMemberships.mapTo(hashSetOf()) { it.contentId }
+        val labeledIds = labelMemberships.filter { albumGrouping.labelGroupId(it.labelId) == com.pixel.gallery.model.LABELS_ALBUM_GROUP }.mapTo(hashSetOf()) { it.contentId }
         val byAlbum = coverVisibleMedia.groupBy { it.path.substringBeforeLast('/') }
         buildMap<String, List<MediaEntry>> {
             put(com.pixel.gallery.model.LABELS_ALBUM_GROUP, coverVisibleMedia.filter { it.contentId in labeledIds })
             albumGrouping.groups.forEach { group ->
                 val paths = group.paths.filter { it in visiblePaths }.toHashSet()
-                put(group.id, paths.flatMap { byAlbum[it].orEmpty() })
+                val labelMediaIds = labelMemberships.filter { albumGrouping.labelGroupId(it.labelId) == group.id }.mapTo(hashSetOf()) { it.contentId }
+                put(group.id, if (group.isLabelGroup) coverVisibleMedia.filter { it.contentId in labelMediaIds }
+                    else paths.flatMap { byAlbum[it].orEmpty() })
             }
         }
     }
@@ -1242,7 +1250,7 @@ private fun MainScaffoldContent(
                                 selectedCollectionKey = if (inlineCoverGroupId != null) activeCoverKey else selectedCollection?.key,
                                 coverPickingGroupId = inlineCoverGroupId,
                                 onSetLabelCover = { id ->
-                                    if (inlineCoverGroupId == com.pixel.gallery.model.LABELS_ALBUM_GROUP) {
+                                    if (inlineCoverGroupId != null && albumGrouping.labelGroupId(id) == inlineCoverGroupId) {
                                         coverPickerLabel = id
                                     } else labelSummaries.firstOrNull { it.label.id == id }?.let { summary ->
                                         selectedCollection = if (selectedCollection?.key == labelCoverKey(id)) null else CoverTarget(labelCoverKey(id), if (summary.label.isSystem)
@@ -1264,7 +1272,7 @@ private fun MainScaffoldContent(
                                     } else albumGroupsViewModel.toggle(id)
                                 },
                                 onLabel = { id ->
-                                    if (inlineCoverGroupId == com.pixel.gallery.model.LABELS_ALBUM_GROUP) coverPickerLabel = id
+                                    if (inlineCoverGroupId != null && albumGrouping.labelGroupId(id) == inlineCoverGroupId) coverPickerLabel = id
                                     else {
                                         selectedCollection = null
                                         navigateToStack(navigationStack + Screen.Label(id))
@@ -1321,6 +1329,7 @@ private fun MainScaffoldContent(
                 Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
                     onNavigateToExcludedFolders = { navigateToStack(navigationStack + Screen.ExcludedFolders) })
                 Screen.Labels -> LabelsScreen(
+                    gridState = labelsGridState,
                     columns = labelsGridColumns,
                     onColumnsChange = { photosViewModel.setPageGridColumns("labels", it) },
                     labels = labelSummaries,
@@ -1330,6 +1339,9 @@ private fun MainScaffoldContent(
                     onRenameLabel = { id, name -> labelsViewModel.renameLabel(id, name) },
                     onDeleteLabels = labelsViewModel::deleteLabels,
                     onSetCover = openLabelCover,
+                    onAddToGroup = { ids, clear ->
+                        labelGroupSelection = ids; clearLabelGroupSelection = clear; showAlbumGroupPicker = true
+                    },
                     errorMessage = labelsError,
                     onClearError = labelsViewModel::clearError,
                     isSaving = labelsSaving,
@@ -1532,6 +1544,10 @@ private fun MainScaffoldContent(
             confirmButton = { TextButton(onClick = albumGroupsViewModel::clearError) { Text(stringResource(R.string.album_group_cancel)) } },
         )
     }
+    val mixedAlbumSelection = selectedAlbumPaths.isNotEmpty() && selectedCollection?.key?.startsWith("label:") == true
+    LaunchedEffect(mixedAlbumSelection) {
+        if (mixedAlbumSelection) { showAlbumGroupPicker = false; selectionPanelHeight = 0.dp }
+    }
     val selectionHeader: GalleryHeaderSpec? = run {
 
             if (selectedCollection != null) {
@@ -1551,6 +1567,9 @@ private fun MainScaffoldContent(
                     }) else null,
                     renameDescription = stringResource(R.string.collection_settings),
                     onRename = { coversViewModel.clearError(); coverTarget = selectedCollection },
+                    onAddToGroup = chosen.key.takeIf { canGroupAlbumSelection(selectedAlbumPaths.size, 1) && it.startsWith("label:") && it != labelCoverKey(com.pixel.gallery.data.local.entity.FAVOURITES_LABEL_ID) }?.removePrefix("label:")?.toLongOrNull()?.let { labelId ->
+                        { labelGroupSelection = setOf(labelId); clearLabelGroupSelection = { selectedCollection = null }; showAlbumGroupPicker = true }
+                    },
                     findDuplicatesLabel = stringResource(R.string.duplicate_find_group),
                     canFindDuplicates = groupMedia.size > 1,
                     onFindDuplicates = { duplicateViewModel.start(groupMedia, DeduplicationScope.ALL_FILES, chosen.title) },
@@ -1566,7 +1585,7 @@ private fun MainScaffoldContent(
             } else if (albumSelectionMode) {
                 AlbumSelectionTopBar(
                     count = selectedAlbumPaths.size,
-                    onAddToGroup = if (currentScreen == Screen.Home) ({ showAlbumGroupPicker = true }) else null,
+                    onAddToGroup = if (currentScreen == Screen.Home && canGroupAlbumSelection(selectedAlbumPaths.size, if (selectedCollection?.key?.startsWith("label:") == true) 1 else 0)) ({ labelGroupSelection = null; clearLabelGroupSelection = null; showAlbumGroupPicker = true }) else null,
                     onClear = { selectedAlbumPaths = emptySet() },
                     renameDescription = stringResource(R.string.collection_settings),
                     onRename = {
@@ -2076,7 +2095,26 @@ private fun MainScaffoldContent(
     }
     val density = LocalDensity.current
     val routeHeaderScrollBehavior = topBarScrollBehavior
-    val detailToolbarLocked = coverTarget != null || (visibleViewer != null && reviewPage == null)
+    // The shared header follows the visible page, never the previous route's offset.
+    val activeHeaderGrid = when (val route = baseScreen) {
+        Screen.Home -> if (homePagerState.currentPage == 0) {
+            if (normalizedPhotoSearchQuery.isEmpty()) recentsGridState else photoSearchGridState
+        } else {
+            if (normalizedAlbumSearchQuery.isEmpty()) albumsGridState else albumSearchGridState
+        }
+        Screen.Trash -> trashGridState
+        Screen.Favourites -> favouritesGridState
+        Screen.HiddenAlbums -> hiddenAlbumsGridState
+        Screen.LockedFolder -> vaultGridState
+        Screen.Labels -> labelsGridState
+        is Screen.Label -> albumGridStates["label:${route.labelId}"]
+        is Screen.Photo -> albumGridStates[if (route.hiddenAlbum) "hidden:${route.albumName}" else route.albumName]
+        else -> null
+    }
+    val gridAtTop = activeHeaderGrid?.let {
+        !it.canScrollBackward || (it.firstVisibleItemIndex == 0 && it.firstVisibleItemScrollOffset == 0)
+    } == true
+    val detailToolbarLocked = gridAtTop || coverTarget != null || (visibleViewer != null && reviewPage == null)
     LaunchedEffect(detailToolbarLocked) {
         if (detailToolbarLocked) {
             // Viewer controls must remain reachable while the media surface
@@ -2274,8 +2312,9 @@ private fun MainScaffoldContent(
         com.pixel.gallery.ui.home.CollectionSettingsDialog(
             target, collectionNameDraft, { collectionNameDraft = it; collectionEditError = false }, canRename,
             manual ?: autoCover, manual == null, coverSaving || collectionEditSaving, coverError || collectionEditError,
+            labelGroup = target.key == groupCoverKey(com.pixel.gallery.model.LABELS_ALBUM_GROUP) || group?.isLabelGroup == true,
             onBack = closeCollectionSettings, onChoose = { pickingCover = true }, onAutomatic = { coverDraft = null },
-            onSave = {
+            onSave = { illustration ->
                 collectionEditSaving = true
                 scope.launch {
                     var key = target.key
@@ -2288,38 +2327,59 @@ private fun MainScaffoldContent(
                         }
                     }
                     collectionEditSaving = false
-                    if (result.isFailure) collectionEditError = true else coversViewModel.save(key, manual?.uri) {
+                    val completeSave: () -> Unit = {
+                        if (illustration != null && target.key.startsWith("group:")) {
+                            context.getSharedPreferences("group_illustrations", 0).edit()
+                                .putInt(target.key.removePrefix("group:"), illustration).apply()
+                        }
                         selectedCollection = selectedCollection?.copy(key = key, title = name)
                         if (key != target.key) selectedAlbumPaths = emptySet()
                         coverTarget = null; pickingCover = false; coversViewModel.clearError()
                     }
+                    if (result.isFailure) collectionEditError = true
+                    else if (target.key.startsWith("group:")) completeSave()
+                    else coversViewModel.save(key, manual?.uri, completeSave)
                 }
             },
         )
     }
 
-    if (showAlbumGroupPicker) {
+    if (showAlbumGroupPicker && !mixedAlbumSelection) {
+        val liveLabelSelection = labelGroupSelection?.intersect(labelSummaries.filterNot { it.label.isSystem }.mapTo(hashSetOf()) { it.label.id })
         com.pixel.gallery.ui.home.AlbumGroupPickerSheet(
-            groups = albumGrouping.groups,
+            groups = albumGrouping.groups.filter { it.isLabelGroup == (labelGroupSelection != null) }.map {
+                if (it.isLabelGroup) it.copy(paths = it.labelIds.orEmpty().filter { id -> labelSummaries.any { summary -> summary.label.id == id && !summary.label.isSystem } }.map(Long::toString)) else it
+            },
+            labelMode = labelGroupSelection != null,
+            nameValidationGroups = albumGrouping.groups,
             groupCovers = resolvedGroupCovers,
             albums = albums,
-            selectedPaths = selectedAlbumPaths,
-            columns = albumGroupPickerColumns,
-            onColumnsChange = { photosViewModel.setPageGridColumns("groups:picker", it) },
+            selectedPaths = liveLabelSelection?.mapTo(linkedSetOf(), Long::toString) ?: selectedAlbumPaths,
+            columns = if (labelGroupSelection != null) labelGroupPickerColumns else albumGroupPickerColumns,
+            onColumnsChange = { photosViewModel.setPageGridColumns(if (labelGroupSelection != null) "label-groups:picker" else "groups:picker", it) },
             isSaving = albumGroupSaving,
             errorMessage = if (albumGroupError) stringResource(R.string.album_group_error) else null,
             onPanelHeightChange = { selectionPanelHeight = it },
             onDismiss = {
                 if (!albumGroupSaving) { showAlbumGroupPicker = false; selectionPanelHeight = 0.dp; albumGroupsViewModel.clearError() }
             },
-            onAssign = { id -> albumGroupsViewModel.assign(selectedAlbumPaths.toSet(), id) },
+            onAssign = { id ->
+                val labels = liveLabelSelection
+                if (labels != null) albumGroupsViewModel.assignLabels(labels, id)
+                else albumGroupsViewModel.assign(selectedAlbumPaths.toSet(), id)
+            },
             onCreate = { name, art, onSaved ->
                 val id = java.util.UUID.randomUUID().toString()
-                albumGroupsViewModel.create(name, selectedAlbumPaths.toSet(), {
+                val labels = liveLabelSelection
+                val saved = {
                     context.getSharedPreferences("group_illustrations", 0).edit().putInt(id, art).apply()
-                    selectedAlbumPaths = emptySet()
+                    if (labels != null) {
+                        labelGroupSelection = emptySet(); clearLabelGroupSelection?.invoke()
+                    } else selectedAlbumPaths = emptySet()
                     onSaved()
-                }, id)
+                }
+                if (labels != null) albumGroupsViewModel.createLabels(name, labels, saved, id)
+                else albumGroupsViewModel.create(name, selectedAlbumPaths.toSet(), saved, id)
             },
         )
     }

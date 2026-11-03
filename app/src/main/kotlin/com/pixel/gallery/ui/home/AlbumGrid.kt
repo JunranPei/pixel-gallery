@@ -45,6 +45,7 @@ fun AlbumGrid(
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(16.dp),
     emptyMessage: String? = null,
     contentBackground: Modifier = Modifier,
+    gridGestures: Modifier = Modifier,
     content: LazyGridScope.() -> Unit,
 ) {
     val gridColumns = columns.coerceIn(2, 6)
@@ -61,6 +62,7 @@ fun AlbumGrid(
             overscrollEffect = scrollEvents,
             modifier = Modifier
                 .fillMaxSize()
+                .then(gridGestures)
                 .pinchToZoomColumns(
                     currentColumns = gridColumns,
                     onColumnsChange = onColumnsChange,

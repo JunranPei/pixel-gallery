@@ -45,6 +45,12 @@ class AlbumGroupsViewModel @Inject constructor(private val settings: SettingsRep
         require(cleaned.isNotEmpty() && cleaned.length <= 60 && state.groups.none { it.name.equals(cleaned, true) })
         state.copy(groups = state.groups + AlbumGroup(id, cleaned, colorIndex = state.nextColorIndex())).assign(paths, id)
     }
+    fun assignLabels(ids: Set<Long>, id: String?, onSaved: () -> Unit = {}) = save(onSaved) { it.assignLabels(ids, id) }
+    fun createLabels(name: String, ids: Set<Long>, onSaved: () -> Unit = {}, id: String = UUID.randomUUID().toString()) = save(onSaved) { state ->
+        val cleaned = name.trim()
+        require(cleaned.isNotEmpty() && cleaned.length <= 60 && state.groups.none { it.name.equals(cleaned, true) })
+        state.copy(groups = state.groups + AlbumGroup(id, cleaned, colorIndex = state.nextColorIndex(), labelIds = emptyList())).assignLabels(ids, id)
+    }
     fun rename(id: String, name: String) = update { state ->
         val cleaned = name.trim()
         require(cleaned.isNotEmpty() && cleaned.length <= 60 && state.groups.none { it.id != id && it.name.equals(cleaned, true) })

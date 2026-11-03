@@ -27,7 +27,7 @@ import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 fun CollectionSettingsDialog(
     target: CoverTarget, name: String, onNameChange: (String) -> Unit, canRename: Boolean,
     preview: MediaEntry?, automatic: Boolean, saving: Boolean, error: Boolean,
-    onBack: () -> Unit, onSave: () -> Unit, onChoose: () -> Unit, onAutomatic: () -> Unit,
+    labelGroup: Boolean = false, onBack: () -> Unit, onSave: (Int?) -> Unit, onChoose: () -> Unit, onAutomatic: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences("group_illustrations", 0) }
@@ -35,7 +35,7 @@ fun CollectionSettingsDialog(
     var draftArt by rememberSaveable(target.key) { mutableIntStateOf(groupId?.let { prefs.getInt(it, 0) }?.coerceIn(groupArt.indices) ?: 0) }
     var pickingArt by rememberSaveable(target.key) { mutableStateOf(false) }
     if (pickingArt) {
-        GroupIllustrationPicker(draftArt, { draftArt = it; pickingArt = false }, { pickingArt = false })
+        GroupIllustrationPicker(draftArt, { draftArt = it; pickingArt = false }, { pickingArt = false }, labelGroup)
         return
     }
     com.pixel.gallery.ui.components.GalleryDialog(
@@ -55,7 +55,7 @@ fun CollectionSettingsDialog(
                     Surface(onClick = { pickingArt = true }, enabled = !saving,
                         shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow,
                         modifier = Modifier.size(112.dp)) {
-                        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(groupArt[draftArt]),
+                        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(groupIllustrationResource(draftArt, labelGroup)),
                             contentDescription = stringResource(R.string.group_choose_illustration), modifier = Modifier.padding(8.dp))
                     }
                 } else Box(Modifier.size(128.dp)) {
@@ -106,7 +106,7 @@ fun CollectionSettingsDialog(
                 if (error) Text(stringResource(R.string.cover_save_error), color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { Button(onClick = { groupId?.let { prefs.edit().putInt(it, draftArt).apply() }; onSave() }, enabled = !saving && (!canRename || name.trim().isNotEmpty())) {
+        confirmButton = { Button(onClick = { onSave(draftArt.takeIf { groupId != null }) }, enabled = !saving && (!canRename || name.trim().isNotEmpty())) {
             Text(stringResource(R.string.labels_save))
         } },
         dismissButton = { TextButton(onClick = onBack, enabled = !saving) { Text(stringResource(R.string.labels_cancel)) } },

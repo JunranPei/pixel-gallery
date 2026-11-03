@@ -246,4 +246,5 @@
         <item>Mulberry</item>
         <item>Rouge</item>
     </string-array>
+    <string name="label_group_selected_count">Selected label albums: %1$d</string>
 </resources>
