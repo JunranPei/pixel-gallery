@@ -60,6 +60,7 @@ fun LabelsScreen(
     onCreateLabel: (String) -> Unit,
     onRenameLabel: (Long, String) -> Unit,
     onDeleteLabels: (Set<Long>) -> Unit,
+    onSetCover: (Long) -> Unit = {},
     errorMessage: String? = null,
     onClearError: () -> Unit = {},
     isSaving: Boolean = false,
@@ -114,12 +115,9 @@ fun LabelsScreen(
                 AlbumSelectionTopBar(
                     count = selectedIds.size,
                     enabled = !isSaving,
-                    renameDescription = stringResource(R.string.labels_rename),
                     onClear = { selectedIds = emptySet() },
-                    onRename = {
-                        editingLabel = labels.firstOrNull { it.label.id == selectedIds.singleOrNull() }?.label
-                        showNameDialog = editingLabel != null
-                    },
+                    renameDescription = stringResource(R.string.collection_settings),
+                    onRename = { selectedIds.singleOrNull()?.let(onSetCover) },
                     onDelete = { deletingLabels = labels.filter { it.label.id in selectedIds }.map { it.label } },
                 )
             } else {

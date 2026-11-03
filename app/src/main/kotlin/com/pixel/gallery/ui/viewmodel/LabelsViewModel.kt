@@ -63,8 +63,15 @@ class LabelsViewModel @Inject constructor(
     val recentLabelIds = settingsRepository.recentLabelIds
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val labels = combine(labelEntries, memberships, visibleMedia, labelSortMode) { entries, links, media, sort ->
-        AlbumSorter.shared.sortLabels(buildLabelSummaries(entries, links, media), sort)
+    val labels = combine(labelEntries, memberships, visibleMedia, labelSortMode, settingsRepository.collectionCovers) { entries, links, media, sort, covers ->
+        val byUri = media.associateBy { it.uri }
+        val members = links.groupBy { it.labelId }.mapValues { (_, rows) -> rows.mapTo(hashSetOf()) { it.contentId } }
+        val summaries = buildLabelSummaries(entries, links, media).map { summary ->
+            val manual = covers[com.pixel.gallery.model.labelCoverKey(summary.label.id)]?.let(byUri::get)
+                ?.takeIf { it.contentId in members[summary.label.id].orEmpty() }
+            if (manual == null) summary else summary.copy(cover = manual)
+        }
+        AlbumSorter.shared.sortLabels(summaries, sort)
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -84,6 +91,7 @@ class LabelsViewModel @Inject constructor(
     fun clearError() { _errorMessage.value = null }
 
     fun createLabel(name: String) = mutate { repository.createLabel(name) }
+    suspend fun renameAndWait(id: Long, name: String): Result<Unit> = runCatching { repository.renameLabel(id, name) }
     fun renameLabel(id: Long, name: String) = mutate { repository.renameLabel(id, name) }
     fun deleteLabel(id: Long) = mutate { repository.deleteLabel(id) }
     fun deleteLabels(ids: Set<Long>) = mutate { repository.deleteLabels(ids) }

@@ -109,4 +109,65 @@
     <string name="viewer_remember_direction_description">重新打开同一项时恢复画面角度，屏幕方向单独设置。</string>
     <string name="viewer_remember_zoom">记忆缩放和位置</string>
     <string name="viewer_remember_zoom_description">重新打开同一项时，恢复缩放比例和观看位置。关闭后以适屏状态打开。</string>
+    <string name="cover_set">设置封面</string>
+    <string name="cover_automatic">自动选取</string>
+    <string name="cover_manual">手动选取</string>
+    <string name="cover_auto_hint">随相册内容自动更新</string>
+    <string name="cover_use_auto">恢复自动</string>
+    <string name="cover_save_error">封面保存失败，请重试。</string>
+    <string name="cover_empty">暂无可选内容，添加内容后将自动选取封面。</string>
+    <string name="cover_no_results">没有匹配的文件</string>
+    <string name="cover_choose">选为封面</string>
+    <string name="cover_search">搜索文件</string>
+    <string name="collection_settings">相册设置</string>
+    <string name="collection_cover">封面</string>
+    <string name="cover_choose_image">选择图片</string>
+    <string name="duplicate_find_group">群组内去重</string>
+    <string name="cover_empty_title">暂无可选图片</string>
+    <string name="cover_search_empty_hint">试试其他文件名。</string>
+    <string name="cover_choose_album">选择本群组中的相册</string>
+    <string name="group_choose_illustration">选择插画</string>
+    <string name="group_art_all">全部</string>
+    <string-array name="group_art_categories"><item>旅行</item><item>人物</item><item>运动</item><item>生活</item><item>自然</item><item>美食</item><item>创作</item><item>学习</item><item>节日</item><item>动物</item></string-array>
+<string name="theme_color_title">色彩</string><string name="theme_color_auto">自动取色</string><string-array name="theme_color_names"><item>紫罗兰</item><item>蓝色</item><item>青色</item><item>绿色</item><item>金色</item><item>珊瑚色</item><item>玫瑰色</item><item>淡紫色</item></string-array>
+    <string name="theme_color_manual">主题色</string>
+    <string name="theme_color_hue">色相</string>
+    <string-array name="theme_hue_names">
+        <item>玫瑰红</item>
+        <item>绯红</item>
+        <item>砖红</item>
+        <item>朱红</item>
+        <item>陶橙</item>
+        <item>赭石</item>
+        <item>琥珀</item>
+        <item>金黄</item>
+        <item>姜黄</item>
+        <item>秋香</item>
+        <item>橄榄绿</item>
+        <item>苔绿</item>
+        <item>草绿</item>
+        <item>叶绿</item>
+        <item>森林绿</item>
+        <item>翡翠</item>
+        <item>碧绿</item>
+        <item>薄荷绿</item>
+        <item>铜绿</item>
+        <item>鸭绿</item>
+        <item>孔雀绿</item>
+        <item>湖蓝</item>
+        <item>碧蓝</item>
+        <item>天蓝</item>
+        <item>蔚蓝</item>
+        <item>钢蓝</item>
+        <item>矢车菊蓝</item>
+        <item>钴蓝</item>
+        <item>群青</item>
+        <item>靛蓝</item>
+        <item>鸢尾紫</item>
+        <item>藤紫</item>
+        <item>兰紫</item>
+        <item>木槿紫</item>
+        <item>莓紫</item>
+        <item>胭脂</item>
+    </string-array>
 </resources>

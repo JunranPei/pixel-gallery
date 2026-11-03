@@ -11,7 +11,7 @@ class AlbumGroupingTest {
     @Test fun groupsFirstMembersKeepAlbumOrderAndTrashLast() {
         val rows = groupedAlbumRows(albums, grouping, emptyList())
         assertEquals(listOf("group:system:labels", "group:one", "album:/B", "album:/A", "group:two", "album:/C", "album:/D", "system:trash"), rows.map { it.key })
-        assertEquals("one", rows[2].backgroundGroup)
+        assertEquals("one", rows[1].backgroundGroup)
         assertNull(rows[6].backgroundGroup)
         assertEquals(rows.size, rows.map { it.key }.distinct().size)
     }

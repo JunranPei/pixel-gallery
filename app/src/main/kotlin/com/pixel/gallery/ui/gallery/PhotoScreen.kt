@@ -7,6 +7,7 @@ import com.pixel.gallery.ui.GalleryHeader
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
@@ -107,6 +108,9 @@ fun PhotoScreen(
     gridState: LazyGridState = rememberLazyGridState(),
     quickSort: QuickSortUiConfig? = null,
     onToggleQuickSort: () -> Unit = {},
+    onSetCover: () -> Unit = {},
+    coverPicking: Boolean = false,
+    columnsPageOverride: String? = null,
     initialMediaType: MediaTypeFilter = MediaTypeFilter.ALL,
     isForeground: Boolean = true,
     selectionMode: Boolean = selectedIds.isNotEmpty(),
@@ -114,7 +118,7 @@ fun PhotoScreen(
     isHiddenAlbum: Boolean = false,
 ): GalleryPageContent {
     val browsingIndex by (if (isHiddenAlbum) viewModel.hiddenBrowsingIndex else viewModel.browsingIndex).collectAsState()
-    val columnsPage = "${if (isHiddenAlbum) "hidden-album" else "album"}:$albumName"
+    val columnsPage = columnsPageOverride ?: "${if (isHiddenAlbum) "hidden-album" else "album"}:$albumName"
     val gridColumns by remember(columnsPage, viewModel) { viewModel.pageGridColumns(columnsPage) }.collectAsState(initial = 3)
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
@@ -216,10 +220,12 @@ fun PhotoScreen(
                         }
                     },
                     actions = {
-                        GalleryOverflowButton(
+                        if (!coverPicking) GalleryOverflowButton(
                             expanded = showMenu,
                             onExpandedChange = { showMenu = it },
                         ) {
+                        GalleryMenuRow(stringResource(R.string.collection_settings), Icons.Outlined.Edit,
+                            onClick = { showMenu = false; onSetCover() })
                             MediaTypeMenuSection(mediaType) { type ->
                                 showMenu = false
                                 if (type != mediaType) {

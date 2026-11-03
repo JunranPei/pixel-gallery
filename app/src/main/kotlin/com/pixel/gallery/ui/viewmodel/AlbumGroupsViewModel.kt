@@ -40,16 +40,22 @@ class AlbumGroupsViewModel @Inject constructor(private val settings: SettingsRep
     fun clearError() { _error.value = false }
     fun toggle(id: String) = update { it.copy(collapsedIds = if (id in it.collapsedIds) it.collapsedIds - id else it.collapsedIds + id) }
     fun assign(paths: Set<String>, id: String?, onSaved: () -> Unit = {}) = save(onSaved) { it.assign(paths, id) }
-    fun create(name: String, paths: Set<String>, onSaved: () -> Unit = {}) = save(onSaved) { state ->
+    fun create(name: String, paths: Set<String>, onSaved: () -> Unit = {}, id: String = UUID.randomUUID().toString()) = save(onSaved) { state ->
         val cleaned = name.trim()
         require(cleaned.isNotEmpty() && cleaned.length <= 60 && state.groups.none { it.name.equals(cleaned, true) })
-        val id = UUID.randomUUID().toString()
         state.copy(groups = state.groups + AlbumGroup(id, cleaned, colorIndex = state.nextColorIndex())).assign(paths, id)
     }
     fun rename(id: String, name: String) = update { state ->
         val cleaned = name.trim()
         require(cleaned.isNotEmpty() && cleaned.length <= 60 && state.groups.none { it.id != id && it.name.equals(cleaned, true) })
         state.copy(groups = state.groups.map { if (it.id == id) it.copy(name = cleaned) else it })
+    }
+    suspend fun renameAndWait(id: String, name: String): Result<Unit> = runCatching {
+        settings.updateAlbumGrouping { state ->
+            val cleaned = name.trim()
+            require(cleaned.isNotEmpty() && cleaned.length <= 60 && state.groups.none { it.id != id && it.name.equals(cleaned, true) })
+            state.copy(groups = state.groups.map { if (it.id == id) it.copy(name = cleaned) else it })
+        }
     }
     fun dissolve(id: String) = update { it.copy(groups = it.groups.filterNot { g -> g.id == id }, collapsedIds = it.collapsedIds - id) }
 }

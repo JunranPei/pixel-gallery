@@ -145,7 +145,7 @@ internal fun DuplicateScanContent(state: DuplicateUiState) {
 
 /** Both no-match scans and successful cleanup end at this exact same content. */
 @Composable
-internal fun DuplicateResultContent(title: String, noDuplicates: Boolean, detail: String? = null) {
+internal fun DuplicateResultContent(title: String, noDuplicates: Boolean, detail: String? = null, showCheck: Boolean = true) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight)
@@ -153,7 +153,7 @@ internal fun DuplicateResultContent(title: String, noDuplicates: Boolean, detail
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         ) {
-            if (noDuplicates) DuplicatePhotoIllustration(true, Modifier.size(244.dp, 222.dp))
+            if (noDuplicates) DuplicatePhotoIllustration(showCheck, Modifier.size(244.dp, 222.dp))
             else Icon(Icons.Outlined.Info, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)

@@ -71,6 +71,19 @@ class SettingsRepository @Inject constructor(
     suspend fun updateAlbumGrouping(change: (com.pixel.gallery.model.AlbumGrouping) -> com.pixel.gallery.model.AlbumGrouping) {
         context.dataStore.edit { it[ALBUM_GROUPING] = Gson().toJson(change(decodeGrouping(it[ALBUM_GROUPING]))) }
     }
+    private val COLLECTION_COVERS = stringPreferencesKey("collection_covers")
+    private fun decodeCovers(json: String?): Map<String, String> = runCatching {
+        Gson().fromJson(json, Array<com.pixel.gallery.model.CollectionCover>::class.java)
+            .orEmpty().filter { it.key.isNotBlank() && it.uri.isNotBlank() }.associate { it.key to it.uri }
+    }.getOrDefault(emptyMap())
+    val collectionCovers: Flow<Map<String, String>> = context.dataStore.data.map { decodeCovers(it[COLLECTION_COVERS]) }
+    suspend fun setCollectionCover(key: String, uri: String?) {
+        context.dataStore.edit { preferences ->
+            val covers = decodeCovers(preferences[COLLECTION_COVERS]).toMutableMap()
+            if (uri == null) covers.remove(key) else covers[key] = uri
+            preferences[COLLECTION_COVERS] = Gson().toJson(covers.map { com.pixel.gallery.model.CollectionCover(it.key, it.value) })
+        }
+    }
     private val QUICK_SORT_TARGETS = stringPreferencesKey("quick_sort_targets")
     private val QUICK_SORT_DOCK_TOP = booleanPreferencesKey("quick_sort_dock_top")
     private val QUICK_SORT_ALBUM_ROWS = intPreferencesKey("quick_sort_album_rows")
@@ -106,6 +119,8 @@ class SettingsRepository @Inject constructor(
     ) {
         context.dataStore.edit { preferences ->
             preferences[ALBUM_GROUPING] = Gson().toJson(decodeGrouping(preferences[ALBUM_GROUPING]).remap(source, target))
+            val covers = com.pixel.gallery.model.remapCollectionCovers(decodeCovers(preferences[COLLECTION_COVERS]), source, target)
+            preferences[COLLECTION_COVERS] = Gson().toJson(covers.map { com.pixel.gallery.model.CollectionCover(it.key, it.value) })
             listOf(EXCLUDED_FOLDERS, HIDDEN_FOLDERS).forEach { key ->
                 preferences[key]?.let { paths ->
                     preferences[key] = paths.map { remapAlbumPath(it, source, target) }.toSet()
@@ -163,6 +178,10 @@ class SettingsRepository @Inject constructor(
     suspend fun setShowFullAlbumNames(value: Boolean) {
         context.dataStore.edit { it[SHOW_FULL_ALBUM_NAMES] = value }
     }
+
+    private val MANUAL_COLOR = intPreferencesKey("manual_theme_color")
+    val manualColor: Flow<Int> = context.dataStore.data.map { it[MANUAL_COLOR] ?: 0 }
+    suspend fun setManualColor(value: Int) { context.dataStore.edit { it[MANUAL_COLOR] = if (value < 0) value else value.coerceIn(0, 7) } }
 
     val materialYou: Flow<Boolean> = context.dataStore.data
         .map { preferences -> preferences[MATERIAL_YOU] ?: true }

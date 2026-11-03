@@ -743,6 +743,7 @@ fun AlbumCoverCard(
     coverSizeBytes: Long? = null,
     coverRotationDegrees: Int = 0,
     emptyIcon: ImageVector = Icons.Outlined.Folder,
+    coverInset: androidx.compose.ui.unit.Dp = 0.dp,
     coverShape: androidx.compose.ui.graphics.Shape = ExpressiveShapes.ExtraLargeIncreased,
     titleMaxLines: Int = Int.MAX_VALUE,
     coverContent: (@Composable BoxScope.() -> Unit)? = null,
@@ -750,6 +751,8 @@ fun AlbumCoverCard(
     coverBorder: BorderStroke? = null,
     coverBadge: (@Composable BoxScope.() -> Unit)? = null,
     onClickLabel: String? = null,
+    onDoubleClick: (() -> Unit)? = null,
+    showCaption: Boolean = true,
     captionContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -839,6 +842,7 @@ fun AlbumCoverCard(
             enabled = enabled,
             onClick = onClick,
             onClickLabel = onClickLabel,
+            onDoubleClick = onDoubleClick,
             onLongClick = onLongClick
         )
     ) {
@@ -846,6 +850,7 @@ fun AlbumCoverCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
+                .padding(coverInset)
                 .graphicsLayer {
                     scaleX = coverScale
                     scaleY = coverScale
@@ -924,8 +929,8 @@ fun AlbumCoverCard(
             }
             coverBadge?.invoke(this)
         }
-        Spacer(Modifier.height(spacerHeight))
-        Column(modifier = Modifier.fillMaxWidth().heightIn(min = captionMinHeight)) {
+        if (showCaption) Spacer(Modifier.height(spacerHeight))
+        if (showCaption) Column(modifier = Modifier.fillMaxWidth().heightIn(min = captionMinHeight)) {
             Text(
                 text = title,
                 style = titleStyle,

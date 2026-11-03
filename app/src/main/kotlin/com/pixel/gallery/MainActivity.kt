@@ -120,6 +120,7 @@ class MainActivity : FragmentActivity() {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.ui.platform.LocalConfiguration provides (videoPipConfiguration ?: currentConfiguration),
             ) {
+            val manualColor by viewModel.manualColor.collectAsState(initial = 0)
             val materialYou by viewModel.materialYou.collectAsState(initial = true)
             val showFullAlbumNames by viewModel.showFullAlbumNames.collectAsState()
             val themeMode by viewModel.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
@@ -129,7 +130,7 @@ class MainActivity : FragmentActivity() {
                 ThemeMode.DARK -> true
                 ThemeMode.SYSTEM -> systemDarkTheme
             }
-            PixelGalleryTheme(darkTheme = darkTheme, dynamicColor = materialYou) {
+            PixelGalleryTheme(darkTheme = darkTheme, dynamicColor = materialYou, manualColor = manualColor) {
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {

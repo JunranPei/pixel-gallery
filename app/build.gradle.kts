@@ -88,8 +88,8 @@ android {
         minSdk = 26
         targetSdk = 35
         testInstrumentationRunner = "com.pixel.gallery.integration.QuickSortSafetyInstrumentation"
-        versionCode = 2076
-        versionName = "4.3.5.9-auto-multitask"
+        versionCode = 2077
+        versionName = "4.3.6.0-auto-multitask"
     }
 
     signingConfigs {
@@ -200,6 +200,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.android.material:material:1.14.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     
     // Compose

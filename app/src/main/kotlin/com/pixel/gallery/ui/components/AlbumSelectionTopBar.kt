@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileCopy
 import androidx.compose.material.icons.outlined.Folder
@@ -31,6 +33,9 @@ import com.pixel.gallery.R
 @Composable
 fun AlbumSelectionTopBar(
     count: Int,
+    collectionTitle: String? = null,
+    groupExpanded: Boolean = false,
+    onToggleGroup: (() -> Unit)? = null,
     onClear: () -> Unit,
     enabled: Boolean = true,
     renameDescription: String = stringResource(R.string.album_rename),
@@ -39,6 +44,8 @@ fun AlbumSelectionTopBar(
     onExclude: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     canFindDuplicates: Boolean = true,
+    findDuplicatesLabel: String = stringResource(R.string.duplicate_find_selected_albums),
+    extraMenu: @Composable () -> Unit = {},
     onFindDuplicates: (() -> Unit)? = null,
     onUnhide: (() -> Unit)? = null,
     onAddToGroup: (() -> Unit)? = null,
@@ -89,8 +96,9 @@ fun AlbumSelectionTopBar(
                                 GalleryMenuRow(stringResource(R.string.album_group_add), Icons.Outlined.Folder,
                                     enabled = enabled, onClick = { showMenu = false; action() })
                             }
+                            extraMenu()
                             if (onFindDuplicates != null) GalleryMenuRow(
-                                stringResource(R.string.duplicate_find_selected_albums),
+                                findDuplicatesLabel,
                                 Icons.Outlined.FileCopy,
                                 accented = true,
                                 enabled = enabled && canFindDuplicates,

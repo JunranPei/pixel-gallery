@@ -1,9 +1,20 @@
 package com.pixel.gallery.ui.settings
 
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.res.stringResource
+import androidx.compose.material3.*
+import com.pixel.gallery.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.Icon
@@ -28,9 +39,10 @@ fun ThemeSettingsGroup(
     title: String? = null,
 ) {
     val materialYou by viewModel.materialYou.collectAsStateWithLifecycle()
+    val manualColor by viewModel.manualColor.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
 
-    SettingsGroup(itemCount = 2, title = title) { index ->
+    SettingsGroup(itemCount = if (materialYou) 2 else 3, title = title) { index ->
         when (index) {
             0 -> {
                 Column(
@@ -61,13 +73,16 @@ fun ThemeSettingsGroup(
                 }
             }
             1 -> {
-                SettingsToggleItem(
-                    title = "Material You",
-                    icon = Icons.Outlined.Palette,
-                    checked = materialYou,
-                    onCheckedChange = viewModel::setMaterialYou,
-                )
+                Column {
+                    Text(stringResource(R.string.theme_color_title), style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(start = 16.dp, top = 16.dp))
+                    SettingsToggleItem(
+                        title = stringResource(R.string.theme_color_auto), icon = Icons.Outlined.Palette,
+                        checked = materialYou, onCheckedChange = viewModel::setMaterialYou,
+                    )
+                }
             }
+            2 -> ThemeHuePicker(manualColor, viewModel::setManualColor)
         }
     }
 }

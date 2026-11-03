@@ -93,8 +93,8 @@ internal class AlbumGroupsChecks(private val instrumentation: Instrumentation) {
             await(secondName); await(names[2]); await(names[3])
             screenshot("01-multiple-open-three-columns")
             verifyTopStretch(names[1])
-            longPress(groupName); screenshot("dialog-manage"); click("Rename group")
-            screenshot("dialog-rename"); click("Cancel")
+            longPress(groupName); click("Album settings"); screenshot("group-settings")
+            screenshot("dialog-rename"); click("Cancel"); click("Clear selection")
             // All member and ungrouped columns align with the same three X coordinates.
             val xPositions = (listOf(groupName, secondName) + names).mapNotNull { name -> find(name)?.let { bounds(it).left } }.distinct()
             check(xPositions.size <= 3) { "Cards use different column frames: $xPositions" }
@@ -120,7 +120,7 @@ internal class AlbumGroupsChecks(private val instrumentation: Instrumentation) {
             // Enter a real album and return to the same expanded grid.
             click(names[0]); await("Back"); back(); await(groupName); await(names[0])
             // Selection of an expanded member must keep existing album actions available.
-            longPress(names[1]); await("1 selected"); await("Rename album"); await("Hide Album"); click("Clear selection")
+            longPress(names[1]); await("1 selected"); await("Album settings"); await("Hide Album"); click("Clear selection")
             instrumentation.runOnMainSync { activity!!.finish() }; settle(300); launch(dark = true)
             await(groupName); screenshot("06-dark-groups")
             instrumentation.runOnMainSync { activity!!.finish() }; settle(300)
@@ -130,7 +130,7 @@ internal class AlbumGroupsChecks(private val instrumentation: Instrumentation) {
             instrumentation.uiAutomation.executeShellCommand("settings put system font_scale 1.0").close()
             settle(600); launch(); await(groupName)
             // Dissolve through its real group menu; members reappear as ordinary albums.
-            longPress(groupName); click("Dissolve group"); screenshot("dialog-dissolve"); click("Dissolve group")
+            longPress(groupName); click("More"); click("Dissolve group"); screenshot("dialog-dissolve"); click("Dissolve group")
             repeat(30) { if (settings.albumGrouping.first().groups.none { it.id == id }) return@repeat; settle(100) }
             check(settings.albumGrouping.first().groups.none { it.id == id })
             await(names[0]); await(names[1]); screenshot("05-dissolved-preserved-albums")

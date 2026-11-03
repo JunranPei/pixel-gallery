@@ -6,6 +6,7 @@ import com.pixel.gallery.ui.GalleryHeader
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Sort
@@ -42,6 +43,7 @@ fun LabelPhotosScreen(
     onSortPhotos: () -> Unit = {},
     onRemoveFromLabel: (Set<Long>) -> Unit = {},
     onEditLabel: () -> Unit = {},
+    onSetCover: () -> Unit = {},
     isForeground: Boolean = true,
     selectionMode: Boolean = selectedIds.isNotEmpty(),
 ): GalleryPageContent {
@@ -96,6 +98,8 @@ fun LabelPhotosScreen(
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.labels_back)) } },
             actions = {
                     GalleryOverflowButton(expanded = showMenu, onExpandedChange = { showMenu = it }) {
+                        GalleryMenuRow(stringResource(R.string.collection_settings), Icons.Outlined.Edit,
+                            onClick = { showMenu = false; onSetCover() })
                         MediaTypeMenuSection(mediaType) { type -> mediaType = type; showMenu = false }
                         GalleryMenuRow("Sort Photos", Icons.Default.Sort, accented = true, onClick = { showMenu = false; onSortPhotos() })
                         GalleryMenuRow("Edit label", Icons.Outlined.Label, accented = true, onClick = { showMenu = false; onEditLabel() })

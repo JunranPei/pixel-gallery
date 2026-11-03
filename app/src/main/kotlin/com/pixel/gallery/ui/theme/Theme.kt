@@ -35,6 +35,7 @@ private val DarkAppSurface = Color(0xFF121212)
 fun PixelGalleryTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
+    manualColor: Int = 0,
     content: @Composable () -> Unit
 ) {
     val baseColorScheme = when {
@@ -42,8 +43,7 @@ fun PixelGalleryTheme(
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        else -> manualColorScheme(manualColor, darkTheme)
     }
 
     // Samsung and other Android 12+ devices can supply different dynamic
@@ -70,5 +70,70 @@ fun PixelGalleryTheme(
         typography = Typography,
         shapes = Shapes,
         content = content
+    )
+}
+
+// Official Material Color Utilities, distributed by MDC Android 1.14.0.
+internal val ManualColorSeeds = listOf(0xFF6750A4, 0xFF3569B5, 0xFF008577, 0xFF4C7D3C, 0xFF9B741B, 0xFFB45336, 0xFFA83F64, 0xFF8755A4).map { it.toInt() }
+// Legacy values 0..7 are preset indices; opaque ARGB values store custom seeds.
+internal fun resolveManualColorSeed(value: Int): Int =
+    if (value < 0) value else ManualColorSeeds[value.coerceIn(ManualColorSeeds.indices)]
+
+internal fun manualColorScheme(index: Int, dark: Boolean): androidx.compose.material3.ColorScheme =
+    seedColorScheme(resolveManualColorSeed(index), dark)
+
+internal fun seedColorScheme(seed: Int, dark: Boolean): androidx.compose.material3.ColorScheme {
+    val scheme = com.google.android.material.color.utilities.SchemeTonalSpot(
+        com.google.android.material.color.utilities.Hct.fromInt(seed), dark, 0.0)
+    val base = if (dark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = Color(scheme.primary),
+        onPrimary = Color(scheme.onPrimary),
+        primaryContainer = Color(scheme.primaryContainer),
+        onPrimaryContainer = Color(scheme.onPrimaryContainer),
+        inversePrimary = Color(scheme.inversePrimary),
+        secondary = Color(scheme.secondary),
+        onSecondary = Color(scheme.onSecondary),
+        secondaryContainer = Color(scheme.secondaryContainer),
+        onSecondaryContainer = Color(scheme.onSecondaryContainer),
+        tertiary = Color(scheme.tertiary),
+        onTertiary = Color(scheme.onTertiary),
+        tertiaryContainer = Color(scheme.tertiaryContainer),
+        onTertiaryContainer = Color(scheme.onTertiaryContainer),
+        background = Color(scheme.background),
+        onBackground = Color(scheme.onBackground),
+        surface = Color(scheme.surface),
+        onSurface = Color(scheme.onSurface),
+        surfaceVariant = Color(scheme.surfaceVariant),
+        onSurfaceVariant = Color(scheme.onSurfaceVariant),
+        surfaceTint = Color(scheme.surfaceTint),
+        inverseSurface = Color(scheme.inverseSurface),
+        inverseOnSurface = Color(scheme.inverseOnSurface),
+        error = Color(scheme.error),
+        onError = Color(scheme.onError),
+        errorContainer = Color(scheme.errorContainer),
+        onErrorContainer = Color(scheme.onErrorContainer),
+        outline = Color(scheme.outline),
+        outlineVariant = Color(scheme.outlineVariant),
+        scrim = Color(scheme.scrim),
+        surfaceBright = Color(scheme.surfaceBright),
+        surfaceDim = Color(scheme.surfaceDim),
+        surfaceContainer = Color(scheme.surfaceContainer),
+        surfaceContainerHigh = Color(scheme.surfaceContainerHigh),
+        surfaceContainerHighest = Color(scheme.surfaceContainerHighest),
+        surfaceContainerLow = Color(scheme.surfaceContainerLow),
+        surfaceContainerLowest = Color(scheme.surfaceContainerLowest),
+        primaryFixed = Color(scheme.primaryFixed),
+        primaryFixedDim = Color(scheme.primaryFixedDim),
+        onPrimaryFixed = Color(scheme.onPrimaryFixed),
+        onPrimaryFixedVariant = Color(scheme.onPrimaryFixedVariant),
+        secondaryFixed = Color(scheme.secondaryFixed),
+        secondaryFixedDim = Color(scheme.secondaryFixedDim),
+        onSecondaryFixed = Color(scheme.onSecondaryFixed),
+        onSecondaryFixedVariant = Color(scheme.onSecondaryFixedVariant),
+        tertiaryFixed = Color(scheme.tertiaryFixed),
+        tertiaryFixedDim = Color(scheme.tertiaryFixedDim),
+        onTertiaryFixed = Color(scheme.onTertiaryFixed),
+        onTertiaryFixedVariant = Color(scheme.onTertiaryFixedVariant),
     )
 }

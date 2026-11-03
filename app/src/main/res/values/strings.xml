@@ -185,4 +185,65 @@
     <string name="viewer_remember_direction_description">Restore the picture rotation when reopening the same item. Screen orientation is set separately.</string>
     <string name="viewer_remember_zoom">Remember zoom and position</string>
     <string name="viewer_remember_zoom_description">Restore the same item’s zoom and viewed area. When off, reopen fitted to the screen.</string>
+    <string name="cover_set">Set cover</string>
+    <string name="cover_automatic">Automatic</string>
+    <string name="cover_manual">Custom cover</string>
+    <string name="cover_auto_hint">Updates with the collection</string>
+    <string name="cover_use_auto">Use auto</string>
+    <string name="cover_save_error">Could not save the cover. Try again.</string>
+    <string name="cover_empty">No media available. The cover will be selected automatically when content is added.</string>
+    <string name="cover_no_results">No matching files</string>
+    <string name="cover_choose">Choose as cover</string>
+    <string name="cover_search">Search files</string>
+    <string name="collection_settings">Album settings</string>
+    <string name="collection_cover">Cover</string>
+    <string name="cover_choose_image">Choose image</string>
+    <string name="duplicate_find_group">Find duplicates within group</string>
+    <string name="cover_empty_title">No images to choose</string>
+    <string name="cover_search_empty_hint">Try a different file name.</string>
+    <string name="cover_choose_album">Choose an album in this group</string>
+    <string name="group_choose_illustration">Choose illustration</string>
+    <string name="group_art_all">All</string>
+    <string-array name="group_art_categories"><item>Travel</item><item>People</item><item>Sports</item><item>Life</item><item>Nature</item><item>Food</item><item>Creativity</item><item>Learning</item><item>Celebrations</item><item>Animals</item></string-array>
+<string name="theme_color_title">Color</string><string name="theme_color_auto">Automatic color</string><string-array name="theme_color_names"><item>Violet</item><item>Blue</item><item>Teal</item><item>Green</item><item>Gold</item><item>Coral</item><item>Rose</item><item>Lavender</item></string-array>
+    <string name="theme_color_manual">Theme color</string>
+    <string name="theme_color_hue">Hue</string>
+    <string-array name="theme_hue_names">
+        <item>Rose</item>
+        <item>Crimson</item>
+        <item>Brick</item>
+        <item>Vermilion</item>
+        <item>Terracotta</item>
+        <item>Ochre</item>
+        <item>Amber</item>
+        <item>Golden</item>
+        <item>Mustard</item>
+        <item>Citron</item>
+        <item>Olive</item>
+        <item>Moss</item>
+        <item>Grass</item>
+        <item>Leaf</item>
+        <item>Forest</item>
+        <item>Jade</item>
+        <item>Emerald</item>
+        <item>Mint</item>
+        <item>Patina</item>
+        <item>Teal</item>
+        <item>Peacock</item>
+        <item>Lake blue</item>
+        <item>Cyan blue</item>
+        <item>Sky blue</item>
+        <item>Azure</item>
+        <item>Steel blue</item>
+        <item>Cornflower</item>
+        <item>Cobalt</item>
+        <item>Ultramarine</item>
+        <item>Indigo</item>
+        <item>Iris</item>
+        <item>Wisteria</item>
+        <item>Orchid</item>
+        <item>Mauve</item>
+        <item>Mulberry</item>
+        <item>Rouge</item>
+    </string-array>
 </resources>

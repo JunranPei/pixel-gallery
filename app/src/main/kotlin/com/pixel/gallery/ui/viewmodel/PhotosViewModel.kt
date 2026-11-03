@@ -353,6 +353,9 @@ class PhotosViewModel @Inject constructor(
     val showFullAlbumNames: StateFlow<Boolean> = settingsRepository.showFullAlbumNames
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val manualColor = settingsRepository.manualColor.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+    fun setManualColor(value: Int) { viewModelScope.launch { settingsRepository.setManualColor(value) } }
+
     val materialYou: StateFlow<Boolean> = settingsRepository.materialYou
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
@@ -395,8 +398,9 @@ class PhotosViewModel @Inject constructor(
         }
     }
 
-    val albums: StateFlow<List<Album>> = combine(browsingIndex, albumSortOrder) { index, sort ->
-        index.library[com.pixel.gallery.model.MediaTypeFilter.ALL].albums(sort)
+    val albums: StateFlow<List<Album>> = combine(browsingIndex, albumSortOrder, settingsRepository.collectionCovers) { index, sort, covers ->
+        val library = index.library[com.pixel.gallery.model.MediaTypeFilter.ALL]
+        com.pixel.gallery.model.applyAlbumCovers(library.albums(sort), library.media.photos, covers)
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -417,8 +421,8 @@ class PhotosViewModel @Inject constructor(
     val hiddenAlbums: StateFlow<List<Album>> = combine(
         allPhotos,
         settingsRepository.hiddenFolderRoots,
-        albumSortOrder
-    ) { all, hidden, sort ->
+        albumSortOrder, settingsRepository.collectionCovers
+    ) { all, hidden, sort, covers ->
         // Saved roots must remain manageable even when empty or not indexed.
         // Keep the exact saved path so Unhide removes the matching setting.
         val grouped = hidden.map { root ->
@@ -431,7 +435,7 @@ class PhotosViewModel @Inject constructor(
                 lastModified = entries.maxOfOrNull { it.chronologicalTimestamp() } ?: 0L,
             )
         }
-        AlbumSorter.shared.sortAlbums(grouped, sort)
+        com.pixel.gallery.model.applyAlbumCovers(AlbumSorter.shared.sortAlbums(grouped, sort), all, covers)
     }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())

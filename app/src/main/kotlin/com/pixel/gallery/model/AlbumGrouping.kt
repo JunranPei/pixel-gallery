@@ -49,7 +49,7 @@ fun groupedAlbumRows(
     if (search) return albums.map { GroupedAlbumRow("album:${it.path}", album = it) }
     return buildList {
         val labelsOpen = LABELS_ALBUM_GROUP !in grouping.collapsedIds
-        add(GroupedAlbumRow("group:$LABELS_ALBUM_GROUP", if (labelsOpen) LABELS_ALBUM_GROUP else null,
+        add(GroupedAlbumRow("group:$LABELS_ALBUM_GROUP", LABELS_ALBUM_GROUP,
             group = AlbumGroup(LABELS_ALBUM_GROUP, "")))
         if (labelsOpen) labels.forEach {
             add(GroupedAlbumRow("label:${it.label.id}", LABELS_ALBUM_GROUP, label = it))
@@ -57,7 +57,7 @@ fun groupedAlbumRows(
         val assigned = hashSetOf<String>()
         grouping.groups.forEach { group ->
             val open = group.id !in grouping.collapsedIds
-            add(GroupedAlbumRow("group:${group.id}", if (open) group.id else null, group = group))
+            add(GroupedAlbumRow("group:${group.id}", group.id, group = group))
             // Preserve the caller's album sort inside each group.
             albums.filter { it.path in group.paths && assigned.add(it.path) }.forEach {
                 if (open) add(GroupedAlbumRow("album:${it.path}", group.id, album = it))

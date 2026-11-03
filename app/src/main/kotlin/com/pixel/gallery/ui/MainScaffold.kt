@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.material.icons.outlined.FolderOff
+import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material3.*
@@ -33,6 +36,12 @@ import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import com.pixel.gallery.ui.gallery.matchesAlbumSearch
 import com.pixel.gallery.model.Album
+import com.pixel.gallery.model.CoverTarget
+import com.pixel.gallery.model.albumCoverKey
+import com.pixel.gallery.model.labelCoverKey
+import com.pixel.gallery.model.groupCoverKey
+import com.pixel.gallery.model.applyAlbumCovers
+import com.pixel.gallery.model.resolveCollectionCover
 import com.pixel.gallery.ui.home.PhotosScreen
 import com.pixel.gallery.ui.home.AlbumsScreen
 import com.pixel.gallery.ui.home.AlbumRenameDialog
@@ -330,6 +339,18 @@ private fun MainScaffoldContent(
     photosViewModel: PhotosViewModel,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val coversViewModel: com.pixel.gallery.ui.viewmodel.CollectionCoversViewModel = hiltViewModel()
+    val collectionCovers by coversViewModel.covers.collectAsState()
+    val coverSaving by coversViewModel.saving.collectAsState()
+    val coverError by coversViewModel.error.collectAsState()
+    var coverTarget by remember { mutableStateOf<CoverTarget?>(null) }
+    var selectedCollection by remember { mutableStateOf<CoverTarget?>(null) }
+    var pickingCover by remember { mutableStateOf(false) }
+    var collectionEditSaving by remember { mutableStateOf(false) }
+    var collectionEditError by remember { mutableStateOf(false) }
+    var editingGroupName by remember { mutableStateOf<com.pixel.gallery.model.AlbumGroup?>(null) }
+    var dissolvingCollection by remember { mutableStateOf<com.pixel.gallery.model.AlbumGroup?>(null) }
+    var editingLabelName by remember { mutableStateOf<CoverTarget?>(null) }
     val albumGroupsViewModel: com.pixel.gallery.ui.viewmodel.AlbumGroupsViewModel = hiltViewModel()
     val albumGrouping by albumGroupsViewModel.grouping.collectAsState()
     val albumGroupError by albumGroupsViewModel.error.collectAsState()
@@ -342,6 +363,12 @@ private fun MainScaffoldContent(
     val labelSummaries by labelsViewModel.labels.collectAsState()
     val labelMemberships by labelsViewModel.memberships.collectAsState()
     val recentLabelIds by labelsViewModel.recentLabelIds.collectAsState()
+    val openLabelCover: (Long) -> Unit = { id ->
+        labelSummaries.firstOrNull { it.label.id == id }?.let { summary ->
+            coversViewModel.clearError()
+            coverTarget = CoverTarget(labelCoverKey(id), if (summary.label.isSystem) context.getString(R.string.labels_favourites) else summary.label.name)
+        }
+    }
     val editorLabelEntries = remember(labelEntries, labelSummaries) {
         val byId = labelEntries.associateBy { it.id }
         val orderedIds = labelSummaries.map { it.label.id }
@@ -647,6 +674,67 @@ private fun MainScaffoldContent(
             com.pixel.gallery.model.AlbumSorter.shared.sortAlbums(filtered, albumSortOrder)
         }
     }
+    val coverVisibleMedia = remember(allPhotos, vault) {
+        val locked = vault.mapTo(hashSetOf()) { it.contentId }
+        allPhotos.filter { !it.isTrashed && it.contentId !in locked }
+    }
+    val groupCoverCandidates = remember(coverVisibleMedia, albums, albumGrouping, labelMemberships) {
+        val visiblePaths = albums.mapTo(hashSetOf()) { it.path }
+        val labeledIds = labelMemberships.mapTo(hashSetOf()) { it.contentId }
+        val byAlbum = coverVisibleMedia.groupBy { it.path.substringBeforeLast('/') }
+        buildMap<String, List<MediaEntry>> {
+            put(com.pixel.gallery.model.LABELS_ALBUM_GROUP, coverVisibleMedia.filter { it.contentId in labeledIds })
+            albumGrouping.groups.forEach { group ->
+                val paths = group.paths.filter { it in visiblePaths }.toHashSet()
+                put(group.id, paths.flatMap { byAlbum[it].orEmpty() })
+            }
+        }
+    }
+    val resolvedGroupCovers = remember(groupCoverCandidates, collectionCovers) {
+        groupCoverCandidates.mapNotNull { (id, media) ->
+            resolveCollectionCover(collectionCovers[groupCoverKey(id)], media)?.let { id to it.uri }
+        }.toMap()
+    }
+    val activeCoverKey = coverTarget?.key.orEmpty()
+    val inlineCoverGroupId = if (pickingCover) activeCoverKey.takeIf { it.startsWith("group:") }?.removePrefix("group:") else null
+    var collectionNameDraft by remember(activeCoverKey) { mutableStateOf(coverTarget?.title.orEmpty()) }
+    var coverPickerAlbum by remember(activeCoverKey) { mutableStateOf<String?>(null) }
+    var coverPickerLabel by remember(activeCoverKey) { mutableStateOf<Long?>(null) }
+    var coverDraft by remember(activeCoverKey) { mutableStateOf(collectionCovers[activeCoverKey]) }
+    LaunchedEffect(activeCoverKey) { pickingCover = false; collectionEditError = false }
+    val coverDensityKey = "cover-picker:$activeCoverKey" + (coverPickerLabel?.let { ":label:$it" } ?: "")
+    val coverColumns by remember(coverDensityKey, photosViewModel) {
+        photosViewModel.pageGridColumns(coverDensityKey)
+    }.collectAsState(initial = 3)
+    val coverCandidates = remember(coverTarget, coverVisibleMedia, hiddenPhotos, groupCoverCandidates, labelMemberships) {
+        val target = coverTarget
+        when {
+            target == null -> emptyList()
+            target.key.startsWith("group:") -> groupCoverCandidates[target.key.removePrefix("group:")].orEmpty()
+            target.key.startsWith("label:") -> {
+                val id = target.key.removePrefix("label:").toLongOrNull()
+                val ids = labelMemberships.filter { it.labelId == id }.mapTo(hashSetOf()) { it.contentId }
+                coverVisibleMedia.filter { it.contentId in ids }
+            }
+            else -> (if (target.hidden) hiddenPhotos else coverVisibleMedia).filter {
+                !it.isTrashed && it.path.substringBeforeLast('/') == target.key.removePrefix("album:")
+            }
+        }.distinctBy { it.uri }.sortedWith(compareByDescending<MediaEntry> { it.bestTimestamp }.thenByDescending { it.contentId })
+    }
+    val autoCover = remember(coverTarget, coverCandidates, browsingIndex, albums, labelSummaries, albumGrouping) {
+        val key = coverTarget?.key.orEmpty()
+        val uri = when {
+            key.startsWith("album:") && coverTarget?.hidden != true -> browsingIndex.library[MediaTypeFilter.ALL]
+                .albums(albumSortOrder).firstOrNull { it.path == key.removePrefix("album:") }?.coverUri
+            key == groupCoverKey(com.pixel.gallery.model.LABELS_ALBUM_GROUP) -> labelSummaries.firstNotNullOfOrNull { it.cover?.uri }
+            key.startsWith("group:") -> {
+                val paths = albumGrouping.groups.firstOrNull { it.id == key.removePrefix("group:") }?.paths.orEmpty()
+                albums.firstOrNull { it.path in paths && it.coverUri.isNotBlank() }?.coverUri
+            }
+            else -> null
+        }
+        coverCandidates.firstOrNull { it.uri == uri } ?: coverCandidates.firstOrNull()
+    }
     var photoSearchQuery by rememberSaveable { mutableStateOf("") }
     var albumSearchQuery by rememberSaveable { mutableStateOf("") }
     val normalizedPhotoSearchQuery = photoSearchQuery.trim()
@@ -668,13 +756,14 @@ private fun MainScaffoldContent(
         }
     }
     val albumSearchResult by produceState(
-        HomeAlbumSearchResult(homeMediaType), browsingIndex, homeMediaType, albumSortOrder, normalizedAlbumSearchQuery,
+        HomeAlbumSearchResult(homeMediaType), browsingIndex, homeMediaType, albumSortOrder, normalizedAlbumSearchQuery, collectionCovers,
     ) {
         val type = homeMediaType
         val query = normalizedAlbumSearchQuery
         if (query.isNotEmpty()) delay(HomeSearchDebounceMillis)
         value = withContext(Dispatchers.Default) {
-            val albums = browsingIndex.library[type].albums(albumSortOrder)
+            val library = browsingIndex.library[type]
+            val albums = applyAlbumCovers(library.albums(albumSortOrder), library.media.photos, collectionCovers)
             HomeAlbumSearchResult(type, query, if (query.isEmpty()) albums else albums.filter {
                 it.name.contains(query, ignoreCase = true)
             })
@@ -719,6 +808,7 @@ private fun MainScaffoldContent(
     var renamingAlbum by remember { mutableStateOf<Album?>(null) }
     val albumSelectionMode = (currentScreen == Screen.Home || currentScreen == Screen.HiddenAlbums) && selectedAlbumPaths.isNotEmpty()
     val toggleAlbumPath: (String) -> Unit = { path ->
+        selectedCollection = null
         selectedAlbumPaths = if (path in selectedAlbumPaths) selectedAlbumPaths - path else selectedAlbumPaths + path
     }
     val hasOpenSelectionSheet = (showLabelEditor && labelEditorFromGrid) ||
@@ -1148,10 +1238,38 @@ private fun MainScaffoldContent(
                                 albums = searchedAlbums,
                                 labels = labelSummaries,
                                 grouping = albumGrouping,
-                                onToggleGroup = albumGroupsViewModel::toggle,
-                                onRenameGroup = albumGroupsViewModel::rename,
-                                onDissolveGroup = albumGroupsViewModel::dissolve,
-                                onLabel = { id -> navigateToStack(navigationStack + Screen.Label(id)) },
+                                groupCovers = resolvedGroupCovers,
+                                selectedCollectionKey = if (inlineCoverGroupId != null) activeCoverKey else selectedCollection?.key,
+                                coverPickingGroupId = inlineCoverGroupId,
+                                onSetLabelCover = { id ->
+                                    if (inlineCoverGroupId == com.pixel.gallery.model.LABELS_ALBUM_GROUP) {
+                                        coverPickerLabel = id
+                                    } else labelSummaries.firstOrNull { it.label.id == id }?.let { summary ->
+                                        selectedCollection = if (selectedCollection?.key == labelCoverKey(id)) null else CoverTarget(labelCoverKey(id), if (summary.label.isSystem)
+                                            context.getString(R.string.labels_favourites) else summary.label.name)
+                                    }
+                                },
+                                onSetGroupCover = { id ->
+                                    if (inlineCoverGroupId != null) {
+                                        if (id == inlineCoverGroupId) pickingCover = false
+                                    } else {
+                                    coversViewModel.clearError()
+                                    selectedCollection = if (selectedCollection?.key == groupCoverKey(id)) null else CoverTarget(groupCoverKey(id), if (id == com.pixel.gallery.model.LABELS_ALBUM_GROUP)
+                                        context.getString(R.string.qs_labels_title) else albumGrouping.groups.firstOrNull { it.id == id }?.name.orEmpty())
+                                    }
+                                },
+                                onToggleGroup = { id ->
+                                    if (inlineCoverGroupId != null) {
+                                        if (id == inlineCoverGroupId) pickingCover = false
+                                    } else albumGroupsViewModel.toggle(id)
+                                },
+                                onLabel = { id ->
+                                    if (inlineCoverGroupId == com.pixel.gallery.model.LABELS_ALBUM_GROUP) coverPickerLabel = id
+                                    else {
+                                        selectedCollection = null
+                                        navigateToStack(navigationStack + Screen.Label(id))
+                                    }
+                                },
                                 bottomPadding = contentBottomPadding,
                                 gridState = if (normalizedAlbumSearchQuery.isEmpty()) {
                                     albumsGridState
@@ -1160,7 +1278,14 @@ private fun MainScaffoldContent(
                                 },
                                 onLabels = { navigateToStack(navigationStack + Screen.Labels) },
                                 onTrash = { navigateToStack(navigationStack + Screen.Trash) },
-                                onAlbum = { name -> navigateToStack(navigationStack + Screen.Photo(name, homeMediaType)) },
+                                onAlbum = { name ->
+                                    if (inlineCoverGroupId != null) {
+                                        if (albumGrouping.groups.any { it.id == inlineCoverGroupId && name in it.paths }) coverPickerAlbum = name
+                                    } else {
+                                        selectedCollection = null
+                                        navigateToStack(navigationStack + Screen.Photo(name, homeMediaType))
+                                    }
+                                },
                                 selectedPaths = selectedAlbumPaths,
                                 selectionMode = albumSelectionMode,
                                 onToggleSelection = toggleAlbumPath,
@@ -1204,6 +1329,7 @@ private fun MainScaffoldContent(
                     onCreateLabel = { labelsViewModel.createLabel(it) },
                     onRenameLabel = { id, name -> labelsViewModel.renameLabel(id, name) },
                     onDeleteLabels = labelsViewModel::deleteLabels,
+                    onSetCover = openLabelCover,
                     errorMessage = labelsError,
                     onClearError = labelsViewModel::clearError,
                     isSaving = labelsSaving,
@@ -1244,6 +1370,7 @@ private fun MainScaffoldContent(
                             labelsViewModel.removeMediaFromLabel(labelId, ids) { selectedIds = emptySet() }
                         },
                         onEditLabel = { navigateToStack(navigationStack.dropLast(1) + Screen.Labels) },
+                        onSetCover = { openLabelCover(labelId) },
                         isForeground = isActiveRoute && currentScreen == screen,
                     )
                 }
@@ -1352,6 +1479,10 @@ private fun MainScaffoldContent(
                         quickSort = quickSortConfig,
                         onToggleQuickSort = toggleQuickSort,
                         albumName = albumName,
+                        onSetCover = {
+                            coversViewModel.clearError()
+                            coverTarget = CoverTarget(albumCoverKey(albumName), java.io.File(albumName).name, screen.hiddenAlbum)
+                        },
                         isHiddenAlbum = screen.hiddenAlbum,
                         initialMediaType = screen.initialMediaType,
                         isForeground = isActiveRoute && currentScreen == screen,
@@ -1403,14 +1534,46 @@ private fun MainScaffoldContent(
     }
     val selectionHeader: GalleryHeaderSpec? = run {
 
-            if (albumSelectionMode) {
+            if (selectedCollection != null) {
+                val chosen = selectedCollection!!
+                val groupMedia = if (chosen.key.startsWith("group:")) groupCoverCandidates[chosen.key.removePrefix("group:")].orEmpty()
+                    else {
+                        val labelId = chosen.key.removePrefix("label:").toLongOrNull()
+                        val ids = labelMemberships.filter { it.labelId == labelId }.mapTo(hashSetOf()) { it.contentId }
+                        coverVisibleMedia.filter { it.contentId in ids }
+                    }
+                AlbumSelectionTopBar(count = 1, onClear = { selectedCollection = null },
+                    collectionTitle = chosen.title,
+                    groupExpanded = chosen.key.removePrefix("group:") !in albumGrouping.collapsedIds,
+                    onToggleGroup = if (chosen.key.startsWith("group:")) ({
+                        if (pickingCover) pickingCover = false
+                        albumGroupsViewModel.toggle(chosen.key.removePrefix("group:"))
+                    }) else null,
+                    renameDescription = stringResource(R.string.collection_settings),
+                    onRename = { coversViewModel.clearError(); coverTarget = selectedCollection },
+                    findDuplicatesLabel = stringResource(R.string.duplicate_find_group),
+                    canFindDuplicates = groupMedia.size > 1,
+                    onFindDuplicates = { duplicateViewModel.start(groupMedia, DeduplicationScope.ALL_FILES, chosen.title) },
+                    extraMenu = {
+                        val group = albumGrouping.groups.firstOrNull { groupCoverKey(it.id) == chosen.key }
+                        if (group != null) com.pixel.gallery.ui.components.GalleryMenuRow(
+                            stringResource(R.string.album_group_dissolve), androidx.compose.material.icons.Icons.Outlined.FolderOff,
+                            onClick = { dissolvingCollection = group })
+                        if (chosen.key == groupCoverKey(com.pixel.gallery.model.LABELS_ALBUM_GROUP))
+                            com.pixel.gallery.ui.components.GalleryMenuRow(stringResource(R.string.album_group_manage), androidx.compose.material.icons.Icons.Outlined.Label,
+                                onClick = { selectedCollection = null; navigateToStack(navigationStack + Screen.Labels) })
+                    })
+            } else if (albumSelectionMode) {
                 AlbumSelectionTopBar(
                     count = selectedAlbumPaths.size,
                     onAddToGroup = if (currentScreen == Screen.Home) ({ showAlbumGroupPicker = true }) else null,
                     onClear = { selectedAlbumPaths = emptySet() },
+                    renameDescription = stringResource(R.string.collection_settings),
                     onRename = {
-                        val source = if (currentScreen == Screen.HiddenAlbums) hiddenAlbums else searchedAlbums
-                        renamingAlbum = source.firstOrNull { it.path == selectedAlbumPaths.singleOrNull() }
+                        selectedAlbumPaths.singleOrNull()?.let { path ->
+                            coversViewModel.clearError()
+                            coverTarget = CoverTarget(albumCoverKey(path), java.io.File(path).name, currentScreen == Screen.HiddenAlbums)
+                        }
                     },
                     onHide = {
                         selectedAlbumPaths.forEach(photosViewModel::addHiddenFolder)
@@ -1851,8 +2014,59 @@ private fun MainScaffoldContent(
         Screen.HiddenAlbums in navigationStack -> GalleryNavigationTab.Hidden
         else -> if (homePagerState.currentPage == 0) GalleryNavigationTab.Photos else GalleryNavigationTab.Albums
     }
+    val closeCollectionSettings = { if (!coverSaving && !collectionEditSaving) { coverTarget = null; pickingCover = false; coversViewModel.clearError() } }
+    BackHandler(enabled = selectedCollection != null && coverTarget == null) { selectedCollection = null }
+    BackHandler(enabled = coverTarget != null) {
+        if (pickingCover && (coverPickerAlbum != null || coverPickerLabel != null)) {
+            coverPickerAlbum = null; coverPickerLabel = null
+        } else if (pickingCover) pickingCover = false else closeCollectionSettings()
+    }
+    val collectionPage = coverTarget?.let { target ->
+        val chooseCover: (Long) -> Unit = { id ->
+            coverCandidates.firstOrNull { it.contentId == id }?.let {
+                coverDraft = it.uri; pickingCover = false
+                coverPickerAlbum = null; coverPickerLabel = null
+            }
+        }
+        if (pickingCover) {
+            val groupId = target.key.takeIf { it.startsWith("group:") }?.removePrefix("group:")
+            val selectedPath = coverPickerAlbum
+            val selectedLabel = coverPickerLabel
+            when {
+                // Keep the actual home grid mounted: same rows, density, order and scroll state.
+                groupId != null && selectedPath == null && selectedLabel == null -> null
+                target.key.startsWith("album:") || selectedPath != null -> PhotoScreen(
+                    albumName = selectedPath ?: target.key.removePrefix("album:"), isHiddenAlbum = target.hidden,
+                    onBack = { if (selectedPath != null) coverPickerAlbum = null else pickingCover = false },
+                    onNavigateToViewer = { id, _, _ -> chooseCover(id) },
+                    onToggleSelection = chooseCover, selectionMode = false,
+                    coverPicking = true, columnsPageOverride = "cover-picker:${target.key}:${selectedPath.orEmpty()}",
+                    viewModel = photosViewModel,
+                )
+                else -> {
+                    val labelIds = selectedLabel?.let { id ->
+                        labelMemberships.filter { it.labelId == id }.mapTo(hashSetOf()) { it.contentId }
+                    }
+                    com.pixel.gallery.ui.home.CollectionCoverPhotoPage(
+                        title = selectedLabel?.let { id ->
+                            labelSummaries.firstOrNull { it.label.id == id }?.let {
+                                if (it.label.isSystem) context.getString(R.string.favourites) else it.label.name
+                            }
+                        } ?: target.title,
+                        media = if (labelIds == null) coverCandidates else coverCandidates.filter { it.contentId in labelIds },
+                        columns = coverColumns,
+                        onColumnsChange = { photosViewModel.setPageGridColumns(coverDensityKey, it) },
+                        photosViewModel = photosViewModel,
+                        onBack = { if (selectedLabel != null) coverPickerLabel = null else pickingCover = false },
+                        onChoose = chooseCover,
+                    )
+                }
+            }
+        } else null
+    }
+
     val showRootNavigation = (currentScreen == Screen.Home || currentScreen == Screen.LockedFolder || currentScreen == Screen.HiddenAlbums) &&
-        !quickSortEnabled && !albumSelectionMode && !selectionMode && reviewPage == null
+        !quickSortEnabled && !albumSelectionMode && !selectionMode && reviewPage == null && coverTarget == null && selectedCollection == null
     LaunchedEffect(currentScreen, showRootNavigation) {
         if (!showRootNavigation) navigationReveal.reset(rootNavigationTab.side)
         else if (rootNavigationTab.side != 0 && navigationReveal.anchor != rootNavigationTab.side) {
@@ -1862,7 +2076,7 @@ private fun MainScaffoldContent(
     }
     val density = LocalDensity.current
     val routeHeaderScrollBehavior = topBarScrollBehavior
-    val detailToolbarLocked = visibleViewer != null && reviewPage == null
+    val detailToolbarLocked = coverTarget != null || (visibleViewer != null && reviewPage == null)
     LaunchedEffect(detailToolbarLocked) {
         if (detailToolbarLocked) {
             // Viewer controls must remain reachable while the media surface
@@ -1894,7 +2108,7 @@ private fun MainScaffoldContent(
         snackbarHost = {
             GalleryMessageHost()
         },
-        header = reviewPage?.header ?: viewerPage?.takeIf { visibleViewer != null }?.header ?: selectionHeader ?: routePages.getValue(baseScreenIndex).header,
+        header = collectionPage?.header ?: reviewPage?.header ?: viewerPage?.takeIf { visibleViewer != null }?.header ?: selectionHeader ?: routePages.getValue(baseScreenIndex).header,
         underlayHeader = (selectionHeader ?: routePages.getValue(baseScreenIndex).header).takeIf {
             visibleViewer != null && reviewPage == null
         },
@@ -1937,8 +2151,8 @@ private fun MainScaffoldContent(
                         key(screenIndex, screen) {
                             val isActiveRoute = screenIndex == baseScreenIndex
                             RetainedGalleryLayer(
-                                visible = isActiveRoute && (visibleViewer == null || viewerTransitions.revealing) && reviewPage == null,
-                                interactive = isActiveRoute && visibleViewer == null && reviewPage == null,
+                                visible = isActiveRoute && (visibleViewer == null || viewerTransitions.revealing) && reviewPage == null && collectionPage == null,
+                                interactive = isActiveRoute && visibleViewer == null && reviewPage == null && collectionPage == null,
                             ) {
                                 CompositionLocalProvider(
                                     LocalViewerGridScope provides screen,
@@ -2045,11 +2259,49 @@ private fun MainScaffoldContent(
                     page.content()
                 }
             }
+            collectionPage?.let { page ->
+                Box(Modifier.fillMaxSize().padding(top = innerPadding.calculateTopPadding()).galleryContentEdge()) {
+                    page.content()
+                }
             }
+            }
+
+    if (!pickingCover) coverTarget?.let { target ->
+        val manual = resolveCollectionCover(coverDraft, coverCandidates)
+        val group = albumGrouping.groups.firstOrNull { groupCoverKey(it.id) == target.key }
+        val label = labelSummaries.firstOrNull { labelCoverKey(it.label.id) == target.key }?.label
+        val canRename = target.key.startsWith("album:") || group != null || (label != null && !label.isSystem)
+        com.pixel.gallery.ui.home.CollectionSettingsDialog(
+            target, collectionNameDraft, { collectionNameDraft = it; collectionEditError = false }, canRename,
+            manual ?: autoCover, manual == null, coverSaving || collectionEditSaving, coverError || collectionEditError,
+            onBack = closeCollectionSettings, onChoose = { pickingCover = true }, onAutomatic = { coverDraft = null },
+            onSave = {
+                collectionEditSaving = true
+                scope.launch {
+                    var key = target.key
+                    val name = collectionNameDraft.trim()
+                    val result = if (!canRename || name == target.title) Result.success(Unit) else when {
+                        group != null -> albumGroupsViewModel.renameAndWait(group.id, name)
+                        label != null -> labelsViewModel.renameAndWait(label.id, name)
+                        else -> photosViewModel.renameAlbum(target.key.removePrefix("album:"), name).also {
+                            if (it.isSuccess) key = albumCoverKey(java.io.File(java.io.File(target.key.removePrefix("album:")).parentFile, name).path)
+                        }
+                    }
+                    collectionEditSaving = false
+                    if (result.isFailure) collectionEditError = true else coversViewModel.save(key, manual?.uri) {
+                        selectedCollection = selectedCollection?.copy(key = key, title = name)
+                        if (key != target.key) selectedAlbumPaths = emptySet()
+                        coverTarget = null; pickingCover = false; coversViewModel.clearError()
+                    }
+                }
+            },
+        )
+    }
 
     if (showAlbumGroupPicker) {
         com.pixel.gallery.ui.home.AlbumGroupPickerSheet(
             groups = albumGrouping.groups,
+            groupCovers = resolvedGroupCovers,
             albums = albums,
             selectedPaths = selectedAlbumPaths,
             columns = albumGroupPickerColumns,
@@ -2061,8 +2313,13 @@ private fun MainScaffoldContent(
                 if (!albumGroupSaving) { showAlbumGroupPicker = false; selectionPanelHeight = 0.dp; albumGroupsViewModel.clearError() }
             },
             onAssign = { id -> albumGroupsViewModel.assign(selectedAlbumPaths.toSet(), id) },
-            onCreate = { name, onSaved ->
-                albumGroupsViewModel.create(name, selectedAlbumPaths.toSet(), onSaved)
+            onCreate = { name, art, onSaved ->
+                val id = java.util.UUID.randomUUID().toString()
+                albumGroupsViewModel.create(name, selectedAlbumPaths.toSet(), {
+                    context.getSharedPreferences("group_illustrations", 0).edit().putInt(id, art).apply()
+                    selectedAlbumPaths = emptySet()
+                    onSaved()
+                }, id)
             },
         )
     }
@@ -2106,13 +2363,47 @@ private fun MainScaffoldContent(
         )
     }
 
+    editingGroupName?.let { group ->
+        com.pixel.gallery.ui.home.AlbumGroupNameDialog(albumGrouping.groups, group, { editingGroupName = null }) { name ->
+            albumGroupsViewModel.rename(group.id, name)
+            coverTarget = coverTarget?.copy(title = name); selectedCollection = selectedCollection?.copy(title = name)
+            editingGroupName = null
+        }
+    }
+    dissolvingCollection?.let { group ->
+        com.pixel.gallery.ui.home.AlbumGroupDissolveDialog(group.name, { dissolvingCollection = null }) {
+            albumGroupsViewModel.dissolve(group.id); dissolvingCollection = null; coverTarget = null; selectedCollection = null
+        }
+    }
+    editingLabelName?.let { target ->
+        var name by remember(target.key) { mutableStateOf(target.title) }
+        val id = target.key.removePrefix("label:").toLong()
+        val valid = com.pixel.gallery.model.isValidLabelName(name) && labelSummaries.none {
+            it.label.id != id && it.label.normalizedName == com.pixel.gallery.model.normalizeLabelName(name)
+        }
+        com.pixel.gallery.ui.components.GalleryDialog(
+            onDismissRequest = { editingLabelName = null }, title = { Text(stringResource(R.string.labels_rename)) },
+            text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(stringResource(R.string.labels_name)) }) },
+            confirmButton = { TextButton(enabled = valid, onClick = {
+                labelsViewModel.renameLabel(id, name.trim()); coverTarget = coverTarget?.copy(title = name.trim())
+                selectedCollection = selectedCollection?.copy(title = name.trim()); editingLabelName = null
+            }) { Text(stringResource(R.string.labels_save)) } },
+            dismissButton = { TextButton(onClick = { editingLabelName = null }) { Text(stringResource(R.string.labels_cancel)) } },
+        )
+    }
     renamingAlbum?.let { album ->
         AlbumRenameDialog(
             album = album,
             onDismiss = { renamingAlbum = null },
             onRename = { path, name ->
                 photosViewModel.renameAlbum(path, name).also { result ->
-                    if (result.isSuccess) selectedAlbumPaths = emptySet()
+                    if (result.isSuccess) {
+                        selectedAlbumPaths = emptySet()
+                        if (coverTarget?.key == albumCoverKey(path)) {
+                            val renamedPath = java.io.File(java.io.File(path).parentFile, name.trim()).path
+                            coverTarget = coverTarget?.copy(key = albumCoverKey(renamedPath), title = name.trim())
+                        }
+                    }
                 }
             },
         )
