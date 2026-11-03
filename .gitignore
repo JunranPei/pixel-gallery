@@ -50,3 +50,6 @@ all_apks/
 *.apk
 *.txt
 build_apks/
+
+# Native build entrypoints must be available in clean checkouts.
+!CMakeLists.txt

@@ -1,0 +1,44 @@
+cmake_minimum_required(VERSION 3.22.1)
+
+project(indexed_jxl LANGUAGES C CXX)
+
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_DEVTOOLS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_JPEGLI OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_MANPAGES OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_JNI OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_SJPEG OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_OPENEXR OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_SKCMS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_VIEWERS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_PLUGINS OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_TRANSCODE_JPEG OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_BOXES OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(vendor/libjxl EXCLUDE_FROM_ALL)
+
+add_library(indexed-jxl SHARED indexed_jxl_jni.cpp)
+
+target_compile_options(indexed-jxl PRIVATE
+    -O3
+    -fstrict-aliasing
+    -fvisibility=hidden
+)
+
+find_library(log-lib log)
+find_library(jnigraphics-lib jnigraphics)
+find_library(z-lib z)
+target_link_libraries(indexed-jxl
+    jxl_dec
+    jxl_cms
+    ${log-lib}
+    ${jnigraphics-lib}
+    ${z-lib}
+)
