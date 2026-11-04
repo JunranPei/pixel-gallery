@@ -258,7 +258,7 @@ class PhotosViewModel @Inject constructor(
         _transferUiState.value = TransferUiState()
     }
 
-    fun groupMedia(entries: List<MediaEntry>, columns: Int = 3, sortOrder: PhotoSortOrder = PhotoSortOrder.DATE_DESC): List<GridItem> {
+    fun groupMedia(entries: List<MediaEntry>, columns: Int = 4, sortOrder: PhotoSortOrder = PhotoSortOrder.DATE_DESC): List<GridItem> {
         // Album, favourites, trash and vault all pass through here. Sorting here
         // prevents date headers from being generated against a different order.
         val sortedEntries = sortMedia(entries, sortOrder)
@@ -269,27 +269,27 @@ class PhotosViewModel @Inject constructor(
     }
 
     val gridColumns: StateFlow<Int> = settingsRepository.gridColumns
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
     val albumGridColumns: StateFlow<Int> = settingsRepository.albumGridColumns
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 2)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
-    fun pageGridColumns(page: String, default: Int = 3) = settingsRepository.pageGridColumns(page, default)
+    fun pageGridColumns(page: String, default: Int = 4) = settingsRepository.pageGridColumns(page, default)
     fun setPageGridColumns(page: String, value: Int) {
         viewModelScope.launch { settingsRepository.setPageGridColumns(page, value) }
     }
-    val favouritesGridColumns = pageGridColumns("favourites").stateIn(viewModelScope, SharingStarted.Eagerly, 3)
-    val trashGridColumns = pageGridColumns("trash").stateIn(viewModelScope, SharingStarted.Eagerly, 3)
-    val vaultGridColumns = pageGridColumns("vault").stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+    val favouritesGridColumns = pageGridColumns("favourites").stateIn(viewModelScope, SharingStarted.Eagerly, 4)
+    val trashGridColumns = pageGridColumns("trash").stateIn(viewModelScope, SharingStarted.Eagerly, 4)
+    val vaultGridColumns = pageGridColumns("vault").stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
     val moveSheetColumns: StateFlow<Int> = settingsRepository.moveSheetColumns
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
     val labelSheetColumns: StateFlow<Int> = settingsRepository.labelSheetColumns
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
     val quickSortSheetColumns: StateFlow<Int> = settingsRepository.quickSortSheetColumns
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
     internal val browsingIndex: StateFlow<MediaBrowseIndex> = combine(
         orderedMedia, gridColumns.map { it >= 6 }.distinctUntilChanged(), browseTimeZone,

@@ -72,8 +72,8 @@ class LabelBackupTest {
     @Test fun rejectsDamagedUnsupportedOrDanglingBackupsBeforeAnyImport() {
         val valid = LabelBackupJson.gson.toJson(backup(file()))
         listOf(
-            valid.replace("\"version\": 1", "\"version\": 2"),
-            valid.replace("\"version\": 1", "\"version\": 1.5"),
+            valid.replace("\"version\": 2", "\"version\": 99"),
+            valid.replace("\"version\": 2", "\"version\": 1.5"),
             valid.replace(hash, "short-hash"),
             LabelBackupJson.gson.toJson(backup(file(labels = listOf("missing")))),
             LabelBackupJson.gson.toJson(backup(file(), file())),

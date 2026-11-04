@@ -7,10 +7,12 @@ enum class AlbumSortOrder(val criterion: String, val direction: String) {
     COUNT_ASC("COUNT", "ASC"),
     COUNT_DESC("COUNT", "DESC"),
     DATE_ASC("DATE", "ASC"),
-    DATE_DESC("DATE", "DESC");
+    DATE_DESC("DATE", "DESC"),
+    CUSTOM("CUSTOM", "ASC");
 
     companion object {
         fun fromSelection(criterion: String, direction: String): AlbumSortOrder {
+            if (criterion == "CUSTOM") return CUSTOM
             val normalizedDirection = if (direction == "DESC") "DESC" else "ASC"
             return entries.firstOrNull {
                 it.criterion == criterion && it.direction == normalizedDirection
@@ -49,6 +51,7 @@ class AlbumSorter private constructor() {
         count: (T) -> Int,
         timestamp: (T) -> Long,
     ): List<T> = when (order) {
+        AlbumSortOrder.CUSTOM -> values
         AlbumSortOrder.NAME_ASC -> values.sortedWith(naturalBy(name))
         AlbumSortOrder.NAME_DESC -> values.sortedWith(naturalBy(name).reversed())
         AlbumSortOrder.COUNT_ASC -> values.sortedWith(compareBy(count).then(naturalBy(name)))

@@ -82,7 +82,7 @@ internal class TransferUiEdgeChecks(private val instrumentation: Instrumentation
         try {
             instrumentation.runOnMainSync { activity.setContent { PixelGalleryTheme(darkTheme=false,dynamicColor=false) {
                 Surface(Modifier.fillMaxSize()) {
-                    if(shown.value) key(epoch.intValue) { TransferDestinationScreen(entries.value,
+                    if(shown.value) key(epoch.intValue) { TransferDestinationScreen(entries = entries.value,
                         onBack={shown.value=false},onFinished={finished+=it;shown.value=false;vm.clearTransferState()},viewModel=vm,quickSortViewModel=qs) }
                     else Text("Transfer test complete")
                 }

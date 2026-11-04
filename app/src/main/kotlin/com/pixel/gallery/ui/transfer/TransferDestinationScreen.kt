@@ -119,6 +119,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalGlideComposeApi::class)
 @Composable
 fun TransferDestinationScreen(
+    expandRequest: Int = 0,
     entries: List<MediaEntry>,
     onBack: () -> Unit,
     onFinished: (TransferSummary) -> Unit,
@@ -126,7 +127,7 @@ fun TransferDestinationScreen(
     onMoveAccepted: (Set<Long>) -> Unit = {},
     onTransferStarted: (Set<Long>) -> Unit = {},
     onPanelHeightChange: (androidx.compose.ui.unit.Dp) -> Unit = {},
-    columns: Int = 3,
+    columns: Int = 4,
     onColumnsChange: (Int) -> Unit = {},
     viewModel: PhotosViewModel = hiltViewModel(),
     quickSortViewModel: QuickSortViewModel = hiltViewModel()
@@ -283,6 +284,7 @@ fun TransferDestinationScreen(
     var panelHeight by remember { mutableStateOf(0.dp) }
     Box(Modifier.fillMaxSize()) {
     SelectionBottomSheet(
+        expandRequest = expandRequest,
         title = stringResource(R.string.transfer_title),
         showBackButton = false,
         centerTitle = true,
@@ -532,7 +534,7 @@ fun TransferDestinationContent(
     onOtherFolders: () -> Unit,
     onCopy: () -> Unit,
     onMove: () -> Unit,
-    columns: Int = 3,
+    columns: Int = 4,
     onColumnsChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
     handedness: Handedness = Handedness.RIGHT,

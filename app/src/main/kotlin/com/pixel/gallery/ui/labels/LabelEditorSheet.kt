@@ -45,12 +45,13 @@ import com.pixel.gallery.ui.utils.pinchToZoomColumns
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LabelEditorSheet(
+    expandRequest: Int = 0,
     labels: List<LabelEntry>,
     labelSummaries: List<LabelSummary> = emptyList(),
     memberships: List<MediaLabelEntry>,
     selectedIds: Set<Long>,
     recentLabelIds: List<Long> = emptyList(),
-    columns: Int = 2,
+    columns: Int = 4,
     onColumnsChange: (Int) -> Unit = {},
     onDismiss: () -> Unit,
     onApply: (LabelEditRequest, () -> Unit) -> Unit,
@@ -59,7 +60,7 @@ fun LabelEditorSheet(
     errorMessage: String? = null,
     onPanelHeightChange: (androidx.compose.ui.unit.Dp) -> Unit = {},
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable(selectedIds) { mutableStateOf("") }
     val gridColumns = columns.coerceIn(2, 6)
     val favouriteName = stringResource(R.string.labels_favourites)
     val normalizedQuery = normalizeLabelName(query)
@@ -101,11 +102,11 @@ fun LabelEditorSheet(
     }
 
     SelectionBottomSheet(
+        expandRequest = expandRequest,
         title = stringResource(R.string.label_edit),
         showBackButton = false,
         centerTitle = true,
         onPanelHeightChange = onPanelHeightChange,
-        subtitle = stringResource(R.string.labels_selection_count, selectedIds.size),
         onDismiss = onDismiss,
         confirmDismiss = { !isSaving },
     ) {

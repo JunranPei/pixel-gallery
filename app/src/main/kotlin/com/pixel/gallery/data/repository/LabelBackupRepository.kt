@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
@@ -24,7 +25,7 @@ import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class LabelExportResult(val labels: Int, val media: Int, val skipped: Int)
+data class LabelExportResult(val labels: Int, val media: Int, val skipped: Int, val groups: Int = 0)
 data class LabelImportPreview(
     val backup: LabelBackup,
     val resolution: LabelBackupMatches,
@@ -40,6 +41,7 @@ class LabelBackupRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val database: GalleryDatabase,
     private val mediaRepository: MediaRepository,
+    private val settings: SettingsRepository,
 ) {
     suspend fun export(uri: Uri, onProgress: (Int, Int) -> Unit): LabelExportResult = withContext(Dispatchers.IO) {
         val backup = mediaRepository.withMediaMutation {
@@ -68,7 +70,15 @@ class LabelBackupRepository @Inject constructor(
                 result
             }
             require(files.size <= 100_000 && snapshot.first.size <= 5_000)
-            LabelBackup(exportedAt = Instant.now().toString(),
+            val grouping = settings.albumGrouping.first()
+            val art = context.getSharedPreferences("group_illustrations", 0)
+            val exportedLabelIds = snapshot.first.filterNot { it.isSystem }.mapTo(hashSetOf()) { it.id }
+            val groups = (listOf(AlbumGroup(LABELS_ALBUM_GROUP, "", labelIds = emptyList())) + grouping.groups).map { group ->
+                BackupGroup(group.id, group.name, group.paths,
+                    if (group.isLabelGroup) group.labelIds.orEmpty().filter { it in exportedLabelIds }.map { "label-$it" } else null,
+                    group.colorIndex, art.getInt(group.id, 0).coerceIn(0, 49), group.id in grouping.collapsedIds)
+            }
+            LabelBackup(groups = groups, exportedAt = Instant.now().toString(),
                 labels = snapshot.first.map { BackupLabel("label-${it.id}", it.name, it.systemKind) },
                 media = files, skippedMedia = skipped)
         }
@@ -87,7 +97,7 @@ class LabelBackupRepository @Inject constructor(
             it.flush()
         }
         currentCoroutineContext().ensureActive()
-        LabelExportResult(backup.labels.size, backup.media.size, backup.skippedMedia)
+        LabelExportResult(backup.labels.size, backup.media.size, backup.skippedMedia, backup.groups.orEmpty().count { it.id != LABELS_ALBUM_GROUP })
     }
 
     suspend fun preview(uri: Uri, onProgress: (Int, Int) -> Unit): LabelImportPreview = withContext(Dispatchers.IO) {
@@ -130,11 +140,12 @@ class LabelBackupRepository @Inject constructor(
                 if (expected.sha256 != actual.sha256 || expected.sizeBytes != actual.sizeBytes ||
                     expected.relativePath != actual.relativePath) throw ChangedLabelMediaException()
             }
-            database.withTransaction {
+            val restoredLabelIds = mutableMapOf<String, Long>()
+            val result = database.withTransaction {
                 currentCoroutineContext().ensureActive()
                 val dao = database.labelDao()
                 val existing = dao.getLabels().toMutableList()
-                val labelIds = mutableMapOf<String, Long>()
+                val labelIds = restoredLabelIds
                 var addedLabels = 0
                 preview.backup.labels.forEach { label ->
                     currentCoroutineContext().ensureActive()
@@ -168,6 +179,17 @@ class LabelBackupRepository @Inject constructor(
                 currentCoroutineContext().ensureActive()
                 LabelImportResult(ids.size, addedLabels, links.size)
             }
+            preview.backup.groups?.let { groups ->
+                var illustrations = emptyMap<String, Int>()
+                settings.updateAlbumGrouping { current ->
+                    mergeBackupGroups(current, groups, restoredLabelIds).also { illustrations = it.illustrations }.grouping
+                }
+                val prefs = context.getSharedPreferences("group_illustrations", 0)
+                val editor = prefs.edit()
+                illustrations.forEach { (id, art) -> if (!prefs.contains(id)) editor.putInt(id, art) }
+                check(editor.commit()) { "Could not save group illustrations" }
+            }
+            result
         }
     }
 

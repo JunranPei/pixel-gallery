@@ -66,7 +66,7 @@ fun LabelBackupSettingsBlock(
             SettingsClickItem(
                 title = stringResource(R.string.label_backup_export),
                 icon = Icons.Outlined.FileUpload,
-                onClick = { exporter.launch("pixel-gallery-labels-${LocalDate.now()}.json") },
+                onClick = { exporter.launch("pixel-gallery-library-${LocalDate.now()}.json") },
             )
         } else {
             SettingsClickItem(
@@ -119,6 +119,7 @@ fun LabelBackupSettingsBlock(
                     val result = state.importResult!!
                     Text(stringResource(R.string.label_backup_import_result, result.media, result.labelsAdded, result.linksAdded))
                 } else Text(stringResource(R.string.label_backup_merge_note))
+                Text(stringResource(R.string.backup_group_count, preview.backup.groups.orEmpty().count { it.id != com.pixel.gallery.model.LABELS_ALBUM_GROUP }))
                 if (preview.unreadable > 0) Text(stringResource(R.string.label_backup_unreadable, preview.unreadable))
                 if (preview.backup.skippedMedia > 0) Text(stringResource(R.string.label_backup_source_skipped, preview.backup.skippedMedia))
                 if (missing.isNotEmpty()) { Text(stringResource(R.string.label_backup_missing, missing.size)); Text(stringResource(R.string.label_backup_missing_note)) }
@@ -134,6 +135,6 @@ fun LabelBackupSettingsBlock(
     val error = state.error
     if (exported != null || error != null) GalleryDialog(onDismissRequest = viewModel::dismissMessage,
         title = { Text(stringResource(if (error != null) R.string.label_backup_error else R.string.label_backup_export_done)) },
-        text = { Text(error ?: stringResource(R.string.label_backup_export_result, exported!!.labels, exported.media, exported.skipped)) },
+        text = { Text(error ?: stringResource(R.string.label_backup_export_result, exported!!.labels, exported.media, exported.skipped, exported.groups)) },
         confirmButton = { TextButton(onClick = viewModel::dismissMessage) { Text(stringResource(R.string.label_backup_ok)) } })
 }

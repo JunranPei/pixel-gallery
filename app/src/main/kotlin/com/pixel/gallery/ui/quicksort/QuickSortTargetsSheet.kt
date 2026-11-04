@@ -67,6 +67,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickSortTargetsSheet(
+    expandRequest: Int = 0,
     availableTargets: List<TransferDestination>,
     albumUses: List<QuickSortAlbumUse> = emptyList(),
     selectedTargets: List<TransferDestination>,
@@ -76,7 +77,7 @@ fun QuickSortTargetsSheet(
     onDismiss: () -> Unit,
     onPanelHeightChange: (Dp) -> Unit = {},
     onTargetsChange: (List<TransferDestination>) -> Unit = {},
-    columns: Int = 3,
+    columns: Int = 4,
     onColumnsChange: (Int) -> Unit = {},
     onCreateAlbum: (
         parent: TransferDestination,
@@ -148,6 +149,7 @@ fun QuickSortTargetsSheet(
     val selectionIndices = remember(draft) { draft.mapIndexed { index, target -> target.stableKey to index }.toMap() }
     val gridColumns = columns.coerceIn(2, 6)
     SelectionBottomSheet(
+        expandRequest = expandRequest,
         title = stringResource(R.string.qs_targets_title),
         onDismiss = onDismiss,
         confirmDismiss = { !isCreating },

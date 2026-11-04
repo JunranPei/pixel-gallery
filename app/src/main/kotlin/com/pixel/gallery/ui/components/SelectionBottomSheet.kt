@@ -35,6 +35,7 @@ fun SelectionBottomSheet(
     onDismiss: () -> Unit,
     confirmDismiss: () -> Boolean = { true },
     persistent: Boolean = false,
+    expandRequest: Int = 0,
     centerTitle: Boolean = false,
     onPanelHeightChange: (Dp) -> Unit = {},
     headerActions: @Composable RowScope.() -> Unit = {},
@@ -48,6 +49,14 @@ fun SelectionBottomSheet(
     var pullOffset by remember { mutableFloatStateOf(0f) }
     var pullReturn by remember { mutableStateOf<Job?>(null) }
     var closing by remember { mutableStateOf(false) }
+    LaunchedEffect(expandRequest) {
+        if (expandRequest > 0) {
+            pullReturn?.cancel()
+            pullOffset = 0f
+            closing = false
+            expanded = true
+        }
+    }
     androidx.activity.compose.BackHandler {
         if (expanded || panel.fraction > 0f) expanded = false
         else if (confirmDismiss()) onDismiss()

@@ -43,7 +43,7 @@
     <string name="settings_section_theme">Theme</string>
     <string name="settings_section_performance">Performance</string>
     <string name="settings_section_cache">Cache</string>
-    <string name="settings_section_label_backup">Label backup</string>
+    <string name="settings_section_label_backup">Labels and groups backup</string>
     <string name="settings_section_exclude_folders">Exclude folders</string>
     
     <!-- Hidden / Excluded -->
@@ -247,4 +247,6 @@
         <item>Rouge</item>
     </string-array>
     <string name="label_group_selected_count">Selected label albums: %1$d</string>
+    <string name="album_grouping_enabled">Album groups</string>
+    <string name="album_grouping_enabled_description">Keep groups saved when turned off.</string>
 </resources>

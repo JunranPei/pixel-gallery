@@ -39,6 +39,7 @@ fun AlbumSortDialog(
             SortCriterion("NAME", "Name", "A to Z", "Z to A"),
             SortCriterion("COUNT", "Count", "Least first", "Most first"),
             SortCriterion("DATE", "Date", "Oldest first", "Newest first"),
+            SortCriterion("CUSTOM", "Custom", "", ""),
         )
     }
     SortDialog(
@@ -162,6 +163,7 @@ fun SortDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                if (selectedCriterion != "CUSTOM") {
                 // 2. Sort direction section (2 options)
                 Text(
                     text = "Order",
@@ -181,6 +183,7 @@ fun SortDialog(
                     unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 )
 
+                }
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // 3. Confirm/Cancel action buttons (M3 Expressive compliant pill shape)

@@ -12,7 +12,14 @@ import javax.inject.Inject
 
 @HiltViewModel
 class AlbumGroupsViewModel @Inject constructor(private val settings: SettingsRepository) : ViewModel() {
-    val grouping = settings.albumGrouping.stateIn(viewModelScope, SharingStarted.Eagerly, AlbumGrouping())
+    val enabled = settings.groupingEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    fun setEnabled(value: Boolean) { viewModelScope.launch { settings.setGroupingEnabled(value) } }
+    private val expansion = PendingGroupExpansion()
+    private val _grouping = MutableStateFlow(AlbumGrouping())
+    val grouping = _grouping.asStateFlow()
+    init {
+        viewModelScope.launch { settings.albumGrouping.collect { _grouping.value = expansion.apply(it) } }
+    }
     private val _error = MutableStateFlow(false)
     val error = _error.asStateFlow()
     private fun update(change: (AlbumGrouping) -> AlbumGrouping) {
@@ -37,8 +44,56 @@ class AlbumGroupsViewModel @Inject constructor(private val settings: SettingsRep
             }
         }
     }
+    fun rememberRows(rows: List<GroupedAlbumRow>) = update { it.rememberOrder(rows) }
+    fun setOrder(scope: String, rule: AlbumSortOrder, rows: List<GroupedAlbumRow>) = update { state ->
+        val prepared = if (rule == AlbumSortOrder.CUSTOM) state.startCustom(scope, rows) else state
+        prepared.withOrder(scope) { it.copy(rule = rule) }
+    }
+    fun startCustom(rows: List<GroupedAlbumRow>) = update { state ->
+        rows.map { it.orderScope() }.distinct().fold(state) { result, scope -> result.startCustom(scope, rows) }
+    }
+    fun pinRows(rows: List<GroupedAlbumRow>, keys: Set<String>) = update { state ->
+        val chosen = rows.filter { it.key in keys }
+        val remove = chosen.isNotEmpty() && chosen.all { it.key in state.orderState(it.orderScope()).pinned }
+        var result = state
+        chosen.groupBy { it.orderScope() }.forEach { (scope, entries) ->
+            result = result.withOrder(scope) { saved -> saved.copy(pinned = if (remove) saved.pinned - entries.map { it.key }.toSet() else (saved.pinned + entries.map { it.key }).distinct()) }
+        }
+        result
+    }
+    fun moveRow(rows: List<GroupedAlbumRow>, from: String, to: String, default: AlbumSortOrder) = update { state ->
+        val a = rows.firstOrNull { it.key == from } ?: return@update state
+        val b = rows.firstOrNull { it.key == to } ?: return@update state
+        val scope = a.orderScope()
+        val saved = state.orderState(scope)
+        if (scope != b.orderScope() || (from in saved.pinned) != (to in saved.pinned)) return@update state
+        val pin = from in saved.pinned
+        if (!pin && (saved.rule ?: if (scope.startsWith("groups:")) AlbumSortOrder.CUSTOM else default) != AlbumSortOrder.CUSTOM) return@update state
+        val order = (if (pin) saved.pinned else saved.custom).toMutableList()
+        if (from !in order || to !in order) return@update state
+        val destination = order.indexOf(to)
+        order.remove(from); order.add(destination.coerceAtMost(order.size), from)
+        state.withOrder(scope) { if (pin) it.copy(pinned = order) else it.copy(custom = order, customStarted = true) }
+    }
     fun clearError() { _error.value = false }
-    fun toggle(id: String) = update { it.copy(collapsedIds = if (id in it.collapsedIds) it.collapsedIds - id else it.collapsedIds + id) }
+    fun toggle(id: String) {
+        val request = expansion.begin(id, grouping.value)
+        _grouping.value = expansion.apply(grouping.value)
+        viewModelScope.launch {
+            try {
+                settings.updateAlbumGrouping { state ->
+                    state.copy(collapsedIds = if (request.collapsed) state.collapsedIds + id else state.collapsedIds - id)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _error.value = true
+            } finally {
+                expansion.finish(request)
+            }
+            _grouping.value = expansion.apply(settings.albumGrouping.first())
+        }
+    }
     fun assign(paths: Set<String>, id: String?, onSaved: () -> Unit = {}) = save(onSaved) { it.assign(paths, id) }
     fun create(name: String, paths: Set<String>, onSaved: () -> Unit = {}, id: String = UUID.randomUUID().toString()) = save(onSaved) { state ->
         val cleaned = name.trim()

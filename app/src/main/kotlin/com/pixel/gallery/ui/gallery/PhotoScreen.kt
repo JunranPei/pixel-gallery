@@ -119,7 +119,7 @@ fun PhotoScreen(
 ): GalleryPageContent {
     val browsingIndex by (if (isHiddenAlbum) viewModel.hiddenBrowsingIndex else viewModel.browsingIndex).collectAsState()
     val columnsPage = columnsPageOverride ?: "${if (isHiddenAlbum) "hidden-album" else "album"}:$albumName"
-    val gridColumns by remember(columnsPage, viewModel) { viewModel.pageGridColumns(columnsPage) }.collectAsState(initial = 3)
+    val gridColumns by remember(columnsPage, viewModel) { viewModel.pageGridColumns(columnsPage) }.collectAsState(initial = 4)
     val photoSortOrder by viewModel.photoSortOrder.collectAsState()
     var showSortDialog by remember { mutableStateOf(false) }
     var searchMode by rememberSaveable(albumName) { mutableStateOf(false) }

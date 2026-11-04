@@ -49,17 +49,28 @@ fun GroupedAlbumsScreen(
     albums: List<Album>, labels: List<LabelSummary>, grouping: AlbumGrouping,
     bottomPadding: Dp, gridState: LazyGridState, columns: Int, onColumnsChange: (Int) -> Unit,
     selectedPaths: Set<String>, selectionMode: Boolean, onToggleSelection: (String) -> Unit,
+    selectedLabelIds: Set<Long>, onToggleLabelSelection: (Long) -> Unit,
     onAlbum: (String) -> Unit, onLabel: (Long) -> Unit, onLabels: () -> Unit, onTrash: () -> Unit,
     onToggleGroup: (String) -> Unit,
+    groupingEnabled: Boolean = true,
     search: Boolean = false, emptyMessage: String? = null,
     groupCovers: Map<String, String> = emptyMap(),
     selectedCollectionKey: String? = null,
     onSetGroupCover: (String) -> Unit = {},
     onSetLabelCover: (Long) -> Unit = {},
     coverPickingGroupId: String? = null,
+    defaultOrder: AlbumSortOrder = AlbumSortOrder.NAME_ASC,
+    onRememberOrder: (List<GroupedAlbumRow>) -> Unit = {},
+    onMoveRow: (List<GroupedAlbumRow>, String, String) -> Unit = { _, _, _ -> },
 ) {
     val gridColumns = columns.coerceIn(2, 6)
-    val rows = remember(albums, labels, grouping, search) { groupedAlbumRows(albums, grouping, labels, search) }
+    val rows = remember(albums, labels, grouping, search, groupingEnabled, defaultOrder) {
+        orderedAlbumRows(groupedAlbumRows(albums, grouping, labels, search, groupingEnabled), grouping, defaultOrder)
+    }
+    LaunchedEffect(albums, labels, grouping.groups, defaultOrder) {
+        val all = orderedAlbumRows(groupedAlbumRows(albums, grouping.copy(collapsedIds = emptySet()), labels, false, groupingEnabled), grouping, defaultOrder)
+        onRememberOrder(all)
+    }
     val backgrounds = remember(rows) { rows.associate { it.key to it.backgroundGroup } }
     val scheme = MaterialTheme.colorScheme
     val dark = scheme.surface.luminance() < 0.5f
@@ -75,13 +86,33 @@ fun GroupedAlbumsScreen(
         modifier = Modifier.testTag("grouped-albums-grid"),
         gridGestures = Modifier.albumGridDragSelect(
             state = gridState,
-            keys = rows.mapNotNull { it.album?.path },
-            selected = selectedPaths,
-            onToggle = onToggleSelection,
+            keys = rows.filter { it.group != null || it.album != null || (it.label != null && !it.label.label.isSystem) }.map { it.key },
+            rangeKeys = rows.filter { it.album != null || (it.label != null && !it.label.label.isSystem) }.map { it.key },
+            selected = setOfNotNull(selectedCollectionKey) + selectedPaths.mapTo(linkedSetOf()) { "album:$it" } + selectedLabelIds.map { "label:$it" },
+            onToggle = { key ->
+                if (key.startsWith("group:")) onSetGroupCover(key.removePrefix("group:"))
+                else if (key.startsWith("label:")) onToggleLabelSelection(key.removePrefix("label:").toLong())
+                else onToggleSelection(key.removePrefix("album:"))
+            },
+            canReorder = { key -> rows.firstOrNull { it.key == key }?.let { row ->
+                val saved = grouping.orderState(row.orderScope())
+                key in saved.pinned || (saved.rule ?: if (row.group != null) AlbumSortOrder.CUSTOM else defaultOrder) == AlbumSortOrder.CUSTOM
+            } == true },
+            onReorder = { from, to -> onMoveRow(rows, from, to) },
             leftPaddingPx = with(LocalDensity.current) { 16.dp.toPx() },
             columns = gridColumns,
             enabled = coverPickingGroupId == null,
-            keyForGridKey = { key -> rows.firstOrNull { it.key == key }?.album?.path },
+            collapseGroupForKey = { key ->
+                if (selectionMode || selectedCollectionKey != null) null else backgrounds[key]
+            },
+            onSwipeCollapse = { id ->
+                val header = rows.indexOfFirst { it.backgroundGroup == id }
+                if (header >= 0 && gridState.layoutInfo.visibleItemsInfo.none { it.index == header }) {
+                    gridState.requestScrollToItem(header)
+                }
+                onToggleGroup(id)
+            },
+            keyForGridKey = { key -> rows.firstOrNull { it.key == key && (it.group != null || it.album != null || (it.label != null && !it.label.label.isSystem)) }?.key },
         ),
         contentBackground = Modifier.groupBackgrounds(gridState, backgrounds, groupColors,
             selectedCollectionKey?.takeIf { it.startsWith("group:") }?.removePrefix("group:"), scheme.primary)
@@ -159,7 +190,7 @@ fun GroupedAlbumsScreen(
                         subtitle = stringResource(if (isLabels) R.string.album_group_label_count else R.string.album_group_count, members.size),
                         coverUri = null, coverModifiedMillis = 0L, columns = gridColumns, enabled = rowEnabled,
                         onClick = { if (!selectionMode) { if (coverPickingGroupId != null || selectedCollectionKey != null) onSetGroupCover(group.id) else onToggleGroup(group.id) } },
-                        onLongClick = { if (!selectionMode) onSetGroupCover(group.id) },
+                        onLongClick = null,
                         onClickLabel = stringResource(
                             if (open) R.string.album_group_collapse else R.string.album_group_expand, title,
                         ),
@@ -175,7 +206,6 @@ fun GroupedAlbumsScreen(
                     val album = row.album
                     AlbumCoverCard(album.name, "${album.itemCount} items", album.coverUri.takeIf { it.isNotBlank() }, album.lastModified,
                         onClick = { if (selectionMode) onToggleSelection(album.path) else onAlbum(album.path) },
-                        coverInset = if (row.backgroundGroup != null) 6.dp else 0.dp,
                         columns = gridColumns, enabled = rowEnabled, selected = album.path in selectedPaths, selectionMode = selectionMode,
                         onLongClick = null)
                 }
@@ -188,16 +218,21 @@ fun GroupedAlbumsScreen(
                         coverMimeType = summary.cover?.sourceMimeType, coverSizeBytes = summary.cover?.sizeBytes,
                         coverRotationDegrees = summary.cover?.sourceRotationDegrees ?: 0,
                         emptyIcon = if (summary.label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
-                        coverInset = if (row.backgroundGroup != null) 6.dp else 0.dp,
-                        columns = gridColumns, enabled = !selectionMode && rowEnabled,
-                        selected = selectedCollectionKey == labelCoverKey(summary.label.id),
-                        onClick = { if (coverPickingGroupId != null || selectedCollectionKey?.startsWith("label:") == true) onSetLabelCover(summary.label.id) else onLabel(summary.label.id) },
-                        onLongClick = { if (!selectionMode) onSetLabelCover(summary.label.id) },
+                        columns = gridColumns, enabled = rowEnabled,
+                        selectionMode = selectionMode,
+                        selected = summary.label.id in selectedLabelIds,
+                        onClick = {
+                            if (selectionMode) onToggleLabelSelection(summary.label.id)
+                            else if (coverPickingGroupId != null) onSetLabelCover(summary.label.id)
+                            else onLabel(summary.label.id)
+                        },
+                        onLongClick = null,
                     )
                 }
                 else -> AlbumCoverCard(stringResource(R.string.album_group_trash), "", null, 0L,
                     onClick = onTrash, columns = gridColumns, enabled = !selectionMode && rowEnabled, emptyIcon = Icons.Outlined.DeleteOutline)
             }
+
             }
         }
     }
@@ -254,22 +289,32 @@ private fun Modifier.groupBackgrounds(state: LazyGridState, groups: Map<String, 
             val bands = drawn[group].orEmpty()
             if (bands.isEmpty()) return@forEach
             val path = Path()
-            fun rect(left: Float, top: Float, right: Float, bottom: Float) {
-                val next = Path().apply { addRect(left, top, right, bottom, Path.Direction.CW) }
+            val radius = ExpressiveShapes.AlbumCornerRadius.toPx()
+            val overlapping = bands.zipWithNext().any { (a, b) -> b.top < a.bottom + pad * 2 }
+
+            fun rect(left: Float, top: Float, right: Float, bottom: Float, rounded: Boolean = false) {
+                val next = Path().apply {
+                    if (rounded) addRoundRect(left, top, right, bottom, radius, radius, Path.Direction.CW)
+                    else addRect(left, top, right, bottom, Path.Direction.CW)
+                }
                 path.op(next, Path.Op.UNION)
             }
             bands.forEachIndexed { index, band ->
-                rect(band.left - pad, band.top - pad, band.right + pad, band.bottom + pad)
+                // Round before union: overlapping animated bands create tiny stair-step edges.
+                // Applying CornerPathEffect only after union collapses those corners to zero.
+                rect(band.left - pad, band.top - pad, band.right + pad, band.bottom + pad, rounded = overlapping)
                 bands.getOrNull(index + 1)?.let { next ->
                     val left = maxOf(band.left, next.left)
                     val right = minOf(band.right, next.right)
-                    if (right > left && next.top >= band.top)
+                    // Morphing rows initially overlap. Only bridge a real vertical gap;
+                    // an inverted bridge cuts across their rounded outer corners.
+                    if (right > left && next.top > band.bottom)
                         rect(left - pad, band.bottom - pad, right + pad, next.top + pad)
                 }
             }
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 this.color = (if (group == selectedGroup) lerp(color, selectionColor, 0.14f) else color).toArgb()
-                pathEffect = CornerPathEffect(ExpressiveShapes.AlbumCornerRadius.toPx())
+                if (!overlapping) pathEffect = CornerPathEffect(radius)
             }
             canvas.nativeCanvas.drawPath(path, paint)
             if (group == selectedGroup) {

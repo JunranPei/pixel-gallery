@@ -18,9 +18,9 @@ class AlbumGroupingTest {
 
     @Test fun groupsFirstMembersKeepAlbumOrderAndTrashLast() {
         val rows = groupedAlbumRows(albums, grouping, emptyList())
-        assertEquals(listOf("group:system:labels", "group:one", "album:/B", "album:/A", "group:two", "album:/C", "album:/D", "system:trash"), rows.map { it.key })
-        assertEquals("one", rows[1].backgroundGroup)
-        assertNull(rows[6].backgroundGroup)
+        assertEquals(listOf("group:one", "album:/B", "album:/A", "group:two", "album:/C", "album:/D", "system:trash"), rows.map { it.key })
+        assertEquals("one", rows[0].backgroundGroup)
+        assertNull(rows[5].backgroundGroup)
         assertEquals(rows.size, rows.map { it.key }.distinct().size)
     }
     @Test fun closingOneGroupDoesNotCloseOthersOrLeakMembersIntoUngrouped() {
@@ -53,7 +53,7 @@ class AlbumGroupingTest {
     }
     @Test fun newUngroupedAlbumUsesCallerSortAndEmptyGroupsRemainReachable() {
         val rows = groupedAlbumRows(emptyList(), grouping, emptyList())
-        assertEquals(listOf("group:system:labels", "group:one", "group:two", "system:trash"), rows.map { it.key })
+        assertEquals(listOf("group:one", "group:two", "system:trash"), rows.map { it.key })
         val added = groupedAlbumRows(listOf(Album("New", "/new", "", 1)) + albums, grouping, emptyList())
         assertEquals(listOf("/new", "/D"), added.filter { it.album != null && it.backgroundGroup == null }.map { it.album!!.path })
     }
@@ -106,5 +106,18 @@ class AlbumGroupingTest {
         assertFalse(groupedAlbumRows(albums, legacy, listOf(fav.copy(count = 0))).any { it.favourite != null })
         assertTrue(runCatching { legacy.assignLabels(setOf(1L), "old") }.isFailure)
         assertTrue(runCatching { legacy.assignLabels(setOf(1L,2L), "old") }.isFailure)
+    }
+    @Test fun defaultLabelsEntryHidesWhenEmptyAndReturnsWithAnAlbum() {
+        val label = LabelSummary(com.pixel.gallery.data.local.entity.LabelEntry(2L, "Trip", "trip"), 0)
+        val fav = LabelSummary(com.pixel.gallery.data.local.entity.LabelEntry(1L, "Favourites", "favourites", "FAVOURITES"), 2)
+        fun hasEntry(state: AlbumGrouping, labels: List<LabelSummary>) =
+            groupedAlbumRows(albums, state, labels).any { it.key == "group:$LABELS_ALBUM_GROUP" }
+        assertFalse(hasEntry(grouping, emptyList()))
+        assertFalse(hasEntry(grouping, listOf(fav)))
+        assertTrue(hasEntry(grouping, listOf(label))) // An empty album still counts as an album.
+        val assigned = grouping.copy(groups = grouping.groups + AlbumGroup("tags", "Tags", labelIds = listOf(2L)))
+        assertFalse(hasEntry(assigned, listOf(label)))
+        assertTrue(hasEntry(assigned.assignLabels(setOf(2L), null), listOf(label)))
+        assertFalse(hasEntry(assigned, emptyList()))
     }
 }

@@ -62,6 +62,9 @@ class SettingsRepository @Inject constructor(
     private val RECENT_LABEL_IDS = stringPreferencesKey("recent_label_ids")
     private val GLIDE_THREAD_COUNT = intPreferencesKey("glide_thread_count")
     private val GLIDE_CACHE_SIZE = intPreferencesKey("glide_cache_size")
+    private val GROUPING_ENABLED = booleanPreferencesKey("album_grouping_enabled")
+    val groupingEnabled = context.dataStore.data.map { it[GROUPING_ENABLED] ?: true }
+    suspend fun setGroupingEnabled(enabled: Boolean) { context.dataStore.edit { it[GROUPING_ENABLED] = enabled } }
     private val ALBUM_GROUPING = stringPreferencesKey("album_grouping")
     private fun decodeGrouping(json: String?): com.pixel.gallery.model.AlbumGrouping = runCatching {
         Gson().fromJson(json, com.pixel.gallery.model.AlbumGrouping::class.java)?.let { state ->
@@ -270,7 +273,7 @@ class SettingsRepository @Inject constructor(
     }
 
     val gridColumns: Flow<Int> = context.dataStore.data
-        .map { preferences -> preferences[GRID_COLUMNS] ?: 3 }
+        .map { preferences -> preferences[GRID_COLUMNS] ?: 4 }
 
     suspend fun setGridColumns(value: Int) {
         context.dataStore.edit { preferences ->
@@ -279,7 +282,7 @@ class SettingsRepository @Inject constructor(
     }
 
     val albumGridColumns: Flow<Int> = context.dataStore.data
-        .map { preferences -> preferences[ALBUM_GRID_COLUMNS] ?: 2 }
+        .map { preferences -> preferences[ALBUM_GRID_COLUMNS] ?: 4 }
 
     suspend fun setAlbumGridColumns(value: Int) {
         context.dataStore.edit { preferences ->
@@ -288,7 +291,7 @@ class SettingsRepository @Inject constructor(
     }
 
     /** Every collection has its own persisted density, including individual albums and labels. */
-    fun pageGridColumns(page: String, default: Int = 3): Flow<Int> = context.dataStore.data
+    fun pageGridColumns(page: String, default: Int = 4): Flow<Int> = context.dataStore.data
         .map { preferences -> (preferences[intPreferencesKey("page_grid_columns:$page")] ?: default).coerceIn(2, 6) }
 
     suspend fun setPageGridColumns(page: String, value: Int) {
@@ -296,7 +299,7 @@ class SettingsRepository @Inject constructor(
     }
 
     val moveSheetColumns: Flow<Int> = context.dataStore.data
-        .map { preferences -> (preferences[MOVE_SHEET_COLUMNS] ?: 3).coerceIn(2, 6) }
+        .map { preferences -> (preferences[MOVE_SHEET_COLUMNS] ?: 4).coerceIn(2, 6) }
 
     suspend fun setMoveSheetColumns(value: Int) {
         context.dataStore.edit { preferences ->
@@ -305,7 +308,7 @@ class SettingsRepository @Inject constructor(
     }
 
     val labelSheetColumns: Flow<Int> = context.dataStore.data
-        .map { preferences -> (preferences[LABEL_SHEET_COLUMNS] ?: 3).coerceIn(2, 6) }
+        .map { preferences -> (preferences[LABEL_SHEET_COLUMNS] ?: 4).coerceIn(2, 6) }
 
     suspend fun setLabelSheetColumns(value: Int) {
         context.dataStore.edit { preferences ->
@@ -314,7 +317,7 @@ class SettingsRepository @Inject constructor(
     }
 
     val quickSortSheetColumns: Flow<Int> = context.dataStore.data
-        .map { preferences -> (preferences[QUICK_SORT_SHEET_COLUMNS] ?: 3).coerceIn(2, 6) }
+        .map { preferences -> (preferences[QUICK_SORT_SHEET_COLUMNS] ?: 4).coerceIn(2, 6) }
 
     suspend fun setQuickSortSheetColumns(value: Int) {
         context.dataStore.edit { preferences ->

@@ -29,6 +29,7 @@ import com.pixel.gallery.ui.components.SelectionSearchField
 /** The same bounded, searchable grid used by label selection. One target per album. */
 @Composable
 fun AlbumGroupPickerSheet(
+    expandRequest: Int = 0,
     groups: List<AlbumGroup>, albums: List<Album>, selectedPaths: Set<String>,
     groupCovers: Map<String, String> = emptyMap(),
     labelMode: Boolean = false,
@@ -55,6 +56,7 @@ fun AlbumGroupPickerSheet(
         return
     }
     SelectionBottomSheet(
+        expandRequest = expandRequest,
         title = stringResource(R.string.album_group_add), centerTitle = true, showBackButton = false,
         subtitle = stringResource(if (labelMode) R.string.label_group_selected_count else R.string.album_group_selected_count, selectedPaths.size),
         onDismiss = onDismiss, confirmDismiss = { !isSaving }, onPanelHeightChange = onPanelHeightChange,

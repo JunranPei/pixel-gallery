@@ -12,7 +12,7 @@ import com.google.gson.stream.JsonToken
 import java.io.Reader
 
 const val LABEL_BACKUP_FORMAT = "pixel-gallery-labels"
-const val LABEL_BACKUP_VERSION = 1
+const val LABEL_BACKUP_VERSION = 2
 
 data class BackupLabel(val key: String, val name: String, val systemKind: String? = null)
 data class BackupMedia(
@@ -30,6 +30,7 @@ data class LabelBackup(
     val labels: List<BackupLabel>,
     val media: List<BackupMedia>,
     val skippedMedia: Int = 0,
+    val groups: List<BackupGroup>? = null,
 )
 
 /** Versioned, portable JSON. MediaStore IDs are deliberately never used to restore links. */
@@ -39,7 +40,8 @@ object LabelBackupJson {
     fun read(reader: Reader): LabelBackup {
         val root = readStrictDocument(reader).asJsonObject
         require(root.string("format") == LABEL_BACKUP_FORMAT) { "format" }
-        require(root.long("version") == LABEL_BACKUP_VERSION.toLong()) { "version" }
+        val version = root.long("version")
+        require(version in 1..LABEL_BACKUP_VERSION.toLong()) { "version" }
         val rawLabels = root.getAsJsonArray("labels")
         val rawMedia = root.getAsJsonArray("media")
         require(rawLabels.size() <= 5_000 && rawMedia.size() <= 100_000) { "size" }
@@ -74,7 +76,32 @@ object LabelBackupJson {
         require(media.map { it.key }.toSet().size == media.size) { "duplicate media" }
         val skipped = root.get("skippedMedia")?.let { root.long("skippedMedia") } ?: 0L
         require(skipped in 0..Int.MAX_VALUE.toLong())
-        return LabelBackup(exportedAt = root.string("exportedAt"), labels = labels, media = media, skippedMedia = skipped.toInt())
+        val groups = root.get("groups")?.takeUnless { it.isJsonNull }?.let { raw ->
+            require(version >= 2 && raw.isJsonArray && raw.asJsonArray.size() <= 5_000)
+            val result = raw.asJsonArray.map { element ->
+                val obj = element.asJsonObject
+                fun strings(key: String) = obj.getAsJsonArray(key).map { value ->
+                    require(value.isJsonPrimitive && value.asJsonPrimitive.isString); value.asString
+                }
+                val paths = strings("paths")
+                val keys = obj.get("labelKeys")?.takeUnless { it.isJsonNull }?.let { strings("labelKeys") }
+                val color = obj.get("colorIndex")?.takeUnless { it.isJsonNull }?.let { obj.long("colorIndex").also { require(it in 0..3) }.toInt() }
+                val art = obj.long("illustration").also { require(it in 0..49) }.toInt()
+                val collapsed = obj.get("collapsed").also { require(it.isJsonPrimitive && it.asJsonPrimitive.isBoolean) }.asBoolean
+                BackupGroup(obj.string("id"), obj.string("name"), paths, keys, color, art, collapsed).also { group ->
+                    require(group.id.length in 1..100 && (group.id == LABELS_ALBUM_GROUP || !group.id.startsWith("system:")))
+                    require(group.name.length <= 60 && (group.id == LABELS_ALBUM_GROUP || group.name.isNotBlank()))
+                    require(paths.size <= 100_000 && paths.distinct().size == paths.size && paths.all { it.isNotBlank() })
+                    require(keys == null || (paths.isEmpty() && keys.size <= 5_000 && keys.distinct().size == keys.size && keys.all { key -> labels.any { it.key == key && it.systemKind == null } }))
+                    require(group.id != LABELS_ALBUM_GROUP || (paths.isEmpty() && keys != null && keys.isEmpty()))
+                }
+            }
+            require(result.map { it.id }.distinct().size == result.size)
+            val paths = result.flatMap { it.paths }; require(paths.distinct().size == paths.size)
+            val keys = result.flatMap { it.labelKeys.orEmpty() }; require(keys.distinct().size == keys.size)
+            result
+        }
+        return LabelBackup(version = version.toInt(), groups = groups, exportedAt = root.string("exportedAt"), labels = labels, media = media, skippedMedia = skipped.toInt())
     }
 
     private fun JsonObject.string(key: String): String = get(key).let {

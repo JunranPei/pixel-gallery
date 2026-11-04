@@ -66,7 +66,7 @@
     <string name="settings_section_theme">主题</string>
     <string name="settings_section_performance">性能</string>
     <string name="settings_section_cache">缓存</string>
-    <string name="settings_section_label_backup">标签备份</string>
+    <string name="settings_section_label_backup">标签与编组备份</string>
     <string name="settings_section_exclude_folders">排除文件夹</string>
     <string name="video_settings_title">视频播放器</string>
     <string name="video_autoplay">自动播放</string>
@@ -171,4 +171,6 @@
         <item>胭脂</item>
     </string-array>
     <string name="label_group_selected_count">已选标签相册：%1$d</string>
+    <string name="album_grouping_enabled">相册群组</string>
+    <string name="album_grouping_enabled_description">关闭后保留已有编组，重新开启即可恢复。</string>
 </resources>

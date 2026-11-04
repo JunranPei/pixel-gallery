@@ -94,7 +94,7 @@ import com.pixel.gallery.ui.viewmodel.PhotosViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel.GridItem
 import com.pixel.gallery.ui.viewmodel.PhotoSortOrder
 import com.pixel.gallery.ui.viewmodel.TrashSortOrder
-import com.pixel.gallery.model.AlbumSortOrder
+import com.pixel.gallery.model.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -354,12 +354,14 @@ private fun MainScaffoldContent(
     var dissolvingCollection by remember { mutableStateOf<com.pixel.gallery.model.AlbumGroup?>(null) }
     var editingLabelName by remember { mutableStateOf<CoverTarget?>(null) }
     val albumGroupsViewModel: com.pixel.gallery.ui.viewmodel.AlbumGroupsViewModel = hiltViewModel()
+    val groupingEnabled by albumGroupsViewModel.enabled.collectAsState()
     val albumGrouping by albumGroupsViewModel.grouping.collectAsState()
     val albumGroupError by albumGroupsViewModel.error.collectAsState()
     val albumGroupSaving by albumGroupsViewModel.isSaving.collectAsState()
-    val albumGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("groups:picker") }.collectAsState(initial = 3)
-    val labelGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("label-groups:picker") }.collectAsState(initial = 3)
+    val albumGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("groups:picker") }.collectAsState(initial = 4)
+    val labelGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("label-groups:picker") }.collectAsState(initial = 4)
     var showAlbumGroupPicker by remember { mutableStateOf(false) }
+    var sheetExpandRequest by remember { mutableIntStateOf(0) }
     var labelGroupSelection by remember { mutableStateOf<Set<Long>?>(null) }
     var clearLabelGroupSelection by remember { mutableStateOf<(() -> Unit)?>(null) }
     val labelsViewModel: LabelsViewModel = hiltViewModel()
@@ -496,16 +498,21 @@ private fun MainScaffoldContent(
     val albums by photosViewModel.albums.collectAsState()
     val gridColumns by photosViewModel.gridColumns.collectAsState()
     val albumGridColumns by photosViewModel.albumGridColumns.collectAsState()
-    val labelsGridColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("labels") }.collectAsState(initial = 3)
-    val hiddenAlbumsColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("hidden-albums") }.collectAsState(initial = 3)
+    val labelsGridColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("labels") }.collectAsState(initial = 4)
+    val hiddenAlbumsColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("hidden-albums") }.collectAsState(initial = 4)
     val externalMedia by photosViewModel.externalMedia.collectAsState()
 
     val photoSortOrder by photosViewModel.photoSortOrder.collectAsState()
     val albumSortOrder by photosViewModel.albumSortOrder.collectAsState()
+    val orderingRows = remember(albums, labelSummaries, albumGrouping, albumSortOrder) {
+        orderedAlbumRows(groupedAlbumRows(albums, albumGrouping.copy(collapsedIds = emptySet()), labelSummaries), albumGrouping, albumSortOrder)
+    }
+
 
     var showPhotoSortDialog by remember { mutableStateOf(false) }
     var showTrashSortDialog by remember { mutableStateOf(false) }
     var showAlbumSortDialog by remember { mutableStateOf(false) }
+    var groupSortScope by remember { mutableStateOf<String?>(null) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isDeletePermanentlyConfirm by remember { mutableStateOf(false) }
     var showSelectionMenu by remember { mutableStateOf(false) }
@@ -514,6 +521,10 @@ private fun MainScaffoldContent(
 
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
     var selectedAlbumPaths by remember { mutableStateOf(emptySet<String>()) }
+    var selectedLabelAlbumIds by remember { mutableStateOf(emptySet<Long>()) }
+    LaunchedEffect(labelSummaries) {
+        selectedLabelAlbumIds = selectedLabelAlbumIds.intersect(labelSummaries.filterNot { it.label.isSystem }.map { it.label.id }.toSet())
+    }
     var showLabelEditor by rememberSaveable { mutableStateOf(false) }
     var labelEditorFromGrid by rememberSaveable { mutableStateOf(false) }
     var gridTransferSession by rememberSaveable { mutableStateOf<String?>(null) }
@@ -556,6 +567,7 @@ private fun MainScaffoldContent(
             labelEditorFromGrid = false
             gridTransferSession = null
             selectedAlbumPaths = emptySet()
+            selectedLabelAlbumIds = emptySet()
             showSelectionMenu = false
         }
         navigationStack = nextStack
@@ -654,6 +666,7 @@ private fun MainScaffoldContent(
 
     val startupAtAlbums by photosViewModel.startupAtAlbums.collectAsState()
     val homePagerState = rememberPagerState(pageCount = { 2 })
+    val homeVisiblePage by remember { derivedStateOf { homePagerState.settledPage } }
     var homeHeaderTransition by remember { mutableStateOf(HomeHeaderTransitionState()) }
     val isHomeSearchMode = homeHeaderTransition.isSearchMode
     val scope = rememberCoroutineScope()
@@ -684,7 +697,7 @@ private fun MainScaffoldContent(
         val locked = vault.mapTo(hashSetOf()) { it.contentId }
         allPhotos.filter { !it.isTrashed && it.contentId !in locked }
     }
-    val groupCoverCandidates = remember(coverVisibleMedia, albums, albumGrouping, labelMemberships) {
+    val groupCoverCandidates = remember(coverVisibleMedia, albums, albumGrouping.groups, labelMemberships) {
         val visiblePaths = albums.mapTo(hashSetOf()) { it.path }
         val labeledIds = labelMemberships.filter { albumGrouping.labelGroupId(it.labelId) == com.pixel.gallery.model.LABELS_ALBUM_GROUP }.mapTo(hashSetOf()) { it.contentId }
         val byAlbum = coverVisibleMedia.groupBy { it.path.substringBeforeLast('/') }
@@ -713,7 +726,7 @@ private fun MainScaffoldContent(
     val coverDensityKey = "cover-picker:$activeCoverKey" + (coverPickerLabel?.let { ":label:$it" } ?: "")
     val coverColumns by remember(coverDensityKey, photosViewModel) {
         photosViewModel.pageGridColumns(coverDensityKey)
-    }.collectAsState(initial = 3)
+    }.collectAsState(initial = 4)
     val coverCandidates = remember(coverTarget, coverVisibleMedia, hiddenPhotos, groupCoverCandidates, labelMemberships) {
         val target = coverTarget
         when {
@@ -808,16 +821,32 @@ private fun MainScaffoldContent(
         }
     }
 
-    val selectedAlbumEntries = remember(allPhotos, hiddenPhotos, currentScreen, selectedAlbumPaths) {
+    val selectedLabelMediaIds = remember(labelMemberships, selectedLabelAlbumIds) {
+        labelMemberships.filter { it.labelId in selectedLabelAlbumIds }.mapTo(hashSetOf()) { it.contentId }
+    }
+    val selectedAlbumEntries = remember(allPhotos, hiddenPhotos, currentScreen, selectedAlbumPaths, selectedLabelMediaIds) {
         if (currentScreen == Screen.HiddenAlbums) {
             hiddenPhotos.filter { entry -> selectedAlbumPaths.any { entry.path.isInsideMediaFolder(it) } }
-        } else allPhotos.filter { mediaParentPath(it.path) in selectedAlbumPaths }
+        } else allPhotos.filter { mediaParentPath(it.path) in selectedAlbumPaths || it.contentId in selectedLabelMediaIds }
     }
     var renamingAlbum by remember { mutableStateOf<Album?>(null) }
-    val albumSelectionMode = (currentScreen == Screen.Home || currentScreen == Screen.HiddenAlbums) && selectedAlbumPaths.isNotEmpty()
+    LaunchedEffect(selectedCollection?.key) {
+        val scope = groupSortScope
+        if (scope != null && selectedCollection?.key != "group:$scope") {
+            showAlbumSortDialog = false
+            groupSortScope = null
+        }
+    }
+    val albumSelectionMode = (currentScreen == Screen.Home || currentScreen == Screen.HiddenAlbums) && (selectedAlbumPaths.isNotEmpty() || selectedLabelAlbumIds.isNotEmpty())
     val toggleAlbumPath: (String) -> Unit = { path ->
         selectedCollection = null
         selectedAlbumPaths = if (path in selectedAlbumPaths) selectedAlbumPaths - path else selectedAlbumPaths + path
+    }
+    val toggleLabelAlbum: (Long) -> Unit = { id ->
+        if (labelSummaries.any { it.label.id == id && !it.label.isSystem }) {
+            selectedCollection = null
+            selectedLabelAlbumIds = if (id in selectedLabelAlbumIds) selectedLabelAlbumIds - id else selectedLabelAlbumIds + id
+        }
     }
     val hasOpenSelectionSheet = (showLabelEditor && labelEditorFromGrid) ||
         gridTransferSession != null || currentScreen is Screen.TransferDestination ||
@@ -832,7 +861,7 @@ private fun MainScaffoldContent(
         quickSortEnabled = false
         showQuickTargets = false
         selectionPanelHeight = 0.dp
-        showLabelEditor = true
+        sheetExpandRequest++; showLabelEditor = true
     }
     val onQuickEnqueued: (QuickSortEnqueueResult) -> Unit = { result ->
         when (result) {
@@ -852,7 +881,7 @@ private fun MainScaffoldContent(
             quickTargetsPanelHeight = 0.dp
             quickSortOwner = quickSortScope
             photosViewModel.setQuickSortDockTop(false)
-            showQuickTargets = true
+            sheetExpandRequest++; showQuickTargets = true
         } else {
             showQuickTargets = false
         }
@@ -873,7 +902,7 @@ private fun MainScaffoldContent(
         onReorderTargets = photosViewModel::setQuickSortTargets,
         onManageTargets = {
             if (!showQuickTargets) quickTargetsPanelHeight = 0.dp
-            showQuickTargets = true
+            sheetExpandRequest++; showQuickTargets = true
         },
         onMove = { ids, destination ->
             quickSortViewModel.enqueue((allPhotos + hiddenPhotos).filter { it.contentId in ids }, destination, onQuickEnqueued, quickSortSessionId)
@@ -955,6 +984,7 @@ private fun MainScaffoldContent(
             navigateToStack(navigationStack.dropLast(1))
         } else if (albumSelectionMode) {
             selectedAlbumPaths = emptySet()
+            selectedLabelAlbumIds = emptySet()
         } else if (selectionMode) {
             selectedIds = emptySet()
         } else if (quickSortEnabled && currentScreen !is Screen.Viewer) {
@@ -1041,7 +1071,7 @@ private fun MainScaffoldContent(
     val selectedVaultEntries = remember(selectedIds, vault) { vault.filter { it.contentId in selectedIds } }
 
     val homeTopBar: @Composable () -> GalleryHeaderSpec = {
-        val searchingAlbums = homePagerState.currentPage == 1
+        val searchingAlbums = homeVisiblePage == 1
         val query = if (searchingAlbums) albumSearchQuery else photoSearchQuery
         GalleryHeader(
             centerTitle = true,
@@ -1131,10 +1161,10 @@ private fun MainScaffoldContent(
                         }
                     },
                     onDismissRequest = { showMenu = false },
-                    showQuickSort = homePagerState.currentPage == 0 && !quickSortEnabled,
-                    sortLabel = if (homePagerState.currentPage == 0) "Sort photos" else "Sort albums",
+                    showQuickSort = homeVisiblePage == 0 && !quickSortEnabled,
+                    sortLabel = if (homeVisiblePage == 0) "Sort photos" else "Sort albums",
                     duplicateLabel = stringResource(
-                        if (homePagerState.currentPage == 0) R.string.duplicate_find_all
+                        if (homeVisiblePage == 0) R.string.duplicate_find_all
                         else R.string.duplicate_find_each_album,
                     ),
                     canFindDuplicates = allPhotos.size > 1,
@@ -1144,12 +1174,12 @@ private fun MainScaffoldContent(
                     },
                     onSort = {
                         showMenu = false
-                        if (homePagerState.currentPage == 0) showPhotoSortDialog = true
+                        if (homeVisiblePage == 0) showPhotoSortDialog = true
                         else showAlbumSortDialog = true
                     },
                     onFindDuplicates = {
                         showMenu = false
-                        val isPhotosPage = homePagerState.currentPage == 0
+                        val isPhotosPage = homeVisiblePage == 0
                         duplicateViewModel.start(
                             allPhotos,
                             if (isPhotosPage) DeduplicationScope.ALL_FILES else DeduplicationScope.WITHIN_ALBUMS,
@@ -1189,6 +1219,7 @@ private fun MainScaffoldContent(
                     ) {
                         HorizontalPager(
                         state = homePagerState,
+                        beyondViewportPageCount = 1,
                         modifier = Modifier.fillMaxSize(),
                         userScrollEnabled = !selectionMode && !albumSelectionMode && !quickSortEnabled
                     ) { page ->
@@ -1246,6 +1277,10 @@ private fun MainScaffoldContent(
                                 albums = searchedAlbums,
                                 labels = labelSummaries,
                                 grouping = albumGrouping,
+                                defaultOrder = albumSortOrder,
+                                onRememberOrder = albumGroupsViewModel::rememberRows,
+                                onMoveRow = { rows, from, to -> albumGroupsViewModel.moveRow(rows, from, to, albumSortOrder) },
+                                groupingEnabled = groupingEnabled,
                                 groupCovers = resolvedGroupCovers,
                                 selectedCollectionKey = if (inlineCoverGroupId != null) activeCoverKey else selectedCollection?.key,
                                 coverPickingGroupId = inlineCoverGroupId,
@@ -1294,6 +1329,8 @@ private fun MainScaffoldContent(
                                         navigateToStack(navigationStack + Screen.Photo(name, homeMediaType))
                                     }
                                 },
+                                selectedLabelIds = selectedLabelAlbumIds,
+                                onToggleLabelSelection = toggleLabelAlbum,
                                 selectedPaths = selectedAlbumPaths,
                                 selectionMode = albumSelectionMode,
                                 onToggleSelection = toggleAlbumPath,
@@ -1327,6 +1364,7 @@ private fun MainScaffoldContent(
                     onBack = navigateBack,
                 )
                 Screen.LibrarySettings -> LibrarySettingsScreen(onBack = navigateBack,
+                    groupingEnabled = groupingEnabled, onGroupingEnabledChange = albumGroupsViewModel::setEnabled,
                     onNavigateToExcludedFolders = { navigateToStack(navigationStack + Screen.ExcludedFolders) })
                 Screen.Labels -> LabelsScreen(
                     gridState = labelsGridState,
@@ -1339,8 +1377,8 @@ private fun MainScaffoldContent(
                     onRenameLabel = { id, name -> labelsViewModel.renameLabel(id, name) },
                     onDeleteLabels = labelsViewModel::deleteLabels,
                     onSetCover = openLabelCover,
-                    onAddToGroup = { ids, clear ->
-                        labelGroupSelection = ids; clearLabelGroupSelection = clear; showAlbumGroupPicker = true
+                    onAddToGroup = if (!groupingEnabled) null else { ids, clear ->
+                        labelGroupSelection = ids; clearLabelGroupSelection = clear; sheetExpandRequest++; showAlbumGroupPicker = true
                     },
                     errorMessage = labelsError,
                     onClearError = labelsViewModel::clearError,
@@ -1353,7 +1391,7 @@ private fun MainScaffoldContent(
                     val labelId = screen.labelId
                     val labelColumns by remember(labelId, photosViewModel) {
                         photosViewModel.pageGridColumns("label:$labelId")
-                    }.collectAsState(initial = 3)
+                    }.collectAsState(initial = 4)
                     val labelState = remember(labelId) { albumGridStates.getOrPut("label:$labelId") { LazyGridState() } }
                     val routeLabelPhotos = remember(labelId, allPhotos, labelMemberships, vault) {
                         val ids = labelMemberships.filter { it.labelId == labelId }.mapTo(hashSetOf()) { it.contentId }
@@ -1544,7 +1582,7 @@ private fun MainScaffoldContent(
             confirmButton = { TextButton(onClick = albumGroupsViewModel::clearError) { Text(stringResource(R.string.album_group_cancel)) } },
         )
     }
-    val mixedAlbumSelection = selectedAlbumPaths.isNotEmpty() && selectedCollection?.key?.startsWith("label:") == true
+    val mixedAlbumSelection = selectedAlbumPaths.isNotEmpty() && selectedLabelAlbumIds.isNotEmpty()
     LaunchedEffect(mixedAlbumSelection) {
         if (mixedAlbumSelection) { showAlbumGroupPicker = false; selectionPanelHeight = 0.dp }
     }
@@ -1560,6 +1598,9 @@ private fun MainScaffoldContent(
                     }
                 AlbumSelectionTopBar(count = 1, onClear = { selectedCollection = null },
                     collectionTitle = chosen.title,
+                    onPin = { albumGroupsViewModel.pinRows(orderingRows, setOf(chosen.key)) },
+                    pinned = orderingRows.firstOrNull { it.key == chosen.key }?.let { chosen.key in albumGrouping.orderState(it.orderScope()).pinned } == true,
+                    onSort = if (chosen.key.startsWith("group:")) ({ groupSortScope = chosen.key.removePrefix("group:"); showAlbumSortDialog = true }) else null,
                     groupExpanded = chosen.key.removePrefix("group:") !in albumGrouping.collapsedIds,
                     onToggleGroup = if (chosen.key.startsWith("group:")) ({
                         if (pickingCover) pickingCover = false
@@ -1567,8 +1608,8 @@ private fun MainScaffoldContent(
                     }) else null,
                     renameDescription = stringResource(R.string.collection_settings),
                     onRename = { coversViewModel.clearError(); coverTarget = selectedCollection },
-                    onAddToGroup = chosen.key.takeIf { canGroupAlbumSelection(selectedAlbumPaths.size, 1) && it.startsWith("label:") && it != labelCoverKey(com.pixel.gallery.data.local.entity.FAVOURITES_LABEL_ID) }?.removePrefix("label:")?.toLongOrNull()?.let { labelId ->
-                        { labelGroupSelection = setOf(labelId); clearLabelGroupSelection = { selectedCollection = null }; showAlbumGroupPicker = true }
+                    onAddToGroup = chosen.key.takeIf { groupingEnabled && canGroupAlbumSelection(selectedAlbumPaths.size, 1) && it.startsWith("label:") && it != labelCoverKey(com.pixel.gallery.data.local.entity.FAVOURITES_LABEL_ID) }?.removePrefix("label:")?.toLongOrNull()?.let { labelId ->
+                        { labelGroupSelection = setOf(labelId); clearLabelGroupSelection = { selectedCollection = null }; sheetExpandRequest++; showAlbumGroupPicker = true }
                     },
                     findDuplicatesLabel = stringResource(R.string.duplicate_find_group),
                     canFindDuplicates = groupMedia.size > 1,
@@ -1584,28 +1625,37 @@ private fun MainScaffoldContent(
                     })
             } else if (albumSelectionMode) {
                 AlbumSelectionTopBar(
-                    count = selectedAlbumPaths.size,
-                    onAddToGroup = if (currentScreen == Screen.Home && canGroupAlbumSelection(selectedAlbumPaths.size, if (selectedCollection?.key?.startsWith("label:") == true) 1 else 0)) ({ labelGroupSelection = null; clearLabelGroupSelection = null; showAlbumGroupPicker = true }) else null,
-                    onClear = { selectedAlbumPaths = emptySet() },
+                    count = selectedAlbumPaths.size + selectedLabelAlbumIds.size,
+                    onPin = if (currentScreen == Screen.Home) ({ albumGroupsViewModel.pinRows(orderingRows,
+                        selectedAlbumPaths.map { "album:$it" }.toSet() + selectedLabelAlbumIds.map { "label:$it" }) }) else null,
+                    pinned = orderingRows.filter { it.album?.path in selectedAlbumPaths || it.label?.label?.id in selectedLabelAlbumIds }
+                        .let { chosen -> chosen.isNotEmpty() && chosen.all { it.key in albumGrouping.orderState(it.orderScope()).pinned } },
+                    onAddToGroup = if (groupingEnabled && currentScreen == Screen.Home && canGroupAlbumSelection(selectedAlbumPaths.size, selectedLabelAlbumIds.size)) ({
+                        labelGroupSelection = selectedLabelAlbumIds.takeIf { it.isNotEmpty() }?.toSet()
+                        clearLabelGroupSelection = if (selectedLabelAlbumIds.isNotEmpty()) ({ selectedLabelAlbumIds = emptySet() }) else null
+                        sheetExpandRequest++; showAlbumGroupPicker = true
+                    }) else null,
+                    onClear = { selectedAlbumPaths = emptySet(); selectedLabelAlbumIds = emptySet() },
                     renameDescription = stringResource(R.string.collection_settings),
                     onRename = {
+                        selectedLabelAlbumIds.singleOrNull()?.let(openLabelCover)
                         selectedAlbumPaths.singleOrNull()?.let { path ->
                             coversViewModel.clearError()
                             coverTarget = CoverTarget(albumCoverKey(path), java.io.File(path).name, currentScreen == Screen.HiddenAlbums)
                         }
                     },
-                    onHide = {
+                    onHide = if (selectedLabelAlbumIds.isEmpty()) ({
                         selectedAlbumPaths.forEach(photosViewModel::addHiddenFolder)
                         selectedAlbumPaths = emptySet()
-                    },
+                    }) else null,
                     onUnhide = if (currentScreen == Screen.HiddenAlbums) ({
                         photosViewModel.removeHiddenFolders(selectedAlbumPaths)
                         selectedAlbumPaths = emptySet()
                     }) else null,
-                    onExclude = {
+                    onExclude = if (selectedLabelAlbumIds.isEmpty()) ({
                         selectedAlbumPaths.forEach(photosViewModel::addExcludedFolder)
                         selectedAlbumPaths = emptySet()
-                    },
+                    }) else null,
                     canFindDuplicates = selectedAlbumEntries.size > 1,
                     onFindDuplicates = {
                         duplicateViewModel.start(
@@ -1812,6 +1862,7 @@ private fun MainScaffoldContent(
                                     quickSortEnabled = false
                                     showQuickTargets = false
                                     selectionPanelHeight = 0.dp
+                                    sheetExpandRequest++
                                     if (gridTransferSession == null) gridTransferSession = java.util.UUID.randomUUID().toString()
                                 }) {
                                     Icon(
@@ -2001,8 +2052,9 @@ private fun MainScaffoldContent(
                             Screen.ViewerSource.External
                         ),
                         onRequestTransfer = { media ->
+                            sheetExpandRequest++
                             photosViewModel.clearTransferState()
-                            navigateToStack(navigationStack + Screen.TransferDestination(
+                            navigateToStack(navigationStack.dropLastWhile { it is Screen.TransferDestination } + Screen.TransferDestination(
                                 longArrayOf(media.contentId),
                                 Screen.TransferOrigin.Viewer
                             ))
@@ -2031,7 +2083,7 @@ private fun MainScaffoldContent(
     val rootNavigationTab = when {
         Screen.LockedFolder in navigationStack -> GalleryNavigationTab.Lock
         Screen.HiddenAlbums in navigationStack -> GalleryNavigationTab.Hidden
-        else -> if (homePagerState.currentPage == 0) GalleryNavigationTab.Photos else GalleryNavigationTab.Albums
+        else -> if (homeVisiblePage == 0) GalleryNavigationTab.Photos else GalleryNavigationTab.Albums
     }
     val closeCollectionSettings = { if (!coverSaving && !collectionEditSaving) { coverTarget = null; pickingCover = false; coversViewModel.clearError() } }
     BackHandler(enabled = selectedCollection != null && coverTarget == null) { selectedCollection = null }
@@ -2097,7 +2149,7 @@ private fun MainScaffoldContent(
     val routeHeaderScrollBehavior = topBarScrollBehavior
     // The shared header follows the visible page, never the previous route's offset.
     val activeHeaderGrid = when (val route = baseScreen) {
-        Screen.Home -> if (homePagerState.currentPage == 0) {
+        Screen.Home -> if (homeVisiblePage == 0) {
             if (normalizedPhotoSearchQuery.isEmpty()) recentsGridState else photoSearchGridState
         } else {
             if (normalizedAlbumSearchQuery.isEmpty()) albumsGridState else albumSearchGridState
@@ -2111,9 +2163,13 @@ private fun MainScaffoldContent(
         is Screen.Photo -> albumGridStates[if (route.hiddenAlbum) "hidden:${route.albumName}" else route.albumName]
         else -> null
     }
-    val gridAtTop = activeHeaderGrid?.let {
-        !it.canScrollBackward || (it.firstVisibleItemIndex == 0 && it.firstVisibleItemScrollOffset == 0)
-    } == true
+    val gridAtTop by remember(activeHeaderGrid) {
+        derivedStateOf {
+            activeHeaderGrid?.let {
+                !it.canScrollBackward || (it.firstVisibleItemIndex == 0 && it.firstVisibleItemScrollOffset == 0)
+            } == true
+        }
+    }
     val detailToolbarLocked = gridAtTop || coverTarget != null || (visibleViewer != null && reviewPage == null)
     LaunchedEffect(detailToolbarLocked) {
         if (detailToolbarLocked) {
@@ -2226,6 +2282,7 @@ private fun MainScaffoldContent(
                     }
                 }
                 TransferDestinationScreen(
+                    expandRequest = sheetExpandRequest,
                     entries = transferableEntries,
                     moveSessionId = gridTransferSession,
                     onPanelHeightChange = { selectionPanelHeight = it },
@@ -2347,6 +2404,7 @@ private fun MainScaffoldContent(
     if (showAlbumGroupPicker && !mixedAlbumSelection) {
         val liveLabelSelection = labelGroupSelection?.intersect(labelSummaries.filterNot { it.label.isSystem }.mapTo(hashSetOf()) { it.label.id })
         com.pixel.gallery.ui.home.AlbumGroupPickerSheet(
+                    expandRequest = sheetExpandRequest,
             groups = albumGrouping.groups.filter { it.isLabelGroup == (labelGroupSelection != null) }.map {
                 if (it.isLabelGroup) it.copy(paths = it.labelIds.orEmpty().filter { id -> labelSummaries.any { summary -> summary.label.id == id && !summary.label.isSystem } }.map(Long::toString)) else it
             },
@@ -2386,6 +2444,7 @@ private fun MainScaffoldContent(
     if (showLabelEditor) {
         val labelBatchIds = if (labelEditorFromGrid) selectedIds else editingLabelIds
         LabelEditorSheet(
+                    expandRequest = sheetExpandRequest,
             labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = labelBatchIds, recentLabelIds = recentLabelIds,
             columns = labelSheetColumns,
             onColumnsChange = photosViewModel::setLabelSheetColumns,
@@ -2405,6 +2464,7 @@ private fun MainScaffoldContent(
     }
     if (showQuickTargets && quickSortEnabled && quickSortOwner == quickSortScope) {
         QuickSortTargetsSheet(
+                    expandRequest = sheetExpandRequest,
             albumUses = quickQueue.albumUses,
             availableTargets = transferTargets.filter { it.documentUri == null },
             selectedTargets = quickPreferences.targets,
@@ -2550,12 +2610,17 @@ private fun MainScaffoldContent(
         ) {
             AlbumSortDialog(
                 visible = showAlbumSortDialog,
-                onDismissRequest = { showAlbumSortDialog = false },
-                title = "Sort Albums By",
-                initialOrder = albumSortOrder,
+                onDismissRequest = { showAlbumSortDialog = false; groupSortScope = null },
+                title = if (groupSortScope == null) "Sort Albums By" else "Sort Group Albums By",
+                initialOrder = groupSortScope?.let { albumGrouping.orderState(it).rule } ?: albumSortOrder,
                 onConfirm = { order ->
-                    photosViewModel.setAlbumSortOrder(order)
+                    if (groupSortScope != null) albumGroupsViewModel.setOrder(groupSortScope!!, order, orderingRows)
+                    else {
+                        if (order == AlbumSortOrder.CUSTOM) albumGroupsViewModel.startCustom(orderingRows)
+                        photosViewModel.setAlbumSortOrder(order)
+                    }
                     showAlbumSortDialog = false
+                    groupSortScope = null
                 }
             )
         }

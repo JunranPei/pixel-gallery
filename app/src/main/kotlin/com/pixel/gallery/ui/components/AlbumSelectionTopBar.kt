@@ -18,6 +18,9 @@ import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +52,9 @@ fun AlbumSelectionTopBar(
     onFindDuplicates: (() -> Unit)? = null,
     onUnhide: (() -> Unit)? = null,
     onAddToGroup: (() -> Unit)? = null,
+    onPin: (() -> Unit)? = null,
+    pinned: Boolean = false,
+    onSort: (() -> Unit)? = null,
 ): GalleryHeaderSpec {
     var showMenu by remember { mutableStateOf(false) }
     return GalleryHeader(
@@ -61,6 +67,12 @@ fun AlbumSelectionTopBar(
         },
         actions = {
             Row(horizontalArrangement = Arrangement.spacedBy((-8).dp), verticalAlignment = Alignment.CenterVertically) {
+                onPin?.let { action ->
+                    IconButton(enabled = enabled, onClick = action) {
+                        Icon(if (pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, if (pinned) "Unpin" else "Pin",
+                            tint = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 if (count == 1 && onRename != null) {
                     IconButton(enabled = enabled, onClick = onRename) {
                         Icon(Icons.Outlined.Edit, renameDescription)
@@ -86,7 +98,7 @@ fun AlbumSelectionTopBar(
                         Icon(Icons.Outlined.Delete, stringResource(R.string.delete))
                     }
                 }
-                if (onFindDuplicates != null || onAddToGroup != null) {
+                if (onFindDuplicates != null || onAddToGroup != null || onSort != null) {
                     androidx.compose.foundation.layout.Box(Modifier.size(48.dp)) {
                         GalleryOverflowButton(
                             expanded = showMenu,
@@ -94,6 +106,10 @@ fun AlbumSelectionTopBar(
                         ) {
                             onAddToGroup?.let { action ->
                                 GalleryMenuRow(stringResource(R.string.album_group_add), Icons.Outlined.Folder,
+                                    enabled = enabled, onClick = { showMenu = false; action() })
+                            }
+                            onSort?.let { action ->
+                                GalleryMenuRow("Sort group albums", Icons.AutoMirrored.Filled.Sort,
                                     enabled = enabled, onClick = { showMenu = false; action() })
                             }
                             extraMenu()

@@ -39,7 +39,7 @@ fun HiddenAlbumsScreen(
     onNavigateToAlbum: (String) -> Unit,
     onSort: () -> Unit,
     onDeduplicate: () -> Unit,
-    columns: Int = 2,
+    columns: Int = 4,
     onColumnsChange: (Int) -> Unit = {},
     gridState: LazyGridState = rememberLazyGridState(),
     bottomPadding: Dp = 0.dp,

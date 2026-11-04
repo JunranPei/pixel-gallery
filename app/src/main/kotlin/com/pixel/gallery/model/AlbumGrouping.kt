@@ -21,6 +21,7 @@ data class AlbumGroup(
 data class AlbumGrouping(
     val groups: List<AlbumGroup> = emptyList(),
     val collapsedIds: Set<String> = setOf(LABELS_ALBUM_GROUP),
+    val ordering: Map<String, AlbumOrderState>? = emptyMap(),
 )
 
 /** Allocate once; avoid the previous group and balance the four quiet hues. */
@@ -70,21 +71,29 @@ data class GroupedAlbumRow(
 
 /** One flat sequence: no spans, nested grids or group-specific cell measurements. */
 fun groupedAlbumRows(
-    albums: List<Album>, grouping: AlbumGrouping, labels: List<LabelSummary>, search: Boolean = false,
+    albums: List<Album>, grouping: AlbumGrouping, labels: List<LabelSummary>, search: Boolean = false, groupingEnabled: Boolean = true,
 ): List<GroupedAlbumRow> {
     if (search) return albums.map { GroupedAlbumRow("album:${it.path}", album = it) }
     return buildList {
         labels.firstOrNull { it.label.id == FAVOURITES_LABEL_ID && it.count > 0 }?.let {
             add(GroupedAlbumRow(FAVOURITES_ALBUM_ENTRY, favourite = it))
         }
-        val labelsOpen = LABELS_ALBUM_GROUP !in grouping.collapsedIds
-        add(GroupedAlbumRow("group:$LABELS_ALBUM_GROUP", LABELS_ALBUM_GROUP,
-            group = AlbumGroup(LABELS_ALBUM_GROUP, "")))
-        if (labelsOpen) labels.filter { grouping.labelGroupId(it.label.id) == LABELS_ALBUM_GROUP }.forEach {
-            add(GroupedAlbumRow("label:${it.label.id}", LABELS_ALBUM_GROUP, label = it))
+        if (!groupingEnabled) {
+            labels.filterNot { it.label.isSystem }.forEach { add(GroupedAlbumRow("label:${it.label.id}", label = it)) }
+            albums.forEach { add(GroupedAlbumRow("album:${it.path}", album = it)) }
+            add(GroupedAlbumRow("system:trash"))
+            return@buildList
+        }
+        val defaultLabels = labels.filter { !it.label.isSystem && grouping.labelGroupId(it.label.id) == LABELS_ALBUM_GROUP }
+        if (defaultLabels.isNotEmpty()) {
+            add(GroupedAlbumRow("group:$LABELS_ALBUM_GROUP", LABELS_ALBUM_GROUP,
+                group = AlbumGroup(LABELS_ALBUM_GROUP, "")))
+            if (LABELS_ALBUM_GROUP !in grouping.collapsedIds) defaultLabels.forEach {
+                add(GroupedAlbumRow("label:${it.label.id}", LABELS_ALBUM_GROUP, label = it))
+            }
         }
         val assigned = hashSetOf<String>()
-        grouping.groups.forEach { group ->
+        grouping.groups.sortedBy { !it.isLabelGroup }.forEach { group ->
             val open = group.id !in grouping.collapsedIds
             add(GroupedAlbumRow("group:${group.id}", group.id, group = group))
             if (group.isLabelGroup) {

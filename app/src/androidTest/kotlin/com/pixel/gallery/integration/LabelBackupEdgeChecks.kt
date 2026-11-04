@@ -37,7 +37,7 @@ internal class LabelBackupEdgeChecks(private val context: Context, private val f
         val settings = SettingsRepository(isolated)
         val media = MediaRepository(isolated, db.mediaDao(), settings)
         val labels = LabelRepository(db, db.labelDao())
-        val backup = LabelBackupRepository(isolated, db, media)
+        val backup = LabelBackupRepository(isolated, db, media, com.pixel.gallery.data.repository.SettingsRepository(isolated))
         val ownedMedia = mutableListOf<Uri>()
         val ownedDocuments = mutableListOf<File>()
         val report = mutableListOf<String>()

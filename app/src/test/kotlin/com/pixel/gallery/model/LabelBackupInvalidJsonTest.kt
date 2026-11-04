@@ -25,7 +25,7 @@ class LabelBackupInvalidJsonTest(private val description: String, private val in
                 "duplicate version" to valid.replace("\"version\":1", "\"version\":99,\"version\":1"),
                 "duplicate nested name" to valid.replace("\"name\":\"Trip\"", "\"name\":\"Other\",\"name\":\"Trip\""),
                 "wrong format" to valid.replace("pixel-gallery-labels", "another-app"),
-                "future version" to valid.replace("\"version\":1", "\"version\":2"),
+                "future version" to valid.replace("\"version\":1", "\"version\":99"),
                 "fractional version" to valid.replace("\"version\":1", "\"version\":1.5"),
                 "string version" to valid.replace("\"version\":1", "\"version\":\"1\""),
                 "null labels" to valid.replace("\"labels\":[{\"key\":\"tag\",\"name\":\"Trip\"}]", "\"labels\":null"),

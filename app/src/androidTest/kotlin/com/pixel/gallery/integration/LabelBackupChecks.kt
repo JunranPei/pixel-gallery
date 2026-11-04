@@ -29,7 +29,7 @@ internal class LabelBackupChecks(private val context: Context) {
         val db = Room.inMemoryDatabaseBuilder(isolated, GalleryDatabase::class.java).addCallback(LABEL_DATABASE_CALLBACK).build()
         val media = MediaRepository(isolated, db.mediaDao(), SettingsRepository(isolated))
         val labels = LabelRepository(db, db.labelDao())
-        val transfer = LabelBackupRepository(isolated, db, media)
+        val transfer = LabelBackupRepository(isolated, db, media, com.pixel.gallery.data.repository.SettingsRepository(isolated))
         val created = mutableListOf<Uri>()
         val files = mutableListOf<File>()
         val report = mutableListOf<String>()
