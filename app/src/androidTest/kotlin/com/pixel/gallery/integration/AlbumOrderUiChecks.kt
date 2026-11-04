@@ -55,7 +55,7 @@ internal class AlbumOrderUiChecks(private val instrumentation: Instrumentation) 
             settings.setAlbumSortOrder("CUSTOM")
             settings.updateAlbumGrouping { state ->
                 state.copy(groups=listOf(AlbumGroup(gid,groupName,paths.take(3)))+state.groups, collapsedIds=state.collapsedIds + state.groups.map { it.id })
-                    .withOrder("groups:albums") { it.copy(pinned=listOf("group:$gid")+it.pinned) }
+                    .withOrder("groups:albums") { it.copy(custom=listOf("group:$gid")+it.custom, pinned=emptyList()) }
                     .withOrder(gid) { AlbumOrderState(rule=AlbumSortOrder.CUSTOM,customStarted=true,custom=paths.take(3).map { "album:$it" }) }
                     .withOrder("albums") { it.copy(customStarted=true,custom=paths.drop(3).map { "album:$it" }+it.custom) }
             }
@@ -108,6 +108,33 @@ internal class AlbumOrderUiChecks(private val instrumentation: Instrumentation) 
             settings.setAlbumSortOrder("NAME_DESC");settle(400);settings.setAlbumSortOrder("CUSTOM");settle(400)
             check(settings.albumGrouping.first()==retained)
             results += "sort toggle preserves custom and pins PASS"
+            // Isolated group fixtures exercise the real grid without depending on user's group count.
+            val ga=AlbumGroup("drag-a-$token","Drag A $token",paths.take(1))
+            val gb=AlbumGroup("drag-b-$token","Drag B $token",paths.drop(1).take(1))
+            val la=AlbumGroup("drag-la-$token","Label A $token",labelIds=emptyList())
+            val lb=AlbumGroup("drag-lb-$token","Label B $token",labelIds=emptyList())
+            settings.updateAlbumGrouping { AlbumGrouping(groups=listOf(ga,gb,la,lb),collapsedIds=setOf(ga.id,gb.id,la.id,lb.id)) }
+            click("Clear selection")
+            repeat(12) { if(find(la.name)==null) swipeDown() }
+            await(la.name);await(lb.name)
+            drag(la.name,lb.name,hold=true)
+            val labelOrder=settings.albumGrouping.first().orderState("groups:labels").custom.filter { it=="group:${la.id}" || it=="group:${lb.id}" }
+            check(labelOrder==listOf("group:${lb.id}","group:${la.id}")) { "Label group drag failed: $labelOrder" }
+            results += "label groups long-press drag PASS"
+            click("Clear selection")
+            drag(ga.name,gb.name,hold=true)
+            check(settings.albumGrouping.first().orderState("groups:albums").custom==listOf("group:${gb.id}","group:${ga.id}"))
+            click("Clear selection")
+            longPress(gb.name)
+            val beforeCross=settings.albumGrouping.first()
+            drag(gb.name,la.name)
+            check(settings.albumGrouping.first()==beforeCross) { "Group crossed type boundary" }
+            results += "ordinary group drag and cross-type rejection PASS"
+            click("Clear selection")
+            click(gb.name)
+            drag(ga.name,names[1],hold=true)
+            check(settings.albumGrouping.first().orderState("groups:albums").custom==listOf("group:${ga.id}","group:${gb.id}"))
+            results += "expanded member target moves whole group PASS"
             snapshot("finished")
             File(output,"result.txt").writeText(results.joinToString("\n"))
             results.joinToString("; ")
@@ -120,9 +147,10 @@ internal class AlbumOrderUiChecks(private val instrumentation: Instrumentation) 
             settings.setAlbumSortOrder(originalSort);settings.setGroupingEnabled(enabled)
         }
     }
-    private fun drag(from:String,to:String) {
+    private fun drag(from:String,to:String,hold:Boolean=false) {
         val a=bounds(from);val b=bounds(to)
         event(MotionEvent.ACTION_DOWN,a.centerX().toFloat(),a.centerY().toFloat())
+        if(hold) SystemClock.sleep(700)
         repeat(24) { index ->
             val f=(index+1)/24f
             event(MotionEvent.ACTION_MOVE,a.centerX()+(b.centerX()-a.centerX())*f,a.centerY()+(b.centerY()-a.centerY())*f)

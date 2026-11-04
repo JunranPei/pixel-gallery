@@ -63,6 +63,7 @@ class AlbumGroupsViewModel @Inject constructor(private val settings: SettingsRep
     }
     fun moveRow(rows: List<GroupedAlbumRow>, from: String, to: String, default: AlbumSortOrder) = update { state ->
         val a = rows.firstOrNull { it.key == from } ?: return@update state
+        if (a.group != null) return@update state.moveGroup(rows, from, to)
         val b = rows.firstOrNull { it.key == to } ?: return@update state
         val scope = a.orderScope()
         val saved = state.orderState(scope)

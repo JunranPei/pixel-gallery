@@ -96,8 +96,18 @@ fun GroupedAlbumsScreen(
             },
             canReorder = { key -> rows.firstOrNull { it.key == key }?.let { row ->
                 val saved = grouping.orderState(row.orderScope())
-                key in saved.pinned || (saved.rule ?: if (row.group != null) AlbumSortOrder.CUSTOM else defaultOrder) == AlbumSortOrder.CUSTOM
+                row.group != null || key in saved.pinned || (saved.rule ?: defaultOrder) == AlbumSortOrder.CUSTOM
             } == true },
+            reorderOnLongPress = { key -> rows.any { it.key == key && it.group != null } },
+            reorderTarget = { from, to ->
+                val source = rows.firstOrNull { it.key == from }
+                val target = rows.firstOrNull { it.key == to }
+                if (source?.group == null) to else {
+                    val header = if (target?.group != null) target else
+                        rows.firstOrNull { it.group != null && it.group.id == target?.backgroundGroup }
+                    header?.takeIf { it.orderScope() == source.orderScope() }?.key
+                }
+            },
             onReorder = { from, to -> onMoveRow(rows, from, to) },
             leftPaddingPx = with(LocalDensity.current) { 16.dp.toPx() },
             columns = gridColumns,

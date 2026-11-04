@@ -26,8 +26,8 @@ fun orderedAlbumRows(rows: List<GroupedAlbumRow>, grouping: AlbumGrouping, defau
     fun sort(entries: List<GroupedAlbumRow>): List<GroupedAlbumRow> {
         if (entries.isEmpty()) return entries
         val scope = entries.first().orderScope()
-        val saved = grouping.orderState(scope)
-        val rule = saved.rule ?: if (scope.startsWith("groups:")) AlbumSortOrder.CUSTOM else default
+        val saved = grouping.orderState(scope).let { if (scope.startsWith("groups:")) it.copy(pinned = emptyList()) else it }
+        val rule = if (scope.startsWith("groups:")) AlbumSortOrder.CUSTOM else saved.rule ?: default
         fun name(r: GroupedAlbumRow) = r.group?.name ?: r.album?.name ?: r.label?.label?.name.orEmpty()
         fun count(r: GroupedAlbumRow) = r.album?.itemCount ?: r.label?.count ?: (r.group?.paths?.size ?: 0) + (r.group?.labelIds?.size ?: 0)
         fun date(r: GroupedAlbumRow) = r.album?.lastModified ?: r.label?.lastModified ?: 0L
@@ -63,4 +63,20 @@ fun AlbumGrouping.startCustom(scope: String, rows: List<GroupedAlbumRow>): Album
         val visible = rows.filter { it.orderScope() == scope && (it.album != null || it.label != null || it.group != null) }.map { it.key }
         saved.copy(customStarted = true, custom = visible + saved.custom.filterNot(visible::contains))
     }
+}
+
+/** Move a whole group, including when the pointer lands over one of its members. */
+fun AlbumGrouping.moveGroup(rows: List<GroupedAlbumRow>, from: String, to: String): AlbumGrouping {
+    val source = rows.firstOrNull { it.key == from && it.group != null } ?: return this
+    val targetRow = rows.firstOrNull { it.key == to } ?: return this
+    val target = if (targetRow.group != null) targetRow else
+        rows.firstOrNull { it.group?.id == targetRow.backgroundGroup && it.group != null } ?: return this
+    if (source.orderScope() != target.orderScope() || source.key == target.key) return this
+    val scope = source.orderScope()
+    val prepared = rememberOrder(rows)
+    val order = prepared.orderState(scope).custom.toMutableList()
+    val destination = order.indexOf(target.key)
+    if (destination < 0 || !order.remove(source.key)) return this
+    order.add(destination.coerceAtMost(order.size), source.key)
+    return prepared.withOrder(scope) { it.copy(rule = null, pinned = emptyList(), customStarted = true, custom = order) }
 }

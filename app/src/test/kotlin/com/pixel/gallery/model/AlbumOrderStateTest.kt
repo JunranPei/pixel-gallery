@@ -39,4 +39,25 @@ class AlbumOrderStateTest {
         val saved=old.withOrder("g") { AlbumOrderState(AlbumSortOrder.CUSTOM,true,listOf("label:3"),listOf("label:3")) }
         assertEquals(saved,Gson().fromJson(Gson().toJson(saved),AlbumGrouping::class.java))
     }
+
+    @Test fun groupDragStaysWithinTypeAndMovesWholeExpandedBlock() {
+        val groups = listOf(AlbumGroup("a","A",listOf("/A")), AlbumGroup("b","B",listOf("/B")),
+            AlbumGroup("l1","L1",labelIds=emptyList()), AlbumGroup("l2","L2",labelIds=emptyList()))
+        val initial = AlbumGrouping(groups=groups)
+        val source = rows(listOf("A","B"),initial)
+        val moved = initial.moveGroup(source,"group:a","album:/B")
+        val ordered = orderedAlbumRows(source,moved,AlbumSortOrder.NAME_ASC)
+        assertEquals(listOf("group:l1","group:l2","group:b","album:/B","group:a","album:/A","system:trash"),ordered.map { it.key })
+        assertEquals(moved,moved.moveGroup(ordered,"group:a","group:l1"))
+        assertEquals(moved,moved.moveGroup(ordered,"group:l1","album:/A"))
+        val labelsMoved=moved.moveGroup(ordered,"group:l1","group:l2")
+        assertEquals(listOf("group:l2","group:l1","group:b","group:a"),orderedAlbumRows(source,labelsMoved,AlbumSortOrder.DATE_DESC).filter { it.group!=null }.map { it.key })
+        assertEquals(labelsMoved,Gson().fromJson(Gson().toJson(labelsMoved),AlbumGrouping::class.java))
+    }
+    @Test fun groupOrderIgnoresOldRuleAndPinAndAppendsNewGroups() {
+        val initial=AlbumGrouping(groups=listOf(AlbumGroup("a","A"),AlbumGroup("b","B")))
+            .withOrder("groups:albums") { AlbumOrderState(rule=AlbumSortOrder.NAME_ASC,custom=listOf("group:b","group:a"),pinned=listOf("group:a")) }
+        val extended=initial.copy(groups=initial.groups+AlbumGroup("c","C"))
+        assertEquals(listOf("group:b","group:a","group:c"),orderedAlbumRows(rows(emptyList(),extended),extended,AlbumSortOrder.NAME_DESC).filter { it.group!=null }.map { it.key })
+    }
 }

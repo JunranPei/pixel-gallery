@@ -1598,7 +1598,7 @@ private fun MainScaffoldContent(
                     }
                 AlbumSelectionTopBar(count = 1, onClear = { selectedCollection = null },
                     collectionTitle = chosen.title,
-                    onPin = { albumGroupsViewModel.pinRows(orderingRows, setOf(chosen.key)) },
+                    onPin = if (chosen.key.startsWith("group:")) null else ({ albumGroupsViewModel.pinRows(orderingRows, setOf(chosen.key)) }),
                     pinned = orderingRows.firstOrNull { it.key == chosen.key }?.let { chosen.key in albumGrouping.orderState(it.orderScope()).pinned } == true,
                     onSort = if (chosen.key.startsWith("group:")) ({ groupSortScope = chosen.key.removePrefix("group:"); showAlbumSortDialog = true }) else null,
                     groupExpanded = chosen.key.removePrefix("group:") !in albumGrouping.collapsedIds,

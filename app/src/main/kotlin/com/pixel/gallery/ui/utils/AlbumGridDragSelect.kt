@@ -39,6 +39,8 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
     columns: Int,
     enabled: Boolean = true,
     canReorder: (K) -> Boolean = { false },
+    reorderOnLongPress: (K) -> Boolean = { false },
+    reorderTarget: (K, K) -> K? = { _, target -> target },
     onReorder: (K, K) -> Unit = { _, _ -> },
     collapseGroupForKey: (K) -> String? = { null },
     onSwipeCollapse: (String) -> Unit = {},
@@ -46,6 +48,8 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
 ): Modifier {
     val reorderAllowed by rememberUpdatedState(canReorder)
     val reorder by rememberUpdatedState(onReorder)
+    val resolveReorderTarget by rememberUpdatedState(reorderTarget)
+    val longPressReorder by rememberUpdatedState(reorderOnLongPress)
     val currentKeys by rememberUpdatedState(rangeKeys)
     val selection by rememberUpdatedState(selected)
     val toggle by rememberUpdatedState(onToggle)
@@ -72,7 +76,8 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
                 val start = anchor ?: return
                 val end = hit(pointer) ?: return
                 if (moving) {
-                    if (end != start && end != lastTarget) { reorder(start, end); lastTarget = end }
+                    val target = resolveReorderTarget(start, end) ?: return
+                    if (target != start && target != lastTarget) { reorder(start, target); lastTarget = target }
                     return
                 }
                 val next = if (start !in currentKeys) { if (selecting) initial + start else initial - start }
@@ -88,7 +93,8 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
             fun begin(key: K, position: Offset) {
                 anchor = key
                 initial = selection
-                moving = key in initial && reorderAllowed(key)
+                moving = reorderAllowed(key) && (key in initial || longPressReorder(key))
+                if (moving && key !in initial) toggle(key)
                 lastTarget = null
                 applied = initial
                 selecting = key !in initial
