@@ -89,6 +89,25 @@ import kotlin.coroutines.resume
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Chooses the snapshot used to seed a detail page. A matching non-empty live
+ * snapshot always wins; when the live stream is in its transient empty state,
+ * the most recent matching complete snapshot keeps the page mounted.
+ */
+internal fun resolveViewerMediaSnapshot(
+    current: MediaRepository.ViewerMediaSnapshot?,
+    retained: MediaRepository.ViewerMediaSnapshot?,
+    sortKey: String,
+    hiddenFolders: Set<String>,
+): List<MediaEntry>? = sequenceOf(current, retained)
+    .filterNotNull()
+    .firstOrNull {
+        it.sortKey == sortKey &&
+            it.hiddenFolders == hiddenFolders &&
+            it.entries.isNotEmpty()
+    }
+    ?.entries
+
 @Singleton
 class MediaRepository @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -129,6 +148,13 @@ class MediaRepository @Inject constructor(
     private val mediaMutationMutex = Mutex()
     private val syncMutex = Mutex()
     private val viewerMediaSnapshot = AtomicReference<ViewerMediaSnapshot?>(null)
+    /**
+     * The live MediaStore flow is intentionally allowed to publish an empty
+     * value while it is being rebuilt. Keep the last complete snapshot
+     * separately so a new Activity/ViewModel can seed a detail page without
+     * first mounting it with an empty list.
+     */
+    private val lastNonEmptyViewerMediaSnapshot = AtomicReference<ViewerMediaSnapshot?>(null)
     private val moveJournalLock = Any()
     @Volatile private var mediaMutationInProgress = false
 
@@ -209,12 +235,18 @@ class MediaRepository @Inject constructor(
     internal fun cachedViewerMediaSnapshot(
         sortKey: String,
         hiddenFolders: Set<String>,
-    ): List<MediaEntry>? = viewerMediaSnapshot.get()?.takeIf {
-        it.sortKey == sortKey && it.hiddenFolders == hiddenFolders
-    }?.entries
+    ): List<MediaEntry>? = resolveViewerMediaSnapshot(
+        current = viewerMediaSnapshot.get(),
+        retained = lastNonEmptyViewerMediaSnapshot.get(),
+        sortKey = sortKey,
+        hiddenFolders = hiddenFolders,
+    )
 
     internal fun cacheViewerMediaSnapshot(snapshot: ViewerMediaSnapshot) {
         viewerMediaSnapshot.set(snapshot)
+        if (snapshot.entries.isNotEmpty()) {
+            lastNonEmptyViewerMediaSnapshot.set(snapshot)
+        }
     }
 
     /** Reads the post-sync Room snapshot without waiting for the UI StateFlow to re-emit. */

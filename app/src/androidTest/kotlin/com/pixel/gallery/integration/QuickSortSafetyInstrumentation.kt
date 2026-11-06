@@ -37,6 +37,8 @@ import kotlin.coroutines.resume
 class QuickSortSafetyInstrumentation : Instrumentation() {
     private var imageRotationAudit = false
     private var bulkTransferSuite = false
+    private var viewerSheetPagingSuite = false
+    private var imageZoomMemorySuite = false
     private var videoHandoffSuite = false
     private var videoReturnSuite = false
     private var returnMediaId = "1047"
@@ -78,12 +80,15 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var thumbnailQualitySuite = false
     private var nativeFitSuite = false
     private var viewerCompressionSuite = false
+    private var viewerRecreationFlickerSuite = false
     private var geometryRun = "baseline"
     private var labelBackupEdgeFilter: String? = null
     private var labelBackupCleanupToken: String? = null
     override fun onCreate(arguments: Bundle?) {
         imageRotationAudit = arguments?.getString("suite") == "image-rotation-audit"
         bulkTransferSuite = arguments?.getString("suite") == "bulk-transfer"
+        viewerSheetPagingSuite = arguments?.getString("suite") == "viewer-sheet-paging"
+        imageZoomMemorySuite = arguments?.getString("suite") == "image-zoom-memory"
         videoHandoffSuite = arguments?.getString("suite") == "video-handoff"
         videoReturnSuite = arguments?.getString("suite") == "video-return"
         returnMediaId = arguments?.getString("returnMediaId") ?: "1047"
@@ -125,6 +130,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         thumbnailQualitySuite = arguments?.getString("suite") == "thumbnail-quality"
         nativeFitSuite = arguments?.getString("suite") == "native-fit"
         viewerCompressionSuite = arguments?.getString("suite") == "viewer-compression"
+        viewerRecreationFlickerSuite = arguments?.getString("suite") == "viewer-recreation-flicker"
         geometryRun = arguments?.getString("geometryRun") ?: "baseline"
         labelBackupEdgeFilter = arguments?.getString("edgeFilter")
         labelBackupCleanupToken = arguments?.getString("edgeCleanupToken")
@@ -138,6 +144,8 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
             val report = when {
                 imageRotationAudit -> ImageRotationAudit(this).exercise()
                 bulkTransferSuite -> BulkTransferDeviceChecks(this, bulkToken).exercise()
+                viewerSheetPagingSuite -> ViewerSheetPagingChecks(this).exercise()
+                imageZoomMemorySuite -> ImageZoomMemoryChecks(this).exercise()
                 videoHandoffSuite -> VideoHandoffDeviceChecks(this).exercise()
                 videoReturnSuite -> VideoReturnDeviceChecks(this, returnMediaId, returnBackgroundMs).exercise()
                 videoPipSuite -> VideoPipDeviceChecks(this, pipFixed, pipMediaId).exercise()
@@ -148,6 +156,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
                 albumSelectionSuite -> AlbumSelectionChecks(this).exercise()
                 albumRenameSuite -> AlbumRenameChecks(targetContext).exercise()
                 viewerCompressionSuite -> ViewerCompressionDeviceChecks(targetContext).exercise()
+                viewerRecreationFlickerSuite -> ViewerRecreationFlickerChecks(this).exercise()
                 nativeFitSuite -> NativeFitDeviceChecks(targetContext).exercise()
                 thumbnailQualitySuite -> ThumbnailQualityDeviceChecks(targetContext).exercise()
                 thumbnailAspectSuite -> ThumbnailAspectDeviceChecks(targetContext, geometryRun).exercise()

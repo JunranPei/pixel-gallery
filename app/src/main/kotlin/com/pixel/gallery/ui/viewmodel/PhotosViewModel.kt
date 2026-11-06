@@ -28,6 +28,25 @@ import com.pixel.gallery.model.TransferSummary
 import com.pixel.gallery.model.ThemeMode
 import javax.inject.Inject
 
+/**
+ * MediaStore rebuilds can publish an empty list for a short interval. Do not
+ * pass that transient value to the viewer: it would replace the active page
+ * with the empty branch and make the renderer disappear for a frame. A real
+ * empty result is still delivered after the short settling window.
+ */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+internal fun retainViewerMediaSnapshots(
+    source: Flow<MediaRepository.ViewerMediaSnapshot>,
+    emptyDelayMillis: Long = 350L,
+): Flow<MediaRepository.ViewerMediaSnapshot> = source.transformLatest { snapshot ->
+    if (snapshot.entries.isNotEmpty()) {
+        emit(snapshot)
+    } else {
+        kotlinx.coroutines.delay(emptyDelayMillis)
+        emit(snapshot)
+    }
+}
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PhotosViewModel @Inject constructor(
@@ -118,7 +137,7 @@ class PhotosViewModel @Inject constructor(
         hiddenFolders = hiddenFolders.value,
     ).orEmpty()
 
-    val viewerPhotos: StateFlow<List<MediaEntry>> = combine(
+    private val viewerMediaSnapshots: Flow<MediaRepository.ViewerMediaSnapshot> = combine(
         allPhotos,
         hiddenFolders,
         photoSortOrder,
@@ -128,6 +147,8 @@ class PhotosViewModel @Inject constructor(
         MediaRepository.ViewerMediaSnapshot(ordered, sort.name, hidden)
     }
         .flowOn(Dispatchers.Default)
+
+    val viewerPhotos: StateFlow<List<MediaEntry>> = retainViewerMediaSnapshots(viewerMediaSnapshots)
         .onEach(repository::cacheViewerMediaSnapshot)
         .map { it.entries }
         .stateIn(viewModelScope, SharingStarted.Eagerly, initialViewerPhotos())

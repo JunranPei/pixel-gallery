@@ -1,13 +1,67 @@
 package com.pixel.gallery.ui
 
 import com.pixel.gallery.data.local.entity.MediaEntry
+import com.pixel.gallery.data.repository.MediaRepository
+import com.pixel.gallery.data.repository.resolveViewerMediaSnapshot
+import com.pixel.gallery.ui.viewmodel.retainViewerMediaSnapshots
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 import com.pixel.gallery.model.TransferReceipt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import kotlin.random.Random
 
 class ViewerSessionTest {
+
+    @Test
+    fun `viewer flow suppresses an empty rebuild when the full list returns quickly`() = runBlocking {
+        val full = MediaRepository.ViewerMediaSnapshot(
+            entries = listOf(entry(1, "/one.jpg")),
+            sortKey = "DATE_DESC",
+            hiddenFolders = emptySet(),
+        )
+        val empty = full.copy(entries = emptyList())
+
+        val result = retainViewerMediaSnapshots(flow {
+            emit(full)
+            emit(empty)
+            delay(20)
+            emit(full)
+        }, emptyDelayMillis = 100).toList()
+
+        assertEquals(listOf(full, full), result)
+    }
+
+    @Test
+    fun `viewer snapshot falls back to retained data during transient empty refresh`() {
+        val retained = MediaRepository.ViewerMediaSnapshot(
+            entries = listOf(entry(1, "/one.jpg")),
+            sortKey = "DATE_DESC",
+            hiddenFolders = emptySet(),
+        )
+        val current = retained.copy(entries = emptyList())
+
+        assertEquals(
+            retained.entries,
+            resolveViewerMediaSnapshot(current, retained, "DATE_DESC", emptySet()),
+        )
+    }
+
+    @Test
+    fun `viewer snapshot does not reuse retained data for another view`() {
+        val retained = MediaRepository.ViewerMediaSnapshot(
+            entries = listOf(entry(1, "/one.jpg")),
+            sortKey = "DATE_DESC",
+            hiddenFolders = emptySet(),
+        )
+
+        assertNull(resolveViewerMediaSnapshot(null, retained, "NAME_ASC", emptySet()))
+        assertNull(resolveViewerMediaSnapshot(null, retained, "DATE_DESC", setOf("/hidden")))
+    }
 
     @Test
     fun `live reorder does not change viewer page identity`() {
