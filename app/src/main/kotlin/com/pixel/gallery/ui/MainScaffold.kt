@@ -127,6 +127,8 @@ import com.pixel.gallery.ui.deduplication.DuplicateViewModel
 
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
+import com.pixel.gallery.ui.components.GalleryMotion
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -355,7 +357,6 @@ private fun MainScaffoldContent(
     var editingLabelName by remember { mutableStateOf<CoverTarget?>(null) }
     val albumGroupsViewModel: com.pixel.gallery.ui.viewmodel.AlbumGroupsViewModel = hiltViewModel()
     val groupingEnabled by albumGroupsViewModel.enabled.collectAsState()
-    val albumGrouping by albumGroupsViewModel.grouping.collectAsState()
     val albumGroupError by albumGroupsViewModel.error.collectAsState()
     val albumGroupSaving by albumGroupsViewModel.isSaving.collectAsState()
     val albumGroupPickerColumns by remember(photosViewModel) { photosViewModel.pageGridColumns("groups:picker") }.collectAsState(initial = 4)
@@ -504,9 +505,6 @@ private fun MainScaffoldContent(
 
     val photoSortOrder by photosViewModel.photoSortOrder.collectAsState()
     val albumSortOrder by photosViewModel.albumSortOrder.collectAsState()
-    val orderingRows = remember(albums, labelSummaries, albumGrouping, albumSortOrder) {
-        orderedAlbumRows(groupedAlbumRows(albums, albumGrouping.copy(collapsedIds = emptySet()), labelSummaries), albumGrouping, albumSortOrder)
-    }
 
 
     var showPhotoSortDialog by remember { mutableStateOf(false) }
@@ -588,6 +586,16 @@ private fun MainScaffoldContent(
     }
 
     val currentScreen = navigationStack.last()
+    // Other tasks still share persisted groups. A covered/stopped route keeps
+    // its presentation instead of rebuilding its grid for every remote toggle.
+    val groupPresentationActive = lifecycleState.isAtLeast(Lifecycle.State.STARTED) &&
+        (currentScreen == Screen.Home || showAlbumGroupPicker || coverTarget != null ||
+            editingGroupName != null || dissolvingCollection != null)
+    val groupingLoaded by albumGroupsViewModel.groupingLoaded.collectAsState()
+    val albumGrouping by albumGroupsViewModel.grouping.collectAsRetainedState(groupPresentationActive, groupingLoaded)
+    val orderingRows = remember(albums, labelSummaries, albumGrouping, albumSortOrder) {
+        orderedAlbumRows(groupedAlbumRows(albums, albumGrouping.copy(collapsedIds = emptySet()), labelSummaries), albumGrouping, albumSortOrder)
+    }
     // A destination picker overlays its source viewer instead of disposing it.
     // Retaining this same composition also preserves the current page and zoom.
     val visibleViewer = navigationStack.lastOrNull { it !is Screen.TransferDestination } as? Screen.Viewer
@@ -1219,6 +1227,7 @@ private fun MainScaffoldContent(
                     ) {
                         HorizontalPager(
                         state = homePagerState,
+                        flingBehavior = PagerDefaults.flingBehavior(homePagerState, snapAnimationSpec = GalleryMotion.navigation()),
                         beyondViewportPageCount = 1,
                         modifier = Modifier.fillMaxSize(),
                         userScrollEnabled = !selectionMode && !albumSelectionMode && !quickSortEnabled
@@ -2025,6 +2034,23 @@ private fun MainScaffoldContent(
                 if (photosForViewer.isNotEmpty()) {
                     ViewerScreen(
                         isForeground = visibleViewer != null,
+                        onCurrentMediaChanged = { mediaId ->
+                            if (showLabelEditor && !labelEditorFromGrid &&
+                                editingLabelIds != setOfNotNull(mediaId)) {
+                                editingLabelIds = setOfNotNull(mediaId) - quickQueue.reservedIds
+                                labelsViewModel.clearError()
+                            }
+                            val picker = navigationStack.lastOrNull() as? Screen.TransferDestination
+                            if (picker?.origin == Screen.TransferOrigin.Viewer &&
+                                picker.entryIds.singleOrNull() != mediaId) {
+                                if (!photosViewModel.transferUiState.value.isRunning) {
+                                    photosViewModel.clearTransferState()
+                                }
+                                navigateToStack(navigationStack.dropLast(1) + picker.copy(
+                                    entryIds = setOfNotNull(mediaId).toLongArray(),
+                                ))
+                            }
+                        },
                         onEditLabels = openLabelEditor,
                         labelsForMedia = { labelNamesByMedia[it].orEmpty() },
                         labelIdsForMedia = { labelIdsByMedia[it].orEmpty() },
@@ -2083,7 +2109,15 @@ private fun MainScaffoldContent(
     val rootNavigationTab = when {
         Screen.LockedFolder in navigationStack -> GalleryNavigationTab.Lock
         Screen.HiddenAlbums in navigationStack -> GalleryNavigationTab.Hidden
-        else -> if (homeVisiblePage == 0) GalleryNavigationTab.Photos else GalleryNavigationTab.Albums
+        // Selection starts with the page request/gesture, not after its animation finishes.
+        else -> if (homePagerState.targetPage == 0) GalleryNavigationTab.Photos else GalleryNavigationTab.Albums
+    }
+    val homePagerScrolling = homePagerState.isScrollInProgress
+    SideEffect {
+        com.pixel.gallery.utils.GalleryInteractionProbe.navigation(
+            rootNavigationTab.ordinal, homePagerState.settledPage,
+            homePagerState.targetPage, homePagerScrolling,
+        )
     }
     val closeCollectionSettings = { if (!coverSaving && !collectionEditSaving) { coverTarget = null; pickingCover = false; coversViewModel.clearError() } }
     BackHandler(enabled = selectedCollection != null && coverTarget == null) { selectedCollection = null }
@@ -2284,6 +2318,7 @@ private fun MainScaffoldContent(
                 TransferDestinationScreen(
                     expandRequest = sheetExpandRequest,
                     entries = transferableEntries,
+                    showSourceName = transferScreen?.origin == Screen.TransferOrigin.Viewer,
                     moveSessionId = gridTransferSession,
                     onPanelHeightChange = { selectionPanelHeight = it },
                     onTransferStarted = { ordinaryTransferIds = it },
@@ -2336,7 +2371,7 @@ private fun MainScaffoldContent(
                                 navigationReveal.settle(0)
                                 val page = if (tab == GalleryNavigationTab.Photos) 0 else 1
                                 if (currentScreen == Screen.Home) {
-                                    scope.launch { homePagerState.animateScrollToPage(page) }
+                                    scope.launch { homePagerState.animateScrollToPage(page, animationSpec = GalleryMotion.navigation()) }
                                 } else {
                                     scope.launch {
                                         // Set the retained home page before exposing it; no intermediate wrong tab.
@@ -2446,6 +2481,9 @@ private fun MainScaffoldContent(
         LabelEditorSheet(
                     expandRequest = sheetExpandRequest,
             labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = labelBatchIds, recentLabelIds = recentLabelIds,
+            sourceName = if (labelEditorFromGrid) null else labelBatchIds.singleOrNull()?.let { id ->
+                allPhotos.firstOrNull { it.contentId == id }?.path?.let { java.io.File(it).name }
+            },
             columns = labelSheetColumns,
             onColumnsChange = photosViewModel::setLabelSheetColumns,
             onDismiss = {

@@ -4,8 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutLinearInEasing
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
@@ -86,7 +84,7 @@ fun SelectionBottomSheet(
                 Column(Modifier.fillMaxWidth().compactSheetDismissDrag(
                     panel, expanded, range, threshold, with(density) { 40.dp.toPx() },
                     onPull = { offset -> if (!closing) { pullReturn?.cancel(); pullOffset = offset } },
-                    onReleasePull = { dismiss ->
+                    onReleasePull = { dismiss, velocity ->
                         if (!closing) {
                             val accepted = dismiss && confirmDismiss()
                             closing = accepted
@@ -94,8 +92,8 @@ fun SelectionBottomSheet(
                             pullReturn = pullScope.launch {
                                 val target = if (accepted) with(density) { (collapsed + 24.dp).toPx() } else 0f
                                 animate(pullOffset, target,
-                                    animationSpec = tween(if (accepted) 180 else 150, easing = FastOutLinearInEasing),
-                                ) { value, _ -> pullOffset = value }
+                                    initialVelocity = velocity, animationSpec = GalleryMotion.layout(),
+                                ) { value, _ -> pullOffset = value.coerceAtLeast(0f) }
                                 if (accepted) onDismiss()
                                 // An asynchronous save may retain the sheet, including on failure.
                                 pullOffset = 0f
@@ -132,7 +130,8 @@ private fun SelectionSheetHeader(title: String, subtitle: String?, onBack: () ->
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(title, style = EmphasizedTypography.TitleLarge.copy(fontSize = 24.sp, lineHeight = 30.sp),
                     maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
             }
             Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically, content = actions)
         }
@@ -146,7 +145,8 @@ private fun SelectionSheetHeader(title: String, subtitle: String?, onBack: () ->
         }
         Column(Modifier.weight(1f).padding(start = if (showBackButton) 4.dp else 20.dp)) {
             Text(title, style = EmphasizedTypography.TitleLarge.copy(fontSize = 24.sp, lineHeight = 30.sp), maxLines = 1)
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
         }
         actions()
     }

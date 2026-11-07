@@ -17,8 +17,13 @@ class AlbumGroupsViewModel @Inject constructor(private val settings: SettingsRep
     private val expansion = PendingGroupExpansion()
     private val _grouping = MutableStateFlow(AlbumGrouping())
     val grouping = _grouping.asStateFlow()
+    private val _groupingLoaded = MutableStateFlow(false)
+    val groupingLoaded = _groupingLoaded.asStateFlow()
     init {
-        viewModelScope.launch { settings.albumGrouping.collect { _grouping.value = expansion.apply(it) } }
+        viewModelScope.launch { settings.albumGrouping.collect {
+            _grouping.value = expansion.apply(it)
+            _groupingLoaded.value = true
+        } }
     }
     private val _error = MutableStateFlow(false)
     val error = _error.asStateFlow()

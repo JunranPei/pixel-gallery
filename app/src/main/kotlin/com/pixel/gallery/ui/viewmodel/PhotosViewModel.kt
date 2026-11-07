@@ -420,6 +420,7 @@ class PhotosViewModel @Inject constructor(
     }
 
     val albums: StateFlow<List<Album>> = combine(browsingIndex, albumSortOrder, settingsRepository.collectionCovers) { index, sort, covers ->
+        com.pixel.gallery.utils.GroupWorkProbe.hit("album_covers_rebuild")
         val library = index.library[com.pixel.gallery.model.MediaTypeFilter.ALL]
         com.pixel.gallery.model.applyAlbumCovers(library.albums(sort), library.media.photos, covers)
     }.flowOn(Dispatchers.Default)

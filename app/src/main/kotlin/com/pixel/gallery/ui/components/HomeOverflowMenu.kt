@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FileCopy
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -72,20 +71,22 @@ fun GalleryOverflowMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     onSettings: (() -> Unit)? = null,
+    anchor: androidx.compose.ui.geometry.Rect,
+    onReopen: () -> Unit,
+    onSourceHidden: (Boolean) -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val menuWidth = minOf(
         (236 * LocalDensity.current.fontScale.coerceAtLeast(1f)).dp,
         (LocalConfiguration.current.screenWidthDp - 32).dp,
     )
-    DropdownMenu(
+    AnchoredOverflowPopup(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
-        modifier = Modifier.width(menuWidth),
-        shape = RoundedCornerShape(32.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 0.dp,
-        shadowElevation = 6.dp,
+        anchor = anchor,
+        width = menuWidth,
+        onReopen = onReopen,
+        onSourceHidden = onSourceHidden,
     ) {
         content()
         GallerySettingsMenuEntry(onDismissRequest = onDismissRequest, onSettings = onSettings)

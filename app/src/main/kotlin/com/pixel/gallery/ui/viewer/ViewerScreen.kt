@@ -376,6 +376,7 @@ internal fun ViewerScreen(
     onBack: () -> Unit,
     allowTransfer: Boolean = true,
     onRequestTransfer: (MediaEntry) -> Unit = {},
+    onCurrentMediaChanged: (Long?) -> Unit = {},
     onUnlockFromVault: (MediaEntry) -> Unit = {},
     allowUnlockFromVault: Boolean = false,
     enableUltraHdr: Boolean = false,
@@ -453,6 +454,14 @@ internal fun ViewerScreen(
 
     val currentMedia = remember(pagerState.currentPage, photos) {
         photos.getOrNull(pagerState.currentPage)
+    }
+    val currentMediaChanged by rememberUpdatedState(onCurrentMediaChanged)
+    LaunchedEffect(currentMedia?.contentId) {
+        // Actions belong to the visible media, not the page that opened a panel.
+        showMenu = false
+        showDeleteConfirm = false
+        videoOptionsOpen = false
+        currentMediaChanged(currentMedia?.contentId)
     }
     val directionMedia = photos.getOrNull(pagerState.settledPage)
     val directionIsVideo = directionMedia?.sourceMimeType?.startsWith("video/") == true

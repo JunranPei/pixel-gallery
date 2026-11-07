@@ -52,7 +52,9 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
     private val report = mutableListOf<String>()
     private var sortConfirmed: Pair<String, String>? = null
 
-    fun exercise(quickSortOnly: Boolean = false): String {
+    private val searchMode = mutableStateOf(false)
+    private var searchState: com.pixel.gallery.ui.GallerySearchState? = null
+    fun exercise(quickSortOnly: Boolean = false, motionOnly: Boolean = false): String {
         val fixture = File(output, "viewer-fixture.jpg")
         Bitmap.createBitmap(160, 240, Bitmap.Config.ARGB_8888).apply {
             eraseColor(0xff668899.toInt())
@@ -76,6 +78,11 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
                                 transformStateStore = remember { ViewerTransformStateStore() }, onBack = {})
                             4 -> LibrarySettingsScreen(onBack = {}, onNavigateToExcludedFolders = {}, groupingEnabled = true, onGroupingEnabledChange = {})
                             5 -> DisplaySettingsScreen(onBack = {})
+                            9 -> {
+                                val search = com.pixel.gallery.ui.rememberGallerySearch(searchMode.value, { searchMode.value = it }) { androidx.compose.material3.Text("Search fixture") }
+                                SideEffect { searchState = search.state }
+                                GalleryPageContent(GalleryHeader(title = { androidx.compose.material3.Text("Motion fixture") }, search = search), {})
+                            }
                             else -> null
                     }
                     GalleryPageCheckHost(
@@ -184,6 +191,32 @@ internal class RedesignTouchChecks(private val instrumentation: Instrumentation)
         check(findText("0 selected") != null || findText("已选 0 个") != null)
         snapshot("quicksort-cleared")
         report += "Default stays collapsed; swipe opens chooser; full short title and clear chip share one header row; New album is an inline query action without a dialog; clear applies immediately."
+        if (motionOnly) {
+            instrumentation.runOnMainSync { mode.intValue = 9 }
+            settle(500)
+            val y = boundsFor("Motion fixture").exactCenterY()
+            val w = root.width
+            fun swipe(from: Float, to: Float) {
+                event(MotionEvent.ACTION_DOWN, w * from, y)
+                repeat(16) { event(MotionEvent.ACTION_MOVE, w * (from + (to - from) * (it + 1) / 16), y); SystemClock.sleep(12) }
+                event(MotionEvent.ACTION_UP, w * to, y)
+            }
+            swipe(.15f, .85f); settle(850)
+            check(searchMode.value) { "Search header did not open" }
+            swipe(.85f, .15f); SystemClock.sleep(40)
+            event(MotionEvent.ACTION_DOWN, w * .3f, y)
+            event(MotionEvent.ACTION_MOVE, w * .4f, y)
+            SystemClock.sleep(50)
+            val held = checkNotNull(searchState).dragOffsetPx
+            SystemClock.sleep(150)
+            check(abs(checkNotNull(searchState).dragOffsetPx - held) < 2f) { "Settling kept moving while grabbed" }
+            event(MotionEvent.ACTION_CANCEL, w * .4f, y)
+            settle(850)
+            check(!checkNotNull(searchState).isAnimating && checkNotNull(searchState).dragOffsetPx == 0f)
+            report += "Search header: opens, interrupted settling stops under finger, cancellation settles exactly."
+            instrumentation.runOnMainSync { activity.finish() }
+            return report.joinToString("\n")
+        }
         if (quickSortOnly) {
             instrumentation.runOnMainSync { dark.value = true }
             settle(250)

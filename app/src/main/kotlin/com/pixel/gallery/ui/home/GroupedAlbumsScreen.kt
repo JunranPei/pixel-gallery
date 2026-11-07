@@ -1,7 +1,7 @@
 package com.pixel.gallery.ui.home
 
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.tween
+import com.pixel.gallery.ui.components.GalleryMotion
 import androidx.compose.ui.geometry.Rect
 import kotlinx.coroutines.flow.collectLatest
 import android.graphics.CornerPathEffect
@@ -34,6 +34,9 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import com.pixel.gallery.ui.utils.albumGridDragSelect
+import com.pixel.gallery.ui.utils.AlbumReorderDragState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -64,7 +67,10 @@ fun GroupedAlbumsScreen(
     onMoveRow: (List<GroupedAlbumRow>, String, String) -> Unit = { _, _, _ -> },
 ) {
     val gridColumns = columns.coerceIn(2, 6)
+    val reorderDrag = remember(gridState) { AlbumReorderDragState() }
+    val leftPaddingPx = with(LocalDensity.current) { 16.dp.toPx() }
     val rows = remember(albums, labels, grouping, search, groupingEnabled, defaultOrder) {
+        com.pixel.gallery.utils.GroupWorkProbe.hit("group_grid_rows")
         orderedAlbumRows(groupedAlbumRows(albums, grouping, labels, search, groupingEnabled), grouping, defaultOrder)
     }
     LaunchedEffect(albums, labels, grouping.groups, defaultOrder) {
@@ -109,7 +115,8 @@ fun GroupedAlbumsScreen(
                 }
             },
             onReorder = { from, to -> onMoveRow(rows, from, to) },
-            leftPaddingPx = with(LocalDensity.current) { 16.dp.toPx() },
+            reorderDrag = reorderDrag,
+            leftPaddingPx = leftPaddingPx,
             columns = gridColumns,
             enabled = coverPickingGroupId == null,
             collapseGroupForKey = { key ->
@@ -160,7 +167,17 @@ fun GroupedAlbumsScreen(
                 (row.label != null && grouping.labelGroupId(row.label.label.id) == coverPickingGroupId)
             // The active group remains an exit target, but only member albums stay visually emphasized.
             val rowDimmed = !rowEnabled || (coverPickingGroupId != null && row.group != null)
-            Box(Modifier.animateItem(placementSpec = tween(350)).alpha(if (rowDimmed) 0.3f else 1f)) {
+            val dragged = reorderDrag.key == row.key
+            Box(Modifier
+                .animateItem(placementSpec = if (dragged) null else if (reorderDrag.key != null) GalleryMotion.reorder() else GalleryMotion.layout())
+                .zIndex(if (dragged) 1f else 0f)
+                .graphicsLayer {
+                    // Read pointer/layout state in the layer phase: no per-frame row rebuilding.
+                    val offset = if (dragged) reorderDrag.translation(gridState, leftPaddingPx) else androidx.compose.ui.geometry.Offset.Zero
+                    translationX = offset.x
+                    translationY = offset.y
+                }
+                .alpha(if (rowDimmed) 0.3f else 1f)) {
             when {
                 row.favourite != null -> {
                     AlbumCoverCard(
@@ -249,6 +266,8 @@ fun GroupedAlbumsScreen(
 
 }
 
+private class GroupPathCache(var bands: List<Rect> = emptyList(), val path: Path = Path())
+
 /** Paint only behind the existing grid. Measuring/placing album cards is never affected. */
 @Composable
 private fun Modifier.groupBackgrounds(state: LazyGridState, groups: Map<String, String?>, colors: Map<String, Color>, selectedGroup: String?, selectionColor: Color): Modifier {
@@ -272,7 +291,7 @@ private fun Modifier.groupBackgrounds(state: LazyGridState, groups: Map<String, 
             val morph = previous.isNotEmpty() && keys != lastKeys && !state.isScrollInProgress
             lastKeys = keys
             if (!morph) drawn = target else {
-                animate(0f, 1f, animationSpec = tween(350)) { progress, _ ->
+                animate(0f, 1f, animationSpec = GalleryMotion.fraction()) { progress, _ ->
                     drawn = target.mapValues { (group, bands) ->
                         val old = previous[group] ?: bands
                         List(maxOf(old.size, bands.size)) { i ->
@@ -285,10 +304,15 @@ private fun Modifier.groupBackgrounds(state: LazyGridState, groups: Map<String, 
             }
         }
     }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val radius = with(density) { ExpressiveShapes.AlbumCornerRadius.toPx() }
+    val geometry = remember(radius) { mutableMapOf<String, GroupPathCache>() }
+    val scratchPath = remember { Path() }
+    val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG) }
+    val corners = remember(radius) { CornerPathEffect(radius) }
+    SideEffect { geometry.keys.retainAll(colors.keys) }
     return drawBehind {
-    val visible = state.layoutInfo.visibleItemsInfo
     val pad = 2.dp.toPx()
-    val rowHeights = visible.groupBy { it.row }.mapValues { (_, cells) -> cells.maxOf { it.size.height } }
     drawIntoCanvas { canvas ->
         // Lazy-grid item offsets exclude its content padding. The draw modifier belongs
         // to the outer viewport, so translate into that same padded coordinate space.
@@ -298,17 +322,20 @@ private fun Modifier.groupBackgrounds(state: LazyGridState, groups: Map<String, 
         colors.forEach { (group, color) ->
             val bands = drawn[group].orEmpty()
             if (bands.isEmpty()) return@forEach
-            val path = Path()
-            val radius = ExpressiveShapes.AlbumCornerRadius.toPx()
-            val overlapping = bands.zipWithNext().any { (a, b) -> b.top < a.bottom + pad * 2 }
+            val cached = geometry.getOrPut(group) { GroupPathCache() }
+            val path = cached.path
+            val overlapping = (1 until bands.size).any { bands[it].top < bands[it - 1].bottom + pad * 2 }
 
             fun rect(left: Float, top: Float, right: Float, bottom: Float, rounded: Boolean = false) {
-                val next = Path().apply {
+                val next = scratchPath.apply {
+                    rewind()
                     if (rounded) addRoundRect(left, top, right, bottom, radius, radius, Path.Direction.CW)
                     else addRect(left, top, right, bottom, Path.Direction.CW)
                 }
                 path.op(next, Path.Op.UNION)
             }
+            if (cached.bands != bands) {
+            path.rewind()
             bands.forEachIndexed { index, band ->
                 // Round before union: overlapping animated bands create tiny stair-step edges.
                 // Applying CornerPathEffect only after union collapses those corners to zero.
@@ -322,9 +349,12 @@ private fun Modifier.groupBackgrounds(state: LazyGridState, groups: Map<String, 
                         rect(left - pad, band.bottom - pad, right + pad, next.top + pad)
                 }
             }
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            cached.bands = bands
+            }
+            paint.apply {
+                style = Paint.Style.FILL
                 this.color = (if (group == selectedGroup) lerp(color, selectionColor, 0.14f) else color).toArgb()
-                if (!overlapping) pathEffect = CornerPathEffect(radius)
+                pathEffect = if (!overlapping) corners else null
             }
             canvas.nativeCanvas.drawPath(path, paint)
             if (group == selectedGroup) {

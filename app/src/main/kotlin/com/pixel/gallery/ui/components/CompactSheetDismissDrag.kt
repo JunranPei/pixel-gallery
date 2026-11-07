@@ -33,7 +33,7 @@ internal fun Modifier.compactSheetDismissDrag(
     flingThresholdPx: Float,
     dismissDistancePx: Float,
     onPull: (Float) -> Unit,
-    onReleasePull: (Boolean) -> Unit,
+    onReleasePull: (Boolean, Float) -> Unit,
 ): Modifier {
     val currentExpanded by rememberUpdatedState(expanded)
     val range by rememberUpdatedState(rangePx)
@@ -80,13 +80,13 @@ internal fun Modifier.compactSheetDismissDrag(
                     lastPosition = position
                     change.consume()
                 }
-                if (gesture.dismissGesture) releasePull(released && gesture.shouldDismiss(closeThreshold))
+                if (gesture.dismissGesture) releasePull(released && gesture.shouldDismiss(closeThreshold), if (released) velocity.calculateVelocity().y * .35f else 0f)
                 else if (released) panel.finish(velocity.calculateVelocity().y, flingThreshold)
                 else panel.cancel()
                 finished = true
             } finally {
                 if (!finished) {
-                    if (gesture.dismissGesture) releasePull(false) else panel.cancel()
+                    if (gesture.dismissGesture) releasePull(false, 0f) else panel.cancel()
                 }
             }
         }

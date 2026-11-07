@@ -42,6 +42,7 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
     reorderOnLongPress: (K) -> Boolean = { false },
     reorderTarget: (K, K) -> K? = { _, target -> target },
     onReorder: (K, K) -> Unit = { _, _ -> },
+    reorderDrag: AlbumReorderDragState? = null,
     collapseGroupForKey: (K) -> String? = { null },
     onSwipeCollapse: (String) -> Unit = {},
     keyForGridKey: (Any) -> K? = { key -> keys.firstOrNull { it == key } },
@@ -57,7 +58,7 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
     val collapseGroup by rememberUpdatedState(collapseGroupForKey)
     val collapse by rememberUpdatedState(onSwipeCollapse)
     val haptics = LocalHapticFeedback.current
-    return pointerInput(state, columns, enabled, leftPaddingPx) {
+    return pointerInput(state, columns, enabled, leftPaddingPx, reorderDrag) {
         if (!enabled) return@pointerInput
         coroutineScope {
             var anchor: K? = null
@@ -74,9 +75,12 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
             }
             fun update() {
                 val start = anchor ?: return
+                if (moving) reorderDrag?.pointer = pointer
                 val end = hit(pointer) ?: return
                 if (moving) {
                     val target = resolveReorderTarget(start, end) ?: return
+                    // Once our own slot reaches the pointer, allow crossing the same neighbour back.
+                    if (target == start) { lastTarget = null; return }
                     if (target != start && target != lastTarget) { reorder(start, target); lastTarget = target }
                     return
                 }
@@ -89,6 +93,7 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
                 scrollJob?.cancel()
                 scrollJob = null
                 anchor = null
+                reorderDrag?.end()
             }
             fun begin(key: K, position: Offset) {
                 anchor = key
@@ -99,6 +104,7 @@ internal fun <K : Any> Modifier.albumGridDragSelect(
                 applied = initial
                 selecting = key !in initial
                 pointer = position
+                if (moving) reorderDrag?.begin(key, position, state, leftPaddingPx)
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 update()
                 scrollJob = launch {

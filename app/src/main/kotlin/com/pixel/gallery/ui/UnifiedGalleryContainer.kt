@@ -2,7 +2,10 @@ package com.pixel.gallery.ui
 
 import android.view.View
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
+import com.pixel.gallery.ui.components.GalleryMotion
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -234,8 +237,9 @@ private fun PermanentGalleryToolbar(
     val search = header.search
     val latestSearch by rememberUpdatedState(search)
     var widthPx by remember { mutableFloatStateOf(0f) }
+    var settling by remember { mutableStateOf<Job?>(null) }
     val dragState = rememberDraggableState { delta ->
-        search?.takeIf { it.enabled && !it.state.isAnimating && widthPx > 0f }?.let {
+        search?.takeIf { it.enabled && widthPx > 0f }?.let {
             it.state.dragOffsetPx = (it.state.dragOffsetPx + delta).coerceIn(-widthPx, widthPx)
         }
     }
@@ -251,7 +255,8 @@ private fun PermanentGalleryToolbar(
             .draggable(
                 state = dragState,
                 orientation = Orientation.Horizontal,
-                enabled = search?.let { it.enabled && !it.state.isAnimating } == true,
+                enabled = search?.enabled == true,
+                onDragStarted = { settling?.cancel(); search?.state?.isAnimating = false },
                 onDragStopped = { velocity ->
                     val activeSearch = latestSearch ?: return@draggable
                     val state = activeSearch.state
@@ -264,10 +269,12 @@ private fun PermanentGalleryToolbar(
                     val switchPage = shouldSwitchPhotoHeader(startingOffset, widthPx, velocity)
                     val direction = if (startingOffset > 0f) 1f else -1f
                     val targetOffset = if (switchPage) direction * widthPx else 0f
+                    val job = currentCoroutineContext().job
+                    settling = job
                     state.isAnimating = true
                     try {
-                        Animatable(startingOffset).animateTo(targetOffset, tween(180)) {
-                            if (latestSearch?.state === state) state.dragOffsetPx = value
+                        Animatable(startingOffset).animateTo(targetOffset, GalleryMotion.navigation(), initialVelocity = velocity) {
+                            if (latestSearch?.state === state) state.dragOffsetPx = value.coerceIn(-widthPx, widthPx)
                         }
                         if (latestSearch?.state === state) {
                             val nextMode = if (switchPage) !startingMode else startingMode
@@ -277,7 +284,7 @@ private fun PermanentGalleryToolbar(
                         }
                     } finally {
                         if (latestSearch?.state !== state) state.dragOffsetPx = 0f
-                        state.isAnimating = false
+                        if (settling === job) { settling = null; state.isAnimating = false }
                     }
                 },
             )

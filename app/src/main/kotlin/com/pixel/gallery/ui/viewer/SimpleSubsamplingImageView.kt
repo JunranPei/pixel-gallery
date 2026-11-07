@@ -149,13 +149,12 @@ internal class ViewerTransformStateStore(
         // A centered fit state is the renderer's default, not a user presentation
         // to restore. Keeping it makes a fresh preview start transparent while it
         // waits for Glide, which is the one-frame black flash seen after resume.
-        states[key]?.state?.let { state ->
-            if (hasMeaningfulViewerTransform(state)) return state
-            states.remove(key)
-        }
-        return readSaved?.invoke(key)?.takeIf(::hasMeaningfulViewerTransform)?.also {
-            states[key] = StoredState(it, 1)
-        }
+        // A cached fit state is an explicit reset. Do not fall through to an older
+        // persisted zoom; return null only to use the renderer's normal fit path.
+        states[key]?.let { return it.state.takeIf(::hasMeaningfulViewerTransform) }
+        val saved = readSaved?.invoke(key) ?: return null
+        states[key] = StoredState(saved, 1)
+        return saved.takeIf(::hasMeaningfulViewerTransform)
     }
 
     @Synchronized
@@ -173,16 +172,8 @@ internal class ViewerTransformStateStore(
         state: SubsamplingScaleImageView.ViewState,
         reason: String = "unspecified",
     ) {
-        if (!hasMeaningfulViewerTransform(state)) {
-            states.remove(key)
-            ViewerLoadMetrics.event(
-                "TRANSFORM_STORE_SKIP_FIT",
-                "reason=$reason scale=${state.scale} base=${state.baseFitScale} " +
-                    "center=${state.sourceCenter} rotation=${state.rotationRadians}",
-                imageKey = key,
-            )
-            return
-        }
+        if (!state.scale.isFinite() || state.scale <= 0f ||
+            !state.baseFitScale.isFinite() || state.baseFitScale <= 0f) return
         val revision = (states[key]?.revision ?: 0) + 1
         states[key] = StoredState(state, revision)
         while (states.size > MAX_SAVED_TRANSFORMS) {
@@ -421,11 +412,12 @@ private fun applyPreviewTransform(
 internal fun hasMeaningfulViewerTransform(state: SubsamplingScaleImageView.ViewState?): Boolean {
     if (state == null || state.baseFitScale <= 0f) return false
     val relativeScale = state.scale / state.baseFitScale
-    return relativeScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001
+    return kotlin.math.abs(relativeScale - 1f) > 0.02f || kotlin.math.abs(state.rotationRadians) > 0.001
 }
 
 private fun requiresDeepZoom(state: SubsamplingScaleImageView.ViewState?): Boolean =
-    hasMeaningfulViewerTransform(state)
+    state != null && state.baseFitScale > 0f &&
+        (state.scale / state.baseFitScale > 1.02f || kotlin.math.abs(state.rotationRadians) > 0.001)
 
 private fun shouldUseIntermediatePreview(
     state: SubsamplingScaleImageView.ViewState?,
@@ -786,7 +778,7 @@ internal fun SimpleSubsamplingImageView(
                     transformStateKey,
                     "reason=${if (!isActivePage) "inactive" else "subsampling-disabled"}",
                 )
-                view.snapshotViewState()?.let {
+                view.snapshotViewState()?.takeUnless { previewOwnsTransform }?.let {
                     transformStateStore.save(transformStateKey, it, "page-inactive")
                 }
                 imageSessionGeneration += 1
@@ -1220,7 +1212,7 @@ internal fun SimpleSubsamplingImageView(
     DisposableEffect(ssivView, transformStateKey) {
         val view = ssivView
         onDispose {
-            view?.snapshotViewState()?.let {
+            view?.snapshotViewState()?.takeUnless { previewOwnsTransform }?.let {
                 transformStateStore.save(transformStateKey, it, "composition-dispose")
             }
             view?.recycle()
@@ -1604,7 +1596,7 @@ internal fun SimpleSubsamplingImageView(
                             "SSIV_VIEW_DETACHED",
                             transformStateKey,
                         )
-                        this@ssivView.snapshotViewState()?.let {
+                        this@ssivView.snapshotViewState()?.takeUnless { previewOwnsTransform }?.let {
                             transformStateStore.save(transformStateKey, it, "view-detached")
                         }
                         ViewerLoadMetrics.workReady(

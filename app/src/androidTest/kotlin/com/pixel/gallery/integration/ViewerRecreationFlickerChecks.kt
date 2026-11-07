@@ -99,7 +99,7 @@ internal class ViewerRecreationFlickerChecks(private val instrumentation: Instru
                 "Viewer emitted an empty list during the forced rebuild: $sizes"
             }
             "PASS forced empty MediaStore window + Activity recreation: " +
-                "viewer remained non-empty, renderer stayed mounted, samples=${sizes.size}"
+                "viewer remained non-empty, renderer present before/after recreation (frame continuity not tested), samples=${sizes.size}"
         } finally {
             collector?.cancel()
             try {

@@ -50,6 +50,7 @@ class LabelsViewModel @Inject constructor(
         settingsRepository.excludedFolders,
         mediaRepository.vaultEntries,
     ) { entries, hidden, excluded, lockedEntries ->
+        com.pixel.gallery.utils.GroupWorkProbe.hit("label_visibility_filter")
         val lockedIds = lockedEntries.mapTo(hashSetOf()) { it.contentId }
         filterVisibleLabelMedia(entries, hidden + excluded, lockedIds)
     }.flowOn(Dispatchers.Default)
@@ -64,6 +65,7 @@ class LabelsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val labels = combine(labelEntries, memberships, visibleMedia, labelSortMode, settingsRepository.collectionCovers) { entries, links, media, sort, covers ->
+        com.pixel.gallery.utils.GroupWorkProbe.hit("labels_rebuild")
         val byUri = media.associateBy { it.uri }
         val members = links.groupBy { it.labelId }.mapValues { (_, rows) -> rows.mapTo(hashSetOf()) { it.contentId } }
         val summaries = buildLabelSummaries(entries, links, media).map { summary ->

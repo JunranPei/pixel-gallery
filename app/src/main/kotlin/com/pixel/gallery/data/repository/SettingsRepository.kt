@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -83,7 +84,13 @@ class SettingsRepository @Inject constructor(
         Gson().fromJson(json, Array<com.pixel.gallery.model.CollectionCover>::class.java)
             .orEmpty().filter { it.key.isNotBlank() && it.uri.isNotBlank() }.associate { it.key to it.uri }
     }.getOrDefault(emptyMap())
-    val collectionCovers: Flow<Map<String, String>> = context.dataStore.data.map { decodeCovers(it[COLLECTION_COVERS]) }
+    // Group expansion shares this DataStore. Ignore unrelated writes before decoding
+    // or notifying the full-library cover indexes owned by each open Activity.
+    val collectionCovers: Flow<Map<String, String>> = context.dataStore.data
+        .map { it[COLLECTION_COVERS] }
+        .distinctUntilChanged()
+        .map(::decodeCovers)
+        .distinctUntilChanged()
     suspend fun setCollectionCover(key: String, uri: String?) {
         context.dataStore.edit { preferences ->
             val covers = decodeCovers(preferences[COLLECTION_COVERS]).toMutableMap()
@@ -230,6 +237,7 @@ class SettingsRepository @Inject constructor(
 
     val excludedFolders: Flow<Set<String>> = context.dataStore.data
         .map { preferences -> preferences[EXCLUDED_FOLDERS] ?: emptySet() }
+        .distinctUntilChanged()
 
     suspend fun addExcludedFolder(path: String) {
         context.dataStore.edit { preferences ->
@@ -247,6 +255,7 @@ class SettingsRepository @Inject constructor(
 
     val hiddenFolderRoots: Flow<Set<String>> = context.dataStore.data
         .map { preferences -> preferences[HIDDEN_FOLDERS] ?: emptySet() }
+        .distinctUntilChanged()
 
     /** Visibility includes in-flight protection; the Hidden grid uses saved roots only. */
     val hiddenFolders: StateFlow<Set<String>> = context.dataStore.data.map { preferences ->

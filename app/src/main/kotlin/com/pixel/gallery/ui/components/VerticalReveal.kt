@@ -1,7 +1,6 @@
 package com.pixel.gallery.ui.components
 
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -28,15 +27,20 @@ class VerticalRevealState internal constructor(
     var dragging by mutableStateOf(false)
         private set
     private var animation: Job? = null
+    private var lastRange = 0f
+    private var speed = 0f
+    private var target = if (expanded) 1f else 0f
     private var startExpanded = expanded
 
     fun start() {
         animation?.cancel()
         startExpanded = fraction >= .5f
+        speed = 0f
         dragging = true
     }
 
     fun dragBy(delta: Float, range: Float) {
+        lastRange = range
         if (range > 0f) fraction = (fraction - delta / range).coerceIn(0f, 1f)
     }
 
@@ -47,8 +51,9 @@ class VerticalRevealState internal constructor(
             velocity > flingThreshold -> false
             else -> fraction >= .5f
         }
-        onExpandedChange(expanded)
+        speed = if (lastRange > 0f) -velocity / lastRange else 0f
         settle(expanded)
+        onExpandedChange(expanded)
     }
 
     fun cancel() {
@@ -59,11 +64,17 @@ class VerticalRevealState internal constructor(
 
     fun settle(expanded: Boolean) {
         if (dragging) return
+        val next = if (expanded) 1f else 0f
+        if (animation?.isActive == true && target == next) return
         animation?.cancel()
+        target = next
         animation = scope.launch {
-            animate(fraction, if (expanded) 1f else 0f, animationSpec = tween(180)) { value, _ ->
-                fraction = value
+            animate(fraction, next, initialVelocity = speed, animationSpec = GalleryMotion.fraction()) { value, velocity ->
+                fraction = value.coerceIn(0f, 1f)
+                speed = velocity
             }
+            fraction = next
+            speed = 0f
         }
     }
 }

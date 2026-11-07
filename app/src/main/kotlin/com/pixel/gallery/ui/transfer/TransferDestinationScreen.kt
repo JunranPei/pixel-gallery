@@ -127,6 +127,7 @@ fun TransferDestinationScreen(
     onMoveAccepted: (Set<Long>) -> Unit = {},
     onTransferStarted: (Set<Long>) -> Unit = {},
     onPanelHeightChange: (androidx.compose.ui.unit.Dp) -> Unit = {},
+    showSourceName: Boolean = false,
     columns: Int = 4,
     onColumnsChange: (Int) -> Unit = {},
     viewModel: PhotosViewModel = hiltViewModel(),
@@ -143,6 +144,7 @@ fun TransferDestinationScreen(
         onDispose { if (moveSessionId == null) quickSortViewModel.finishSession(sessionId) }
     }
     val undoableJob = com.pixel.gallery.model.latestUndoableQuickSortJob(quickQueue, sessionId)
+    val recipientIds = entries.map { it.contentId }
     var enqueueing by remember { mutableStateOf(false) }
     var lastTransferMode by rememberSaveable { mutableStateOf(TransferMode.MOVE) }
     BackHandler(enabled = transferState.isRunning) {}
@@ -150,16 +152,16 @@ fun TransferDestinationScreen(
     val scope = rememberCoroutineScope()
     val createdDestinations = remember { mutableStateListOf<TransferDestination>() }
     var query by remember { mutableStateOf("") }
-    var selectedDestination by remember { mutableStateOf<TransferDestination?>(null) }
-    var folderNameError by remember { mutableStateOf<String?>(null) }
-    var confirmation by remember { mutableStateOf<PendingTransfer?>(null) }
-    var confirmedDestination by remember { mutableStateOf<TransferDestination?>(null) }
+    var selectedDestination by remember(recipientIds) { mutableStateOf<TransferDestination?>(null) }
+    var folderNameError by remember(recipientIds) { mutableStateOf<String?>(null) }
+    var confirmation by remember(recipientIds) { mutableStateOf<PendingTransfer?>(null) }
+    var confirmedDestination by remember(recipientIds) { mutableStateOf<TransferDestination?>(null) }
     var isCreating by remember { mutableStateOf(false) }
-    var showConflictDialog by remember { mutableStateOf(false) }
-    var pendingMode by remember { mutableStateOf<TransferMode?>(null) }
-    var pendingEntries by remember { mutableStateOf<List<MediaEntry>>(emptyList()) }
-    var conflictCount by remember { mutableStateOf(0) }
-    var conflictPolicy by remember { mutableStateOf(ConflictPolicy.KEEP_BOTH) }
+    var showConflictDialog by remember(recipientIds) { mutableStateOf(false) }
+    var pendingMode by remember(recipientIds) { mutableStateOf<TransferMode?>(null) }
+    var pendingEntries by remember(recipientIds) { mutableStateOf<List<MediaEntry>>(emptyList()) }
+    var conflictCount by remember(recipientIds) { mutableStateOf(0) }
+    var conflictPolicy by remember(recipientIds) { mutableStateOf(ConflictPolicy.KEEP_BOTH) }
     val permissionRequests = remember {
         MutableSharedFlow<androidx.activity.result.IntentSenderRequest>(extraBufferCapacity = 1)
     }
@@ -286,6 +288,7 @@ fun TransferDestinationScreen(
     SelectionBottomSheet(
         expandRequest = expandRequest,
         title = stringResource(R.string.transfer_title),
+        subtitle = if (showSourceName) entries.singleOrNull()?.path?.let { File(it).name } else null,
         showBackButton = false,
         centerTitle = true,
         onPanelHeightChange = { panelHeight = it; onPanelHeightChange(it) },
@@ -309,7 +312,9 @@ fun TransferDestinationScreen(
                 "$action ${it.completed} / ${it.total}"
             },
             onQueryChange = { query = it; folderNameError = null },
-            onSelect = { selectedDestination = it },
+            onSelect = { destination ->
+                selectedDestination = destination.takeUnless { it.stableKey == selectedDestination?.stableKey }
+            },
             onNewAlbum = {
                 if (canCreate && !isCreating && !transferState.isRunning) {
                     isCreating = true

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.util.AtomicFile
 import androidx.core.content.ContextCompat
 import com.google.gson.Gson
+import com.pixel.gallery.R
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.model.*
 import com.pixel.gallery.services.QuickSortService
@@ -154,6 +155,10 @@ class QuickSortQueueRepository @Inject constructor(
             if (eligible.isEmpty()) return@withLock QuickSortEnqueueResult.Rejected("Items are already in the destination album")
             val accepted = selectUnreservedQuickSortEntries(eligible, state.value)
             if (accepted.isEmpty()) return@withLock QuickSortEnqueueResult.Rejected("Items are already being moved")
+            if (accepted.size > MAX_PENDING_ITEMS) {
+                return@withLock QuickSortEnqueueResult.Rejected(context.getString(
+                    R.string.transfer_queue_selection_too_large, MAX_PENDING_ITEMS))
+            }
             if (state.value.pendingCount + accepted.size > MAX_PENDING_ITEMS || state.value.jobs.count { !it.isTerminal } >= MAX_PENDING_JOBS) {
                 return@withLock QuickSortEnqueueResult.Rejected("Queue is full; wait for a batch to finish")
             }

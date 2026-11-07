@@ -50,9 +50,9 @@ import kotlin.math.roundToInt
 import kotlin.math.sign
 import kotlin.math.tanh
 
-// User chose the rightmost setting of the approved interactive prototype.
-private const val NavigationDamping = 1.10f
-private const val NavigationStiffness = 520f
+// Match the pager response; target selection still starts immediately.
+private const val NavigationDamping = 1f
+private const val NavigationStiffness = GalleryMotion.NavigationStiffness
 private const val RevealDistance = 112f
 
 internal enum class GalleryNavigationTab(val label: String, val side: Int = 0) {
@@ -191,6 +191,7 @@ internal fun RevealGalleryNavigation(
         ).value.coerceIn(0f, 1f)
     }
     val textMeasurer = rememberTextMeasurer()
+    SideEffect { com.pixel.gallery.utils.GalleryInteractionProbe.weight(weights[GalleryNavigationTab.Albums.ordinal]) }
     val labelStyle = MaterialTheme.typography.labelLarge
     val maxLabelWidth = tabs.maxOf { textMeasurer.measure(AnnotatedString(it.label), labelStyle).size.width }
     val selectedWidth = with(density) { maxOf(120.dp.toPx(), maxLabelWidth + 56.dp.toPx()) }

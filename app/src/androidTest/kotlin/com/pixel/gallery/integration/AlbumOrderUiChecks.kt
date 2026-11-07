@@ -207,8 +207,9 @@ internal class AlbumOrderUiChecks(private val instrumentation: Instrumentation) 
     private fun back() { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK); settle(400) }
     private fun settle(ms: Long) { SystemClock.sleep(ms); instrumentation.waitForIdleSync() }
     private fun snapshot(name: String) {
-        instrumentation.uiAutomation.takeScreenshot().apply {
-            File(output, "$name.png").outputStream().use { compress(Bitmap.CompressFormat.PNG, 100, it) }; recycle()
-        }
+        File(output, "$name.txt").writeText(nodes().joinToString("\n") { node ->
+            val rect = Rect().also(node::getBoundsInScreen)
+            "${node.text} | ${node.contentDescription} | $rect | selected=${node.isSelected}"
+        })
     }
 }

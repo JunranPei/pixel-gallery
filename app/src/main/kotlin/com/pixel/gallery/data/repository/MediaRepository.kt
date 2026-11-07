@@ -219,6 +219,7 @@ class MediaRepository @Inject constructor(
         readRefreshes.refreshes(mediaDao.observeAllEntriesChanges()).coalesceMediaInvalidations().map { mediaDao.getAllEntriesPaged() },
         settingsRepository.excludedFolders
     ) { entries, excluded ->
+        com.pixel.gallery.utils.GroupWorkProbe.hit("media_exclusion_filter")
         entries.filter { entry ->
             !entry.path.contains("/PixelGallery-QuickSortUndo/") && !excluded.any { entry.path.isInsideMediaFolder(it) }
         }
