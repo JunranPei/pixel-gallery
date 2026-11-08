@@ -20,6 +20,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pixel.gallery.R
 import com.pixel.gallery.ui.components.GalleryDialog
+import com.pixel.gallery.ui.components.PopupPresence
+import com.pixel.gallery.ui.components.GalleryPopupDialog
+import com.pixel.gallery.ui.components.popupMotion
 import com.pixel.gallery.ui.theme.EmphasizedTypography
 import com.pixel.gallery.ui.viewmodel.LabelBackupOperation
 import com.pixel.gallery.ui.viewmodel.LabelBackupViewModel
@@ -77,14 +80,14 @@ fun LabelBackupSettingsBlock(
         }
     }
 
-    val preview = state.preview
-    if (preview != null && !busy && state.error == null) {
+    PopupPresence(state.takeIf { it.preview != null && !busy && it.error == null }) { state ->
+        val preview = checkNotNull(state.preview)
         val missing = preview.resolution.missing
         val ambiguous = preview.resolution.ambiguous
-        if (showDetails) {
+        PopupPresence(showDetails) {
             val height = (LocalConfiguration.current.screenHeightDp.dp - 120.dp).coerceIn(240.dp, 640.dp)
-            Dialog(onDismissRequest = { showDetails = false }) {
-                Surface(shape = SettingsBlockPosition.Single.shape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+            GalleryPopupDialog(onDismissRequest = { showDetails = false }) {
+                Surface(modifier = Modifier.popupMotion(), shape = SettingsBlockPosition.Single.shape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                     Column(Modifier.height(height).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(stringResource(R.string.label_backup_details), style = MaterialTheme.typography.titleLarge)
                         val labelNames = preview.backup.labels.associate { it.key to it.name }
@@ -110,7 +113,9 @@ fun LabelBackupSettingsBlock(
                     }
                 }
             }
-        } else GalleryDialog(onDismissRequest = viewModel::clearPreview,
+        }
+        PopupPresence(!showDetails) {
+        GalleryDialog(onDismissRequest = viewModel::clearPreview,
             title = { Text(stringResource(if (state.importResult == null) R.string.label_backup_preview else R.string.label_backup_import_done)) },
             text = {
                 Text(stringResource(R.string.label_backup_matches, preview.resolution.matches.size, preview.backup.media.size))
@@ -130,11 +135,14 @@ fun LabelBackupSettingsBlock(
                 Text(stringResource(if (state.importResult == null) R.string.label_backup_restore else R.string.label_backup_ok))
             } },
             dismissButton = { if (state.importResult == null) TextButton(onClick = viewModel::clearPreview) { Text(stringResource(R.string.qs_cancel)) } })
+        }
     }
     val exported = state.exportResult
     val error = state.error
-    if (exported != null || error != null) GalleryDialog(onDismissRequest = viewModel::dismissMessage,
+    PopupPresence((exported to error).takeIf { exported != null || error != null }) { (exported, error) ->
+    GalleryDialog(onDismissRequest = viewModel::dismissMessage,
         title = { Text(stringResource(if (error != null) R.string.label_backup_error else R.string.label_backup_export_done)) },
         text = { Text(error ?: stringResource(R.string.label_backup_export_result, exported!!.labels, exported.media, exported.skipped, exported.groups)) },
         confirmButton = { TextButton(onClick = viewModel::dismissMessage) { Text(stringResource(R.string.label_backup_ok)) } })
+    }
 }

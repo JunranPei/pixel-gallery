@@ -24,6 +24,10 @@ interface MediaDao {
         loadAllPages(::getAllEntriesPage, MediaEntry::contentId)
             .sortedWith(compareByDescending<MediaEntry> { it.bestTimestamp }.thenByDescending { it.contentId })
 
+    @Transaction
+    suspend fun getAllEntriesPagedReusing(previous: List<MediaEntry>): List<MediaEntry> =
+        readMediaSnapshot(previous, DATABASE_PAGE_SIZE, ::getAllEntriesPage)
+
     @Query("SELECT contentId, path, dateModifiedMillis, isTrashed, trashedAtMillis FROM media_entries WHERE contentId > :afterContentId ORDER BY contentId LIMIT :limit")
     suspend fun getKnownEntriesPage(limit: Int, afterContentId: Long): List<KnownEntry>
 

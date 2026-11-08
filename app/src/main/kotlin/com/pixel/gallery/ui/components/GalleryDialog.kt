@@ -31,15 +31,17 @@ fun GalleryDialog(
     dismissEnabled: Boolean = true,
 ) {
     val colors = MaterialTheme.colorScheme
-    Dialog(
-        onDismissRequest = { if (dismissEnabled) onDismissRequest() },
+    val motion = LocalPopupMotion.current
+    val interactive = motion?.interactive != false
+    GalleryPopupDialog(
+        onDismissRequest = { if (dismissEnabled && interactive) onDismissRequest() },
         properties = DialogProperties(
             dismissOnBackPress = dismissEnabled,
             dismissOnClickOutside = dismissEnabled,
         ),
     ) {
         Surface(
-            modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth()
+            modifier = Modifier.popupMotion().widthIn(max = 360.dp).fillMaxWidth()
                 .heightIn(max = (LocalConfiguration.current.screenHeightDp * .85f).dp),
             shape = RoundedCornerShape(28.dp),
             color = colors.surfaceContainerHigh,

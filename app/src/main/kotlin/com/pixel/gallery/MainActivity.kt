@@ -81,6 +81,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private val showNotificationAccess = mutableStateOf(false)
+    private var restoredWindowDrawGate: com.pixel.gallery.ui.viewer.RestoredWindowDrawGate? = null
 
     private val viewModel: PhotosViewModel by viewModels()
 
@@ -114,11 +115,15 @@ class MainActivity : FragmentActivity() {
         _intentSenderLauncher = intentSenderLauncher
         
         enableEdgeToEdge()
+        if (savedInstanceState != null) {
+            restoredWindowDrawGate = com.pixel.gallery.ui.viewer.RestoredWindowDrawGate(window.decorView)
+        }
         
         setContent {
             val currentConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.ui.platform.LocalConfiguration provides (videoPipConfiguration ?: currentConfiguration),
+                com.pixel.gallery.ui.viewer.LocalRestoredWindowDrawGate provides restoredWindowDrawGate,
             ) {
             val manualColor by viewModel.manualColor.collectAsState(initial = 0)
             val materialYou by viewModel.materialYou.collectAsState(initial = true)
@@ -139,7 +144,7 @@ class MainActivity : FragmentActivity() {
                     ) {
                         MainScaffold()
                     }
-                    if (showNotificationAccess.value) {
+                    com.pixel.gallery.ui.components.PopupPresence(showNotificationAccess.value) {
                         GalleryDialog(
                             onDismissRequest = { showNotificationAccess.value = false },
                             title = { Text(stringResource(R.string.dialog_notifications_title)) },
@@ -265,6 +270,8 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
+        restoredWindowDrawGate?.dispose()
+        restoredWindowDrawGate = null
         super.onDestroy()
         android.util.Log.e("GalleryLifecycle", "MainActivity.onDestroy(hashCode=${hashCode()})")
         traceLifecycle(

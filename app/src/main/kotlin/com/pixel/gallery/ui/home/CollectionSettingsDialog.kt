@@ -34,10 +34,7 @@ fun CollectionSettingsDialog(
     val groupId = target.key.takeIf { it.startsWith("group:") }?.removePrefix("group:")
     var draftArt by rememberSaveable(target.key) { mutableIntStateOf(groupId?.let { prefs.getInt(it, 0) }?.coerceIn(groupArt.indices) ?: 0) }
     var pickingArt by rememberSaveable(target.key) { mutableStateOf(false) }
-    if (pickingArt) {
-        GroupIllustrationPicker(draftArt, { draftArt = it; pickingArt = false }, { pickingArt = false }, labelGroup)
-        return
-    }
+    com.pixel.gallery.ui.components.PopupPresence(!pickingArt) {
     com.pixel.gallery.ui.components.GalleryDialog(
         onDismissRequest = { if (!saving) onBack() }, icon = Icons.Outlined.Edit,
         title = { Text(stringResource(R.string.collection_settings)) },
@@ -111,6 +108,10 @@ fun CollectionSettingsDialog(
         } },
         dismissButton = { TextButton(onClick = onBack, enabled = !saving) { Text(stringResource(R.string.labels_cancel)) } },
     )
+    }
+    com.pixel.gallery.ui.components.PopupPresence(pickingArt) {
+        GroupIllustrationPicker(draftArt, { draftArt = it; pickingArt = false }, { pickingArt = false }, labelGroup)
+    }
 }
 
 /** Label/group collection selection uses the same media grid and date sections as album browsing. */

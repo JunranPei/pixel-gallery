@@ -17,7 +17,7 @@ fun DeleteConfirmDialog(
     isDeletePermanently: Boolean = false,
     onConfirm: () -> Unit
 ) {
-    if (!visible) return
+    PopupPresence(visible) {
     GalleryDialog(
         onDismissRequest = onDismissRequest,
         title = { Text(title) },
@@ -35,4 +35,5 @@ fun DeleteConfirmDialog(
         },
         dismissButton = { TextButton(onClick = onDismissRequest) { Text(stringResource(R.string.dialog_cancel)) } },
     )
+    }
 }

@@ -115,14 +115,13 @@ class PhotosViewModel @Inject constructor(
     private data class OrderedMedia(val entries: List<MediaEntry>, val sort: PhotoSortOrder)
 
     private val orderedMedia = resumedState.flatMapLatest { resumed ->
-        if (!resumed) emptyFlow() else combine(allPhotos, hiddenFolders, photoSortOrder) { all, hidden, sort ->
-            val visible = all.filter { entry -> hidden.none { entry.path.isInsideMediaFolder(it) } }
-            OrderedMedia(sortMedia(visible, sort), sort)
+        if (!resumed) emptyFlow() else combine(repository.loadedEntries.filterNotNull(), hiddenFolders, photoSortOrder) { all, hidden, sort ->
+            OrderedMedia(SharedMediaPhotoLists.cache.get(all, hidden, sort), sort)
         }
     }.flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, OrderedMedia(emptyList(), PhotoSortOrder.DATE_DESC))
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val photos: StateFlow<List<MediaEntry>> = orderedMedia.map { it.entries }
+    val photos: StateFlow<List<MediaEntry>> = orderedMedia.filterNotNull().map { it.entries }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /**
@@ -142,8 +141,8 @@ class PhotosViewModel @Inject constructor(
         hiddenFolders,
         photoSortOrder,
     ) { all, hidden, sort ->
-        val visible = all.filter { entry -> hidden.none { entry.path.isInsideMediaFolder(it) } }
-        val ordered = if (sort == PhotoSortOrder.DATE_DESC) visible else sortMedia(visible, sort)
+        val ordered = SharedMediaPhotoLists.cache.get(all, hidden,
+            sort.takeUnless { it == PhotoSortOrder.DATE_DESC })
         MediaRepository.ViewerMediaSnapshot(ordered, sort.name, hidden)
     }
         .flowOn(Dispatchers.Default)
@@ -160,7 +159,7 @@ class PhotosViewModel @Inject constructor(
     // Hidden browsing uses the original records without exposing them to normal
     // library, label, favourite or transfer-destination lists.
     val hiddenPhotos: StateFlow<List<MediaEntry>> = combine(allPhotos, hiddenFolders) { entries, hidden ->
-        entries.filter { entry -> hidden.any { entry.path.isInsideMediaFolder(it) } }
+        SharedMediaPhotoLists.cache.get(entries, hidden, hiddenOnly = true)
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -313,14 +312,14 @@ class PhotosViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
     internal val browsingIndex: StateFlow<MediaBrowseIndex> = combine(
-        orderedMedia, gridColumns.map { it >= 6 }.distinctUntilChanged(), browseTimeZone,
+        orderedMedia.filterNotNull(), gridColumns.map { it >= 6 }.distinctUntilChanged(), browseTimeZone,
     ) { media, monthly, zone -> Triple(media, monthly, zone) }.mapLatest { (media, monthly, zone) ->
         withContext(Dispatchers.Default) {
             val taskContext = coroutineContext
-            MediaBrowseIndex.build(media.entries, if (monthly) 6 else 3, media.sort,
+            SharedMediaBrowseIndexes.cache.getOrBuild(media.entries, if (monthly) 6 else 3, media.sort,
                 timeZone = java.util.TimeZone.getTimeZone(zone), checkCancelled = { taskContext.ensureActive() })
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, MediaBrowseIndex.Empty)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, MediaBrowseIndex.Unloaded)
 
     val groupedPhotos: StateFlow<List<GridItem>> = browsingIndex.map {
         it.library[com.pixel.gallery.model.MediaTypeFilter.ALL].media.gridItems
@@ -333,7 +332,7 @@ class PhotosViewModel @Inject constructor(
     }.mapLatest { (media, monthly, zone) ->
         withContext(Dispatchers.Default) {
             val taskContext = coroutineContext
-            MediaBrowseIndex.build(sortMedia(media.entries, media.sort), if (monthly) 6 else 3, media.sort,
+            SharedMediaBrowseIndexes.cache.getOrBuild(sortMedia(media.entries, media.sort), if (monthly) 6 else 3, media.sort,
                 timeZone = java.util.TimeZone.getTimeZone(zone), checkCancelled = { taskContext.ensureActive() })
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MediaBrowseIndex.Empty)

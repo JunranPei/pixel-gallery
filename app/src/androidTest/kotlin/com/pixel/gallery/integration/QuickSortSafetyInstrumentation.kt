@@ -36,10 +36,12 @@ import kotlin.coroutines.resume
 /** Self-contained instrumentation; no production media or production queue is submitted for mutation. */
 class QuickSortSafetyInstrumentation : Instrumentation() {
     private var interactionRun: String? = null
+    private var recoveryFramesSuite = false
     private var sharedMotionSuite = false
     private var overflowMotionSuite = false
     private var groupIndexRun: String? = null
     private var settingsProjectionSuite = false
+    private var collectionHeapSuite = false
     private var groupMultiWindowRun: String? = null
     private var imageRotationAudit = false
     private var bulkTransferSuite = false
@@ -91,11 +93,13 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var labelBackupEdgeFilter: String? = null
     private var labelBackupCleanupToken: String? = null
     override fun onCreate(arguments: Bundle?) {
+        recoveryFramesSuite = arguments?.getString("suite") == "viewer-recovery-frames"
         sharedMotionSuite = arguments?.getString("suite") == "shared-motion"
         overflowMotionSuite = arguments?.getString("suite") == "overflow-motion"
         if (arguments?.getString("suite") == "gallery-interaction") interactionRun = arguments.getString("run") ?: "fixed"
         if (arguments?.getString("suite") == "group-index-pressure") groupIndexRun = arguments.getString("run") ?: "baseline"
         settingsProjectionSuite = arguments?.getString("suite") == "settings-projection"
+        collectionHeapSuite = arguments?.getString("suite") == "collection-heap"
         imageRotationAudit = arguments?.getString("suite") == "image-rotation-audit"
         bulkTransferSuite = arguments?.getString("suite") == "bulk-transfer"
         viewerSheetPagingSuite = arguments?.getString("suite") == "viewer-sheet-paging"
@@ -154,11 +158,13 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                recoveryFramesSuite -> ViewerRecoveryFrameChecks(this).exercise()
                 sharedMotionSuite -> RedesignTouchChecks(this).exercise(motionOnly = true)
                 overflowMotionSuite -> OverflowMotionChecks(this).exercise()
                 interactionRun != null -> GalleryInteractionChecks(this, interactionRun!!).exercise()
                 groupIndexRun != null -> GroupIndexPressureChecks(this, groupIndexRun!!).exercise()
                 settingsProjectionSuite -> SettingsProjectionChecks(this).exercise()
+                collectionHeapSuite -> CollectionHeapChecks(this).exercise()
                 groupMultiWindowRun != null -> GroupMultiWindowChecks(this, groupMultiWindowRun!!).exercise()
                 imageRotationAudit -> ImageRotationAudit(this).exercise()
                 bulkTransferSuite -> BulkTransferDeviceChecks(this, bulkToken).exercise()

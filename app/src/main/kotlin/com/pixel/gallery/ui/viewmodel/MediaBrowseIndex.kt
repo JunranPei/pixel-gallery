@@ -54,6 +54,7 @@ internal class MediaBrowseIndex private constructor(
         }
 
     companion object {
+        val Unloaded = build(emptyList(), 3, PhotoSortOrder.DATE_DESC)
         val Empty = build(emptyList(), 3, PhotoSortOrder.DATE_DESC)
 
         /** Input already has the effective library sort order. */

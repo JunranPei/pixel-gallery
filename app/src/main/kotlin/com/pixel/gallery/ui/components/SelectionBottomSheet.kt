@@ -55,7 +55,7 @@ fun SelectionBottomSheet(
             expanded = true
         }
     }
-    androidx.activity.compose.BackHandler {
+    androidx.activity.compose.BackHandler(enabled = LocalPopupMotion.current?.interactive != false) {
         if (expanded || panel.fraction > 0f) expanded = false
         else if (confirmDismiss()) onDismiss()
     }
@@ -68,6 +68,7 @@ fun SelectionBottomSheet(
         val headerColor = MaterialTheme.colorScheme.surfaceContainerLow
         Surface(
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .popupMotion(androidx.compose.ui.graphics.TransformOrigin(.5f, 1f))
                 .height(collapsed + (open - collapsed) * panel.fraction)
                 .graphicsLayer { translationY = pullOffset }
                 .excludeViewerGestures()

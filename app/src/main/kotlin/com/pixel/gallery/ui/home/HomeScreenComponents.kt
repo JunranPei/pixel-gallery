@@ -116,7 +116,9 @@ fun PhotosScreen(
     val retainedSelectionMode = com.pixel.gallery.ui.quicksort.LocalMediaSelectionMode.current
     val presentationSession = quickSort?.sessionKey ?: ordinaryMove?.sessionKey
     val holdBatches = quickSort != null || ordinaryMove != null
-    var sessionSlots by remember(presentationSession, holdBatches, gridContextKey) { mutableStateOf(items) }
+    var sessionSlots by remember(presentationSession, holdBatches, gridContextKey) {
+        mutableStateOf(if (holdBatches) items else emptyList())
+    }
     SideEffect { if (holdBatches && sessionSlots.isEmpty() && items.isNotEmpty()) sessionSlots = items }
     var isFastScrolling by remember { mutableStateOf(false) }
     var isScrollbarDragging by remember { mutableStateOf(false) }
@@ -171,7 +173,7 @@ fun PhotosScreen(
     }
     val quickSortBusy = quickSort != null && quickSortGestures.busy
     val idsByIndex = remember(displayedItems, quickSort != null) {
-        if (quickSort != null) displayedItems.map { (it as? GridItem.Photo)?.entry?.contentId } else emptyList()
+        if (quickSort != null) PhotoGridItemIds(displayedItems) else emptyList()
     }
     SideEffect { quickSortGestures.scrollbarDragging = isScrollbarDragging }
 
@@ -215,6 +217,16 @@ fun PhotosScreen(
         { index: Int -> scrollbarPositionLabels.getOrNull(index) }
     }
 
+    val restoredGrid = com.pixel.gallery.ui.viewer.LocalRestoredGridContent.current
+    SideEffect {
+        if (restoredGrid?.isWaiting == true) restoredGrid.presentedData = items
+        if (restoredGrid?.isWaiting == true) restoredGrid.visibleImageCount = {
+            val layout = state.layoutInfo
+            if (layout.totalItemsCount != displayedItems.size || layout.viewportSize.height == 0 ||
+                (displayedItems.isNotEmpty() && layout.visibleItemsInfo.isEmpty())) null
+            else layout.visibleItemsInfo.count { displayedItems.getOrNull(it.index) is GridItem.Photo }
+        }
+    }
     Box(modifier = Modifier.fillMaxSize()
         .then(if (quickSort != null) Modifier.clipToBounds() else Modifier)
         .then(if (quickSort != null) Modifier.quickSortGestureArbitration(quickSortGestures) else Modifier)
@@ -303,35 +315,23 @@ fun PhotosScreen(
             ) { index ->
                 when (val item = displayedItems[index]) {
                     is GridItem.Header -> {
-                        val headerPhotos = remember(item, displayedItems) {
-                            val photos = mutableListOf<Long>()
-                            for (i in index + 1 until displayedItems.size) {
-                                val nextItem = displayedItems[i]
-                                if (nextItem is GridItem.Header) break
-                                if (nextItem is GridItem.Photo) photos.add(nextItem.entry.contentId)
-                            }
-                            photos
+                        val headerPhotos = remember(index, displayedItems) {
+                            PhotoGridHeaderRange(displayedItems, index)
                         }
-                        val selectableHeaderPhotos = headerPhotos.filterNot { it in reservedIds }
-                        val isHeaderSelected = selectableHeaderPhotos.isNotEmpty() && selectableHeaderPhotos.all { selectedIds.contains(it) }
+                        val isHeaderSelected = remember(headerPhotos, selectedIds, reservedIds) {
+                            headerPhotos.isSelected(selectedIds, reservedIds)
+                        }
                         val isSelectionMode = selectionMode || retainedSelectionMode || quickSort != null
-                        val onHeaderClick = remember(isHeaderSelected, selectedIds, selectableHeaderPhotos, quickSortBusy, reservedIds) {
-                            {
-                                if (!quickSortBusy) {
-                                    if (isHeaderSelected) {
-                                        onSelectionChange(selectedIds - selectableHeaderPhotos.toSet() - reservedIds)
-                                    } else {
-                                        onSelectionChange((selectedIds + selectableHeaderPhotos.toSet()) - reservedIds)
-                                    }
-                                }
-                            }
-                        }
                         
                         DateHeader(
                             title = item.title,
                             isSelectionMode = isSelectionMode,
                             isSelected = isHeaderSelected,
-                            onToggleSelection = onHeaderClick
+                            onToggleSelection = {
+                                if (!quickSortBusy) {
+                                    onSelectionChange(headerPhotos.toggleSelection(selectedIds, reservedIds))
+                                }
+                            }
                         )
                     }
                     is GridItem.Photo -> {
@@ -557,6 +557,7 @@ fun PhotoTileContent(
     onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val restoredRequest = com.pixel.gallery.ui.viewer.rememberRestoredThumbnailRequest(model, transform)
     Box(
         modifier = modifier
             .aspectRatio(1f)
@@ -576,8 +577,8 @@ fun PhotoTileContent(
             model = model,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-            requestBuilderTransform = transform
+            modifier = Modifier.fillMaxSize().then(restoredRequest.modifier),
+            requestBuilderTransform = restoredRequest.transform
         )
         
         // Selection overlay
@@ -868,12 +869,13 @@ fun AlbumCoverCard(
             if (coverContent != null) {
                 coverContent()
             } else if (coverUri != null) {
+                val restoredRequest = com.pixel.gallery.ui.viewer.rememberRestoredThumbnailRequest(model, transform)
                 GlideImage(
                     model = model,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    requestBuilderTransform = transform
+                    modifier = Modifier.fillMaxSize().then(restoredRequest.modifier),
+                    requestBuilderTransform = restoredRequest.transform
                 )
             } else {
                 Icon(

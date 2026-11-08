@@ -27,6 +27,7 @@ internal fun GlideViewerFallback(
     isVisiblePage: Boolean,
     modifier: Modifier = Modifier,
     onContentReadyChanged: (Boolean) -> Unit = {},
+    onContentLoadFailed: () -> Unit = {},
     transformStateStore: ViewerTransformStateStore? = null,
     onClick: () -> Unit = {}
 ) {
@@ -55,6 +56,7 @@ internal fun GlideViewerFallback(
         val fitHeightFraction = (imageHeight * fitScale / containerHeight).coerceIn(0f, 1f)
         var imageView by remember { mutableStateOf<ImageView?>(null) }
         val currentOnContentReadyChanged by rememberUpdatedState(onContentReadyChanged)
+        val currentOnContentLoadFailed by rememberUpdatedState(onContentLoadFailed)
 
         DisposableEffect(imagePath, dateModifiedMillis, isVisiblePage, imageView) {
             val view = imageView
@@ -73,6 +75,7 @@ internal fun GlideViewerFallback(
                             isFirstResource: Boolean,
                         ): Boolean {
                             currentOnContentReadyChanged(false)
+                            currentOnContentLoadFailed()
                             return false
                         }
 

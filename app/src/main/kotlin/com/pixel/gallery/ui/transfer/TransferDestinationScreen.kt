@@ -363,7 +363,7 @@ fun TransferDestinationScreen(
         onClear = viewModel::clearTransferState,
     )
 
-    confirmation?.let { plan ->
+    com.pixel.gallery.ui.components.PopupPresence(confirmation) { plan ->
         TransferConfirmationDialog(
             mode = plan.mode,
             destination = plan.destination,
@@ -373,7 +373,7 @@ fun TransferDestinationScreen(
         )
     }
 
-    if (showConflictDialog) {
+    com.pixel.gallery.ui.components.PopupPresence(showConflictDialog) {
         val canReplace = confirmedDestination?.documentUri == null &&
             (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()))

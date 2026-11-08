@@ -31,15 +31,23 @@ internal object OverflowMotion {
     }
     private fun mix(a: Float, b: Float, p: Float) = a + (b - a) * p
 
+    internal fun responseFraction(fraction: Float, opening: Boolean): Float {
+        if (fraction <= 0f) return 0f
+        if (fraction >= 1f) return 1f
+        val duration = if (opening) .45f else .5f
+        val stiffness = if (opening) 400f else 165f
+        val damping = if (opening) .754f else .8f
+        return response(fraction * duration, stiffness, damping) +
+            (1 - response(duration, stiffness, damping)) * fraction
+    }
+
     fun frame(from: OverflowFrame, to: OverflowFrame, fraction: Float, opening: Boolean, density: Float): OverflowFrame {
         if (fraction <= 0f) return from
         if (fraction >= 1f) return to
         val duration = if (opening) .45f else .5f
         val t = fraction * duration
-        val stiffness = if (opening) 400f else 165f
-        val damping = if (opening) .754f else .8f
         // Remove only the remaining tail; interruption always starts at the last displayed frame.
-        val p = response(t, stiffness, damping) + (1 - response(duration, stiffness, damping)) * fraction
+        val p = responseFraction(fraction, opening)
         val width = mix(from.bounds.width, to.bounds.width, p).coerceAtLeast(1f)
         val height = mix(from.bounds.height, to.bounds.height, p).coerceAtLeast(1f)
         val distance = to.bounds.center.y - from.bounds.center.y

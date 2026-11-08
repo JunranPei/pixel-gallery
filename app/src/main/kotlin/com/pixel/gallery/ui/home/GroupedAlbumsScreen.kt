@@ -73,6 +73,16 @@ fun GroupedAlbumsScreen(
         com.pixel.gallery.utils.GroupWorkProbe.hit("group_grid_rows")
         orderedAlbumRows(groupedAlbumRows(albums, grouping, labels, search, groupingEnabled), grouping, defaultOrder)
     }
+    DisposableEffect(rows, gridState) {
+        // Async startup initially exposes only trash/empty group headers. Keeping
+        // their stable key anchored would scroll past albums arriving before them.
+        // Apply before the next measure; scrolled/restored windows keep their anchor.
+        if (!gridState.isScrollInProgress && gridState.firstVisibleItemIndex == 0 &&
+            gridState.firstVisibleItemScrollOffset == 0) {
+            gridState.requestScrollToItem(0)
+        }
+        onDispose { }
+    }
     LaunchedEffect(albums, labels, grouping.groups, defaultOrder) {
         val all = orderedAlbumRows(groupedAlbumRows(albums, grouping.copy(collapsedIds = emptySet()), labels, false, groupingEnabled), grouping, defaultOrder)
         onRememberOrder(all)
@@ -85,6 +95,24 @@ fun GroupedAlbumsScreen(
         else listOf(Color(0xFFF0F4F8), Color(0xFFEFF5F1), Color(0xFFF4F1F8), Color(0xFFF6F3EF))
     val groupColors = remember(grouping.groups, colors) {
         mapOf(LABELS_ALBUM_GROUP to colors[2]) + grouping.groups.associate { it.id to colors[it.resolvedColorIndex] }
+    }
+    val restoredGrid = com.pixel.gallery.ui.viewer.LocalRestoredGridContent.current
+    SideEffect {
+        if (restoredGrid?.isWaiting == true) {
+            restoredGrid.presentedData = albums
+            restoredGrid.presentedLabels = labels
+            restoredGrid.presentedGrouping = grouping
+        }
+        if (restoredGrid?.isWaiting == true) restoredGrid.visibleImageCount = {
+            val layout = gridState.layoutInfo
+            if (layout.totalItemsCount != rows.size || layout.viewportSize.height == 0 ||
+                (rows.isNotEmpty() && layout.visibleItemsInfo.isEmpty())) null
+            else layout.visibleItemsInfo.count { cell ->
+                rows.getOrNull(cell.index)?.let { row ->
+                    !row.album?.coverUri.isNullOrBlank() || row.label?.cover != null
+                } == true
+            }
+        }
     }
     AlbumGrid(
         columns = gridColumns, onColumnsChange = onColumnsChange, state = gridState,

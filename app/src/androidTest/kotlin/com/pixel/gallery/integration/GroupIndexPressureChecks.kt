@@ -16,6 +16,7 @@ import com.pixel.gallery.data.repository.SettingsRepository
 import com.pixel.gallery.services.MetadataService
 import com.pixel.gallery.ui.viewmodel.LabelsViewModel
 import com.pixel.gallery.ui.viewmodel.PhotosViewModel
+import com.pixel.gallery.ui.viewmodel.SharedLabelCollections
 import com.pixel.gallery.utils.GroupWorkProbe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -38,6 +39,7 @@ internal class GroupIndexPressureChecks(private val runner: Instrumentation, pri
         val db = Room.inMemoryDatabaseBuilder(context, GalleryDatabase::class.java)
             .addCallback(LABEL_DATABASE_CALLBACK).build()
         var repository: MediaRepository? = null
+        var sharedLabels: SharedLabelCollections? = null
         var stage = "seed"
         val store = ViewModelStore()
         val records = mutableListOf<Map<String, Any>>()
@@ -55,6 +57,7 @@ internal class GroupIndexPressureChecks(private val runner: Instrumentation, pri
             withTimeout(60_000) { media.allEntries.first { it.size == count } }
             settings.setCollectionCover(token, "content://index-pressure/1")
             val labelsRepository = LabelRepository(db, db.labelDao(), media.readRefreshes)
+            val collections = SharedLabelCollections(labelsRepository, media, settings).also { sharedLabels = it }
             val photoModels = mutableListOf<PhotosViewModel>()
             runner.runOnMainSync {
                 repeat(4) { index ->
@@ -67,7 +70,7 @@ internal class GroupIndexPressureChecks(private val runner: Instrumentation, pri
                     resumed.value = true
                     photoModels += photos
                     store.put("photos-$index", photos)
-                    store.put("labels-$index", LabelsViewModel(labelsRepository, media, settings, context))
+                    store.put("labels-$index", LabelsViewModel(labelsRepository, media, settings, context, collections))
                 }
             }
             stage = "models"
@@ -97,6 +100,7 @@ internal class GroupIndexPressureChecks(private val runner: Instrumentation, pri
                 "run" to run, "stage" to stage, "loadedRecords" to repository?.allEntries?.value?.size,
                 "syntheticRecords" to count, "heapMax" to Runtime.getRuntime().maxMemory(), "records" to records)))
             runner.runOnMainSync { store.clear() }
+            sharedLabels?.close()
             repository?.let { repo ->
                 (MediaRepository::class.java.getDeclaredField("repositoryScope").apply { isAccessible = true }
                     .get(repo) as CoroutineScope).cancel()

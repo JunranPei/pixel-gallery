@@ -1,0 +1,3 @@
+<resources>
+    <string name="transfer_queue_selection_too_large">一次最多转移 %1$d 个文件，请分批操作。</string>
+</resources>

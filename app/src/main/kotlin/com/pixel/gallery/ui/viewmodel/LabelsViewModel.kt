@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pixel.gallery.R
-import com.pixel.gallery.data.local.entity.LabelEntry
 import com.pixel.gallery.data.local.entity.MediaEntry
 import com.pixel.gallery.data.repository.DuplicateLabelNameException
 import com.pixel.gallery.data.repository.InvalidLabelNameException
@@ -14,22 +13,15 @@ import com.pixel.gallery.data.repository.LabelMediaUnavailableException
 import com.pixel.gallery.data.repository.MediaRepository
 import com.pixel.gallery.data.repository.SettingsRepository
 import com.pixel.gallery.model.LabelEditRequest
-import com.pixel.gallery.model.LabelSummary
-import com.pixel.gallery.model.buildLabelSummaries
-import com.pixel.gallery.model.isInsideMediaFolder
 import com.pixel.gallery.model.AlbumSortOrder
-import com.pixel.gallery.model.AlbumSorter
+import com.pixel.gallery.model.isInsideMediaFolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -39,49 +31,22 @@ class LabelsViewModel @Inject constructor(
     private val repository: LabelRepository,
     private val mediaRepository: MediaRepository,
     private val settingsRepository: SettingsRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    collections: SharedLabelCollections,
 ) : ViewModel() {
-    val labelEntries = repository.labels.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val memberships = repository.memberships.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    private val visibleMedia = combine(
-        mediaRepository.allEntries,
-        settingsRepository.hiddenFolders,
-        settingsRepository.excludedFolders,
-        mediaRepository.vaultEntries,
-    ) { entries, hidden, excluded, lockedEntries ->
-        com.pixel.gallery.utils.GroupWorkProbe.hit("label_visibility_filter")
-        val lockedIds = lockedEntries.mapTo(hashSetOf()) { it.contentId }
-        filterVisibleLabelMedia(entries, hidden + excluded, lockedIds)
-    }.flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    private val labelSortMode = settingsRepository.labelSortOrder
-        .map { AlbumSortOrder.fromStored(it) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, AlbumSortOrder.NAME_ASC)
-
-    val sortMode = labelSortMode
+    private val shared = collections.data
+    val labelEntries = shared.labelEntries
+    val memberships = shared.memberships
+    val labelIdsByMedia = shared.labelIdsByMedia
+    val sortMode = shared.sortMode
     val recentLabelIds = settingsRepository.recentLabelIds
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val labels = combine(labelEntries, memberships, visibleMedia, labelSortMode, settingsRepository.collectionCovers) { entries, links, media, sort, covers ->
-        com.pixel.gallery.utils.GroupWorkProbe.hit("labels_rebuild")
-        val byUri = media.associateBy { it.uri }
-        val members = links.groupBy { it.labelId }.mapValues { (_, rows) -> rows.mapTo(hashSetOf()) { it.contentId } }
-        val summaries = buildLabelSummaries(entries, links, media).map { summary ->
-            val manual = covers[com.pixel.gallery.model.labelCoverKey(summary.label.id)]?.let(byUri::get)
-                ?.takeIf { it.contentId in members[summary.label.id].orEmpty() }
-            if (manual == null) summary else summary.copy(cover = manual)
-        }
-        AlbumSorter.shared.sortLabels(summaries, sort)
-    }.flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val labels = shared.labels
+    internal val loadedLabels = shared.loadedLabels
 
     fun mediaForLabel(labelId: Long): Flow<List<MediaEntry>> =
-        combine(visibleMedia, memberships) { media, links ->
-            val ids = links.asSequence().filter { it.labelId == labelId }.map { it.contentId }.toHashSet()
-            media.filter { it.contentId in ids }
-        }.flowOn(Dispatchers.Default)
+        shared.mediaForLabel(labelId)
 
     private val _isSaving = MutableStateFlow(false)
     val isSaving = _isSaving.asStateFlow()
@@ -152,7 +117,7 @@ internal fun filterVisibleLabelMedia(
     lockedIds: Set<Long>,
 ): List<MediaEntry> = entries.filter { media ->
     !media.path.contains("/PixelGallery-QuickSortUndo/") &&
-        media.contentId !in lockedIds &&
+        (lockedIds.isEmpty() || media.contentId !in lockedIds) &&
         !media.isTrashed &&
         invisibleFolders.none { media.path.isInsideMediaFolder(it) }
 }

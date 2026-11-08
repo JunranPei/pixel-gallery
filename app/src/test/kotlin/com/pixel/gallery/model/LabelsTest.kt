@@ -129,10 +129,10 @@ class LabelsTest {
     }
 
     @Test
-    fun `album sorter maps shared criteria and migrates old custom preference to name`() {
+    fun `album sorter maps shared criteria and preserves custom preference`() {
         assertEquals(AlbumSortOrder.DATE_DESC, AlbumSortOrder.fromSelection("DATE", "DESC"))
         assertEquals(AlbumSortOrder.COUNT_ASC, AlbumSortOrder.fromSelection("COUNT", "ASC"))
-        assertEquals(AlbumSortOrder.NAME_ASC, AlbumSortOrder.fromStored("CUSTOM"))
+        assertEquals(AlbumSortOrder.CUSTOM, AlbumSortOrder.fromStored("CUSTOM"))
     }
 
     @Test

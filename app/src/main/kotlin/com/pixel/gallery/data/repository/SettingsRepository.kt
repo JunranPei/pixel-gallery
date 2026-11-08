@@ -75,7 +75,10 @@ class SettingsRepository @Inject constructor(
         }
             ?: com.pixel.gallery.model.AlbumGrouping()
     }.getOrDefault(com.pixel.gallery.model.AlbumGrouping())
-    val albumGrouping = context.dataStore.data.map { decodeGrouping(it[ALBUM_GROUPING]) }
+    val albumGrouping = context.dataStore.data
+        .map { it[ALBUM_GROUPING] }
+        .distinctUntilChanged()
+        .map(::decodeGrouping)
     suspend fun updateAlbumGrouping(change: (com.pixel.gallery.model.AlbumGrouping) -> com.pixel.gallery.model.AlbumGrouping) {
         context.dataStore.edit { it[ALBUM_GROUPING] = Gson().toJson(change(decodeGrouping(it[ALBUM_GROUPING]))) }
     }
@@ -102,14 +105,16 @@ class SettingsRepository @Inject constructor(
     private val QUICK_SORT_DOCK_TOP = booleanPreferencesKey("quick_sort_dock_top")
     private val QUICK_SORT_ALBUM_ROWS = intPreferencesKey("quick_sort_album_rows")
 
-    val quickSortPreferences: Flow<QuickSortPreferences> = context.dataStore.data.map { preferences ->
+    val quickSortPreferences: Flow<QuickSortPreferences> = context.dataStore.data
+        .map { Triple(it[QUICK_SORT_TARGETS], it[QUICK_SORT_DOCK_TOP], it[QUICK_SORT_ALBUM_ROWS]) }
+        .distinctUntilChanged()
+        .map { (rawTargets, dockTop, albumRows) ->
         val targets = runCatching {
-            Gson().fromJson(preferences[QUICK_SORT_TARGETS] ?: "[]", Array<TransferDestination>::class.java)
+            Gson().fromJson(rawTargets ?: "[]", Array<TransferDestination>::class.java)
                 .orEmpty().filter { it.path.isNotBlank() && it.stableKey.isNotBlank() }
                 .distinctBy { it.stableKey }
         }.getOrDefault(emptyList())
-        QuickSortPreferences(targets, preferences[QUICK_SORT_DOCK_TOP] ?: false,
-            (preferences[QUICK_SORT_ALBUM_ROWS] ?: 2).coerceIn(1, 4))
+        QuickSortPreferences(targets, dockTop ?: false, (albumRows ?: 2).coerceIn(1, 4))
     }
 
     suspend fun setQuickSortTargets(targets: List<TransferDestination>) {

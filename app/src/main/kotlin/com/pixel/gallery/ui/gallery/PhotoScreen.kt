@@ -328,11 +328,7 @@ fun PhotoScreen(
             )
         }
 
-        AnimatedVisibility(
-            visible = showSortDialog,
-            enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
-            exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
-        ) {
+        run {
             val currentCriterion = when (photoSortOrder) {
                 PhotoSortOrder.DATE_DESC, PhotoSortOrder.DATE_ASC -> "DATE"
                 PhotoSortOrder.NAME_DESC, PhotoSortOrder.NAME_ASC -> "NAME"

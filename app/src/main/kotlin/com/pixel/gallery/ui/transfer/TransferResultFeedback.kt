@@ -33,7 +33,9 @@ internal fun TransferResultFeedback(
     LaunchedEffect(summary, error) {
         if (summary != null && summary.failed == 0 && error == null) onFinished(summary)
     }
-    if (error == null && (summary == null || summary.failed == 0)) return
+    com.pixel.gallery.ui.components.PopupPresence((summary to error).takeIf {
+        error != null || (summary != null && summary.failed > 0)
+    }) { (summary, error) ->
 
     val action = summary?.mode ?: mode
     val moving = action == TransferMode.MOVE
@@ -59,6 +61,7 @@ internal fun TransferResultFeedback(
             }
         },
     )
+    }
 }
 
 /** Convert known file-operation diagnostics into brief localized reasons. */

@@ -66,7 +66,7 @@ fun PerformanceSettingsScreen(
             )
         },
     ) { innerPadding ->
-        if (showClearCacheConfirm) {
+        com.pixel.gallery.ui.components.PopupPresence(showClearCacheConfirm) {
             GalleryDialog(
                 onDismissRequest = { showClearCacheConfirm = false },
                 title = { Text(stringResource(R.string.dialog_cache_title)) },

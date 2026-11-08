@@ -33,6 +33,7 @@ internal fun RawEmbeddedPreviewViewer(
     transformStateStore: ViewerTransformStateStore,
     modifier: Modifier = Modifier,
     onContentReadyChanged: (Boolean) -> Unit = {},
+    onContentLoadFailed: () -> Unit = {},
     onClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -71,6 +72,7 @@ internal fun RawEmbeddedPreviewViewer(
                 decoderSourceKey = sourceKey,
                 transformStateStore = transformStateStore,
                 onContentReadyChanged = onContentReadyChanged,
+                onContentLoadFailed = onContentLoadFailed,
                 onClick = onClick,
             )
         }
@@ -84,6 +86,7 @@ internal fun RawEmbeddedPreviewViewer(
             isVisiblePage = isPreviewVisible,
             modifier = modifier,
             onContentReadyChanged = onContentReadyChanged,
+            onContentLoadFailed = onContentLoadFailed,
             onClick = onClick,
         )
 

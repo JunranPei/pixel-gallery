@@ -211,7 +211,7 @@ fun LabelsScreen(
             )
         }
 
-    if (showNameDialog) {
+    com.pixel.gallery.ui.components.PopupPresence(showNameDialog) {
         var name by remember(editingLabel?.id) { mutableStateOf(editingLabel?.name.orEmpty()) }
         var attempted by remember { mutableStateOf(false) }
         val duplicate = labels.any { it.label.id != editingLabel?.id && it.label.normalizedName == normalizeLabelName(name) }
@@ -244,26 +244,22 @@ fun LabelsScreen(
             dismissButton = { TextButton(onClick = { showNameDialog = false }) { Text(stringResource(R.string.labels_cancel)) } }
         )
     }
-    if (deletingLabels.isNotEmpty()) {
+    com.pixel.gallery.ui.components.PopupPresence(deletingLabels.takeIf { it.isNotEmpty() }) { labelsToDelete ->
         GalleryDialog(
             onDismissRequest = { deletingLabels = emptyList() },
             icon = Icons.Outlined.Delete,
-            title = { Text(if (deletingLabels.size == 1) stringResource(R.string.labels_delete_title, deletingLabels.single().name)
-                else stringResource(R.string.labels_delete_selected_title, deletingLabels.size)) },
+            title = { Text(if (labelsToDelete.size == 1) stringResource(R.string.labels_delete_title, labelsToDelete.single().name)
+                else stringResource(R.string.labels_delete_selected_title, labelsToDelete.size)) },
             text = { ConfirmationReminder(stringResource(R.string.labels_delete_message)) },
             confirmButton = { Button(enabled = !isSaving, onClick = {
-                onDeleteLabels(deletingLabels.map { it.id }.toSet())
+                onDeleteLabels(labelsToDelete.map { it.id }.toSet())
                 deletingLabels = emptyList()
                 selectedIds = emptySet()
             }) { Text(stringResource(R.string.labels_delete)) } },
             dismissButton = { TextButton(onClick = { deletingLabels = emptyList() }) { Text(stringResource(R.string.labels_cancel)) } }
         )
     }
-    AnimatedVisibility(
-        visible = showSortDialog,
-        enter = fadeIn() + scaleIn(initialScale = 0.92f),
-        exit = fadeOut() + scaleOut(targetScale = 0.92f),
-    ) {
+    run {
         AlbumSortDialog(
             visible = showSortDialog,
             onDismissRequest = { showSortDialog = false },

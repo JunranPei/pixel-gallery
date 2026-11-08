@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.pixel.gallery.model.AlbumSortOrder
 import com.pixel.gallery.ui.theme.EmphasizedTypography
@@ -65,14 +66,15 @@ fun SortDialog(
     initialDirection: String,
     onConfirm: (criterion: String, direction: String) -> Unit
 ) {
-    if (!visible) return
+    PopupPresence(visible) {
+    val motion = LocalPopupMotion.current
 
-    var selectedCriterion by remember(initialCriterion, visible) { mutableStateOf(initialCriterion) }
-    var selectedDirection by remember(initialDirection, visible) { mutableStateOf(initialDirection) }
+    var selectedCriterion by remember(initialCriterion) { mutableStateOf(initialCriterion) }
+    var selectedDirection by remember(initialDirection) { mutableStateOf(initialDirection) }
 
     // Intercept hardware/system back button presses when the dialog is visible
-    BackHandler(enabled = visible) {
-        onDismissRequest()
+    BackHandler {
+        if (visible) onDismissRequest()
     }
 
     Box(
@@ -83,17 +85,19 @@ fun SortDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer { alpha = motion?.displayedFraction?.coerceIn(0f, 1f) ?: 1f }
                 .background(Color.Black.copy(alpha = 0.2f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = onDismissRequest
+                    onClick = { if (visible) onDismissRequest() }
                 )
         )
 
         // Dialog Content Container - using Surface with 6.dp elevations to match standard M3 AlertDialog shadow exactly
         Surface(
             modifier = Modifier
+                .popupMotion()
                 .widthIn(max = 320.dp)
                 .fillMaxWidth(0.85f)
                 .clickable(
@@ -209,4 +213,6 @@ fun SortDialog(
             }
         }
     }
+}
+
 }

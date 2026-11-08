@@ -67,6 +67,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.runningFold
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
@@ -215,8 +219,14 @@ class MediaRepository @Inject constructor(
         }
     }
 
-    val allEntries: StateFlow<List<MediaEntry>> = combine(
-        readRefreshes.refreshes(mediaDao.observeAllEntriesChanges()).coalesceMediaInvalidations().map { mediaDao.getAllEntriesPaged() },
+    internal val loadedEntries: StateFlow<List<MediaEntry>?> = combine(
+        readRefreshes.refreshes(mediaDao.observeAllEntriesChanges()).coalesceMediaInvalidations()
+            .runningFold(emptyList<MediaEntry>()) { previous, _ ->
+                mediaDao.getAllEntriesPagedReusing(previous)
+            }.drop(1)
+            // Keep combine and StateFlow on the same object generation after an
+            // unchanged Room refresh, rather than retaining two full libraries.
+            .distinctUntilChanged(),
         settingsRepository.excludedFolders
     ) { entries, excluded ->
         com.pixel.gallery.utils.GroupWorkProbe.hit("media_exclusion_filter")
@@ -230,8 +240,11 @@ class MediaRepository @Inject constructor(
     }.stateIn(
         scope = repositoryScope,
         started = SharingStarted.Eagerly,
-        initialValue = emptyList()
+        initialValue = null
     )
+
+    val allEntries: StateFlow<List<MediaEntry>> = loadedEntries.filterNotNull()
+        .stateIn(repositoryScope, SharingStarted.Eagerly, emptyList())
 
     internal fun cachedViewerMediaSnapshot(
         sortKey: String,

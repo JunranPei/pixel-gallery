@@ -39,6 +39,9 @@ import androidx.compose.ui.unit.dp
 import com.pixel.gallery.R
 import com.pixel.gallery.data.repository.VideoPlaybackSpeeds
 import com.pixel.gallery.ui.components.LocalGalleryMessages
+import com.pixel.gallery.ui.components.PopupPresence
+import com.pixel.gallery.ui.components.LocalPopupMotion
+import com.pixel.gallery.ui.components.popupMotion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -94,8 +97,10 @@ fun VideoToolbarActions(session: VideoPlaybackSession, onRotateScreen: () -> Uni
             Text(speedLabel(session.speed), style = MaterialTheme.typography.labelSmall, color = Color.White)
         }
     }
-    if (showSpeed) InlineSpeedChoices(session.speed, onDismiss = { showSpeed = false }) { speed ->
+    PopupPresence(showSpeed) {
+    InlineSpeedChoices(session.speed, onDismiss = { showSpeed = false }) { speed ->
         if (!session.setSpeed(speed)) scope.launch { messages.show(context.getString(R.string.video_speed_failed)) }
+    }
     }
     }
     IconButton(enabled = visibleActions >= 4 && session.firstFrame && !session.captureBusy,
@@ -143,10 +148,11 @@ private fun InlineSpeedChoices(speed: Float, onDismiss: () -> Unit, onSelect: (F
     val latestSelect by rememberUpdatedState(onSelect)
     val latestSpeed by rememberUpdatedState(speed)
     var dragPosition by remember { mutableStateOf<Float?>(null) }
-    Popup(popupPositionProvider = position, onDismissRequest = onDismiss,
+    val motion = LocalPopupMotion.current
+    Popup(popupPositionProvider = position, onDismissRequest = { if (motion?.interactive != false) onDismiss() },
         properties = PopupProperties(focusable = true)) {
         Surface(color = Color(0xF0202020), shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.width(width)) {
+            modifier = Modifier.popupMotion(androidx.compose.ui.graphics.TransformOrigin(1f, 0f)).width(width)) {
             BoxWithConstraints(Modifier.padding(4.dp).fillMaxWidth().height(48.dp)) {
                 val cellWidth = maxWidth / VideoPlaybackSpeeds.size
                 val cellPx = with(LocalDensity.current) { cellWidth.toPx() }

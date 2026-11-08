@@ -19,7 +19,17 @@ fun buildLabelSummaries(
     memberships: List<MediaLabelEntry>,
     visibleMedia: List<MediaEntry>
 ): List<LabelSummary> {
-    val mediaById = visibleMedia.associateBy { it.contentId }
+    if (labels.isEmpty()) return emptyList()
+    val labelIds = labels.mapTo(hashSetOf()) { it.id }
+    val requestedIds = memberships.asSequence().filter { it.labelId in labelIds }
+        .map { it.contentId }.toHashSet()
+    if (requestedIds.isEmpty()) return labels.map { LabelSummary(it, 0) }
+    // A library change reaches every open window. Index only actual label
+    // members, never the entire library for empty or sparsely populated labels.
+    val mediaById = HashMap<Long, MediaEntry>()
+    visibleMedia.forEach { media ->
+        if (media.contentId in requestedIds) mediaById[media.contentId] = media
+    }
     val membersByLabel = memberships.asSequence()
         .filter { it.contentId in mediaById }
         .groupBy { it.labelId }

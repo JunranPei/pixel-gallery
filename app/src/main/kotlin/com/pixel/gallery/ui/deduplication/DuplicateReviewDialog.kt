@@ -265,7 +265,7 @@ fun DuplicateReviewDialog(
             }
         }
 
-        if (showConfirmation && state.phase == DuplicatePhase.REVIEW) {
+        com.pixel.gallery.ui.components.PopupPresence(showConfirmation && state.phase == DuplicatePhase.REVIEW) {
             GalleryDialog(
                 onDismissRequest = { showConfirmation = false },
                 title = { Text(stringResource(R.string.dialog_duplicate_title)) },

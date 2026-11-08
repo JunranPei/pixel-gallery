@@ -53,12 +53,14 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -390,6 +392,7 @@ internal fun ViewerScreen(
     reservedIds: Set<Long> = emptySet()
 ): GalleryPageContent {
     val context = LocalContext.current
+    val restoredDrawGate = LocalRestoredWindowDrawGate.current
     val messages = LocalGalleryMessages.current
     val presentationModel: VideoSettingsViewModel = hiltViewModel()
     val videoPreferences by presentationModel.settings.collectAsState()
@@ -436,10 +439,12 @@ internal fun ViewerScreen(
             pagerState.scrollToPage(photos.lastIndex)
         }
     }
-    var showUI by remember { mutableStateOf(true) }
-    var showInfo by remember { mutableStateOf(false) }
+    var showUI by rememberSaveable { mutableStateOf(true) }
+    var showInfo by rememberSaveable { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
-    var expandedBottomActions by remember { mutableStateOf(false) }
+    var indexMenuAnchor by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var indexMenuSourceHidden by remember { mutableStateOf(false) }
+    var expandedBottomActions by rememberSaveable { mutableStateOf(false) }
     val bottomActionsReveal = rememberVerticalRevealState(expandedBottomActions) { expandedBottomActions = it }
     val actionDensity = LocalDensity.current
     var bottomActionsHeightPx by remember { mutableIntStateOf(0) }
@@ -522,23 +527,49 @@ internal fun ViewerScreen(
     }
 
     DisposableEffect(entryId) {
-        val activity = context as? Activity
         ViewerLoadMetrics.event(
             "VIEWER_ATTACH",
             "initialId=$initialId initialIndex=$initialIndex count=${photos.size}",
             entryId = entryId,
         )
-        val frameListener = activity?.let {
-            ViewerLoadMetrics.attachFrameMetrics(it, entryId) { frameSnapshot.get() }
-        }
-        val perFrameListener = ViewerLoadMetrics.attachPerFrameTrace(entryId) { frameSnapshot.get() }
         onDispose {
             ViewerLoadMetrics.event("VIEWER_DISPOSE", entryId = entryId)
-            if (activity != null) {
-                ViewerLoadMetrics.detachFrameMetrics(activity, entryId, frameListener)
-            }
-            ViewerLoadMetrics.detachPerFrameTrace(entryId, perFrameListener)
             ViewerLoadMetrics.entryEnded(context.applicationContext, entryId, "viewer-dispose")
+        }
+    }
+
+    if (ViewerLoadMetrics.isEnabled) {
+        DisposableEffect(entryId, isForeground, viewerLifecycle) {
+            val activity = context as? Activity
+            var frameListener: android.view.Window.OnFrameMetricsAvailableListener? = null
+            var perFrameListener: android.view.Choreographer.FrameCallback? = null
+            var attached = false
+            fun stopTrace() {
+                if (!attached) return
+                attached = false
+                activity?.let { ViewerLoadMetrics.detachFrameMetrics(it, entryId, frameListener) }
+                ViewerLoadMetrics.detachPerFrameTrace(entryId, perFrameListener, reason = "viewer-inactive")
+                frameListener = null
+                perFrameListener = null
+            }
+            fun updateTrace() {
+                val visible = isForeground && viewerLifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                if (!visible) stopTrace()
+                else if (!attached) {
+                    attached = true
+                    frameListener = activity?.let {
+                        ViewerLoadMetrics.attachFrameMetrics(it, entryId) { frameSnapshot.get() }
+                    }
+                    perFrameListener = ViewerLoadMetrics.attachPerFrameTrace(entryId, System.identityHashCode(context)) { frameSnapshot.get() }
+                }
+            }
+            val observer = LifecycleEventObserver { _, _ -> updateTrace() }
+            viewerLifecycle.addObserver(observer)
+            updateTrace()
+            onDispose {
+                viewerLifecycle.removeObserver(observer)
+                stopTrace()
+            }
         }
     }
 
@@ -999,21 +1030,21 @@ internal fun ViewerScreen(
                         }
                     }
                     if (currentIndexTarget != null) {
-                        IconButton(onClick = {
+                        IconButton(modifier = Modifier.onGloballyPositioned { indexMenuAnchor = it.boundsInWindow() }
+                            .alpha(if (indexMenuSourceHidden) 0f else 1f), onClick = {
                             showUI = true
-                            showMenu = true
+                            showMenu = !showMenu
                         }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
                         }
                     }
-                    DropdownMenu(
+                    com.pixel.gallery.ui.components.AnchoredOverflowPopup(
                         expanded = showMenu,
+                        anchor = indexMenuAnchor,
+                        width = 236.dp,
                         onDismissRequest = { showMenu = false },
-                        modifier = Modifier.width(236.dp),
-                        shape = RoundedCornerShape(32.dp),
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        tonalElevation = 0.dp,
-                        shadowElevation = 6.dp,
+                        onReopen = { showMenu = true },
+                        onSourceHidden = { indexMenuSourceHidden = it },
                     ) {
                         currentIndexTarget?.let { indexTarget ->
                             val indexReady = imageIndexReady == true
@@ -1115,6 +1146,24 @@ internal fun ViewerScreen(
                 AtomicReference<ViewerLoadMetrics.WorkToken?>()
             }
             var fullPreviewReady by remember(pageKey) { mutableStateOf(false) }
+            val onRestoredImageFailure: () -> Unit = {
+                if (isForeground && page == pagerState.currentPage) {
+                    restoredDrawGate?.resolve("viewer:$initialId", "image-error")
+                }
+            }
+            val onPageContentReady: (Boolean) -> Unit = { ready ->
+                fullPreviewReady = ready
+                if (ready && isForeground && page == pagerState.currentPage) {
+                    restoredDrawGate?.resolve("viewer:$initialId")
+                }
+            }
+            val readyForRestoredWindow = fullPreviewReady || media.sourceMimeType.startsWith("video/")
+            SideEffect {
+                if (isForeground && page == pagerState.currentPage && readyForRestoredWindow) {
+                    restoredDrawGate?.resolve("viewer:$initialId",
+                        if (fullPreviewReady) "image-ready" else "video-route")
+                }
+            }
             DisposableEffect(pageKey) {
                 ViewerLoadMetrics.event(
                     "PAGER_PAGE_ATTACH",
@@ -1513,7 +1562,8 @@ internal fun ViewerScreen(
                                     dateModifiedMillis = media.dateModifiedMillis,
                                     isVisiblePage = isPreviewVisible,
                                     modifier = Modifier.fillMaxSize(),
-                                    onContentReadyChanged = { fullPreviewReady = it },
+                                    onContentReadyChanged = onPageContentReady,
+                                    onContentLoadFailed = onRestoredImageFailure,
                                     onClick = onImageClick
                                 )
                             } else if (renderPlan is ViewerRenderPlan.RawEmbeddedPreview) {
@@ -1531,7 +1581,8 @@ internal fun ViewerScreen(
                                         currentIndexTarget.path == media.path,
                                     transformStateStore = pageImageTransforms,
                                     modifier = Modifier.fillMaxSize(),
-                                    onContentReadyChanged = { fullPreviewReady = it },
+                                    onContentReadyChanged = onPageContentReady,
+                                    onContentLoadFailed = onRestoredImageFailure,
                                     onClick = onImageClick,
                                 )
                             } else if (
@@ -1561,7 +1612,8 @@ internal fun ViewerScreen(
                                         dateModifiedMillis = media.dateModifiedMillis,
                                         isVisiblePage = isPreviewVisible,
                                         modifier = Modifier.fillMaxSize(),
-                                        onContentReadyChanged = { fullPreviewReady = it },
+                                        onContentReadyChanged = onPageContentReady,
+                                        onContentLoadFailed = onRestoredImageFailure,
                                         onClick = onImageClick,
                                     )
                                 } else {
@@ -1581,7 +1633,8 @@ internal fun ViewerScreen(
                                         intermediatePreviewModel = swipeThumbnailModel,
                                         regionDecoderKind = indexedRegionKind,
                                         transformStateStore = pageImageTransforms,
-                                        onContentReadyChanged = { fullPreviewReady = it },
+                                        onContentReadyChanged = onPageContentReady,
+                                        onContentLoadFailed = onRestoredImageFailure,
                                         modifier = Modifier.fillMaxSize(),
                                         onClick = onImageClick,
                                     )
@@ -1622,7 +1675,8 @@ internal fun ViewerScreen(
                                         "motionPending=$metadataPending",
                                     regionDecoderKind = tiledPlan.regionDecoderKind,
                                     transformStateStore = pageImageTransforms,
-                                    onContentReadyChanged = { fullPreviewReady = it },
+                                    onContentReadyChanged = onPageContentReady,
+                                    onContentLoadFailed = onRestoredImageFailure,
                                     onUltraHdrAvailabilityChanged = { available ->
                                         ViewerLoadMetrics.event(
                                             "ULTRA_HDR_AVAILABILITY",
@@ -1860,8 +1914,9 @@ internal fun ViewerScreen(
             }
         )
 
-        imageIndexAction?.takeIf { isForeground }?.let { action ->
-            val target = currentIndexTarget ?: return@let
+        com.pixel.gallery.ui.components.PopupPresence(imageIndexAction?.takeIf { isForeground }?.let { action ->
+            currentIndexTarget?.let { target -> action to target }
+        }) { (action, target) ->
             val formatName = target.format.displayName
             val isBuild = action == IndexedImageAction.BUILD
             GalleryDialog(
@@ -2012,7 +2067,7 @@ internal fun ViewerScreen(
             )
         }
 
-        unsupportedIndexFormat?.takeIf { isForeground }?.let { formatName ->
+        com.pixel.gallery.ui.components.PopupPresence(unsupportedIndexFormat?.takeIf { isForeground }) { formatName ->
             GalleryDialog(
                 onDismissRequest = { unsupportedIndexFormat = null },
                 title = { Text(stringResource(R.string.dialog_unsupported_title, formatName)) },
@@ -2029,7 +2084,7 @@ internal fun ViewerScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun InfoBottomSheet(
     media: MediaEntry,
@@ -2046,8 +2101,22 @@ fun InfoBottomSheet(
     val metadata = remember(displayPath) { viewModel.getMediaMetadata(displayPath) }
     val coords = remember(displayPath) { viewModel.getCoordinates(displayPath) }
 
+    MaterialTheme(motionScheme = com.pixel.gallery.ui.components.GalleryPopupMotionScheme) {
+    val sheetState = rememberModalBottomSheetState()
+    val sheetScope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf(false) }
+    fun dismissThen(action: () -> Unit) {
+        if (closing) return
+        closing = true
+        sheetScope.launch {
+            sheetState.hide()
+            onDismiss()
+            action()
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
@@ -2092,7 +2161,7 @@ fun InfoBottomSheet(
                     trailing = {
                         Text(stringResource(if (labels.isEmpty()) R.string.labels_add else R.string.label_edit))
                     },
-                    onTrailingClick = onEditLabels,
+                    onTrailingClick = { dismissThen(onEditLabels) },
                     trailingEnabled = canEditLabels,
                 )
                 if (labels.isNotEmpty()) FlowRow(
@@ -2102,7 +2171,7 @@ fun InfoBottomSheet(
                     labels.forEachIndexed { index, name ->
                         SuggestionChip(
                             onClick = {
-                                labelIds.getOrNull(index)?.let(onOpenLabel)
+                                labelIds.getOrNull(index)?.let { id -> dismissThen { onOpenLabel(id) } }
                             },
                             enabled = canEditLabels,
                             label = { Text(name) }
@@ -2152,6 +2221,8 @@ fun InfoBottomSheet(
             }
         }
     }
+}
+
 }
 
 @Composable
@@ -2211,6 +2282,9 @@ internal fun VideoPlayer(
     val context = LocalContext.current
     val settings by videoViewModel.settings.collectAsState()
     var session by remember(uri) { mutableStateOf<VideoPlaybackSession?>(null) }
+    // This is the state of this open window, independent of the optional history
+    // used when opening a file afresh. Content updates may replace the decoder.
+    val windowState = rememberSaveable(uri, saver = VideoWindowState.Saver) { VideoWindowState() }
     val exoPlayer = session?.player
     val nativeVideoView = session?.native
     val useNativeFallback = nativeVideoView != null
@@ -2265,9 +2339,16 @@ internal fun VideoPlayer(
         val value = if (shouldPrepare && settings != null) VideoPlaybackSession(
             host, context, uri, "$uri:$sourceVersion", videoViewModel.repository,
             settings!!.copy(autoplay = settings!!.autoplay || startOnOpen), isMotionPhoto, { latestEnded() },
+            initialWindowState = if (isMotionPhoto) null else windowState.snapshot(uri),
         ) else null
+        val readWindowState = value?.takeUnless { isMotionPhoto }?.let { player -> { player.windowSnapshot() } }
+        if (readWindowState != null) windowState.attach(readWindowState)
         session = value
-        onDispose { value?.release(); if (session === value) session = null }
+        onDispose {
+            if (readWindowState != null) windowState.detach(readWindowState)
+            value?.release()
+            if (session === value) session = null
+        }
     }
     DisposableEffect(session, isActive, isForeground) {
         val value = session
@@ -2324,7 +2405,8 @@ internal fun VideoPlayer(
             onDispose { }
         } else {
             val frameKey = "video:${value.id}"
-            ViewerLoadMetrics.registerFrameLayer(frameKey) {
+            val frameOwner = System.identityHashCode(context)
+            ViewerLoadMetrics.registerFrameLayer(frameKey, frameOwner) {
                 "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
                     "activityVisible=${currentActivityVisible.value} firstFrame=${value.firstFrame} " +
                     "presented=${currentPresented.value} showSurface=${currentShowSurface.value} " +
@@ -2342,7 +2424,7 @@ internal fun VideoPlayer(
                     "session=${value.id} uri=$uri active=${currentActive.value} foreground=${currentForeground.value} " +
                         "activityVisible=${currentActivityVisible.value} showSurface=${currentShowSurface.value}",
                 )
-                ViewerLoadMetrics.unregisterFrameLayer(frameKey)
+                ViewerLoadMetrics.unregisterFrameLayer(frameKey, frameOwner)
             }
         }
     }

@@ -27,7 +27,7 @@ import java.util.UUID
 import kotlinx.coroutines.*
 
 /** View-only playback state. Never changes the media file or the image renderer. */
-class VideoPlaybackSession(
+class VideoPlaybackSession internal constructor(
     val activity: MainActivity?,
     context: Context,
     val uri: String,
@@ -36,14 +36,16 @@ class VideoPlaybackSession(
     initialSettings: VideoSettings,
     val motionPhoto: Boolean,
     val onEnded: () -> Unit,
+    initialWindowState: VideoWindowSnapshot? = null,
 ) {
+    private val restoredWindow = initialWindowState?.takeIf { !motionPhoto && it.uri == uri }
     val id = UUID.randomUUID().toString()
     private val appContext = context.applicationContext
     var settings = initialSettings
         private set
-    var muted by mutableStateOf(initialSettings.muted)
+    var muted by mutableStateOf(restoredWindow?.muted ?: initialSettings.muted)
         private set
-    var speed by mutableFloatStateOf(if (initialSettings.rememberSpeed) initialSettings.lastSpeed else 1f)
+    var speed by mutableFloatStateOf(restoredWindow?.speed ?: if (initialSettings.rememberSpeed) initialSettings.lastSpeed else 1f)
         private set
     var firstFrame by mutableStateOf(false)
     var videoSize by mutableStateOf(VideoSize.UNKNOWN)
@@ -79,10 +81,11 @@ class VideoPlaybackSession(
         pipEntering = true
         activity?.prepareVideoPip(pipSourceRect)
     }
-    private var wantsPlay = motionPhoto || initialSettings.autoplay
+    private var wantsPlay = restoredWindow?.wantsPlay ?: (motionPhoto || initialSettings.autoplay)
     private var applyingPolicy = false
     private var audioRegistered = false
-    private var initialPosition = if (!motionPhoto && initialSettings.rememberPosition) repository.position(sourceKey) else 0L
+    private var initialPosition = restoredWindow?.position ?:
+        if (!motionPhoto && initialSettings.rememberPosition) repository.position(sourceKey) else 0L
 
     val player: ExoPlayer = ExoPlayer.Builder(context, VideoRenderersFactory(context))
         // Keep the current compressed GOP seekable when the video track is disabled.
@@ -176,7 +179,7 @@ class VideoPlaybackSession(
                 )
                 if (native != null) return
                 if (playbackState == Player.STATE_READY && initialPosition > 0) {
-                    if (player.duration > 0 && initialPosition >= player.duration - 1000) player.seekTo(0)
+                    if (restoredWindow == null && player.duration > 0 && initialPosition >= player.duration - 1000) player.seekTo(0)
                     initialPosition = 0
                 }
                 if (playbackState == Player.STATE_ENDED) completed()
@@ -416,6 +419,14 @@ class VideoPlaybackSession(
         val duration = native?.duration?.toLong() ?: player.duration
         repository.savePosition(sourceKey, if (duration > 0 && position >= duration - 1000) 0 else position)
     }
+
+    internal fun windowSnapshot() = VideoWindowSnapshot(
+        uri = uri,
+        position = (native?.currentPosition?.toLong() ?: player.currentPosition).coerceAtLeast(0),
+        wantsPlay = wantsPlay,
+        muted = muted,
+        speed = speed,
+    )
 
     val pipSupported: Boolean get() = activity?.packageManager?.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) == true
     fun enterPip(): Boolean {

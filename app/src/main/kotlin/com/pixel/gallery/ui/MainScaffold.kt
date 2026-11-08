@@ -174,12 +174,14 @@ private data class HomePhotoSearchResult(
     val photos: List<MediaEntry> = emptyList(),
     val gridItems: List<GridItem> = emptyList(),
     val positionLabels: List<String?> = emptyList(),
+    val sourceGeneration: Int = 0,
 )
 
 private data class HomeAlbumSearchResult(
     val mediaType: MediaTypeFilter,
     val albumQuery: String = "",
     val albums: List<Album> = emptyList(),
+    val sourceGeneration: Int = 0,
 )
 
 internal fun shouldSwitchHomeHeader(
@@ -368,8 +370,10 @@ private fun MainScaffoldContent(
     val labelsViewModel: LabelsViewModel = hiltViewModel()
     val quickSortViewModel: QuickSortViewModel = hiltViewModel()
     val labelEntries by labelsViewModel.labelEntries.collectAsState()
-    val labelSummaries by labelsViewModel.labels.collectAsState()
+    val loadedLabelSummaries by labelsViewModel.loadedLabels.collectAsState()
+    val labelSummaries = loadedLabelSummaries.orEmpty()
     val labelMemberships by labelsViewModel.memberships.collectAsState()
+    val labelIdsByMedia by labelsViewModel.labelIdsByMedia.collectAsState()
     val recentLabelIds by labelsViewModel.recentLabelIds.collectAsState()
     val openLabelCover: (Long) -> Unit = { id ->
         labelSummaries.firstOrNull { it.label.id == id }?.let { summary ->
@@ -600,6 +604,14 @@ private fun MainScaffoldContent(
     // Retaining this same composition also preserves the current page and zoom.
     val visibleViewer = navigationStack.lastOrNull { it !is Screen.TransferDestination } as? Screen.Viewer
     val retainedViewer = navigationStack.lastOrNull { it is Screen.Viewer } as? Screen.Viewer
+    val restoredDrawGate = com.pixel.gallery.ui.viewer.LocalRestoredWindowDrawGate.current
+    androidx.compose.runtime.SideEffect {
+        if (visibleViewer != null || currentScreen != Screen.Home) {
+            val contentKey = visibleViewer?.let { "viewer:${it.initialId}" } ?: "route"
+            restoredDrawGate?.expect(contentKey)
+            if (visibleViewer == null) restoredDrawGate?.resolve(contentKey, "non-image-route")
+        }
+    }
     // A viewer belongs to its underlying grid; another album or Home starts a different scope.
     val quickSortScope = navigationStack.lastOrNull { it !is Screen.Viewer }
     LaunchedEffect(navigationStack, currentScreen, visibleViewer?.initialId, retainedViewer?.initialId) {
@@ -612,12 +624,8 @@ private fun MainScaffoldContent(
         )
     }
     val favouriteLabelName = stringResource(R.string.labels_favourites)
-    val labelNamesByMedia = remember(labelEntries, labelMemberships, favouriteLabelName) {
-        val names = labelEntries.associate { it.id to if (it.isSystem) favouriteLabelName else it.name }
-        labelMemberships.groupBy { it.contentId }.mapValues { (_, links) -> links.mapNotNull { names[it.labelId] } }
-    }
-    val labelIdsByMedia = remember(labelMemberships) {
-        labelMemberships.groupBy { it.contentId }.mapValues { (_, links) -> links.map { it.labelId } }
+    val labelNamesById = remember(labelEntries, favouriteLabelName) {
+        labelEntries.associate { it.id to if (it.isSystem) favouriteLabelName else it.name }
     }
 
     LaunchedEffect(allPhotos) {
@@ -701,28 +709,30 @@ private fun MainScaffoldContent(
             com.pixel.gallery.model.AlbumSorter.shared.sortAlbums(filtered, albumSortOrder)
         }
     }
-    val coverVisibleMedia = remember(allPhotos, vault) {
-        val locked = vault.mapTo(hashSetOf()) { it.contentId }
-        allPhotos.filter { !it.isTrashed && it.contentId !in locked }
-    }
-    val groupCoverCandidates = remember(coverVisibleMedia, albums, albumGrouping.groups, labelMemberships) {
-        val visiblePaths = albums.mapTo(hashSetOf()) { it.path }
-        val labeledIds = labelMemberships.filter { albumGrouping.labelGroupId(it.labelId) == com.pixel.gallery.model.LABELS_ALBUM_GROUP }.mapTo(hashSetOf()) { it.contentId }
-        val byAlbum = coverVisibleMedia.groupBy { it.path.substringBeforeLast('/') }
-        buildMap<String, List<MediaEntry>> {
-            put(com.pixel.gallery.model.LABELS_ALBUM_GROUP, coverVisibleMedia.filter { it.contentId in labeledIds })
-            albumGrouping.groups.forEach { group ->
-                val paths = group.paths.filter { it in visiblePaths }.toHashSet()
-                val labelMediaIds = labelMemberships.filter { albumGrouping.labelGroupId(it.labelId) == group.id }.mapTo(hashSetOf()) { it.contentId }
-                put(group.id, if (group.isLabelGroup) coverVisibleMedia.filter { it.contentId in labelMediaIds }
-                    else paths.flatMap { byAlbum[it].orEmpty() })
+    val requestedCoverGroups = remember(coverTarget?.key, selectedCollection?.key) {
+        buildSet {
+            listOfNotNull(coverTarget?.key, selectedCollection?.key).forEach {
+                if (it.startsWith("group:")) add(it.removePrefix("group:"))
             }
         }
     }
-    val resolvedGroupCovers = remember(groupCoverCandidates, collectionCovers) {
-        groupCoverCandidates.mapNotNull { (id, media) ->
-            resolveCollectionCover(collectionCovers[groupCoverKey(id)], media)?.let { id to it.uri }
-        }.toMap()
+    val needsCoverMedia = coverTarget != null || selectedCollection != null || requestedCoverGroups.isNotEmpty()
+    val coverVisibleMedia = remember(allPhotos, vault, needsCoverMedia) {
+        if (!needsCoverMedia) emptyList() else {
+            val locked = vault.mapTo(hashSetOf()) { it.contentId }
+            allPhotos.filter { !it.isTrashed && it.contentId !in locked }
+        }
+    }
+    val groupCoverCandidates = remember(coverVisibleMedia, albums, albumGrouping.groups, labelMemberships, requestedCoverGroups) {
+        com.pixel.gallery.model.groupCoverCandidates(
+            coverVisibleMedia, albums, albumGrouping, labelMemberships, requestedCoverGroups,
+        )
+    }
+    val resolvedGroupCovers = remember(allPhotos, albums, albumGrouping.groups, labelMemberships, collectionCovers, vault) {
+        com.pixel.gallery.model.resolveGroupCoverUris(
+            allPhotos, albums, albumGrouping, labelMemberships, collectionCovers,
+            vault.mapTo(hashSetOf()) { it.contentId },
+        )
     }
     val activeCoverKey = coverTarget?.key.orEmpty()
     val inlineCoverGroupId = if (pickingCover) activeCoverKey.takeIf { it.startsWith("group:") }?.removePrefix("group:") else null
@@ -781,7 +791,8 @@ private fun MainScaffoldContent(
             val result = browsingIndex.library[type].search(query, { taskContext.ensureActive() }) { entry, text ->
                 entry.matchesFileSearch(text)
             }
-            HomePhotoSearchResult(type, query, result.photos, result.gridItems, result.positionLabels)
+            HomePhotoSearchResult(type, query, result.photos, result.gridItems, result.positionLabels,
+                System.identityHashCode(browsingIndex))
         }
     }
     val albumSearchResult by produceState(
@@ -795,7 +806,7 @@ private fun MainScaffoldContent(
             val albums = applyAlbumCovers(library.albums(albumSortOrder), library.media.photos, collectionCovers)
             HomeAlbumSearchResult(type, query, if (query.isEmpty()) albums else albums.filter {
                 it.name.contains(query, ignoreCase = true)
-            })
+            }, System.identityHashCode(browsingIndex))
         }
     }
     val searchedPhotos = if (normalizedPhotoSearchQuery.isEmpty()) categoryView.media.photos
@@ -807,6 +818,29 @@ private fun MainScaffoldContent(
         else if (photoSearchResult.mediaType == homeMediaType) photoSearchResult.positionLabels else emptyList()
     val photoSearchGridState = rememberLazyGridState()
     val albumSearchGridState = rememberLazyGridState()
+
+    val restoreView = androidx.compose.ui.platform.LocalView.current
+    val restoredHomeGrids = remember(restoredDrawGate, restoreView) {
+        restoredDrawGate?.let { gate -> List(2) { com.pixel.gallery.ui.viewer.RestoredGridContent(gate, restoreView) } }
+    }
+    SideEffect {
+        if (visibleViewer == null && currentScreen == Screen.Home && restoredDrawGate?.isWaiting == true && restoredHomeGrids != null) {
+            val loaded = browsingIndex !== com.pixel.gallery.ui.viewmodel.MediaBrowseIndex.Unloaded
+            val generation = System.identityHashCode(browsingIndex)
+            restoredHomeGrids[0].expectedData = searchedPhotoGridItems
+            restoredHomeGrids[1].expectedData = searchedAlbums
+            restoredHomeGrids[1].expectedLabels = labelSummaries
+            restoredHomeGrids[1].expectedGrouping = albumGrouping
+            restoredHomeGrids[0].dataReady = loaded && (normalizedPhotoSearchQuery.isEmpty() ||
+                (photoSearchResult.sourceGeneration == generation && photoSearchResult.photoQuery == normalizedPhotoSearchQuery &&
+                    photoSearchResult.mediaType == homeMediaType))
+            restoredHomeGrids[1].dataReady = loaded && groupingLoaded && loadedLabelSummaries != null &&
+                albumSearchResult.sourceGeneration == generation && albumSearchResult.albumQuery == normalizedAlbumSearchQuery &&
+                albumSearchResult.mediaType == homeMediaType
+            val grid = restoredHomeGrids[homeVisiblePage]
+            restoredDrawGate?.expectGrid("home:$homeVisiblePage", grid::ready)
+        }
+    }
 
     LaunchedEffect(photoSearchResult.photoQuery) {
         if (photoSearchResult.photoQuery.isNotEmpty()) photoSearchGridState.scrollToItem(0)
@@ -1214,7 +1248,7 @@ private fun MainScaffoldContent(
     val routePages = mutableMapOf<Int, GalleryPageContent>()
     navigationStack.forEachIndexed { screenIndex, screen ->
         if (screen !is Screen.Viewer && screen !is Screen.TransferDestination) {
-            key(screenIndex, screen) {
+            key(screenIndex, remember(screen) { screen.stableStateKey() }) {
                 val isActiveRoute = screenIndex == baseScreenIndex
                 routePages[screenIndex] =
                                     when (screen) {
@@ -1232,6 +1266,7 @@ private fun MainScaffoldContent(
                         modifier = Modifier.fillMaxSize(),
                         userScrollEnabled = !selectionMode && !albumSelectionMode && !quickSortEnabled
                     ) { page ->
+                        CompositionLocalProvider(com.pixel.gallery.ui.viewer.LocalRestoredGridContent provides restoredHomeGrids?.get(page)) {
                         when (page) {
                             0 -> PhotosScreen(
                                 retainMovedItems = true,
@@ -1359,6 +1394,7 @@ private fun MainScaffoldContent(
                     }
                                 }
 
+                }
                 Screen.Settings -> SettingsScreen(
                     onBack = navigateBack,
                     onNavigateToDisplaySettings = { navigateToStack(navigationStack + Screen.DisplaySettings) },
@@ -1583,7 +1619,7 @@ private fun MainScaffoldContent(
         }
     }
 
-    if (albumGroupError && !showAlbumGroupPicker) {
+    com.pixel.gallery.ui.components.PopupPresence(albumGroupError && !showAlbumGroupPicker) {
         com.pixel.gallery.ui.components.GalleryDialog(
             onDismissRequest = albumGroupsViewModel::clearError,
             title = { Text(stringResource(R.string.album_group_error)) },
@@ -1915,7 +1951,7 @@ private fun MainScaffoldContent(
             }
 
     val viewerPage: GalleryPageContent? = if (retainedViewer != null) {
-        key(retainedViewer) {
+        key(remember(retainedViewer) { retainedViewer.stableStateKey() }) {
                 val viewer = retainedViewer
                 val cachedAlbumPhotos = viewer.albumName?.let { name ->
                     albumPhotoLists[if (viewer.hiddenAlbum) "hidden:$name" else name]
@@ -2052,7 +2088,7 @@ private fun MainScaffoldContent(
                             }
                         },
                         onEditLabels = openLabelEditor,
-                        labelsForMedia = { labelNamesByMedia[it].orEmpty() },
+                        labelsForMedia = { labelIdsByMedia[it]?.mapNotNull(labelNamesById::get).orEmpty() },
                         labelIdsForMedia = { labelIdsByMedia[it].orEmpty() },
                         onOpenLabel = { labelId ->
                             navigateToStack(navigationStack.dropLast(1) + Screen.Label(labelId))
@@ -2276,7 +2312,7 @@ private fun MainScaffoldContent(
             ) {
                 navigationStack.forEachIndexed { screenIndex, screen ->
                     if (screen !is Screen.Viewer && screen !is Screen.TransferDestination) {
-                        key(screenIndex, screen) {
+                        key(screenIndex, remember(screen) { screen.stableStateKey() }) {
                             val isActiveRoute = screenIndex == baseScreenIndex
                             RetainedGalleryLayer(
                                 visible = isActiveRoute && (visibleViewer == null || viewerTransitions.revealing) && reviewPage == null && collectionPage == null,
@@ -2306,12 +2342,17 @@ private fun MainScaffoldContent(
             }
 
 
-            if (currentScreen is Screen.TransferDestination || gridTransferSession != null) {
-                val transferScreen = currentScreen as? Screen.TransferDestination
-                val transferIds = if (transferScreen == null) selectedIds else transferScreen.entryIds.toSet()
+            val transferScreen = currentScreen as? Screen.TransferDestination
+            com.pixel.gallery.ui.components.PopupPresence(
+                (transferScreen to (transferScreen?.entryIds?.toSet() ?: selectedIds)).takeIf {
+                    transferScreen != null || gridTransferSession != null
+                }
+            ) { (transferScreen, transferIds) ->
                 val transferableEntries = remember(transferIds, allPhotos, hiddenPhotos, favourites) {
                     if (transferIds.isEmpty()) emptyList() else {
-                        val byId = (allPhotos + hiddenPhotos + favourites).associateBy { it.contentId }
+                        // Only the selected recipients need a temporary lookup.
+                        val byId = sequenceOf(allPhotos, hiddenPhotos, favourites).flatMap { it.asSequence() }
+                            .filter { it.contentId in transferIds }.associateBy { it.contentId }
                         transferIds.toList().mapNotNull(byId::get)
                     }
                 }
@@ -2396,7 +2437,7 @@ private fun MainScaffoldContent(
             }
             }
 
-    if (!pickingCover) coverTarget?.let { target ->
+    com.pixel.gallery.ui.components.PopupPresence(coverTarget?.takeUnless { pickingCover }) { target ->
         val manual = resolveCollectionCover(coverDraft, coverCandidates)
         val group = albumGrouping.groups.firstOrNull { groupCoverKey(it.id) == target.key }
         val label = labelSummaries.firstOrNull { labelCoverKey(it.label.id) == target.key }?.label
@@ -2436,7 +2477,7 @@ private fun MainScaffoldContent(
         )
     }
 
-    if (showAlbumGroupPicker && !mixedAlbumSelection) {
+    com.pixel.gallery.ui.components.PopupPresence(showAlbumGroupPicker && !mixedAlbumSelection) {
         val liveLabelSelection = labelGroupSelection?.intersect(labelSummaries.filterNot { it.label.isSystem }.mapTo(hashSetOf()) { it.label.id })
         com.pixel.gallery.ui.home.AlbumGroupPickerSheet(
                     expandRequest = sheetExpandRequest,
@@ -2476,8 +2517,9 @@ private fun MainScaffoldContent(
             },
         )
     }
-    if (showLabelEditor) {
-        val labelBatchIds = if (labelEditorFromGrid) selectedIds else editingLabelIds
+    com.pixel.gallery.ui.components.PopupPresence(
+        (if (labelEditorFromGrid) selectedIds else editingLabelIds).takeIf { showLabelEditor }
+    ) { labelBatchIds ->
         LabelEditorSheet(
                     expandRequest = sheetExpandRequest,
             labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = labelBatchIds, recentLabelIds = recentLabelIds,
@@ -2500,7 +2542,7 @@ private fun MainScaffoldContent(
             isSaving = labelsSaving, errorMessage = labelsError,
         )
     }
-    if (showQuickTargets && quickSortEnabled && quickSortOwner == quickSortScope) {
+    com.pixel.gallery.ui.components.PopupPresence(showQuickTargets && quickSortEnabled && quickSortOwner == quickSortScope) {
         QuickSortTargetsSheet(
                     expandRequest = sheetExpandRequest,
             albumUses = quickQueue.albumUses,
@@ -2521,19 +2563,19 @@ private fun MainScaffoldContent(
         )
     }
 
-    editingGroupName?.let { group ->
+    com.pixel.gallery.ui.components.PopupPresence(editingGroupName) { group ->
         com.pixel.gallery.ui.home.AlbumGroupNameDialog(albumGrouping.groups, group, { editingGroupName = null }) { name ->
             albumGroupsViewModel.rename(group.id, name)
             coverTarget = coverTarget?.copy(title = name); selectedCollection = selectedCollection?.copy(title = name)
             editingGroupName = null
         }
     }
-    dissolvingCollection?.let { group ->
+    com.pixel.gallery.ui.components.PopupPresence(dissolvingCollection) { group ->
         com.pixel.gallery.ui.home.AlbumGroupDissolveDialog(group.name, { dissolvingCollection = null }) {
             albumGroupsViewModel.dissolve(group.id); dissolvingCollection = null; coverTarget = null; selectedCollection = null
         }
     }
-    editingLabelName?.let { target ->
+    com.pixel.gallery.ui.components.PopupPresence(editingLabelName) { target ->
         var name by remember(target.key) { mutableStateOf(target.title) }
         val id = target.key.removePrefix("label:").toLong()
         val valid = com.pixel.gallery.model.isValidLabelName(name) && labelSummaries.none {
@@ -2549,7 +2591,7 @@ private fun MainScaffoldContent(
             dismissButton = { TextButton(onClick = { editingLabelName = null }) { Text(stringResource(R.string.labels_cancel)) } },
         )
     }
-    renamingAlbum?.let { album ->
+    com.pixel.gallery.ui.components.PopupPresence(renamingAlbum) { album ->
         AlbumRenameDialog(
             album = album,
             onDismiss = { renamingAlbum = null },
@@ -2612,11 +2654,7 @@ private fun MainScaffoldContent(
             },
         )
 
-        AnimatedVisibility(
-            visible = showPhotoSortDialog,
-            enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
-            exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
-        ) {
+        run {
             val currentCriterion = when (photoSortOrder) {
                 PhotoSortOrder.DATE_DESC, PhotoSortOrder.DATE_ASC -> "DATE"
                 PhotoSortOrder.NAME_DESC, PhotoSortOrder.NAME_ASC -> "NAME"
@@ -2641,11 +2679,7 @@ private fun MainScaffoldContent(
             )
         }
 
-        AnimatedVisibility(
-            visible = showAlbumSortDialog,
-            enter = fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.92f, animationSpec = tween(200)),
-            exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
-        ) {
+        run {
             AlbumSortDialog(
                 visible = showAlbumSortDialog,
                 onDismissRequest = { showAlbumSortDialog = false; groupSortScope = null },
@@ -2705,16 +2739,15 @@ private fun MainScaffoldContent(
 
     // Render alerts above the album chooser when the activity is visible.
     val quickConflict = quickQueue.needsConflictDecision
-    if (lifecycleState == Lifecycle.State.RESUMED && quickConflict != null) {
+    com.pixel.gallery.ui.components.PopupPresence(quickConflict?.takeIf { lifecycleState == Lifecycle.State.RESUMED }) { quickConflict ->
         QuickSortConflictDialog(quickConflict,
             onResolve = { quickSortViewModel.resolveConflict(quickConflict.id, it) },
             onCancel = { quickSortViewModel.cancel(quickConflict.id); quickSortViewModel.resume() })
-    } else if (lifecycleState == Lifecycle.State.RESUMED) {
-        quickWarning?.let { message ->
+    }
+    com.pixel.gallery.ui.components.PopupPresence(quickWarning?.takeIf { lifecycleState == Lifecycle.State.RESUMED && quickConflict == null }) { message ->
             QuickSortWarningDialog(message) { quickWarning = null }
-        }
-        if (quickWarning == null) quickFailure?.let { failure ->
+    }
+    com.pixel.gallery.ui.components.PopupPresence(quickFailure?.takeIf { lifecycleState == Lifecycle.State.RESUMED && quickConflict == null && quickWarning == null }) { failure ->
             QuickSortFailureDialog(failure) { quickSortViewModel.dismissFailure(failure) }
-        }
     }
 }

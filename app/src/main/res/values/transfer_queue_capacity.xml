@@ -1,0 +1,3 @@
+<resources>
+    <string name="transfer_queue_selection_too_large">Transfer up to %1$d files at a time. Split your selection into batches.</string>
+</resources>

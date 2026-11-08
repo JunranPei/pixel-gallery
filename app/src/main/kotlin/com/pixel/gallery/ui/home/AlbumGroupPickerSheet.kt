@@ -49,12 +49,12 @@ fun AlbumGroupPickerSheet(
     val gridState = rememberLazyGridState()
     LaunchedEffect(normalized) { gridState.scrollToItem(0) }
 
-    if (creating) {
+    com.pixel.gallery.ui.components.PopupPresence(creating) {
         GroupCreateDialog(nameValidationGroups, query, isSaving, errorMessage, { creating = false }, labelMode) { name, art ->
             onCreate(name, art) { creating = false; query = "" }
         }
-        return
     }
+    if (creating) return
     SelectionBottomSheet(
         expandRequest = expandRequest,
         title = stringResource(R.string.album_group_add), centerTitle = true, showBackButton = false,

@@ -505,6 +505,7 @@ internal fun SimpleSubsamplingImageView(
     decoderSourceKey: String = "",
     transformStateStore: ViewerTransformStateStore,
     onContentReadyChanged: (Boolean) -> Unit = {},
+    onContentLoadFailed: () -> Unit = {},
     onUltraHdrAvailabilityChanged: (Boolean) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
@@ -569,6 +570,7 @@ internal fun SimpleSubsamplingImageView(
     var metricsSessionId by remember(transformStateKey) { mutableStateOf(0L) }
     val renderedLayer = remember(transformStateKey) { AtomicReference("UNSET") }
     val currentOnContentReadyChanged by rememberUpdatedState(onContentReadyChanged)
+    val currentOnContentLoadFailed by rememberUpdatedState(onContentLoadFailed)
     val currentPreviewUserScale by rememberUpdatedState(previewUserScale)
     val currentPreviewOffsetX by rememberUpdatedState(previewOffsetX)
     val currentPreviewOffsetY by rememberUpdatedState(previewOffsetY)
@@ -587,8 +589,9 @@ internal fun SimpleSubsamplingImageView(
     // The per-vsync diagnostic trace reads this provider on the main thread, so it
     // captures the actual layer and view state of the frame being presented rather
     // than a state transition inferred from Compose callbacks.
-    DisposableEffect(transformStateKey) {
-        ViewerLoadMetrics.registerFrameLayer(transformStateKey) {
+    val frameOwner = System.identityHashCode(context)
+    DisposableEffect(transformStateKey, frameOwner) {
+        ViewerLoadMetrics.registerFrameLayer(transformStateKey, frameOwner) {
             val tiles = ssivView
             val preview = imageViewRef
             val tileState = runCatching { tiles?.snapshotViewState() }.getOrNull()
@@ -601,7 +604,7 @@ internal fun SimpleSubsamplingImageView(
                 "${preview?.translationX ?: 0f},${preview?.translationY ?: 0f} " +
                 "previewGesture=$previewGestureInProgress pointer=$previewPointerStrokeActive"
         }
-        onDispose { ViewerLoadMetrics.unregisterFrameLayer(transformStateKey) }
+        onDispose { ViewerLoadMetrics.unregisterFrameLayer(transformStateKey, frameOwner) }
     }
 
     // Active-page bookkeeping is intentionally separate from preview loading.
@@ -1023,6 +1026,7 @@ internal fun SimpleSubsamplingImageView(
                             imageView.alpha = 1f
                             previewLoaded = true
                             currentOnContentReadyChanged(false)
+                            currentOnContentLoadFailed()
                             android.util.Log.e(
                                 "SimpleSubsampling",
                                 "Preview load failed for $transformStateKey",

@@ -158,7 +158,7 @@ private val illustrationCategories = listOf(
 @Composable
 fun GroupIllustrationPicker(choice: Int, onSelect: (Int) -> Unit, onBack: () -> Unit, labelGroup: Boolean = false) {
     val categories = androidx.compose.ui.res.stringArrayResource(R.array.group_art_categories)
-    androidx.compose.ui.window.Dialog(onDismissRequest = onBack,
+    com.pixel.gallery.ui.components.GalleryPopupDialog(onDismissRequest = onBack,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         com.pixel.gallery.ui.components.SelectionBottomSheet(
             title = androidx.compose.ui.res.stringResource(R.string.group_choose_illustration),
@@ -199,11 +199,8 @@ fun GroupCreateDialog(groups: List<com.pixel.gallery.model.AlbumGroup>, initialN
     var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialName) }
     var art by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var choosing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    if (choosing) {
-        GroupIllustrationPicker(art, { art = it; choosing = false }, { choosing = false }, labelGroup)
-        return
-    }
     val valid = name.trim().isNotEmpty() && name.trim().length <= 60 && groups.none { it.name.equals(name.trim(), true) }
+    com.pixel.gallery.ui.components.PopupPresence(!choosing) {
     com.pixel.gallery.ui.components.GalleryDialog(onDismissRequest = { if (!saving) onBack() },
         icon = if (labelGroup) androidx.compose.material.icons.Icons.Outlined.Label else androidx.compose.material.icons.Icons.Outlined.CreateNewFolder,
         title = { Text(androidx.compose.ui.res.stringResource(R.string.album_group_new)) }, dismissEnabled = !saving,
@@ -221,4 +218,8 @@ fun GroupCreateDialog(groups: List<com.pixel.gallery.model.AlbumGroup>, initialN
         },
         confirmButton = { Button(onClick = { onCreate(name.trim(), art) }, enabled = valid && !saving) { Text(androidx.compose.ui.res.stringResource(R.string.album_group_save)) } },
         dismissButton = { TextButton(onClick = onBack, enabled = !saving) { Text(androidx.compose.ui.res.stringResource(R.string.album_group_cancel)) } })
+    }
+    com.pixel.gallery.ui.components.PopupPresence(choosing) {
+        GroupIllustrationPicker(art, { art = it; choosing = false }, { choosing = false }, labelGroup)
+    }
 }

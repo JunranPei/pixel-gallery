@@ -49,7 +49,7 @@ internal object ViewerLoadMetrics {
     private val frameMetricsHandler by lazy {
         Handler(HandlerThread("viewer-frame-metrics").apply { start() }.looper)
     }
-    private val frameLayerProviders = ConcurrentHashMap<String, () -> String>()
+    private val frameLayerProviders = ConcurrentHashMap<Pair<Int, String>, () -> String>()
     private val activeWorks = ConcurrentHashMap<Long, WorkToken>()
     private val nextEntryId = AtomicLong()
     private val nextSessionId = AtomicLong()
@@ -366,7 +366,7 @@ internal object ViewerLoadMetrics {
      * the state that was visible at each vsync, including frames that never became a
      * completed Window frame after a detach or surface handoff.
      */
-    fun attachPerFrameTrace(entryId: Long, snapshot: () -> String): Choreographer.FrameCallback? {
+    fun attachPerFrameTrace(entryId: Long, owner: Int = 0, snapshot: () -> String): Choreographer.FrameCallback? {
         if (!isEnabled || entryId == 0L) return null
         val choreographer = Choreographer.getInstance()
         val callback = object : Choreographer.FrameCallback {
@@ -388,42 +388,43 @@ internal object ViewerLoadMetrics {
                     .getOrElse { "snapshotError=${it.javaClass.simpleName}:${it.message}" }
                 emitFrame(
                     entryId,
-                    "FRAME_STATE entry=$entryId frame=$frameNumber " +
+                    "FRAME_STATE entry=$entryId owner=$owner frame=$frameNumber " +
                         "vsyncNanos=$frameTimeNanos intervalMs=${nanosToMillis(intervalNanos)} " +
                         "callbackDelayMs=${nanosToMillis(callbackDelayNanos)} " +
                         "previousTraceWorkNs=$previousTraceWorkNs " +
-                        "state={$state} layers={${frameLayerDetail()}}",
+                        "state={$state} layers={${frameLayerDetail(owner)}}",
                 )
                 previousTraceWorkNs = System.nanoTime() - traceStartNs
                 choreographer.postFrameCallback(this)
             }
         }
         choreographer.postFrameCallback(callback)
-        event("PER_FRAME_TRACE_ATTACH", entryId = entryId)
+        event("PER_FRAME_TRACE_ATTACH", "owner=$owner", entryId = entryId)
         return callback
     }
 
-    fun detachPerFrameTrace(entryId: Long, callback: Choreographer.FrameCallback?) {
+    fun detachPerFrameTrace(entryId: Long, callback: Choreographer.FrameCallback?, reason: String = "viewer-dispose") {
         if (!isEnabled || callback == null) return
         Choreographer.getInstance().removeFrameCallback(callback)
-        event("PER_FRAME_TRACE_DETACH", "reason=viewer-dispose", entryId = entryId)
+        event("PER_FRAME_TRACE_DETACH", "reason=$reason", entryId = entryId)
     }
 
-    fun registerFrameLayer(key: String, provider: () -> String) {
-        if (isEnabled) frameLayerProviders[key] = provider
+    fun registerFrameLayer(key: String, owner: Int = 0, provider: () -> String) {
+        if (isEnabled) frameLayerProviders[owner to key] = provider
     }
 
-    fun unregisterFrameLayer(key: String) {
-        frameLayerProviders.remove(key)
+    fun unregisterFrameLayer(key: String, owner: Int = 0) {
+        frameLayerProviders.remove(owner to key)
     }
 
-    private fun frameLayerDetail(): String = frameLayerProviders.entries
-        .sortedBy { it.key }
+    private fun frameLayerDetail(owner: Int): String = frameLayerProviders.entries.asSequence()
+        .filter { it.key.first == owner }
+        .sortedBy { it.key.second }
         .take(12)
         .joinToString("|") { (key, provider) ->
             val detail = runCatching { provider() }
                 .getOrElse { "providerError=${it.javaClass.simpleName}:${it.message}" }
-            "$key:$detail"
+            "${key.second}:$detail"
         }
 
     private fun emitFrame(entryId: Long, line: String) {
