@@ -56,6 +56,10 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <activity android:name=".services.VideoPlaybackReturnActivity"
+            android:exported="false" android:excludeFromRecents="true"
+            android:noHistory="true" android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
         <service android:name=".services.VideoPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
         <service
             android:name=".services.QuickSortService"

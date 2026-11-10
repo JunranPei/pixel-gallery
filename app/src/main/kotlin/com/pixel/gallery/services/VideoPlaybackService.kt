@@ -8,11 +8,10 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
-import com.pixel.gallery.MainActivity
 import com.pixel.gallery.R
 import com.pixel.gallery.ui.viewer.VideoPlaybackSession
 
-/** Keeps explicitly selected background audio alive and exposes a system stop action. */
+/** Keeps explicitly selected background audio alive with matching notification controls. */
 class VideoPlaybackService : Service() {
     private var mediaSession: MediaSession? = null
     override fun onBind(intent: Intent?): IBinder? = null
@@ -22,15 +21,20 @@ class VideoPlaybackService : Service() {
             NotificationChannel(CHANNEL, getString(R.string.video_settings_title), NotificationManager.IMPORTANCE_LOW))
         mediaSession = MediaSession(this, "Gallery video").apply {
             setCallback(object : MediaSession.Callback() {
-                override fun onPause() { sessions.values.toList().forEach { it.pause() }; updateNotification() }
-                override fun onStop() { onPause() }
+                override fun onPlay() { sessions.values.lastOrNull()?.play(); updateNotification() }
+                override fun onPause() { sessions.values.lastOrNull()?.pause(); updateNotification() }
+                override fun onStop() { sessions.values.lastOrNull()?.stopBackgroundPlayback(); updateNotification() }
             })
             isActive = true
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == STOP) sessions.values.toList().forEach { it.pause() }
+        val session = intent?.getStringExtra("session")?.let(sessions::get)
+        when (intent?.action) {
+            TOGGLE -> session?.let { if (it.playbackRequested) it.pause() else it.play() }
+            STOP -> session?.stopBackgroundPlayback()
+        }
         updateNotification()
         return START_NOT_STICKY
     }
@@ -42,24 +46,33 @@ class VideoPlaybackService : Service() {
             stopSelf()
             return
         }
-        val stop = PendingIntent.getService(this, 0, Intent(this, VideoPlaybackService::class.java).setAction(STOP),
+        fun control(action: String) = PendingIntent.getService(this, session.id.hashCode(),
+            Intent(this, VideoPlaybackService::class.java).setAction(action).putExtra("session", session.id),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val playing = session.playbackRequested
         val open = session.activity?.let { host ->
-            PendingIntent.getActivity(this, host.taskId, Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            PendingIntent.getActivity(this, host.taskId, Intent(this, VideoPlaybackReturnActivity::class.java)
+                .putExtra("taskId", host.taskId).putExtra("uri", session.uri)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_HISTORY),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
-        mediaSession?.setPlaybackState(PlaybackState.Builder().setActions(PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP)
-            .setState(PlaybackState.STATE_PLAYING, session.player.currentPosition, session.speed).build())
+        mediaSession?.setPlaybackState(PlaybackState.Builder().setActions(PlaybackState.ACTION_PLAY or
+            PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP)
+            .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                session.native?.currentPosition?.toLong() ?: session.player.currentPosition,
+                if (playing) session.speed else 0f).build())
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(getString(R.string.video_background_audio))
             .setContentText(UriName(session.uri))
             .setContentIntent(open)
-            .setOngoing(true)
+            .setOngoing(playing)
             .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(Notification.Action.Builder(android.R.drawable.ic_media_pause, getString(R.string.video_background_pause), stop).build())
+            .addAction(Notification.Action.Builder(if (playing) R.drawable.ic_pip_pause else R.drawable.ic_pip_play,
+                getString(if (playing) R.string.video_background_pause else R.string.video_resume), control(TOGGLE)).build())
+            .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,
+                getString(R.string.video_stop), control(STOP)).build())
             .setStyle(Notification.MediaStyle().setMediaSession(mediaSession?.sessionToken).setShowActionsInCompactView(0))
             .build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -80,7 +93,8 @@ class VideoPlaybackService : Service() {
     companion object {
         private const val CHANNEL = "video_playback"
         private const val ID = 702
-        private const val STOP = "com.pixel.gallery.PAUSE_VIDEO"
+        private const val STOP = "com.pixel.gallery.STOP_VIDEO"
+        private const val TOGGLE = "com.pixel.gallery.TOGGLE_VIDEO"
         private val sessions = linkedMapOf<String, VideoPlaybackSession>()
         private fun UriName(uri: String) = android.net.Uri.decode(uri.substringAfterLast('/'))
         fun retain(context: Context, session: VideoPlaybackSession): Boolean {
@@ -92,6 +106,11 @@ class VideoPlaybackService : Service() {
             if (sessions.remove(id) != null) {
                 if (sessions.isEmpty()) context.stopService(Intent(context, VideoPlaybackService::class.java))
                 else runCatching { context.startService(Intent(context, VideoPlaybackService::class.java)) }
+            }
+        }
+        fun refresh(context: Context, id: String) {
+            if (sessions.containsKey(id)) runCatching {
+                context.startService(Intent(context, VideoPlaybackService::class.java))
             }
         }
     }

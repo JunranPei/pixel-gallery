@@ -1,11 +1,17 @@
 package com.pixel.gallery.ui.viewer
 
 import android.app.Activity
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.graphics.drawable.Icon
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
@@ -21,6 +27,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp4.Mp4Extractor
 import com.pixel.gallery.MainActivity
+import com.pixel.gallery.R
 import com.pixel.gallery.data.repository.*
 import com.pixel.gallery.services.VideoPlaybackService
 import java.util.UUID
@@ -76,6 +83,23 @@ class VideoPlaybackSession internal constructor(
     private var awaitingAudioReturnOutput = false
     private var pipSourceRect: Rect? = null
     private var lastPipParams: PictureInPictureParams? = null
+    private var pipAudioRequested = false
+    private val hasBackgroundAudio get() = pipAudioRequested || settings.backgroundAction == VideoBackgroundAction.AUDIO
+    val playbackRequested: Boolean get() = wantsPlay
+    private val pipAction = "${appContext.packageName}.VIDEO_PIP.$id"
+    private var pipActionState: Pair<Boolean, Boolean>? = null
+    private var pipActions = emptyList<RemoteAction>()
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (released || activity?.videoSession !== this@VideoPlaybackSession ||
+                activity.isInPictureInPictureMode != true) return
+            when (intent.getStringExtra("command")) {
+                "listen" -> listenInBackground()
+                "toggle" -> togglePlay()
+                "mute" -> toggleMute()
+            }
+        }
+    }
 
     internal fun preparePipTransition() {
         pipEntering = true
@@ -98,6 +122,8 @@ class VideoPlaybackSession internal constructor(
         .build()
 
     init {
+        androidx.core.content.ContextCompat.registerReceiver(appContext, pipReceiver,
+            IntentFilter(pipAction), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         ViewerLoadMetrics.event(
             "VIDEO_SESSION_CREATE",
             "session=$id uri=$uri sourceKey=$sourceKey motionPhoto=$motionPhoto " +
@@ -336,7 +362,7 @@ class VideoPlaybackSession internal constructor(
         native?.configure(muted, speed, motionPhoto || settings.endAction == VideoEndAction.LOOP)
     }
 
-    fun toggleMute() { muted = !muted; applyOptions() }
+    fun toggleMute() { muted = !muted; applyOptions(); updatePipParams() }
     fun setSpeed(value: Float): Boolean {
         if (value !in VideoPlaybackSpeeds) return false
         if (native?.setSpeed(value) == false) return false
@@ -355,10 +381,11 @@ class VideoPlaybackSession internal constructor(
                 "inPip=$isInPip ${videoDiagnostics()}",
         )
         if (active && (!isActive || !isRouteVisible || !isActivityVisible)) checkpoint()
+        if (isActivityVisible && !isInPip && !activityVisible) pipAudioRequested = false
         active = isActive
         routeVisible = isRouteVisible
         activityVisible = isActivityVisible
-        if (inPip && !isInPip && !isActivityVisible) wantsPlay = false
+        if (inPip && !isInPip && !isActivityVisible && !pipAudioRequested) wantsPlay = false
         inPip = isInPip
         if (inPip || activityVisible) pipEntering = false
         applyPolicy()
@@ -368,12 +395,12 @@ class VideoPlaybackSession internal constructor(
     private fun applyPolicy() {
         if (released) return
         val allowed = active && routeVisible && (activityVisible || inPip || pipEntering ||
-            (!motionPhoto && settings.backgroundAction == VideoBackgroundAction.AUDIO))
+            (!motionPhoto && hasBackgroundAudio))
         applyingPolicy = true
         player.playWhenReady = allowed && wantsPlay && native == null
         native?.setPlaying(allowed && wantsPlay)
         // Audio-only playback must not keep decoding an invisible video track.
-        val audioOnly = !activityVisible && !inPip && !pipEntering && settings.backgroundAction == VideoBackgroundAction.AUDIO
+        val audioOnly = !activityVisible && !inPip && !pipEntering && hasBackgroundAudio
         if (audioOnly) awaitingAudioReturnOutput = true
         if (!audioOnly && videoOutputAttached) awaitingAudioReturnOutput = false
         val disableVideo = audioOnly || awaitingAudioReturnOutput
@@ -398,13 +425,48 @@ class VideoPlaybackSession internal constructor(
     }
 
     fun togglePlay() {
-        wantsPlay = !(native?.isPlaying ?: player.isPlaying)
+        wantsPlay = !wantsPlay
         if (wantsPlay && player.playbackState == Player.STATE_ENDED) player.seekTo(0)
         applyPolicy()
         updatePipParams()
     }
 
     fun pause() { wantsPlay = false; checkpoint(); applyPolicy(); updatePipParams() }
+    fun play() {
+        if (released) return
+        wantsPlay = true
+        if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+        applyPolicy()
+        updatePipParams()
+    }
+
+    fun stopBackgroundPlayback() {
+        wantsPlay = false
+        pipAudioRequested = false
+        checkpoint()
+        audioRegistered = false
+        VideoPlaybackService.drop(appContext, id)
+        applyPolicy()
+        updatePipParams()
+    }
+
+    private fun listenInBackground() {
+        val host = activity ?: return
+        if (!host.isInPictureInPictureMode || released) return
+        pipAudioRequested = true
+        refreshAudioService()
+        if (!audioRegistered) {
+            pipAudioRequested = false
+            return
+        }
+        // Disable auto-enter before unpinning, retaining this session and user settings.
+        updatePipParams()
+        if (!host.moveTaskToBack(true)) {
+            pipAudioRequested = false
+            refreshAudioService()
+            updatePipParams()
+        }
+    }
     private fun completed() {
         if (!motionPhoto) repository.savePosition(sourceKey, 0)
         wantsPlay = false
@@ -432,6 +494,7 @@ class VideoPlaybackSession internal constructor(
     fun enterPip(): Boolean {
         val host = activity ?: return false
         if (!pipSupported || motionPhoto || !active || !routeVisible || !firstFrame) return false
+        pipAudioRequested = false
         checkpoint()
         onPresentationCheckpoint?.invoke()
         updatePipParams()
@@ -443,7 +506,7 @@ class VideoPlaybackSession internal constructor(
 
     fun onUserLeaveHint() {
         if (active && routeVisible) onPresentationCheckpoint?.invoke()
-        if (settings.backgroundAction == VideoBackgroundAction.PIP && wantsPlay && active && routeVisible && firstFrame) {
+        if (!pipAudioRequested && settings.backgroundAction == VideoBackgroundAction.PIP && wantsPlay && active && routeVisible && firstFrame) {
             updatePipParams()
             activity?.armVideoPip(pipSourceRect)
             pipEntering = true
@@ -458,6 +521,7 @@ class VideoPlaybackSession internal constructor(
         val rawRatio = if (width > 0 && height > 0) width.toFloat() * pixelRatio / height else 16f / 9f
         val ratio = (if (contentRotationDegrees % 180 != 0) 1f / rawRatio else rawRatio).coerceIn(1f / 2.39f, 2.39f)
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational((ratio * 10000).toInt(), 10000))
+            .setActions(pipControls())
         if (activity?.isVideoPipLayoutLocked != true && activity?.isVideoPip != true) {
             (texture ?: surface)?.let { view ->
                 val rect = Rect()
@@ -468,9 +532,30 @@ class VideoPlaybackSession internal constructor(
         if (Build.VERSION.SDK_INT >= 31) {
             builder.setSeamlessResizeEnabled(true)
             builder.setAutoEnterEnabled(!motionPhoto && active && routeVisible && wantsPlay && firstFrame &&
-                pipSourceRect != null && settings.backgroundAction == VideoBackgroundAction.PIP)
+                pipSourceRect != null && !pipAudioRequested && settings.backgroundAction == VideoBackgroundAction.PIP)
         }
         return builder.build()
+    }
+
+    private fun pipControls(): List<RemoteAction> {
+        val state = wantsPlay to muted
+        if (pipActionState == state) return pipActions
+        fun action(command: String, icon: Int, label: Int): RemoteAction {
+            val intent = Intent(pipAction).setPackage(appContext.packageName).putExtra("command", command)
+            val pending = PendingIntent.getBroadcast(appContext, "$id:$command".hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val text = appContext.getString(label)
+            return RemoteAction(Icon.createWithResource(appContext, icon), text, text, pending)
+        }
+        pipActions = listOf(
+            action("listen", R.drawable.ic_pip_headphones, R.string.video_pip_listen),
+            action("toggle", if (wantsPlay) R.drawable.ic_pip_pause else R.drawable.ic_pip_play,
+                if (wantsPlay) R.string.video_background_pause else R.string.video_resume),
+            action("mute", if (muted) R.drawable.ic_pip_volume_off else R.drawable.ic_pip_volume_on,
+                if (muted) R.string.video_unmute else R.string.video_mute),
+        )
+        pipActionState = state
+        return pipActions
     }
 
     fun updatePipParams() {
@@ -486,13 +571,16 @@ class VideoPlaybackSession internal constructor(
     }
 
     private fun refreshAudioService() {
-        val needed = !motionPhoto && active && routeVisible && wantsPlay && settings.backgroundAction == VideoBackgroundAction.AUDIO
+        val needed = !motionPhoto && active && routeVisible && hasBackgroundAudio &&
+            (wantsPlay || pipAudioRequested || (audioRegistered && !activityVisible))
         if (needed && !audioRegistered) {
             audioRegistered = VideoPlaybackService.retain(appContext, this)
             if (!audioRegistered && !activityVisible) pause()
         } else if (!needed && audioRegistered) {
             audioRegistered = false
             VideoPlaybackService.drop(appContext, id)
+        } else if (needed && audioRegistered) {
+            VideoPlaybackService.refresh(appContext, id)
         }
     }
 
@@ -505,6 +593,7 @@ class VideoPlaybackSession internal constructor(
         onPresentationCheckpoint?.invoke()
         onPresentationCheckpoint = null
         released = true
+        runCatching { appContext.unregisterReceiver(pipReceiver) }
         retainedFrameJob?.cancel()
         retainedFrameJob = null
         clearRetainedFrame()

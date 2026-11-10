@@ -1,0 +1,5 @@
+<resources>
+    <string name="video_pip_listen">Listen in background</string>
+    <string name="video_resume">Play</string>
+    <string name="video_stop">Stop playback</string>
+</resources>

@@ -1,0 +1,5 @@
+<resources>
+    <string name="video_pip_listen">后台听</string>
+    <string name="video_resume">播放</string>
+    <string name="video_stop">停止播放</string>
+</resources>
