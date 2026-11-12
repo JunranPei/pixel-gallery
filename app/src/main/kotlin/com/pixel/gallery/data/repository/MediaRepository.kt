@@ -1656,6 +1656,16 @@ class MediaRepository @Inject constructor(
         val capturePreserved = finalTimes.third?.takeIf { it > 0L } == originalTaken
         if (!capturePreserved) throw IOException("Capture timestamp changed during final verification")
         val newId = targetUri.lastPathSegment?.toLongOrNull() ?: throw IOException("Destination media ID is unavailable")
+        if (com.pixel.gallery.ui.viewer.ViewerMemoryDiagnostics.isEnabled) {
+            com.pixel.gallery.ui.viewer.ViewerMemoryDiagnostics.event(
+                "MOVE_VIEWER_IDENTITY",
+                "oldId=${checkpoint.source.contentId} newId=$newId " +
+                    "oldModified=${checkpoint.source.dateModifiedMillis} fileModified=${checkpoint.originalModifiedMillis} " +
+                    "providerModified=${finalTimes.second * 1000L} " +
+                    "oldPath=${checkpoint.source.path} newPath=${checkpoint.targetPath}",
+                imageKey = "media:$newId:${checkpoint.originalModifiedMillis}",
+            )
+        }
         syncMutex.withLock {
             if (!relocatePersistentIndexes(checkpoint.source.path, checkpoint.targetPath)) {
                 throw IOException("Moved file is verified but its viewing index needs recovery: ${checkpoint.targetPath}")

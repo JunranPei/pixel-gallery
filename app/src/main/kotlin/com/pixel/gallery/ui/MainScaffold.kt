@@ -2359,7 +2359,6 @@ private fun MainScaffoldContent(
                 TransferDestinationScreen(
                     expandRequest = sheetExpandRequest,
                     entries = transferableEntries,
-                    showSourceName = transferScreen?.origin == Screen.TransferOrigin.Viewer,
                     moveSessionId = gridTransferSession,
                     onPanelHeightChange = { selectionPanelHeight = it },
                     onTransferStarted = { ordinaryTransferIds = it },
@@ -2523,9 +2522,7 @@ private fun MainScaffoldContent(
         LabelEditorSheet(
                     expandRequest = sheetExpandRequest,
             labels = editorLabelEntries, labelSummaries = labelSummaries, memberships = labelMemberships, selectedIds = labelBatchIds, recentLabelIds = recentLabelIds,
-            sourceName = if (labelEditorFromGrid) null else labelBatchIds.singleOrNull()?.let { id ->
-                allPhotos.firstOrNull { it.contentId == id }?.path?.let { java.io.File(it).name }
-            },
+            showSelectionCount = labelEditorFromGrid,
             columns = labelSheetColumns,
             onColumnsChange = photosViewModel::setLabelSheetColumns,
             onDismiss = {

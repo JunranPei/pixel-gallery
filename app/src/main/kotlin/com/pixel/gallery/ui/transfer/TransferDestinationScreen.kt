@@ -127,7 +127,6 @@ fun TransferDestinationScreen(
     onMoveAccepted: (Set<Long>) -> Unit = {},
     onTransferStarted: (Set<Long>) -> Unit = {},
     onPanelHeightChange: (androidx.compose.ui.unit.Dp) -> Unit = {},
-    showSourceName: Boolean = false,
     columns: Int = 4,
     onColumnsChange: (Int) -> Unit = {},
     viewModel: PhotosViewModel = hiltViewModel(),
@@ -288,7 +287,6 @@ fun TransferDestinationScreen(
     SelectionBottomSheet(
         expandRequest = expandRequest,
         title = stringResource(R.string.transfer_title),
-        subtitle = if (showSourceName) entries.singleOrNull()?.path?.let { File(it).name } else null,
         showBackButton = false,
         centerTitle = true,
         onPanelHeightChange = { panelHeight = it; onPanelHeightChange(it) },

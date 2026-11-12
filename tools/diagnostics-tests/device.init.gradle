@@ -1,0 +1,14 @@
+def hostRoot = new File(System.getProperty('diag.root'))
+gradle.beforeProject { p ->
+    if (p.path != ':app') p.layout.buildDirectory.set(new File(hostRoot, p.path == ':ssiv-pixel' ? 'third_party/ssiv-pixel/build' : p.name + '/build'))
+    if (p.path == ':app') p.afterEvaluate {
+        p.android.defaultConfig.applicationId = System.getProperty('diag.package')
+        p.android.defaultConfig.testInstrumentationRunner = 'com.pixel.gallery.integration.ListenerAcceptanceInstrumentation'
+        p.android.sourceSets.androidTest.java.setSrcDirs([new File(hostRoot,'tools/diagnostics-tests/device')])
+    }
+    p.afterEvaluate {
+        p.tasks.configureEach { task ->
+            if (task.name.startsWith('configureCMake') || task.name.startsWith('buildCMake')) task.enabled = false
+        }
+    }
+}

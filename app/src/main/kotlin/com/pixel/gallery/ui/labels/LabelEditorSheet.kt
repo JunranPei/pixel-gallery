@@ -59,7 +59,7 @@ fun LabelEditorSheet(
     isSaving: Boolean = false,
     errorMessage: String? = null,
     onPanelHeightChange: (androidx.compose.ui.unit.Dp) -> Unit = {},
-    sourceName: String? = null,
+    showSelectionCount: Boolean = true,
 ) {
     var query by rememberSaveable(selectedIds) { mutableStateOf("") }
     val gridColumns = columns.coerceIn(2, 6)
@@ -108,7 +108,7 @@ fun LabelEditorSheet(
         showBackButton = false,
         centerTitle = true,
         onPanelHeightChange = onPanelHeightChange,
-        subtitle = sourceName ?: stringResource(R.string.labels_selection_count, selectedIds.size),
+        subtitle = if (showSelectionCount) stringResource(R.string.labels_selection_count, selectedIds.size) else null,
         onDismiss = onDismiss,
         confirmDismiss = { !isSaving },
     ) {

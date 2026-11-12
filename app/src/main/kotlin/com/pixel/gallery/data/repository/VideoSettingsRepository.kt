@@ -7,6 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
+import com.pixel.gallery.ui.viewer.ViewerMemoryDiagnostics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -116,9 +117,23 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
     fun zoom(isVideo: Boolean, source: String): SavedViewerZoom? = runCatching {
         gson.fromJson(viewerHistory.getString("${if (isVideo) "video" else "image"}:zoom:$source", null), SavedViewerZoom::class.java)
     }.getOrNull()?.takeIf { it.scale.isFinite() && it.scale > 0 && it.centerX.isFinite() && it.centerY.isFinite() }
+        .also { value ->
+            if (ViewerMemoryDiagnostics.isEnabled) ViewerMemoryDiagnostics.event(
+                "VIEWER_MEMORY_READ",
+                "video=$isVideo hit=${value != null} scale=${value?.scale} " +
+                    "base=${value?.baseFitScale} sourceSize=${value?.sourceWidth}x${value?.sourceHeight} " +
+                    "records=${viewerHistory.all.size}",
+                imageKey = source,
+            )
+        }
 
     fun saveZoom(isVideo: Boolean, source: String, value: SavedViewerZoom) {
         val allowed = if (isVideo) settings.value?.rememberView == true else imageSettings.value?.rememberView == true
+        if (!allowed && ViewerMemoryDiagnostics.isEnabled) ViewerMemoryDiagnostics.event(
+            "VIEWER_MEMORY_WRITE_BLOCKED",
+            "video=$isVideo settingsLoaded=${if (isVideo) settings.value != null else imageSettings.value != null}",
+            imageKey = source,
+        )
         if (allowed) writeMemory("${if (isVideo) "video" else "image"}:zoom:$source", gson.toJson(value))
     }
 
@@ -133,8 +148,20 @@ class VideoSettingsRepository @Inject constructor(@ApplicationContext context: C
         if (viewerHistory.getString(key, null) == value) return
         val edit = viewerHistory.edit()
         if (!viewerHistory.contains(key) && viewerHistory.all.size >= 512) {
-            viewerHistory.all.keys.take(viewerHistory.all.size - 511).forEach(edit::remove)
+            viewerHistory.all.keys.take(viewerHistory.all.size - 511).forEach { removed ->
+                if (ViewerMemoryDiagnostics.isEnabled) ViewerMemoryDiagnostics.event(
+                    "VIEWER_MEMORY_EVICT",
+                    "incoming=$key previous=${viewerHistory.getString(removed, null)} records=${viewerHistory.all.size}",
+                    imageKey = removed,
+                )
+                edit.remove(removed)
+            }
         }
+        if (ViewerMemoryDiagnostics.isEnabled) ViewerMemoryDiagnostics.event(
+            "VIEWER_MEMORY_WRITE",
+            "previous=${viewerHistory.getString(key, null)} next=$value records=${viewerHistory.all.size}",
+            imageKey = key,
+        )
         edit.putString(key, value).apply()
     }
 

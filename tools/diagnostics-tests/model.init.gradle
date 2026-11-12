@@ -1,0 +1,12 @@
+gradle.beforeProject { p ->
+    if (p.path == ':app') p.afterEvaluate {
+        p.dependencies.add('testImplementation', 'org.robolectric:robolectric:4.16.1')
+        p.android.sourceSets.test.java.srcDir(p.rootProject.file('tools/diagnostics-tests/android-model'))
+        p.tasks.withType(Test).configureEach {
+            maxHeapSize = '768m'
+            maxParallelForks = 1
+            systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+            jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED', '--add-opens=java.base/java.util=ALL-UNNAMED', '--add-opens=java.base/java.io=ALL-UNNAMED'
+        }
+    }
+}

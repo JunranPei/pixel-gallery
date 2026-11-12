@@ -306,6 +306,9 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun traceLifecycle(name: String, detail: String) {
+        if (com.pixel.gallery.ui.viewer.ViewerMemoryDiagnostics.isEnabled) {
+            com.pixel.gallery.ui.viewer.ViewerMemoryDiagnostics.event(name, "task=$taskId $detail")
+        }
         ViewerLoadMetrics.event(name, detail)
     }
 

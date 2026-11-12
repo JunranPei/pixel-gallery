@@ -151,17 +151,46 @@ internal class ViewerTransformStateStore(
         // waits for Glide, which is the one-frame black flash seen after resume.
         // A cached fit state is an explicit reset. Do not fall through to an older
         // persisted zoom; return null only to use the renderer's normal fit path.
-        states[key]?.let { return it.state.takeIf(::hasMeaningfulViewerTransform) }
-        val saved = readSaved?.invoke(key) ?: return null
+        states[key]?.let {
+            traceRead(key, "session", it.state)
+            return it.state.takeIf(::hasMeaningfulViewerTransform)
+        }
+        val saved = readSaved?.invoke(key)
+        traceRead(key, if (saved == null) "miss" else "saved", saved)
+        if (saved == null) return null
         states[key] = StoredState(saved, 1)
         return saved.takeIf(::hasMeaningfulViewerTransform)
+    }
+
+    private fun traceRead(key: String, source: String, state: SubsamplingScaleImageView.ViewState?) {
+        if (!ViewerMemoryDiagnostics.isEnabled) return
+        if (!ViewerMemoryDiagnostics.shouldRecordRead(this,key,source,states[key]?.revision ?: 0)) return
+        ViewerMemoryDiagnostics.event(
+            "TRANSFORM_STORE_READ",
+            "store=${System.identityHashCode(this)} source=$source " +
+                "meaningful=${hasMeaningfulViewerTransform(state)} scale=${state?.scale} " +
+                "base=${state?.baseFitScale} sourceSize=${state?.sourceWidth}x${state?.sourceHeight}",
+            imageKey = key,
+        )
     }
 
     @Synchronized
     fun clear() { states.clear() }
 
     @Synchronized
-    fun checkpoint() { states.forEach { (key, stored) -> writeSaved?.invoke(key, stored.state) } }
+    fun checkpoint() {
+        if (ViewerMemoryDiagnostics.isEnabled) ViewerMemoryDiagnostics.event(
+            "TRANSFORM_STORE_CHECKPOINT", "store=${System.identityHashCode(this)} count=${states.size}",
+        )
+        states.forEach { (key, stored) ->
+            if (ViewerMemoryDiagnostics.isEnabled) ViewerMemoryDiagnostics.event(
+                "TRANSFORM_STORE_PERSIST",
+                "store=${System.identityHashCode(this)} scale=${stored.state.scale} base=${stored.state.baseFitScale}",
+                imageKey = key,
+            )
+            writeSaved?.invoke(key, stored.state)
+        }
+    }
 
     @Synchronized
     fun revision(key: String): Int = states[key]?.revision ?: 0
@@ -190,6 +219,11 @@ internal class ViewerTransformStateStore(
                 "base=${state.baseFitScale} center=${state.sourceCenter} " +
                 "rotation=${state.rotationRadians}",
             imageKey = key,
+        )
+        if (ViewerMemoryDiagnostics.isEnabled) ViewerMemoryDiagnostics.event(
+            "TRANSFORM_STORE_SAVE",
+            "store=${System.identityHashCode(this)} revision=$revision reason=$reason scale=${state.scale} " +
+                "base=${state.baseFitScale} sourceSize=${state.sourceWidth}x${state.sourceHeight}", imageKey = key,
         )
         if (reason == "page-inactive" || reason == "composition-dispose") writeSaved?.invoke(key, state)
     }

@@ -1,0 +1,111 @@
+{
+  "environment": {
+    "androidSdk": 36,
+    "emulator": "37.3.9",
+    "architecture": "x86_64",
+    "ramMiB": 2560,
+    "cores": 4,
+    "renderer": "SwiftShader",
+    "buildType": "debug",
+    "windows": 24,
+    "fixtureSize": [
+      4096,
+      3072
+    ],
+    "sameSourceBaseline": "e17e5e8c"
+  },
+  "runs": [
+    {
+      "build": "旧版 4.3.6.6",
+      "pssMiB": [
+        1083.86,
+        1086.9
+      ],
+      "javaMiB": [
+        74.94,
+        78.52
+      ],
+      "nativeMiB": [
+        809.74,
+        809.77
+      ],
+      "threads": [
+        64,
+        64
+      ],
+      "medianReturnMillis": 194.5,
+      "checks": "PASS"
+    },
+    {
+      "build": "新版 4.3.6.7 第一次",
+      "pssMiB": [
+        1089.83,
+        1092.86
+      ],
+      "javaMiB": [
+        87.82,
+        91.61
+      ],
+      "nativeMiB": [
+        786.51,
+        786.54
+      ],
+      "threads": [
+        65,
+        65
+      ],
+      "medianReturnMillis": 176.5,
+      "checks": "PASS",
+      "recordingMedianReturnMillis": 175.0
+    },
+    {
+      "build": "新版 4.3.6.7 重复",
+      "pssMiB": [
+        1065.41,
+        1068.36
+      ],
+      "javaMiB": [
+        72.38,
+        75.86
+      ],
+      "nativeMiB": [
+        786.22,
+        786.25
+      ],
+      "threads": [
+        59,
+        59
+      ],
+      "medianReturnMillis": 185.5,
+      "checks": "PASS",
+      "recordingMedianReturnMillis": 186.0
+    }
+  ],
+  "matchedFiftyWindowRuns": [
+    {
+      "version": "4366",
+      "javaPeakMiB": 361.12,
+      "returnJavaMiB": 234.28,
+      "returnNativeMiB": 421.73,
+      "returnPssMiB": 857.09,
+      "focusedDraws": 97,
+      "returnedTasks": 50,
+      "liveMainActivities": 51,
+      "lowMemoryDestructions": 0,
+      "unexpectedDestructions": 0
+    },
+    {
+      "version": "4367",
+      "javaPeakMiB": 350.9,
+      "returnJavaMiB": 234.75,
+      "returnNativeMiB": 419.29,
+      "returnPssMiB": 854.7,
+      "focusedDraws": 99,
+      "returnedTasks": 50,
+      "liveMainActivities": 51,
+      "lowMemoryDestructions": 0,
+      "unexpectedDestructions": 0
+    }
+  ],
+  "matchedFiftyFixtures": true
+}
