@@ -1304,6 +1304,7 @@ private fun MainScaffoldContent(
                                 columns = gridColumns,
                                 onColumnsChange = { photosViewModel.setGridColumns(it) },
                                 bottomPadding = contentBottomPadding,
+                                scrollbarBottomPadding = 0.dp,
                                 state = if (normalizedPhotoSearchQuery.isEmpty()) {
                                     recentsGridState
                                 } else {
@@ -1358,6 +1359,7 @@ private fun MainScaffoldContent(
                                     }
                                 },
                                 bottomPadding = contentBottomPadding,
+                                scrollbarBottomPadding = 0.dp,
                                 gridState = if (normalizedAlbumSearchQuery.isEmpty()) {
                                     albumsGridState
                                 } else {
@@ -2264,6 +2266,11 @@ private fun MainScaffoldContent(
     CompositionLocalProvider(LocalGallerySettingsAction provides {
         if (currentScreen != Screen.Settings) navigateToStack(navigationStack + Screen.Settings)
     }) {
+        // Keep the source grid placed on the entry frame, before the viewer's
+        // DisposableEffect registers its opening state. Otherwise LazyGrid loses
+        // its placed cells for one frame and flashes empty beneath the animation.
+        val revealViewerUnderlay = viewerTransitions.revealing ||
+            (visibleViewer != null && viewerTransitions.opening == null)
         UnifiedGalleryContainer.instance.Shell(
             containerColor = appShellColor,
             modifier = Modifier,
@@ -2277,9 +2284,9 @@ private fun MainScaffoldContent(
             visibleViewer != null && reviewPage == null
         },
         underlayScrollBehavior = routeHeaderScrollBehavior.takeUnless { detailToolbarLocked },
-        underlayVisible = { viewerTransitions.revealing },
+        underlayVisible = { revealViewerUnderlay },
         underlayAlpha = {
-            1f - (viewerTransitions.active?.gesture?.visual?.backdropAlpha ?: 1f)
+            1f - viewerTransitions.backdropAlpha
         },
             content = { innerPadding ->
         Box(
@@ -2299,7 +2306,7 @@ private fun MainScaffoldContent(
                     .then(if (detailToolbarLocked) Modifier else Modifier.nestedScroll(topBarScrollBehavior.nestedScrollConnection))
                     .drawWithContent {
                         // Hide the route decorations together with its content.
-                        if ((visibleViewer == null || viewerTransitions.revealing) && reviewPage == null) drawContent()
+                        if ((visibleViewer == null || revealViewerUnderlay) && reviewPage == null) drawContent()
                     }
                     .then(if (visibleViewer == null) Modifier.galleryContentEdge() else Modifier)
                     .pointerInput(navigationReveal, currentScreen) {
@@ -2315,7 +2322,7 @@ private fun MainScaffoldContent(
                         key(screenIndex, remember(screen) { screen.stableStateKey() }) {
                             val isActiveRoute = screenIndex == baseScreenIndex
                             RetainedGalleryLayer(
-                                visible = isActiveRoute && (visibleViewer == null || viewerTransitions.revealing) && reviewPage == null && collectionPage == null,
+                                visible = isActiveRoute && (visibleViewer == null || revealViewerUnderlay) && reviewPage == null && collectionPage == null,
                                 interactive = isActiveRoute && visibleViewer == null && reviewPage == null && collectionPage == null,
                             ) {
                                 CompositionLocalProvider(

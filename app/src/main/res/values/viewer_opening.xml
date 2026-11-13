@@ -1,0 +1,7 @@
+<resources>
+    <string name="settings_section_animation">Animation effects</string>
+    <string name="viewer_opening_effect">Open media</string>
+    <string name="viewer_opening_none">None</string>
+    <string name="viewer_opening_thumbnail">Thumbnail</string>
+    <string name="viewer_opening_scale_fade">Scale &amp; fade</string>
+</resources>

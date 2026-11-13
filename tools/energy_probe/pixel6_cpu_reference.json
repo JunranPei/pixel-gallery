@@ -1,0 +1,13 @@
+{
+  "id": "pixel6-tensor-cpu-active-reference",
+  "reference_device": "Google Pixel 6 / Tensor G1",
+  "source": "Perfetto trace_processor v59.1 intrinsic Wattson CPU curves",
+  "source_url": "https://github.com/google/perfetto/tree/v59.1/src/trace_processor/plugins/wattson",
+  "scope": "CPU core active contribution only; excludes cluster static, GPU, display and other components",
+  "calibration": null,
+  "scenarios": [
+    {"id":"little-1098", "policy":0, "freq_khz":1098000, "dependency_policy":4, "dependency_freq_khz":1197000, "active_mw":115.83},
+    {"id":"mid-1197", "policy":4, "freq_khz":1197000, "active_mw":132.46},
+    {"id":"big-1426", "policy":6, "freq_khz":1426000, "active_mw":382.61}
+  ]
+}

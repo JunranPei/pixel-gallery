@@ -228,8 +228,11 @@ internal fun rememberViewerDismissGesture(key: ViewerTransitionKey?, isForegroun
 
 /** Transform only existing image pixels. The native image keeps its layout/decoder/tile geometry. */
 internal fun Modifier.viewerDismissMotion(gesture: ViewerDismissGesture): Modifier =
+    viewerVisualMotion { gesture.visual }
+
+internal fun Modifier.viewerVisualMotion(visual: () -> ViewerDismissVisual): Modifier =
     graphicsLayer {
-        val frame = gesture.visual
+        val frame = visual()
         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
         scaleX = frame.scale
         scaleY = frame.scale

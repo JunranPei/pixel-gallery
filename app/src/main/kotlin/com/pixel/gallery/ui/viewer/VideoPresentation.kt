@@ -27,7 +27,10 @@ internal fun VideoPresentation(
     texture: Boolean,
     keepScreenOn: Boolean,
 ) {
-    val showSurface = session?.firstFrame == true && presented && session.outputReadiness.isBuffered
+    val opening = LocalViewerOpening.current
+    val openingKey = opening?.key
+    val readyListener = remember(opening, openingKey) { openingReadyListener(opening, openingKey) }
+    val showSurface = opening?.isRunning != true && session?.firstFrame == true && presented && session.outputReadiness.isBuffered
     val cover = session?.retainedFrame
     val generation = session?.outputReadiness?.generation
     val mayClear = session?.retainedFrameMayClear == true
@@ -68,7 +71,8 @@ internal fun VideoPresentation(
     if (cover == null && firstFrameModel != null && !showSurface) {
         GlideImage(firstFrameModel, contentDescription = null, contentScale = ContentScale.Fit,
             requestBuilderTransform = { it.dontTransform().format(DecodeFormat.PREFER_RGB_565)
-                .diskCacheStrategy(DiskCacheStrategy.RESOURCE).override(720) },
+                .diskCacheStrategy(DiskCacheStrategy.RESOURCE).override(720)
+                .addListener(readyListener) },
             modifier = Modifier.fillMaxSize())
     }
     session?.let { playback ->

@@ -65,6 +65,7 @@ fun GroupedAlbumsScreen(
     defaultOrder: AlbumSortOrder = AlbumSortOrder.NAME_ASC,
     onRememberOrder: (List<GroupedAlbumRow>) -> Unit = {},
     onMoveRow: (List<GroupedAlbumRow>, String, String) -> Unit = { _, _, _ -> },
+    scrollbarBottomPadding: Dp = bottomPadding,
 ) {
     val gridColumns = columns.coerceIn(2, 6)
     val reorderDrag = remember(gridState) { AlbumReorderDragState() }
@@ -116,7 +117,8 @@ fun GroupedAlbumsScreen(
     }
     AlbumGrid(
         columns = gridColumns, onColumnsChange = onColumnsChange, state = gridState,
-        bottomPadding = bottomPadding, emptyMessage = if (albums.isEmpty()) emptyMessage else null,
+        bottomPadding = bottomPadding, scrollbarBottomPadding = scrollbarBottomPadding,
+        emptyMessage = if (albums.isEmpty()) emptyMessage else null,
         modifier = Modifier.testTag("grouped-albums-grid"),
         gridGestures = Modifier.albumGridDragSelect(
             state = gridState,

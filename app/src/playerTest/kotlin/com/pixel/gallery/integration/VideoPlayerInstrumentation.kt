@@ -10,7 +10,12 @@ class VideoPlayerInstrumentation : Instrumentation() {
     override fun onStart() {
         val result = Bundle()
         try {
-            result.putString("stream", "\n" + (if (suite == "pip") VideoPipControlChecks(this).exercise() else VideoPlayerChecks(this).exercise()) + "\n")
+            val report = when (suite) {
+                "motion-power" -> MotionPowerChecks(this).exercise()
+                "pip" -> VideoPipControlChecks(this).exercise()
+                else -> VideoPlayerChecks(this).exercise()
+            }
+            result.putString("stream", "\n$report\n")
             finish(Activity.RESULT_OK, result)
         } catch (error: Throwable) {
             result.putString("stream", error.stackTraceToString())

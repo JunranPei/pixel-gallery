@@ -370,6 +370,11 @@ class PhotosViewModel @Inject constructor(
     val startupAtAlbums: StateFlow<Boolean> = settingsRepository.startupAtAlbums
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    val viewerOpeningEffect = settingsRepository.viewerOpeningEffect
+    fun setViewerOpeningEffect(value: com.pixel.gallery.model.ViewerOpeningEffect) {
+        viewModelScope.launch { settingsRepository.setViewerOpeningEffect(value) }
+    }
+
     val showFullAlbumNames: StateFlow<Boolean> = settingsRepository.showFullAlbumNames
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 

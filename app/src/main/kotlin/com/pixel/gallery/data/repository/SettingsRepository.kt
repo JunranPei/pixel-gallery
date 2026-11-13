@@ -45,6 +45,15 @@ class SettingsRepository @Inject constructor(
     private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val STARTUP_AT_ALBUMS = booleanPreferencesKey("flutter.albums")
     private val SHOW_FULL_ALBUM_NAMES = booleanPreferencesKey("show_full_album_names")
+    private val VIEWER_OPENING_EFFECT = stringPreferencesKey("viewer_opening_effect")
+    val viewerOpeningEffect = context.dataStore.data
+        .map { com.pixel.gallery.model.ViewerOpeningEffect.fromPreference(it[VIEWER_OPENING_EFFECT]) }
+        .distinctUntilChanged()
+        .stateIn(settingsScope, SharingStarted.Eagerly, null)
+
+    suspend fun setViewerOpeningEffect(value: com.pixel.gallery.model.ViewerOpeningEffect) {
+        context.dataStore.edit { it[VIEWER_OPENING_EFFECT] = value.name }
+    }
     private val MATERIAL_YOU = booleanPreferencesKey("flutter.material_you")
     private val THEME_MODE = stringPreferencesKey("theme_mode")
     private val HANDEDNESS = stringPreferencesKey("handedness")

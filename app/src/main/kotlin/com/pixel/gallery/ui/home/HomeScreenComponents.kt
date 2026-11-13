@@ -111,6 +111,7 @@ fun PhotosScreen(
     selectionMode: Boolean = selectedIds.isNotEmpty(),
     gridContextKey: Any? = null,
     retainMovedItems: Boolean = false,
+    scrollbarBottomPadding: Dp = bottomPadding,
 ) {
     val ordinaryMove = com.pixel.gallery.ui.quicksort.LocalMoveGridPresentation.current
     val retainedSelectionMode = com.pixel.gallery.ui.quicksort.LocalMediaSelectionMode.current
@@ -163,6 +164,8 @@ fun PhotosScreen(
     var dockHeightPx by remember { mutableIntStateOf(0) }
     val dockHeight = with(LocalDensity.current) { dockHeightPx.toDp() }
     val effectiveBottomPadding = bottomPadding + (quickSort?.dockBottomInset ?: 0.dp) +
+        com.pixel.gallery.ui.quicksort.LocalSelectionPanelInset.current
+    val effectiveScrollbarBottomPadding = scrollbarBottomPadding + (quickSort?.dockBottomInset ?: 0.dp) +
         com.pixel.gallery.ui.quicksort.LocalSelectionPanelInset.current
     val gridSidePadding = 4.dp
     val gridSidePaddingPx = with(LocalDensity.current) { gridSidePadding.roundToPx().toFloat() }
@@ -397,7 +400,7 @@ fun PhotosScreen(
                 .align(Alignment.CenterEnd)
                 .padding(
                     top = if (quickSort?.dockTop == true) dockHeight + 16.dp else 0.dp,
-                    bottom = effectiveBottomPadding + if (quickSort != null && !quickSort.dockTop) dockHeight + 24.dp else 0.dp,
+                    bottom = effectiveScrollbarBottomPadding + if (quickSort != null && !quickSort.dockTop) dockHeight + 24.dp else 0.dp,
                 ),
             positionLabelProvider = scrollbarPositionLabelProvider,
             onDragStateChanged = { isScrollbarDragging = it }

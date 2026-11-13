@@ -46,6 +46,7 @@ fun AlbumGrid(
     emptyMessage: String? = null,
     contentBackground: Modifier = Modifier,
     gridGestures: Modifier = Modifier,
+    scrollbarBottomPadding: Dp = bottomPadding,
     content: LazyGridScope.() -> Unit,
 ) {
     val gridColumns = columns.coerceIn(2, 6)
@@ -92,7 +93,7 @@ fun AlbumGrid(
 
         GalleryScrollbar(
             lazyGridState = state,
-            layoutModifier = Modifier.align(Alignment.CenterEnd).padding(bottom = bottomPadding),
+            layoutModifier = Modifier.align(Alignment.CenterEnd).padding(bottom = scrollbarBottomPadding),
             onDragStateChanged = {},
         )
     }

@@ -941,9 +941,23 @@ internal fun ViewerScreen(
         animationSpec = tween(durationMillis = 150),
         label = "ViewerHeaderVisibility",
     )
+    val openingEffect by viewModel.viewerOpeningEffect.collectAsState()
+    val openingMedia = photos.getOrNull(initialIndex)
+    val openingRatio = openingMedia?.let {
+        val ratio = if (it.width > 0 && it.height > 0) it.width.toFloat() / it.height else 1f
+        if (it.sourceRotationDegrees % 180 != 0) 1f / ratio else ratio
+    } ?: 1f
+    val hasSavedOpeningTransform = remember(initialId, openingEffect) {
+        openingEffect == com.pixel.gallery.model.ViewerOpeningEffect.THUMBNAIL &&
+            openingMedia?.let { imageTransforms.get(it.viewerCacheKey()) != null } == true
+    }
+    val opening = rememberViewerOpeningTransition(initialId, openingMedia?.viewerTransitionKey(),
+        openingEffect, isForeground && !inVideoPip, openingRatio,
+        allowThumbnail = !hasSavedOpeningTransform && contentRotation.settledDegrees == 0 &&
+            (openingMedia?.width ?: 0) > 0 && (openingMedia?.height ?: 0) > 0)
     val viewerGesturesEnabled = isForeground && !inVideoPip && !showInfo && !showMenu &&
         !showDeleteConfirm && !videoOptionsOpen && imageIndexAction == null &&
-        !pagerState.isScrollInProgress && !pagerReturningToSettledPage
+        !pagerState.isScrollInProgress && !pagerReturningToSettledPage && !opening.isRunning
     val dismissGesture = rememberViewerDismissGesture(
         key = currentMedia?.viewerTransitionKey(),
         isForeground = isForeground,
@@ -964,15 +978,22 @@ internal fun ViewerScreen(
         onDispose { if (rotationGesture.dismissGesture === dismissGesture) rotationGesture.dismissGesture = null }
     }
     return GalleryPage(
-        modifier = Modifier.onSizeChanged { dismissGesture.resize(it.width, it.height) }
-            .onGloballyPositioned { dismissGesture.windowOrigin = it.localToWindow(Offset.Zero) }
-            .drawBehind { drawRect(Color.Black.copy(alpha = dismissGesture.visual.backdropAlpha)) },
+        modifier = Modifier.onSizeChanged {
+            dismissGesture.resize(it.width, it.height)
+            opening.resize(it)
+        }
+            .onGloballyPositioned {
+                dismissGesture.windowOrigin = it.localToWindow(Offset.Zero)
+                opening.windowOrigin = dismissGesture.windowOrigin
+            }
+            .drawBehind { drawRect(Color.Black.copy(alpha =
+                if (opening.isRunning) opening.visual.backdropAlpha else dismissGesture.visual.backdropAlpha)) },
         topBar = {
             GalleryHeader(
                 modifier = Modifier
                     .viewerRotationArea(rotationGesture.takeIf { showUI || headerVisibility > 0f }, excluded = true)
                     .graphicsLayer {
-                        alpha = headerVisibility * dismissGesture.visual.chromeAlpha
+                        alpha = headerVisibility * dismissGesture.visual.chromeAlpha * opening.visual.chromeAlpha
                         translationY = -size.height * (1f - headerVisibility)
                     }
                     .background(
@@ -1128,10 +1149,11 @@ internal fun ViewerScreen(
     ) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize().viewerRotationArea(rotationGesture),
+            modifier = Modifier.fillMaxSize().viewerRotationArea(rotationGesture)
+                .then(if (opening.isRunning) Modifier.viewerVisualMotion { opening.visual } else Modifier),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1,
-            userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage,
+            userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage && !opening.isRunning,
             key = { photos[it].contentId }
         ) { page ->
             val media = photos[page]
@@ -1153,6 +1175,7 @@ internal fun ViewerScreen(
             }
             val onPageContentReady: (Boolean) -> Unit = { ready ->
                 fullPreviewReady = ready
+                if (ready) opening.ready(media.viewerTransitionKey())
                 if (ready && isForeground && page == pagerState.currentPage) {
                     restoredDrawGate?.resolve("viewer:$initialId")
                 }
@@ -1196,8 +1219,10 @@ internal fun ViewerScreen(
                 media.sourceMimeType.equals("image/gif", ignoreCase = true) ||
                     media.path.endsWith(".gif", ignoreCase = true)
             }
-            CompositionLocalProvider(LocalViewerDismissGesture provides
-                dismissGesture.takeIf { pagerState.settledPage == page && !pagerState.isScrollInProgress }) {
+            CompositionLocalProvider(
+                LocalViewerOpening provides opening.takeIf { it.key == media.viewerTransitionKey() },
+                LocalViewerDismissGesture provides
+                    dismissGesture.takeIf { pagerState.settledPage == page && !pagerState.isScrollInProgress }) {
             Box(
                 modifier = Modifier.fillMaxSize().then(
                     if (!isVideo && pagerState.settledPage == page) Modifier.viewerDismissMotion(dismissGesture)
@@ -1321,6 +1346,7 @@ internal fun ViewerScreen(
                                         else Priority.LOW
                                     )
                                     .onlyRetrieveFromCache(!allowSwipeThumbnailSourceLoad)
+                                    .addListener(openingReadyListener(opening, media.viewerTransitionKey()))
                                 if (ViewerLoadMetrics.isEnabled) {
                                     val mainToken = ViewerLoadMetrics.workStarted(
                                         "SWIPE_THUMB_200PX",
@@ -1503,7 +1529,7 @@ internal fun ViewerScreen(
                                                     dataSource: com.bumptech.glide.load.DataSource,
                                                     isFirstResource: Boolean,
                                                 ): Boolean {
-                                                    fullPreviewReady = true
+                                                    onPageContentReady(true)
                                                     return false
                                                 }
                                             })
@@ -1717,7 +1743,7 @@ internal fun ViewerScreen(
             enter = fadeIn(animationSpec = tween(durationMillis = 150)) + slideInVertically(animationSpec = tween(durationMillis = 150)) { it },
             exit = fadeOut(animationSpec = tween(durationMillis = 150)) + slideOutVertically(animationSpec = tween(durationMillis = 150)) { it },
             modifier = Modifier.align(Alignment.BottomCenter)
-                .graphicsLayer { alpha = dismissGesture.visual.chromeAlpha }
+                .graphicsLayer { alpha = dismissGesture.visual.chromeAlpha * opening.visual.chromeAlpha }
                 .viewerRotationArea(rotationGesture, excluded = true)
         ) {
             Column(

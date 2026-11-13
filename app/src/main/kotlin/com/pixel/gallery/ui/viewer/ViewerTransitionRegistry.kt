@@ -26,9 +26,12 @@ internal class ViewerTransitionRegistry {
         val coordinates: LayoutCoordinates, val radius: Float, val epoch: Int)
     private val anchors = mutableMapOf<Any, Anchor>()
     var active by mutableStateOf<Active?>(null)
+    var opening by mutableStateOf<ViewerOpeningTransition?>(null)
     var destinationScope: Any? = null
     private var epoch = 0
-    val revealing: Boolean get() = active?.gesture?.isRevealing == true
+    val revealing: Boolean get() = opening?.isRunning == true || active?.gesture?.isRevealing == true
+    val backdropAlpha: Float get() = opening?.takeIf { it.isRunning }?.visual?.backdropAlpha
+        ?: active?.gesture?.visual?.backdropAlpha ?: 1f
 
     fun beginReveal() { epoch++ }
     fun register(token: Any, scope: Any?, key: ViewerTransitionKey, coordinates: LayoutCoordinates, radius: Float) {
@@ -36,7 +39,7 @@ internal class ViewerTransitionRegistry {
     }
     fun remove(token: Any) { anchors.remove(token) }
     fun hidden(scope: Any?, key: ViewerTransitionKey): Boolean =
-        revealing && scope == destinationScope && key == active?.key
+        active?.gesture?.isRevealing == true && scope == destinationScope && key == active?.key
 
     fun target(key: ViewerTransitionKey?, origin: Offset, width: Int, height: Float): ViewerThumbnailTarget? {
         val anchor = anchors.values.lastOrNull { it.key == key && it.scope == destinationScope &&

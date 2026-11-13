@@ -1,0 +1,7 @@
+<resources>
+    <string name="settings_section_animation">动画效果</string>
+    <string name="viewer_opening_effect">详情页打开效果</string>
+    <string name="viewer_opening_none">无动画</string>
+    <string name="viewer_opening_thumbnail">缩略图展开</string>
+    <string name="viewer_opening_scale_fade">放大淡入</string>
+</resources>
