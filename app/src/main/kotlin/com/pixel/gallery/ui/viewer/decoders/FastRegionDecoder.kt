@@ -159,10 +159,10 @@ class FastRegionDecoder(
         } else {
             null
         }
-        indexedStore = IndexedJpegStore(appContext)
-        indexedPngStore = IndexedPngStore(appContext)
-        indexedWebpStore = IndexedWebpStore(appContext)
-        indexedHeifStore = IndexedHeifStore(appContext)
+        indexedStore = if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) null else IndexedJpegStore(appContext)
+        indexedPngStore = if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) null else IndexedPngStore(appContext)
+        indexedWebpStore = if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) null else IndexedWebpStore(appContext)
+        indexedHeifStore = if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) null else IndexedHeifStore(appContext)
         metricsKey = imageVersion
         metricsSessionId = ViewerLoadMetrics.currentSessionId(metricsKey)
         val displayMetrics = context.resources.displayMetrics
@@ -276,7 +276,7 @@ class FastRegionDecoder(
     }
 
     override fun isRegionCached(sRect: Rect, sampleSize: Int): Boolean {
-        if (!initialized) return false
+        if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE || !initialized) return false
         return tileCacheFiles(sRect, effectiveSampleSize(sRect, sampleSize)).argb8888.isFile
     }
 
@@ -292,7 +292,7 @@ class FastRegionDecoder(
             val actualSample = actualSamples.first()
             // A cache file may have appeared after SSIV built this batch. Preserve the
             // ordinary hit path instead of making that region wait on a source decode.
-            if (sRects.any { tileCacheFiles(it, actualSample).argb8888.isFile }) {
+            if (!com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE && sRects.any { tileCacheFiles(it, actualSample).argb8888.isFile }) {
                 return sRects.map { decodeRegion(it, sampleSize) }
             }
 
@@ -381,6 +381,7 @@ class FastRegionDecoder(
     }
 
     override fun cacheRegion(sRect: Rect, sampleSize: Int, bitmap: Bitmap): Boolean {
+        if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) return false
         synchronized(cacheWriteLock) {
             if (!initialized || bitmap.isRecycled) return false
             val actualSample = effectiveSampleSize(sRect, sampleSize)
@@ -670,8 +671,18 @@ class FastRegionDecoder(
             )
         }
 
-        val bitmap = openDecoder(fallbackReason).decodeRegion(rect, options)
-            ?: throw RuntimeException("Region decoder returned null bitmap")
+        val opened = openDecoder(fallbackReason)
+        val decodeToken = ViewerLoadMetrics.workStarted("PLATFORM_REGION_DECODE", imageVersion,
+            "rect=$rect sample=${options.inSampleSize} config=${options.inPreferredConfig}")
+        val bitmap = try {
+            opened.decodeRegion(rect, options)
+                ?: throw RuntimeException("Region decoder returned null bitmap")
+        } catch (error: Exception) {
+            ViewerLoadMetrics.workFailed(decodeToken, error.javaClass.simpleName)
+            throw error
+        }
+        ViewerLoadMetrics.workReady(decodeToken, "BITMAP_REGION_DECODER",
+            "bitmap=${bitmap.width}x${bitmap.height} config=${bitmap.config}")
         return bitmap to "SOURCE_REGION_DECODE"
     }
 
@@ -837,6 +848,7 @@ class FastRegionDecoder(
     }
 
     private fun decodeCachedTile(cacheFiles: TileCacheFiles): Pair<File, Bitmap>? {
+        if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) return null
         val cacheFile = cacheFiles.argb8888
         if (!cacheFile.isFile) return null
         val decoded = try {
@@ -877,6 +889,7 @@ class FastRegionDecoder(
     }
 
     private fun saveCachedTile(cacheFiles: TileCacheFiles, bitmap: Bitmap): Boolean {
+        if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) return false
         val cacheFile = cacheFiles.argb8888
         if (cacheFile.isFile) return false
         val token = ViewerLoadMetrics.workStarted(

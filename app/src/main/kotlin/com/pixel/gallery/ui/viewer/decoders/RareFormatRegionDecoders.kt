@@ -34,7 +34,7 @@ class TiffRegionDecoder : ImageRegionDecoder {
     private val lock = Any()
 
     override fun init(context: Context, uri: Uri): Point = synchronized(lock) {
-        store = IndexedTiffStore(context.applicationContext)
+        store = if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) null else IndexedTiffStore(context.applicationContext)
         localSourcePath = if (uri.scheme == null || uri.scheme == "file") {
             val path = uri.path ?: uri.toString()
             File(path).takeIf { it.isFile && it.canRead() }?.absolutePath

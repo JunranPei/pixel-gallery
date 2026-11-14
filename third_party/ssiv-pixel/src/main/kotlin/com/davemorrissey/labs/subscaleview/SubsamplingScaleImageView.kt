@@ -76,6 +76,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     var maxScale = 2f
     var isOneToOneZoomEnabled = false
     var rotationEnabled = true
+    var diagnosticNoCache = false
     var eagerLoadingEnabled = false
     var debug = false
     var onImageEventListener: OnImageEventListener? = null
@@ -1411,7 +1412,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
         // A gesture only changes which already-loaded tiles are visible; it does not load
         // new ones. Trimming here used to recycle tens of megabytes on the UI thread in
         // ACTION_MOVE, forcing RenderThread fence waits and producing low-power jank.
-        val cacheStats = if (load && !isZooming && !isPanning && anim == null) {
+        val cacheStats = if (load && (diagnosticNoCache || (!isZooming && !isPanning && anim == null))) {
             trimTileMemoryCache(sampleSize)
         } else {
             val budget = tileMemoryCacheBudget(sampleSize)
@@ -1607,6 +1608,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     }
 
     private fun scheduleStableTileCachePersistence() {
+        if (diagnosticNoCache) return
         val generation = ++stableTileCacheGeneration
         diagnosticsListener?.invoke(
             "tile=CACHE_SCHEDULE generation=$generation delayMs=$TILE_CACHE_ADMISSION_DELAY_MS " +
@@ -1693,6 +1695,7 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
     )
 
     private fun tileMemoryCacheBudget(currentSampleSize: Int): TileMemoryCacheBudget {
+        if (diagnosticNoCache) return TileMemoryCacheBudget(0, 0L, "DISABLED")
         if (!activeTileMemoryCache) {
             return TileMemoryCacheBudget(
                 entries = INACTIVE_OFFSCREEN_TILE_CACHE_ENTRIES,
@@ -2200,6 +2203,9 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                     .filter { it.visible && it.loading && it.bitmap == null }
                 if (tiles.isEmpty()) return null
 
+                view.diagnosticsListener?.invoke("tile=TASK_START id=$diagnosticTaskId mode=BATCH " +
+                    "queueMs=${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L}")
+
                 view.decoderLock.readLock().lock()
                 try {
                     if (!decoder.isReady()) return null
@@ -2386,6 +2392,8 @@ open class SubsamplingScaleImageView @JvmOverloads constructor(context: Context,
                 val decoder = decoderRef.get()
                 val tile = tileRef.get()
                 if (decoder != null && tile != null && view != null && view.imageGeneration == generation && decoder.isReady() && tile.visible) {
+                    view.diagnosticsListener?.invoke("tile=TASK_START id=$diagnosticTaskId mode=SINGLE " +
+                        "queueMs=${(SystemClock.elapsedRealtimeNanos() - queuedAtNanos) / 1_000_000L}")
                     view.debug("TileLoadTask.doInBackground, tile.sRect=${tile.sRect as Rect}, tile.sampleSize=${tile.sampleSize}")
                     view.decoderLock.readLock().lock()
                     try {

@@ -102,6 +102,8 @@ internal object ViewerLoadMetrics {
         val imageKey: String,
         val startedAtNanos: Long,
         val entryId: Long,
+        val startedThreadId: Int = if (isEnabled) Process.myTid() else 0,
+        val startedThreadCpuNanos: Long = if (isEnabled) Debug.threadCpuTimeNanos() else 0L,
     )
 
     /**
@@ -265,7 +267,8 @@ internal object ViewerLoadMetrics {
             token.entryId,
             "WORK_$outcome entry=${token.entryId} sinceClick=${sinceEntryMs(token.entryId)}ms " +
                 "work=${token.id} type=${token.type} key=${token.imageKey} " +
-                "duration=${elapsedMs(token.startedAtNanos)}ms source=$source thread=${threadLabel()} $detail"
+                "duration=${elapsedMs(token.startedAtNanos)}ms source=$source thread=${threadLabel()} " +
+                "cpuNs=${if (Process.myTid() == token.startedThreadId) Debug.threadCpuTimeNanos() - token.startedThreadCpuNanos else -1L} $detail"
         )
     }
 

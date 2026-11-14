@@ -47,7 +47,18 @@ object DcJpegPreview {
         width: Int,
         height: Int,
         cancelled: AtomicBoolean = AtomicBoolean(false),
-    ): Bitmap? {
+    ): Bitmap? = decodeFitInternal(resolver, uri, width, height, cancelled, false)
+
+    fun decodeFitExact(
+        resolver: ContentResolver,
+        uri: Uri,
+        width: Int,
+        height: Int,
+        cancelled: AtomicBoolean = AtomicBoolean(false),
+    ): Bitmap? = decodeFitInternal(resolver, uri, width, height, cancelled, true)
+
+    private fun decodeFitInternal(resolver: ContentResolver, uri: Uri, width: Int, height: Int,
+                                  cancelled: AtomicBoolean, exactFit: Boolean): Bitmap? {
         require(width > 0 && height > 0)
         if (cancelled.get()) return null
         return try {
@@ -58,7 +69,8 @@ object DcJpegPreview {
                 BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, bounds)
                 if (cancelled.get() || bounds.outMimeType != "image/jpeg" ||
                     bounds.outColorSpace?.isSrgb != true) return null
-                decodeFitNative(it.fd, width, height, cancelled)?.let { bitmap ->
+                (if (exactFit) decodeFitExactNative(it.fd, width, height, cancelled)
+                    else decodeFitNative(it.fd, width, height, cancelled))?.let { bitmap ->
                     if (cancelled.get()) { bitmap.recycle(); null } else bitmap
                 }
             }
@@ -68,6 +80,7 @@ object DcJpegPreview {
     }
 
     private external fun decodeFitNative(fd: Int, width: Int, height: Int, cancelled: AtomicBoolean): Bitmap?
+    private external fun decodeFitExactNative(fd: Int, width: Int, height: Int, cancelled: AtomicBoolean): Bitmap?
 
     /** Same-thread diagnostic only; header/alloc/setup/scan/finish ns, sample, fast entropy. */
     fun lastFitTimings(): LongArray = lastFitTimingsNative()

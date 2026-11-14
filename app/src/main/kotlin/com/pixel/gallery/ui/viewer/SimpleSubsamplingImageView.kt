@@ -390,11 +390,17 @@ private suspend fun resolveGlideDataCacheFile(
     fallbackPath: String,
     imageKey: String,
 ): String {
+    if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) {
+        val direct = File(fallbackPath).takeIf { it.isFile && it.canRead() }?.absolutePath
+            ?: (model as? Uri)?.toString() ?: fallbackPath
+        ViewerLoadMetrics.event("REGION_SOURCE_NO_CACHE", "direct=$direct", imageKey = imageKey)
+        return direct
+    }
     val requestManager = Glide.with(context.applicationContext)
     val request = requestManager
         .downloadOnly()
         .load(model)
-        .diskCacheStrategy(DiskCacheStrategy.DATA)
+        .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.DATA))
         .skipMemoryCache(true)
         .let { builder ->
             if (dateModifiedMillis > 0L) builder.signature(ObjectKey(dateModifiedMillis)) else builder
@@ -956,7 +962,7 @@ internal fun SimpleSubsamplingImageView(
         enableUltraHdr,
     ) {
         val imageView = imageViewRef
-        if (imageView != null && isPreviewVisible) {
+        if (imageView != null && isPreviewVisible && (!com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE || isActivePage)) {
             val savedTransform = transformStateStore.get(transformStateKey)
             // The saved SSIV scale is the actual source-pixel-to-screen scale: 1f is
             // original pixels. A 512 px bridge is useful at original size or below,
@@ -1010,7 +1016,9 @@ internal fun SimpleSubsamplingImageView(
                     .withViewerTaskCompression()
                     .format(DecodeFormat.PREFER_ARGB_8888)
                     .diskCacheStrategy(
-                        if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM && nativeFitModel == null) {
+                        if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) {
+                            DiskCacheStrategy.NONE
+                        } else if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM && nativeFitModel == null) {
                             DiskCacheStrategy.ALL
                         } else {
                             DiskCacheStrategy.RESOURCE
@@ -1021,6 +1029,10 @@ internal fun SimpleSubsamplingImageView(
                     .let { opts ->
                         if (enableUltraHdr) {
                             opts.transform(UltraHdrAwareFitCenter)
+                        } else if (nativeFitModel != null && com.pixel.gallery.BuildConfig.NATIVE_GPU_FIT_PROBE &&
+                            !com.pixel.gallery.BuildConfig.NATIVE_EXACT_FIT_PROBE) {
+                            // Diagnostic A/B: the ImageView fits the already sampled bitmap at draw time.
+                            opts.dontTransform()
                         } else {
                             opts.fitCenter()
                         }
@@ -1146,13 +1158,16 @@ internal fun SimpleSubsamplingImageView(
                 val requestManager = Glide.with(context)
                 val startSourceLoad = {
                     if (previewRequestGuard.isCurrent(imageView, transformStateKey)) {
+                        ViewerLoadMetrics.event("FIT_SOURCE_SUBMIT",
+                            "native=${nativeFitModel != null} intermediate=$useIntermediatePreview " +
+                                "noCache=${com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE}", imageKey = transformStateKey)
                         val fullPreviewRequest = requestManager
                             // Match Simple Gallery's local-photo path exactly. Going through the
                             // MediaStore URI selects Glide's QMediaStore loader even though SSIV
                             // already proved that the original file is directly readable.
                             .load(originalRequestModel)
                             .apply(if (regionDecoderKind == ViewerRegionDecoderKind.PLATFORM) {
-                                requestOptions.clone().diskCacheStrategy(DiskCacheStrategy.ALL)
+                                requestOptions.clone().diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.ALL))
                             } else requestOptions)
                             .listener(previewListener())
 
@@ -1160,7 +1175,7 @@ internal fun SimpleSubsamplingImageView(
                             val thumbnailOptions = RequestOptions()
                                 .withViewerTaskCompression()
                                 .format(DecodeFormat.PREFER_RGB_565)
-                                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
                                 .downsample(DownsampleStrategy.FIT_CENTER)
                                 .priority(Priority.IMMEDIATE)
                                 .override(INTERMEDIATE_PREVIEW_LONG_EDGE)
@@ -1221,11 +1236,15 @@ internal fun SimpleSubsamplingImageView(
                 // Probe only the existing full-preview cache first. A hit completes here,
                 // so the 512 request is never started. On a miss, the source path above
                 // decides whether the saved 1:1 scale permits the intermediate preview.
-                requestManager
-                    .load(requestModel)
-                    .apply(requestOptions.clone().onlyRetrieveFromCache(true))
-                    .listener(previewListener(onCacheMiss = startSourceLoad))
-                    .into(imageView)
+                if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) {
+                    startSourceLoad()
+                } else {
+                    requestManager
+                        .load(requestModel)
+                        .apply(requestOptions.clone().onlyRetrieveFromCache(true))
+                        .listener(previewListener(onCacheMiss = startSourceLoad))
+                        .into(imageView)
+                }
             } else {
                 // The request is deliberately retained across settle/active-page changes.
                 // Do not reveal the 200 px cover when no new preview was started.
@@ -1429,6 +1448,7 @@ internal fun SimpleSubsamplingImageView(
                 // This is a renderer-independent invariant, not a device-specific branch.
                 setMaxTileSize(1024)
                 taskExecutor = tileDecodeExecutor
+                diagnosticNoCache = com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE
                 cacheTaskExecutor = tileCacheWriteExecutor
                 setActiveTileMemoryCache(isActivePage)
                 // The native host owns content rotation and touch-coordinate mapping.

@@ -13,6 +13,8 @@ import com.pixel.gallery.model.toggleDuplicateSelection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -51,6 +53,25 @@ class DuplicateViewModel @Inject constructor(private val repository: DuplicateRe
     fun start(entries: List<MediaEntry>, scope: DeduplicationScope, title: String) {
         if (_state.value.phase != DuplicatePhase.IDLE) return
         _state.value = DuplicateUiState(title, DuplicatePhase.SCANNING, canTrash = repository.canTrash)
+        startPrepared(entries, scope)
+    }
+
+    fun startResolved(scope: DeduplicationScope, title: String, resolveEntries: suspend () -> List<MediaEntry>) {
+        if (_state.value.phase != DuplicatePhase.IDLE) return
+        _state.value = DuplicateUiState(title, DuplicatePhase.SCANNING, canTrash = repository.canTrash)
+        job = viewModelScope.launch {
+            try {
+                val entries = withContext(Dispatchers.Default) { resolveEntries() }
+                startPrepared(entries, scope)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                fail(error)
+            }
+        }
+    }
+
+    private fun startPrepared(entries: List<MediaEntry>, scope: DeduplicationScope) {
         if (repository.needsOriginalAccess) {
             pendingScan = entries.toList() to scope
             _originalAccessRequest.value = true

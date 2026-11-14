@@ -86,6 +86,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var viewerPreviewGeometrySuite = false
     private var thumbnailAspectSuite = false
     private var thumbnailQualitySuite = false
+    private var noCacheDiagnosticSuite = false
     private var nativeFitSuite = false
     private var viewerCompressionSuite = false
     private var viewerRecreationFlickerSuite = false
@@ -93,6 +94,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
     private var labelBackupEdgeFilter: String? = null
     private var labelBackupCleanupToken: String? = null
     override fun onCreate(arguments: Bundle?) {
+        noCacheDiagnosticSuite = arguments?.getString("suite") == "no-cache-diagnostic"
         recoveryFramesSuite = arguments?.getString("suite") == "viewer-recovery-frames"
         sharedMotionSuite = arguments?.getString("suite") == "shared-motion"
         overflowMotionSuite = arguments?.getString("suite") == "overflow-motion"
@@ -158,6 +160,7 @@ class QuickSortSafetyInstrumentation : Instrumentation() {
         val results = Bundle()
         try {
             val report = when {
+                noCacheDiagnosticSuite -> NoCacheDiagnosticChecks(targetContext).exercise()
                 recoveryFramesSuite -> ViewerRecoveryFrameChecks(this).exercise()
                 sharedMotionSuite -> RedesignTouchChecks(this).exercise(motionOnly = true)
                 overflowMotionSuite -> OverflowMotionChecks(this).exercise()

@@ -45,7 +45,7 @@ internal fun openingReadyListener(opening: ViewerOpeningTransition?, key: Viewer
 
 /** One finite animation per navigation entry. Only draw/layer lambdas observe the frame state. */
 internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: Boolean,
-    private val seed: ViewerOpeningSeed? = null,
+    seed: ViewerOpeningSeed? = null,
     private val initialEffect: ViewerOpeningEffect = ViewerOpeningEffect.SCALE_FADE,
     private val ratio: Float = 1f) {
     var isRunning by mutableStateOf(pending)
@@ -56,6 +56,7 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
     var viewport by mutableStateOf(IntSize.Zero)
         private set
     private var started = false
+    private var capturedTarget = seed?.target.takeIf { pending }
     var windowOrigin = Offset.Zero
         set(value) { field = value; prepareFirstVisual() }
     var preview by mutableStateOf(seed?.bitmap.takeIf { pending })
@@ -78,6 +79,7 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
         isRunning = false
         visual = ViewerDismissVisual()
         preview = null
+        capturedTarget = null
         job = null
     }
 
@@ -85,7 +87,7 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
         if (!isRunning || started) return
         val source = openingFitBounds(viewport.width.toFloat(), viewport.height.toFloat(), ratio) ?: return
         visual = openingVisual(initialEffect, source,
-            seed?.target?.let { it.copy(bounds = it.bounds.translate(-windowOrigin)) }, 0f)
+            capturedTarget?.let { it.copy(bounds = it.bounds.translate(-windowOrigin)) }, 0f)
     }
 
     suspend fun play(effect: ViewerOpeningEffect, registry: ViewerTransitionRegistry?,
@@ -100,7 +102,7 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
             started = true
             val source = openingFitBounds(viewport.width.toFloat(), viewport.height.toFloat(), ratio)
                 ?: Rect(0f, 0f, viewport.width.toFloat(), viewport.height.toFloat())
-            val target = if (allowThumbnail) seed?.target?.let {
+            val target = if (allowThumbnail) capturedTarget?.let {
                 it.copy(bounds = it.bounds.translate(-windowOrigin))
             } ?: registry?.target(key, windowOrigin, viewport.width, viewport.height.toFloat()) else null
             val resolved = if (effect == ViewerOpeningEffect.THUMBNAIL && target == null)

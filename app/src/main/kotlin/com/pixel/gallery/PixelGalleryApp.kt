@@ -18,6 +18,13 @@ class PixelGalleryApp : Application() {
         com.pixel.gallery.utils.AppLogger.init(this)
         com.pixel.gallery.utils.AppLogger.log("PixelGalleryApp", "Application onCreate, initialization complete.")
         com.pixel.gallery.ui.viewer.ViewerLoadMetrics.startContinuousPowerTimeline(this)
+        if (BuildConfig.IMAGE_LOAD_NO_CACHE) {
+            android.util.Log.i("ViewerLoadMetrics", "NO_CACHE_POLICY package=$packageName " +
+                "glideMemory=false glideDisk=false bitmapPool=false arrayPool=false " +
+                "persistentThumbnails=false systemThumbnails=bypass tileDisk=false " +
+                "offscreenTileMemory=false neighborPreload=false platformIndexes=false " +
+                "systemPageCache=uncontrolled")
+        }
 
         // OSMdroid Configuration
         Configuration.getInstance().userAgentValue = packageName

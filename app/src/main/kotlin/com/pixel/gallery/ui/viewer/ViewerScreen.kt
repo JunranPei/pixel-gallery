@@ -710,6 +710,12 @@ internal fun ViewerScreen(
     var pendingIndexBuildAfterResolution by remember(currentMediaCacheKey) { mutableStateOf(false) }
     var unsupportedIndexFormat by remember(currentMediaCacheKey) { mutableStateOf<String?>(null) }
     LaunchedEffect(currentIndexTarget) {
+        if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) {
+            imageIndexReady = false
+            imageIndexAction = null
+            pendingIndexBuildAfterResolution = false
+            return@LaunchedEffect
+        }
         if (!pendingIndexBuildAfterResolution) imageIndexAction = null
         imageIndexBusy = false
         val isReady = currentIndexTarget?.let { target ->
@@ -1072,7 +1078,7 @@ internal fun ViewerScreen(
                         onReopen = { showMenu = true },
                         onSourceHidden = { indexMenuSourceHidden = it },
                     ) {
-                        currentIndexTarget?.let { indexTarget ->
+                        currentIndexTarget?.takeUnless { com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE }?.let { indexTarget ->
                             val indexReady = imageIndexReady == true
                             val indexChecking = imageIndexReady == null
                             val formatName = indexTarget.format.displayName
@@ -1157,10 +1163,11 @@ internal fun ViewerScreen(
             modifier = Modifier.fillMaxSize().viewerRotationArea(rotationGesture)
                 .then(if (opening.isRunning) Modifier.viewerVisualMotion { opening.visual } else Modifier),
             pageSpacing = 16.dp,
-            beyondViewportPageCount = 1,
+            beyondViewportPageCount = if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) 0 else 1,
             userScrollEnabled = !isPlayingMotion && !pagerReturningToSettledPage && !opening.isRunning,
             key = { photos[it].contentId }
         ) { page ->
+            if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE && page != pagerState.settledPage) return@HorizontalPager
             val media = photos[page]
             // Settings must gate video preparation so a cold start cannot autoplay
             // before the user's preference has arrived. Images can render with their
@@ -1343,14 +1350,14 @@ internal fun ViewerScreen(
                                     // applies ContentScale.Fit when drawing this cover.
                                     .dontTransform()
                                     .format(DecodeFormat.PREFER_RGB_565)
-                                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                                    .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
                                     .signature(swipeThumbnailSignature)
                                     .override(200)
                                     .priority(
                                         if (allowSwipeThumbnailSourceLoad) Priority.NORMAL
                                         else Priority.LOW
                                     )
-                                    .onlyRetrieveFromCache(!allowSwipeThumbnailSourceLoad)
+                                    .onlyRetrieveFromCache(!com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE && !allowSwipeThumbnailSourceLoad)
                                     .addListener(openingReadyListener(opening, media.viewerTransitionKey()))
                                 if (ViewerLoadMetrics.isEnabled) {
                                     val mainToken = ViewerLoadMetrics.workStarted(
@@ -1362,7 +1369,7 @@ internal fun ViewerScreen(
                                     swipeMainTokenRef.getAndSet(mainToken)?.let {
                                         ViewerLoadMetrics.workCleared(it, "request-replaced")
                                     }
-                                    configured.listener(
+                                    configured.addListener(
                                         trackedDrawableListener(mainToken, swipeMainTokenRef),
                                     )
                                 } else {
@@ -1981,6 +1988,7 @@ internal fun ViewerScreen(
                     Button(
                         enabled = !imageIndexBusy && !isCurrentReserved,
                         onClick = confirm@ {
+                            if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) return@confirm
                             val operationTarget = currentIndexTarget ?: return@confirm
                             imageIndexAction = null
                             imageIndexBusy = isBuild

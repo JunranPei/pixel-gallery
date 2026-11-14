@@ -200,4 +200,20 @@ class ViewerOpeningGeometryTest {
         assertFalse(opening.isRunning)
         assertEquals(0, clock.frames)
     }
+
+    @Test fun completedOrDisabledOpeningDoesNotRetainTheThumbnailSeed() {
+        val key = ViewerTransitionKey("temporary-thumbnail", 1)
+        val seed = ViewerOpeningSeed(key, thumbnail)
+        for (pending in listOf(true, false)) {
+            val opening = ViewerOpeningTransition(key, pending, seed)
+            opening.cancel()
+            assertNull(opening.preview)
+            // The seed owns the cached bitmap. Clearing preview alone must not
+            // leave that second ownership path alive for the viewer's lifetime.
+            assertFalse(ViewerOpeningTransition::class.java.declaredFields.any {
+                it.isAccessible = true
+                it.get(opening) === seed
+            })
+        }
+    }
 }

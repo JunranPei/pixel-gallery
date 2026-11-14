@@ -15,12 +15,21 @@ val keystoreProperties = Properties()
 // by a build-wide experiment flag.
 val officialRelease = providers.gradleProperty("officialRelease").orNull.toBoolean()
 val viewerTestVariant = providers.gradleProperty("viewerTestVariant").orNull?.lowercase()
+val imageLoadDiagnostic = viewerTestVariant == "nocachetrace"
+val imageSchedulingProbe = providers.gradleProperty("imageSchedulingProbe").orNull.toBoolean()
+require(!imageSchedulingProbe || imageLoadDiagnostic) { "Scheduling probe requires nocachetrace" }
+val nativeGpuFitProbe = providers.gradleProperty("nativeGpuFitProbe").orNull.toBoolean()
+require(!nativeGpuFitProbe || imageLoadDiagnostic) { "GPU fit probe requires nocachetrace" }
+val nativeExactFitProbe = providers.gradleProperty("nativeExactFitProbe").orNull.toBoolean()
+require(!nativeExactFitProbe || imageLoadDiagnostic) { "Exact fit probe requires nocachetrace" }
+require(!imageLoadDiagnostic || !officialRelease) { "Use nocachetrace without officialRelease" }
 // Legacy DC-only experiment stays isolated; ship the validated adaptive fit path.
 val jpegDcPreviewEnabled = !officialRelease && viewerTestVariant == "trace" &&
     providers.gradleProperty("jpegDcPreview").orNull.toBoolean()
 val jpegFitPreviewEnabled = providers.gradleProperty("jpegFitPreview").orNull
     ?.toBooleanStrictOrNull() ?: true
 val viewerMetricsEnabled = !officialRelease && (
+    imageLoadDiagnostic ||
     viewerTestVariant == "trace" ||
         viewerTestVariant == "compressed" ||
         viewerTestVariant == "zoomtrace" ||
@@ -36,6 +45,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.pixel.gallery"
+    testBuildType = if (imageLoadDiagnostic) "release" else "debug"
     compileSdk = 35
 
     compileOptions {
@@ -53,6 +63,7 @@ android {
             "albumgroups" -> "com.pixel.gallery.albumgroups.test"
             "test" -> "com.pixel.gallery.multitask.test"
             "simplemerge" -> "com.pixel.gallery.simplegallerymerge"
+            "nocachetrace" -> "com.pixel.gallery.loadtrace.nocache"
             "trace" -> "com.pixel.gallery.viewertrace"
             "clean" -> "com.pixel.gallery.codexclean"
             "compressed" -> "com.pixel.gallery.codexcompressed"
@@ -68,6 +79,7 @@ android {
             "albumgroups" -> "Gallery Groups Test"
             "test" -> "Gallery Test"
             "simplemerge" -> "Gallery Test"
+            "nocachetrace" -> "Pixel Load Diagnostic"
             "trace" -> "Pixel Trace"
             "clean" -> "Pixel Clean"
             "compressed" -> "Pixel Compressed"
@@ -78,6 +90,10 @@ android {
             else -> "Gallery"
         }
         buildConfigField("boolean", "VIEWER_METRICS_ENABLED", viewerMetricsEnabled.toString())
+        buildConfigField("boolean", "IMAGE_LOAD_NO_CACHE", imageLoadDiagnostic.toString())
+        buildConfigField("boolean", "NATIVE_GPU_FIT_PROBE", nativeGpuFitProbe.toString())
+        buildConfigField("boolean", "NATIVE_EXACT_FIT_PROBE", nativeExactFitProbe.toString())
+        manifestPlaceholders["diagnosticsProfileable"] = imageLoadDiagnostic.toString()
         buildConfigField("boolean", "JPEG_DC_PREVIEW_ENABLED", jpegDcPreviewEnabled.toString())
         buildConfigField("boolean", "JPEG_FIT_PREVIEW_ENABLED", jpegFitPreviewEnabled.toString())
         buildConfigField(
@@ -87,9 +103,11 @@ android {
         )
         minSdk = 26
         targetSdk = 35
-        testInstrumentationRunner = "com.pixel.gallery.integration.QuickSortSafetyInstrumentation"
-        versionCode = 2085
-        versionName = "4.3.6.8-auto-multitask"
+        testInstrumentationRunner = if (imageSchedulingProbe)
+            "com.pixel.gallery.integration.ImageSchedulingProbe"
+        else "com.pixel.gallery.integration.QuickSortSafetyInstrumentation"
+        versionCode = 2086
+        versionName = "4.3.6.9-auto-multitask"
     }
 
     signingConfigs {
@@ -136,7 +154,7 @@ android {
             // ABI includes inside a disabled splits block do not filter JNI libraries.
             // The ordinary release is for arm64; official releases retain ABI splits.
             if (!officialRelease) {
-                ndk { abiFilters += "arm64-v8a" }
+                ndk { abiFilters += if (imageLoadDiagnostic) listOf("arm64-v8a", "x86_64") else listOf("arm64-v8a") }
             }
             val releaseConfig = signingConfigs.getByName("release")
             if (releaseConfig.storeFile != null && releaseConfig.storeFile!!.exists()) {

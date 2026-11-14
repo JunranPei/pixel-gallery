@@ -11,14 +11,20 @@ internal class ThumbnailSourceStream(source: InputStream, private val isCancelle
         private set
     var sourceBytesRead = 0L
         private set
+    var sourceReadNanos = 0L
+        private set
     private val buffered = BufferedInputStream(object : FilterInputStream(source) {
         override fun read(): Int {
             sourceReadCalls++
-            return `in`.read().also { if (it >= 0) sourceBytesRead++ }
+            val started = if (DiagnosticCachePolicy.disabled) android.os.SystemClock.elapsedRealtimeNanos() else 0L
+            return try { `in`.read().also { if (it >= 0) sourceBytesRead++ } }
+            finally { if (started != 0L) sourceReadNanos += android.os.SystemClock.elapsedRealtimeNanos() - started }
         }
         override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
             sourceReadCalls++
-            return `in`.read(bytes, offset, length).also { if (it > 0) sourceBytesRead += it }
+            val started = if (DiagnosticCachePolicy.disabled) android.os.SystemClock.elapsedRealtimeNanos() else 0L
+            return try { `in`.read(bytes, offset, length).also { if (it > 0) sourceBytesRead += it } }
+            finally { if (started != 0L) sourceReadNanos += android.os.SystemClock.elapsedRealtimeNanos() - started }
         }
     }, 64 * 1024)
 

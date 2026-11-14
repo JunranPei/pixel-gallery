@@ -82,14 +82,14 @@ internal class FastScreenPreviewFetcher(
 
         try {
             val persistentDir = File(context.cacheDir, "persistent_viewer_thumbnails")
-            if (!persistentDir.exists()) {
+            if (!DiagnosticCachePolicy.disabled && !persistentDir.exists()) {
                 persistentDir.mkdirs()
             }
             val contentId = model.uri.tryParseId() ?: model.uri.hashCode()
             val cacheFileName = "fastpreview_${contentId}_${model.rotationDegrees}.jpg"
             val persistentFile = File(persistentDir, cacheFileName)
 
-            if (persistentFile.exists()) {
+            if (!DiagnosticCachePolicy.disabled && persistentFile.exists()) {
                 val persistentReadStartedAt = SystemClock.elapsedRealtimeNanos()
                 try {
                     val options = BitmapFactory.Options().apply {
@@ -184,6 +184,7 @@ if (srcWidth > 0 && srcHeight > 0) {
             if (bitmap != null) {
                 val writeStartedAt = SystemClock.elapsedRealtimeNanos()
                 try {
+                    if (!DiagnosticCachePolicy.disabled) {
                     FileOutputStream(persistentFile).use { out ->
                         bitmap?.compress(Bitmap.CompressFormat.JPEG, 85, out)
                     }
@@ -193,6 +194,7 @@ if (srcWidth > 0 && srcHeight > 0) {
                     }
                     val limitBytes = limitMb.toLong() * 1024 * 1024
                     trimPersistentCache(persistentDir, limitBytes)
+                    }
                 } catch (e: Exception) {
                     // ignore save errors
                 }

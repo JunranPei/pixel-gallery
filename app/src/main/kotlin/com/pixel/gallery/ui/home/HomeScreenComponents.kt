@@ -469,7 +469,7 @@ fun PhotoTile(
                 // same cached pixels with ContentScale.Fit.
                 .dontTransform()
                 .format(DecodeFormat.PREFER_RGB_565)
-                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
                 .signature(signatureKey)
                 .override(200)
                 .addListener(thumbnailListener)
@@ -792,7 +792,7 @@ fun AlbumCoverCard(
         { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
             requestBuilder
                 .format(DecodeFormat.PREFER_RGB_565)
-                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
                 .signature(signatureKey)
                 .override(200)
                 .thumbnail(requestBuilder.clone().sizeMultiplier(0.1f))

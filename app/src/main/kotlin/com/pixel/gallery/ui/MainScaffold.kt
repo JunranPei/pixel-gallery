@@ -208,16 +208,6 @@ internal fun toggleAlbumSelection(
     }
 }
 
-private fun mediaParentPath(path: String): String {
-    val normalizedPath = path.replace('\\', '/')
-    val separator = normalizedPath.lastIndexOf('/')
-    return when {
-        separator == 0 -> "/"
-        separator > 0 -> normalizedPath.substring(0, separator)
-        else -> ""
-    }
-}
-
 private val AlbumGridStatesSaver = listSaver<MutableMap<String, LazyGridState>, Any>(
     save = { states ->
         buildList {
@@ -863,14 +853,6 @@ private fun MainScaffoldContent(
         }
     }
 
-    val selectedLabelMediaIds = remember(labelMemberships, selectedLabelAlbumIds) {
-        labelMemberships.filter { it.labelId in selectedLabelAlbumIds }.mapTo(hashSetOf()) { it.contentId }
-    }
-    val selectedAlbumEntries = remember(allPhotos, hiddenPhotos, currentScreen, selectedAlbumPaths, selectedLabelMediaIds) {
-        if (currentScreen == Screen.HiddenAlbums) {
-            hiddenPhotos.filter { entry -> selectedAlbumPaths.any { entry.path.isInsideMediaFolder(it) } }
-        } else allPhotos.filter { mediaParentPath(it.path) in selectedAlbumPaths || it.contentId in selectedLabelMediaIds }
-    }
     var renamingAlbum by remember { mutableStateOf<Album?>(null) }
     LaunchedEffect(selectedCollection?.key) {
         val scope = groupSortScope
@@ -1703,13 +1685,21 @@ private fun MainScaffoldContent(
                         selectedAlbumPaths.forEach(photosViewModel::addExcludedFolder)
                         selectedAlbumPaths = emptySet()
                     }) else null,
-                    canFindDuplicates = selectedAlbumEntries.size > 1,
+                    canFindDuplicates = true,
                     onFindDuplicates = {
-                        duplicateViewModel.start(
-                            selectedAlbumEntries,
+                        val source = if (currentScreen == Screen.HiddenAlbums) hiddenPhotos else allPhotos
+                        val hiddenSelection = currentScreen == Screen.HiddenAlbums
+                        val paths = selectedAlbumPaths.toSet()
+                        val labelIds = selectedLabelAlbumIds.toSet()
+                        val memberships = labelMemberships
+                        duplicateViewModel.startResolved(
                             DeduplicationScope.ALL_FILES,
                             context.getString(R.string.duplicate_scope_selected_albums),
-                        )
+                        ) {
+                            val mediaIds = memberships.asSequence().filter { it.labelId in labelIds }
+                                .map { it.contentId }.toHashSet()
+                            com.pixel.gallery.model.collectSelectedAlbumMedia(source, paths, mediaIds, hiddenSelection)
+                        }
                     },
                 )
             } else if (selectionMode) {

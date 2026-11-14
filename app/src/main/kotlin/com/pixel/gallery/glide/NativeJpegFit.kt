@@ -48,12 +48,16 @@ internal class NativeJpegFitFetcher(
         val token = ViewerLoadMetrics.workStarted("NATIVE_JPEG_FIT", model.uri.toString(), "requested=${width}x$height")
         var owned: Bitmap? = null
         try {
+            val headerStarted = android.os.SystemClock.elapsedRealtimeNanos()
             // Use all EXIF orientations, including mirrors; MediaStore rotation
             // alone cannot describe these. A failed header read goes to Glide.
             val exif = context.contentResolver.openFileDescriptor(model.uri, "r")?.use {
                 if (!OsConstants.S_ISREG(Os.fstat(it.fileDescriptor).st_mode)) throw IOException("Non-regular JPEG source")
                 ExifInterface(it.fileDescriptor).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)
             } ?: throw IOException("JPEG orientation unavailable")
+            ViewerLoadMetrics.event("NATIVE_FIT_EXIF_DONE",
+                "durationNs=${android.os.SystemClock.elapsedRealtimeNanos() - headerStarted} orientation=$exif",
+                imageKey = model.uri.toString())
             val orientation = if (exif != ExifInterface.ORIENTATION_UNDEFINED) exif else when (model.rotationDegrees) {
                 90 -> ExifInterface.ORIENTATION_ROTATE_90
                 180 -> ExifInterface.ORIENTATION_ROTATE_180
@@ -61,16 +65,34 @@ internal class NativeJpegFitFetcher(
                 else -> ExifInterface.ORIENTATION_NORMAL
             }
             val swapped = orientation in ExifInterface.ORIENTATION_TRANSPOSE..ExifInterface.ORIENTATION_ROTATE_270
-            val bitmap = DcJpegPreview.decodeFit(context.contentResolver, model.uri,
-                if (swapped) height else width, if (swapped) width else height, cancelled)
+            val decodeStarted = android.os.SystemClock.elapsedRealtimeNanos()
+            val decodeCpuStarted = android.os.Debug.threadCpuTimeNanos()
+            // Ship the bounded final-size output. Keep the old diagnostic baseline
+            // selectable for uncached timing comparisons only.
+            val bitmap = if (!com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE ||
+                com.pixel.gallery.BuildConfig.NATIVE_EXACT_FIT_PROBE) {
+                DcJpegPreview.decodeFitExact(context.contentResolver, model.uri,
+                    if (swapped) height else width, if (swapped) width else height, cancelled)
+            } else {
+                DcJpegPreview.decodeFit(context.contentResolver, model.uri,
+                    if (swapped) height else width, if (swapped) width else height, cancelled)
+            }
             owned = bitmap
             if (cancelled.get()) {
                 ViewerLoadMetrics.workCleared(token, "cancelled")
                 return
             }
             if (bitmap == null) throw IOException("Use standard JPEG decoder")
+            ViewerLoadMetrics.event("NATIVE_FIT_DECODE_DONE",
+                "durationNs=${android.os.SystemClock.elapsedRealtimeNanos() - decodeStarted} " +
+                    "cpuNs=${android.os.Debug.threadCpuTimeNanos() - decodeCpuStarted} bitmap=${bitmap.width}x${bitmap.height}",
+                imageKey = model.uri.toString())
             val timings = DcJpegPreview.lastFitTimings()
+            val rotationStarted = android.os.SystemClock.elapsedRealtimeNanos()
             val oriented = TransformationUtils.rotateImageExif(Glide.get(context).bitmapPool, bitmap, orientation)
+            ViewerLoadMetrics.event("NATIVE_FIT_ROTATE_DONE",
+                "durationNs=${android.os.SystemClock.elapsedRealtimeNanos() - rotationStarted} copied=${oriented !== bitmap}",
+                imageKey = model.uri.toString())
             if (oriented !== bitmap) { owned = oriented; bitmap.recycle() }
             if (cancelled.get()) {
                 ViewerLoadMetrics.workCleared(token, "cancelled")

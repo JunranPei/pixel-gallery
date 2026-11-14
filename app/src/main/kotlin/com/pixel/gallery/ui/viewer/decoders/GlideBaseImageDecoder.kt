@@ -28,7 +28,7 @@ class GlideBaseImageDecoder(private val dateModifiedMillis: Long) : ImageDecoder
         val options = RequestOptions()
             .withViewerTaskCompression()
             .format(DecodeFormat.PREFER_ARGB_8888)
-            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+            .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
             .fitCenter()
             .let { opts ->
                 if (dateModifiedMillis > 0L) opts.signature(ObjectKey(dateModifiedMillis)) else opts

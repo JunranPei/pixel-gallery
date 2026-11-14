@@ -60,7 +60,7 @@ class ThumbnailFetcher internal constructor(
         var exception: Exception? = null
 
         try {
-            if (!customFetch && (width == defaultSize || height == defaultSize) && !isFlipped) {
+            if (!com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE && !customFetch && (width == defaultSize || height == defaultSize) && !isFlipped) {
                 // Fetch low quality thumbnails when size is not specified.
                 // As of Android 11, the Media Store content resolver may return a thumbnail
                 // that is automatically rotated according to EXIF orientation, but not flipped,
@@ -155,7 +155,7 @@ class ThumbnailFetcher internal constructor(
             .signature(ObjectKey("$dateModifiedMillis-$rotationDegrees-$isFlipped-$width-$pageId"))
             .override(width, height)
         if (isVideo(mimeType)) {
-            options = options.diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+            options = options.diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
         }
 
         val target = Glide.with(context)

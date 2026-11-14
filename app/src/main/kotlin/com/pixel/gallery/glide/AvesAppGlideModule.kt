@@ -65,6 +65,15 @@ class AvesAppGlideModule : AppGlideModule() {
         val diskCacheSize = cacheSizeMb * 1024 * 1024
         val internalCacheDiskCacheFactory = InternalCacheDiskCacheFactory(context, DiskCache.Factory.DEFAULT_DISK_CACHE_DIR, diskCacheSize.toLong())
         builder.setDiskCache(internalCacheDiskCacheFactory)
+        if (DiagnosticCachePolicy.disabled) {
+            builder.setMemoryCache(LruResourceCache(0))
+            builder.setBitmapPool(BitmapPoolAdapter())
+            builder.setArrayPool(LruArrayPool(0))
+            builder.setDiskCache { com.bumptech.glide.load.engine.cache.DiskCacheAdapter() }
+            builder.setDefaultRequestOptions(RequestOptions()
+                .diskCacheStrategy(DiskCacheStrategy.NONE).skipMemoryCache(true))
+            builder.addGlobalRequestListener(DiagnosticImageRequestListener())
+        }
 
         val (sourceExec, diskExec) = com.pixel.gallery.ui.viewer.ViewerGlideTaskCompression
             .executors(sourceThreadCount)
@@ -103,13 +112,13 @@ class AvesAppGlideModule : AppGlideModule() {
         /*
         val uncachedFullImageOptions = RequestOptions()
             .format(DecodeFormat.PREFER_ARGB_8888)
-            .diskCacheStrategy(DiskCacheStrategy.NONE)
+            .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.NONE))
             .skipMemoryCache(true)
         */
         val uncachedFullImageOptions = RequestOptions()
             .format(DecodeFormat.PREFER_ARGB_8888)
-            .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-            .skipMemoryCache(false)
+            .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
+            .skipMemoryCache(DiagnosticCachePolicy.disabled)
 
         fun getModel(
             context: Context,

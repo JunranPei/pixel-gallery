@@ -29,7 +29,9 @@ internal object RawEmbeddedPreviewStore {
     private var cachedBytes = 0
 
     fun load(context: Context, source: Uri, key: String): RawEmbeddedPreview? {
-        synchronized(cache) { cache[key]?.let { return it } }
+        if (!com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) {
+            synchronized(cache) { cache[key]?.let { return it } }
+        }
         val extracted = openRawDescriptor(context, source)?.use { descriptor ->
             val exif = ExifInterface(descriptor.fileDescriptor)
             val candidates = buildList {
@@ -42,6 +44,8 @@ internal object RawEmbeddedPreviewStore {
                 .mapNotNull(::inspectJpeg)
                 .maxByOrNull { it.width.toLong() * it.height.toLong() }
         } ?: return null
+
+        if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) return extracted
 
         synchronized(cache) {
             cache[key]?.let { return it }
@@ -80,11 +84,13 @@ internal class RawEmbeddedPreviewRegionDecoder(
     private val lock = Any()
 
     override fun init(context: Context, uri: Uri): Point = synchronized(lock) {
-        rawStore = IndexedRawStore(context.applicationContext)
+        rawStore = if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) null else IndexedRawStore(context.applicationContext)
         refreshIndexedDecoder()?.let { indexed ->
             return Point(indexed.sourceWidth, indexed.sourceHeight)
         }
-        val preview = RawEmbeddedPreviewStore.peek(sourceKey)
+        val preview = (if (com.pixel.gallery.BuildConfig.IMAGE_LOAD_NO_CACHE) {
+            RawEmbeddedPreviewStore.load(context, uri, sourceKey)
+        } else RawEmbeddedPreviewStore.peek(sourceKey))
             ?: throw IllegalStateException("RAW embedded preview was evicted before decoder init")
         @Suppress("DEPRECATION")
         val regionDecoder = BitmapRegionDecoder.newInstance(preview.bytes, 0, preview.bytes.size, false)

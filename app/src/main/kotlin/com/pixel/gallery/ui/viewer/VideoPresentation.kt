@@ -71,7 +71,7 @@ internal fun VideoPresentation(
     if (cover == null && firstFrameModel != null && !showSurface) {
         GlideImage(firstFrameModel, contentDescription = null, contentScale = ContentScale.Fit,
             requestBuilderTransform = { it.dontTransform().format(DecodeFormat.PREFER_RGB_565)
-                .diskCacheStrategy(DiskCacheStrategy.RESOURCE).override(720)
+                .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE)).override(720)
                 .addListener(readyListener) },
             modifier = Modifier.fillMaxSize())
     }

@@ -65,7 +65,7 @@ internal fun GlideViewerFallback(
                 val request = Glide.with(view)
                     .load(imagePath)
                     .withViewerTaskCompression()
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
                     .fitCenter()
                     .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
                         override fun onLoadFailed(

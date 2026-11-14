@@ -184,7 +184,7 @@ internal class MediaStoreThumbnailFetcher(
             val isGridView = width < 300 && height < 300
             val isHighResRequest = width >= 200 || height >= 200
             val usePersistentCache =
-                model.allowPersistentCache && isLargeFile && isHighResRequest
+                !DiagnosticCachePolicy.disabled && model.allowPersistentCache && isLargeFile && isHighResRequest
             if (model.traceViewerLoad) {
                 ViewerLoadMetrics.event(
                     "MEDIASTORE_THUMB_POLICY",
@@ -290,7 +290,9 @@ internal class MediaStoreThumbnailFetcher(
                 }
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (DiagnosticCachePolicy.disabled) {
+                ViewerLoadMetrics.event("SYSTEM_THUMBNAIL_BYPASS", "original-source-only", imageKey = metricsKey)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Limit targetSize to a max of 512x512 to hit system pre-generated MINI_KIND/MICRO_KIND caches directly
                 val targetSize = Size(
                     if (width > 0) minOf(width, 512) else 512,
@@ -459,7 +461,9 @@ internal class MediaStoreThumbnailFetcher(
                     }
                 }
                 metricsReady(
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    if (DiagnosticCachePolicy.disabled) {
+                        "ORIGINAL_NO_CACHE"
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         "MEDIASTORE_OR_FALLBACK"
                     } else {
                         "LEGACY_MEDIASTORE_OR_FALLBACK"
@@ -656,7 +660,7 @@ internal class MediaStoreThumbnailFetcher(
                 } finally {
                     if (model.traceViewerLoad) ViewerLoadMetrics.event(
                         "THUMB_SOURCE_IO",
-                        "bytes=${stream.sourceBytesRead} reads=${stream.sourceReadCalls} " +
+                        "bytes=${stream.sourceBytesRead} reads=${stream.sourceReadCalls} ioNs=${stream.sourceReadNanos} " +
                             "buffer=65536 cancelled=${cancelled.get()} retry=$retried",
                         imageKey = metricsKey,
                     )

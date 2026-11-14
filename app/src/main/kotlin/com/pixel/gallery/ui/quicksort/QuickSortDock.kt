@@ -330,7 +330,7 @@ private fun QuickSortAlbumCover(target: TransferDestination) {
             ) { request ->
                 request.override(96, 96)
                     .format(DecodeFormat.PREFER_RGB_565)
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                    .diskCacheStrategy(com.pixel.gallery.glide.DiagnosticCachePolicy.disk(DiskCacheStrategy.RESOURCE))
                     .priority(Priority.LOW)
                     .centerCrop()
                     .dontAnimate()
