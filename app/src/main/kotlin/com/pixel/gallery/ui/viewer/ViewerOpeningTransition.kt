@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.nativeCanvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -63,9 +64,14 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
         private set
     var contentReady by mutableStateOf(false)
         private set
+    private var contentDrawn by mutableStateOf(false)
+    val shouldDrawPreview: Boolean get() = isRunning && !contentDrawn
     private var job: Job? = null
 
     fun ready(mediaKey: ViewerTransitionKey?) { if (mediaKey == key) contentReady = true }
+    fun drawn(mediaKey: ViewerTransitionKey?) {
+        if (mediaKey == key && isRunning) contentDrawn = true
+    }
     fun resize(size: IntSize) {
         if (viewport != IntSize.Zero && viewport != size) cancel()
         viewport = size
@@ -117,13 +123,22 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
     }
 }
 
+/** The detail layer draws before its cover. Hand off only after drawing ready content. */
+internal fun Modifier.viewerOpeningContent(opening: ViewerOpeningTransition,
+    key: ViewerTransitionKey?, ready: Boolean): Modifier = drawWithContent {
+    drawContent()
+    if (ready) opening.drawn(key)
+}
+
 @Composable
 internal fun ViewerOpeningPreview(opening: ViewerOpeningTransition) {
     val bitmap = opening.preview ?: return
     if (!opening.isRunning) return
     val paint = remember { Paint(Paint.FILTER_BITMAP_FLAG) }
     Canvas(Modifier.fillMaxSize().viewerVisualMotion { opening.visual }) {
-        if (!bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0) {
+        // Read at draw time so the detail layer can hand off in this same frame.
+        // A decoded thumbnail/resource callback alone cannot remove this cover.
+        if (opening.shouldDrawPreview && !bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0) {
             val fit = openingFitBounds(size.width, size.height, bitmap.width.toFloat() / bitmap.height)
             if (fit != null) drawContext.canvas.nativeCanvas.drawBitmap(bitmap, null,
                 RectF(fit.left, fit.top, fit.right, fit.bottom), paint)

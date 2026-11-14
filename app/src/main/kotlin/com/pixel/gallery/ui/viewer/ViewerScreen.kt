@@ -1291,7 +1291,8 @@ internal fun ViewerScreen(
                     // The store remains the same for this viewer. The setting only
                     // controls whether its callbacks read/write persistent memory.
                     val pageImageTransforms = imageTransforms
-                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()
+                        .viewerOpeningContent(opening, media.viewerTransitionKey(), fullPreviewReady)) {
                         val isActivePage = pagerState.settledPage == page
                         val isPagerIdle = !pagerState.isScrollInProgress
                         val isPreviewVisible by remember(pagerState, page) {

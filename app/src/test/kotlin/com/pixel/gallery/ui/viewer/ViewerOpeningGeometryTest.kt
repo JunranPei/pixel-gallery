@@ -216,4 +216,48 @@ class ViewerOpeningGeometryTest {
             })
         }
     }
+
+    @Test fun resourceReadinessAloneKeepsTheOpeningCoverUntilDetailDraws() {
+        val key = ViewerTransitionKey("detail", 1)
+        val opening = ViewerOpeningTransition(key, true)
+        assertTrue(opening.shouldDrawPreview)
+        // The 200 px bridge and Glide callbacks can fire before detail pixels draw.
+        opening.ready(key)
+        assertTrue(opening.shouldDrawPreview)
+        opening.drawn(ViewerTransitionKey("neighbor", 1))
+        assertTrue(opening.shouldDrawPreview)
+        opening.drawn(ViewerTransitionKey("detail", 2))
+        assertTrue(opening.shouldDrawPreview)
+        opening.drawn(key)
+        assertFalse(opening.shouldDrawPreview)
+        assertTrue(opening.isRunning)
+    }
+
+    @Test fun detailDrawHandsOffDuringAnimationWithoutChangingItsProgress() = runBlocking {
+        val key = ViewerTransitionKey("detail", 1)
+        val opening = ViewerOpeningTransition(key, true)
+        opening.resize(IntSize(1080, 1920))
+        val clock = FrameClock()
+        val animation = launch(clock, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            opening.play(ViewerOpeningEffect.SCALE_FADE, null, 1f, false)
+        }
+        try {
+            repeat(3) { yield() }
+            val beforeHandoff = opening.visual
+            val framesAtHandoff = clock.frames
+            assertTrue(opening.isRunning)
+            assertTrue(opening.shouldDrawPreview)
+            opening.drawn(key)
+            assertFalse(opening.shouldDrawPreview)
+            assertTrue(opening.isRunning)
+            assertEquals(beforeHandoff, opening.visual)
+            animation.join()
+            assertTrue(clock.frames > framesAtHandoff)
+            assertFalse(opening.isRunning)
+            assertEquals(ViewerDismissVisual(), opening.visual)
+        } finally {
+            opening.cancel()
+            animation.join()
+        }
+    }
 }
