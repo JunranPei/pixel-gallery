@@ -2242,7 +2242,9 @@ private fun MainScaffoldContent(
             } == true
         }
     }
-    val detailToolbarLocked = gridAtTop || coverTarget != null || (visibleViewer != null && reviewPage == null)
+    // Keep the covered grid's header offset unchanged. The viewer locks its own
+    // toolbar separately, without expanding the grid's header before the transition.
+    val detailToolbarLocked = gridAtTop || coverTarget != null
     LaunchedEffect(detailToolbarLocked) {
         if (detailToolbarLocked) {
             // Viewer controls must remain reachable while the media surface
@@ -2275,7 +2277,9 @@ private fun MainScaffoldContent(
             containerColor = appShellColor,
             modifier = Modifier,
             // Every route drives this one mounted toolbar through the same scroll state.
-            scrollBehavior = routeHeaderScrollBehavior.takeUnless { detailToolbarLocked },
+            scrollBehavior = routeHeaderScrollBehavior.takeUnless {
+                detailToolbarLocked || (visibleViewer != null && reviewPage == null)
+            },
         snackbarHost = {
             GalleryMessageHost()
         },

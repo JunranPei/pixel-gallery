@@ -27,7 +27,8 @@ fun LibrarySettingsScreen(onBack: () -> Unit, onNavigateToExcludedFolders: () ->
             contentPadding = SettingsLayout.ContentPadding,
             verticalArrangement = Arrangement.spacedBy(SettingsLayout.GroupSpacing)) {
             item {
-                SettingsGroup(itemCount = 1) {
+                SettingsGroup(itemCount = 1,
+                    title = stringResource(R.string.settings_section_album_organization)) {
                     SettingsToggleItem(title = stringResource(R.string.album_grouping_enabled),
                         description = stringResource(R.string.album_grouping_enabled_description),
                         icon = Icons.Outlined.FolderCopy, checked = groupingEnabled, onCheckedChange = onGroupingEnabledChange)

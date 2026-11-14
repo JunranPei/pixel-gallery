@@ -1,4 +1,8 @@
 <resources>
+    <string name="settings_section_diagnostics">Diagnostics</string>
+    <string name="diagnostics_monitoring_title">Allow external monitoring</string>
+    <string name="diagnostics_monitoring_description">Connect a troubleshooting tool when needed.</string>
+    <string name="settings_section_album_organization">Album organization</string>
     <string name="diagnostics_export">Export diagnostics</string>
     <string name="diagnostics_saved">Diagnostics saved</string>
     <string name="diagnostics_failed">Could not save diagnostics</string>

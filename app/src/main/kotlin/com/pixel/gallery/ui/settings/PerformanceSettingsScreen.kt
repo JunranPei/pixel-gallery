@@ -11,6 +11,8 @@ import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.BugReport
+import com.pixel.gallery.ui.viewer.ViewerDiagnosticsInterface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
@@ -38,6 +40,7 @@ fun PerformanceSettingsScreen(
     viewModel: PhotosViewModel = hiltViewModel(),
 ): GalleryPageContent {
     val context = LocalContext.current
+    var diagnosticsInterfaceOpen by remember { mutableStateOf(ViewerDiagnosticsInterface.isOpen) }
     val messages = LocalGalleryMessages.current
     val glideThreadCount by viewModel.glideThreadCount.collectAsState()
     val glideCacheSize by viewModel.glideCacheSize.collectAsState()
@@ -146,10 +149,23 @@ fun PerformanceSettingsScreen(
                 }
             }
             item {
-                SettingsGroup(itemCount = 1) {
-                    SettingsClickItem(title = stringResource(R.string.diagnostics_export),
-                        icon = Icons.Outlined.FileDownload,
-                        onClick = { exportDiagnostics.launch("gallery-diagnostics.zip") })
+                SettingsGroup(itemCount = 2,
+                    title = stringResource(R.string.settings_section_diagnostics)) { index ->
+                    when (index) {
+                        0 -> SettingsToggleItem(
+                            title = stringResource(R.string.diagnostics_monitoring_title),
+                            description = stringResource(R.string.diagnostics_monitoring_description),
+                            icon = Icons.Outlined.BugReport,
+                            checked = diagnosticsInterfaceOpen,
+                            onCheckedChange = { enabled ->
+                                ViewerDiagnosticsInterface.setOpen(context, enabled)
+                                diagnosticsInterfaceOpen = ViewerDiagnosticsInterface.isOpen
+                            },
+                        )
+                        1 -> SettingsClickItem(title = stringResource(R.string.diagnostics_export),
+                            icon = Icons.Outlined.FileDownload,
+                            onClick = { exportDiagnostics.launch("gallery-diagnostics.zip") })
+                    }
                 }
             }
         }

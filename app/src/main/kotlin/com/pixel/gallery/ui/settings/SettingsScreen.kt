@@ -10,9 +10,6 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Tab
 import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.ui.platform.LocalContext
-import com.pixel.gallery.ui.viewer.ViewerDiagnosticsInterface
 import androidx.compose.ui.res.stringResource
 import com.pixel.gallery.R
 import androidx.compose.material3.*
@@ -38,8 +35,6 @@ fun SettingsScreen(
     onNavigateToPerformanceSettings: () -> Unit,
     onNavigateToLibrarySettings: () -> Unit,
 ): GalleryPageContent {
-    val context = LocalContext.current
-    var diagnosticsInterfaceOpen by remember { mutableStateOf(ViewerDiagnosticsInterface.isOpen) }
     return GalleryPage(
         modifier = Modifier.navigationBarsPadding(),
         topBar = {
@@ -90,20 +85,6 @@ fun SettingsScreen(
                             )
                         }
                     }
-                }
-            }
-            item {
-                SettingsGroup(itemCount = 1, tone = SettingsBlockTone.Emphasized) {
-                    SettingsToggleItem(
-                        title = "允许外部监听",
-                        description = "连接现有窗口，按需记录问题",
-                        icon = Icons.Outlined.BugReport,
-                        checked = diagnosticsInterfaceOpen,
-                        onCheckedChange = { enabled ->
-                            ViewerDiagnosticsInterface.setOpen(context, enabled)
-                            diagnosticsInterfaceOpen = ViewerDiagnosticsInterface.isOpen
-                        },
-                    )
                 }
             }
             item {

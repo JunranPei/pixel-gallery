@@ -160,4 +160,44 @@ class ViewerOpeningGeometryTest {
         assertEquals(ViewerDismissVisual(), opening.visual)
         assertTrue(clock.frames in 14..18)
     }
+
+    @Test fun animationStartsWithoutWaitingForTheViewerPreview() = runBlocking {
+        val opening = ViewerOpeningTransition(ViewerTransitionKey("loading", 1), true)
+        opening.resize(IntSize(1080, 1920))
+        val clock = FrameClock()
+        val animation = launch(clock, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            opening.play(ViewerOpeningEffect.SCALE_FADE, null, 1f, false)
+        }
+        try {
+            repeat(2) { yield() }
+            assertFalse(opening.contentReady)
+            assertTrue("Opening must request frames before the viewer preview is ready", clock.frames > 0)
+        } finally {
+            opening.cancel()
+            animation.join()
+        }
+    }
+
+    @Test fun firstPlacedFrameUsesTheCapturedCellInWindowCoordinates() {
+        val key = ViewerTransitionKey("captured", 1)
+        val seed = ViewerOpeningSeed(key, thumbnail)
+        val opening = ViewerOpeningTransition(key, true, seed, ViewerOpeningEffect.THUMBNAIL, .5f)
+        opening.resize(IntSize(1080, 1920))
+        opening.windowOrigin = Offset(12f, 28f)
+        val first = opening.visual
+        val crop = first.clip!!.scaledAndTranslated(first.scale, first.translation)
+        val target = thumbnail.bounds.translate(-opening.windowOrigin)
+        assertEquals(target.left, crop.left, .001f)
+        assertEquals(target.top, crop.top, .001f)
+        assertEquals(target.right, crop.right, .001f)
+        assertEquals(target.bottom, crop.bottom, .001f)
+    }
+
+    @Test fun noneAlsoReleasesAnAlreadyPendingEntryWithoutFrames() = runBlocking {
+        val opening = ViewerOpeningTransition(null, true)
+        val clock = FrameClock()
+        withContext(clock) { opening.play(ViewerOpeningEffect.NONE, null, 1f, false) }
+        assertFalse(opening.isRunning)
+        assertEquals(0, clock.frames)
+    }
 }

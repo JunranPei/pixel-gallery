@@ -436,6 +436,12 @@ fun PhotoTile(
     onLongClick: (() -> Unit)? = null
 ) {
     val thumbnailAnchor = Modifier.viewerThumbnailAnchor(media.viewerTransitionKey(), ExpressiveShapes.GridCornerRadius)
+    val thumbnailListener = com.pixel.gallery.ui.viewer.rememberViewerThumbnailListener(media.viewerTransitionKey())
+    val transitionRegistry = com.pixel.gallery.ui.viewer.LocalViewerTransitions.current
+    val open = {
+        if (!isSelectionMode) transitionRegistry?.captureOpening(media.viewerTransitionKey())
+        onClick()
+    }
     val isVideo = remember(media.sourceMimeType) { media.sourceMimeType.startsWith("video/") }
     val context = LocalContext.current
     val model = remember(media.uri, media.sourceMimeType, media.sizeBytes,
@@ -455,7 +461,7 @@ fun PhotoTile(
     val signatureKey = remember(media.dateModifiedMillis) {
         ObjectKey(media.dateModifiedMillis)
     }
-    val transform = remember(signatureKey) {
+    val transform = remember(signatureKey, thumbnailListener) {
         { requestBuilder: com.bumptech.glide.RequestBuilder<android.graphics.drawable.Drawable> ->
             requestBuilder
                 // Keep the cached 200 px resource untransformed. Compose still
@@ -466,6 +472,7 @@ fun PhotoTile(
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(signatureKey)
                 .override(200)
+                .addListener(thumbnailListener)
         }
     }
     val formattedDuration = remember(media.durationMillis) {
@@ -523,7 +530,7 @@ fun PhotoTile(
             isSelected = isSelected,
             isSelectionMode = isSelectionMode,
             transform = transform,
-            onClick = onClick,
+            onClick = open,
             onLongClick = onLongClick
         )
     } else {
@@ -538,7 +545,7 @@ fun PhotoTile(
             isSelected = false,
             isSelectionMode = false,
             transform = transform,
-            onClick = onClick,
+            onClick = open,
             onLongClick = onLongClick
         )
     }

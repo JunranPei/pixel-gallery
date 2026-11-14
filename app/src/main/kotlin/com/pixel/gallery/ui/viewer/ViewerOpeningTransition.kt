@@ -10,6 +10,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.nativeCanvas
+import android.graphics.Paint
+import android.graphics.RectF
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -18,7 +24,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
-import kotlinx.coroutines.withTimeoutOrNull
 import android.graphics.drawable.Drawable
 import com.bumptech.glide.load.DataSource
 import com.bumptech.glide.load.engine.GlideException
@@ -39,7 +44,10 @@ internal fun openingReadyListener(opening: ViewerOpeningTransition?, key: Viewer
     }
 
 /** One finite animation per navigation entry. Only draw/layer lambdas observe the frame state. */
-internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: Boolean) {
+internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: Boolean,
+    private val seed: ViewerOpeningSeed? = null,
+    private val initialEffect: ViewerOpeningEffect = ViewerOpeningEffect.SCALE_FADE,
+    private val ratio: Float = 1f) {
     var isRunning by mutableStateOf(pending)
         private set
     var visual by mutableStateOf(if (pending) ViewerDismissVisual(imageAlpha = 0f,
@@ -47,7 +55,11 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
         private set
     var viewport by mutableStateOf(IntSize.Zero)
         private set
+    private var started = false
     var windowOrigin = Offset.Zero
+        set(value) { field = value; prepareFirstVisual() }
+    var preview by mutableStateOf(seed?.bitmap.takeIf { pending })
+        private set
     var contentReady by mutableStateOf(false)
         private set
     private var job: Job? = null
@@ -56,6 +68,7 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
     fun resize(size: IntSize) {
         if (viewport != IntSize.Zero && viewport != size) cancel()
         viewport = size
+        prepareFirstVisual()
     }
     fun cancel() {
         job?.cancel()
@@ -64,31 +77,54 @@ internal class ViewerOpeningTransition(val key: ViewerTransitionKey?, pending: B
     private fun finish() {
         isRunning = false
         visual = ViewerDismissVisual()
+        preview = null
         job = null
+    }
+
+    private fun prepareFirstVisual() {
+        if (!isRunning || started) return
+        val source = openingFitBounds(viewport.width.toFloat(), viewport.height.toFloat(), ratio) ?: return
+        visual = openingVisual(initialEffect, source,
+            seed?.target?.let { it.copy(bounds = it.bounds.translate(-windowOrigin)) }, 0f)
     }
 
     suspend fun play(effect: ViewerOpeningEffect, registry: ViewerTransitionRegistry?,
         ratio: Float, allowThumbnail: Boolean) {
         if (!isRunning) return
+        if (effect == ViewerOpeningEffect.NONE) { finish(); return }
         job = currentCoroutineContext().job
         try {
             snapshotFlow { viewport }.first { it.width > 0 && it.height > 0 }
-            // Reuse the viewer's existing cached thumbnail/full preview. No new image request.
-            // Bound the wait so missing/slow/failed media can still expose its normal viewer UI.
-            val ready = withTimeoutOrNull(180) { snapshotFlow { contentReady }.first { it } } == true
+            // Start immediately with the pixels already displayed in the grid.
+            // Viewer preview decoding must not hold up the opening transition.
+            started = true
             val source = openingFitBounds(viewport.width.toFloat(), viewport.height.toFloat(), ratio)
                 ?: Rect(0f, 0f, viewport.width.toFloat(), viewport.height.toFloat())
-            val target = if (allowThumbnail && ready) registry?.target(key, windowOrigin,
-                viewport.width, viewport.height.toFloat()) else null
+            val target = if (allowThumbnail) seed?.target?.let {
+                it.copy(bounds = it.bounds.translate(-windowOrigin))
+            } ?: registry?.target(key, windowOrigin, viewport.width, viewport.height.toFloat()) else null
             val resolved = if (effect == ViewerOpeningEffect.THUMBNAIL && target == null)
                 ViewerOpeningEffect.SCALE_FADE else effect
             visual = openingVisual(resolved, source, target, 0f)
-            withFrameNanos { }
             animate(0f, 1f, animationSpec = tween(if (resolved == ViewerOpeningEffect.THUMBNAIL) 280 else 220)) { p, _ ->
                 visual = openingVisual(resolved, source, target, p)
             }
         } finally {
             finish()
+        }
+    }
+}
+
+@Composable
+internal fun ViewerOpeningPreview(opening: ViewerOpeningTransition) {
+    val bitmap = opening.preview ?: return
+    if (!opening.isRunning) return
+    val paint = remember { Paint(Paint.FILTER_BITMAP_FLAG) }
+    Canvas(Modifier.fillMaxSize().viewerVisualMotion { opening.visual }) {
+        if (!bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0) {
+            val fit = openingFitBounds(size.width, size.height, bitmap.width.toFloat() / bitmap.height)
+            if (fit != null) drawContext.canvas.nativeCanvas.drawBitmap(bitmap, null,
+                RectF(fit.left, fit.top, fit.right, fit.bottom), paint)
         }
     }
 }
@@ -106,7 +142,9 @@ internal fun rememberViewerOpeningTransition(entryId: Long, key: ViewerTransitio
             context.getSystemService(PowerManager::class.java)?.isPowerSaveMode != true
     }
     val opening = remember(entryId) {
-        ViewerOpeningTransition(key, !consumed && allowed && effect != ViewerOpeningEffect.NONE)
+        val seed = registry?.consumeOpening(key)?.takeIf { allowThumbnail }
+        ViewerOpeningTransition(key, !consumed && allowed && effect != null && effect != ViewerOpeningEffect.NONE,
+            seed, effect ?: ViewerOpeningEffect.NONE, ratio)
     }
     DisposableEffect(opening, registry, lifecycle) {
         registry?.opening = opening

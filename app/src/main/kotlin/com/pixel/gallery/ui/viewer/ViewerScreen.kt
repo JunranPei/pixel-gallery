@@ -948,8 +948,13 @@ internal fun ViewerScreen(
         if (it.sourceRotationDegrees % 180 != 0) 1f / ratio else ratio
     } ?: 1f
     val hasSavedOpeningTransform = remember(initialId, openingEffect) {
-        openingEffect == com.pixel.gallery.model.ViewerOpeningEffect.THUMBNAIL &&
-            openingMedia?.let { imageTransforms.get(it.viewerCacheKey()) != null } == true
+        openingMedia?.let {
+            // The native image renderer stores its transform under the media:
+            // key; viewerCacheKey is used by the Glide fallback renderer.
+            val saved = imageTransforms.get("media:${it.contentId}:${it.dateModifiedMillis}")
+                ?: imageTransforms.get(it.viewerCacheKey())
+            hasMeaningfulViewerTransform(saved)
+        } == true
     }
     val opening = rememberViewerOpeningTransition(initialId, openingMedia?.viewerTransitionKey(),
         openingEffect, isForeground && !inVideoPip, openingRatio,
@@ -1736,6 +1741,8 @@ internal fun ViewerScreen(
             }
             }
         }
+
+        ViewerOpeningPreview(opening)
 
         // Bottom Overlay
         AnimatedVisibility(

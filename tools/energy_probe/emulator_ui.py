@@ -95,7 +95,10 @@ def home():
             shell('am start -n ' + PKG + '/com.pixel.gallery.MainActivity')
             time.sleep(5)
             continue
-        if any(t == 'Pixel Gallery' for t, _, _ in current):
+        if any(t == 'Pixel Gallery' for t, _, _ in current) or (
+            any(d == 'Photos' for _, d, _ in current) and
+            any(d == 'Albums' for _, d, _ in current)
+        ):
             return
         if any(t == 'Cancel' for t, _, _ in current):
             click('Cancel')

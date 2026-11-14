@@ -1,4 +1,8 @@
 <resources>
+    <string name="settings_section_diagnostics">问题诊断</string>
+    <string name="diagnostics_monitoring_title">允许外部监听</string>
+    <string name="diagnostics_monitoring_description">按需连接排查工具，记录当前窗口的问题。</string>
+    <string name="settings_section_album_organization">相册管理</string>
     <string name="diagnostics_export">导出诊断记录</string>
     <string name="diagnostics_saved">诊断记录已保存</string>
     <string name="diagnostics_failed">无法保存诊断记录</string>
