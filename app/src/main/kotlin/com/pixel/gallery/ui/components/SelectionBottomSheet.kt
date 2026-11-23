@@ -95,9 +95,15 @@ fun SelectionBottomSheet(
                                 animate(pullOffset, target,
                                     initialVelocity = velocity, animationSpec = GalleryMotion.layout(),
                                 ) { value, _ -> pullOffset = value.coerceAtLeast(0f) }
-                                if (accepted) onDismiss()
-                                // An asynchronous save may retain the sheet, including on failure.
-                                pullOffset = 0f
+                                if (accepted) {
+                                    // Keep the sheet off-screen while PopupPresence runs its
+                                    // exit animation. Resetting here briefly places the retained
+                                    // sheet back at the compact anchor and produces a flash.
+                                    onDismiss()
+                                } else {
+                                    // An asynchronous save may retain the sheet, including on failure.
+                                    pullOffset = 0f
+                                }
                                 closing = false
                             }
                         }
