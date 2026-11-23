@@ -1,5 +1,6 @@
 package com.pixel.gallery.ui.transfer
 
+import com.pixel.gallery.ui.components.CreateAlbumFromQuery
 import com.pixel.gallery.model.canCreateAlbumFromQuery
 import com.pixel.gallery.ui.components.GalleryDialog
 import com.pixel.gallery.ui.components.ConfirmationReminder
@@ -555,13 +556,6 @@ fun TransferDestinationContent(
             onQueryChange = onQueryChange,
             placeholder = stringResource(R.string.transfer_search),
             enabled = !isRunning && !isCreating,
-            actions = {
-                if (canCreate) com.pixel.gallery.ui.components.CreateQueryAction(
-                    label = stringResource(R.string.transfer_new_album),
-                    enabled = !isRunning && !isCreating,
-                    onCreate = onNewAlbum,
-                )
-            },
         )
         Box(Modifier.weight(1f).fillMaxWidth()) {
             SelectionGrid(
@@ -571,6 +565,9 @@ fun TransferDestinationContent(
                 bottomPadding = 180.dp,
                 modifier = Modifier.fillMaxSize(),
             ) {
+                if (canCreate) item(key = "create-album", span = { GridItemSpan(maxLineSpan) }) {
+                    CreateAlbumFromQuery(query, !isRunning && !isCreating, onNewAlbum)
+                }
                 createError?.let { error ->
                     item(key = "create-error", span = { GridItemSpan(maxLineSpan) }) {
                         Text(error, color = MaterialTheme.colorScheme.error)

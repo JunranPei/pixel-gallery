@@ -39,7 +39,6 @@ import com.pixel.gallery.ui.components.GalleryScrollbar
 import com.pixel.gallery.ui.components.SelectionGrid
 import com.pixel.gallery.ui.components.SelectionSearchField
 import com.pixel.gallery.ui.components.SelectionBottomSheet
-import com.pixel.gallery.ui.components.CreateQueryAction
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
 
@@ -88,12 +87,6 @@ fun LabelEditorSheet(
             onApply(LabelEditRequest(changes = mapOf(labelId to add))) {}
         }
     }
-    fun createLabelFromQuery() {
-        val submittedQuery = query
-        onApply(LabelEditRequest(newLabelNames = listOf(submittedQuery.trim()))) {
-            if (query == submittedQuery) query = ""
-        }
-    }
     val gridState = rememberLazyGridState()
 
     fun moveSelected(id: Long, delta: Int) {
@@ -127,13 +120,6 @@ fun LabelEditorSheet(
                 onQueryChange = { query = it },
                 placeholder = stringResource(R.string.labels_search),
                 enabled = !isSaving && selectedIds.isNotEmpty(),
-                actions = {
-                    if (canCreate) CreateQueryAction(
-                        label = stringResource(R.string.labels_new),
-                        enabled = !isSaving && selectedIds.isNotEmpty(),
-                        onCreate = ::createLabelFromQuery,
-                    )
-                },
             )
             if (orderedSelectedLabels.isNotEmpty()) {
                 Text(stringResource(R.string.labels_selected), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
@@ -197,6 +183,20 @@ fun LabelEditorSheet(
                         onClick = onToggle,
                         emptyIcon = if (label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
                     )
+                }
+                if (canCreate) {
+                    item(key = "create", span = { GridItemSpan(maxLineSpan) }) {
+                        TextButton(onClick = {
+                            val submittedQuery = query
+                            onApply(LabelEditRequest(newLabelNames = listOf(submittedQuery.trim()))) {
+                                if (query == submittedQuery) query = ""
+                            }
+                        }, enabled = !isSaving && selectedIds.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Add, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.labels_new_from_query, query.trim()), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
                 errorMessage?.let {
                     item(key = "error", span = { GridItemSpan(maxLineSpan) }) {

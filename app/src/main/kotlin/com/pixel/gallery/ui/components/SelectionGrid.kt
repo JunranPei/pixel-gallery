@@ -56,17 +56,6 @@ fun CreateAlbumFromQuery(query: String, enabled: Boolean, onCreate: () -> Unit) 
 }
 
 @Composable
-fun CreateQueryAction(label: String, enabled: Boolean, onCreate: () -> Unit) {
-    AssistChip(
-        onClick = onCreate,
-        enabled = enabled,
-        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(Icons.Default.Add, null) },
-        modifier = Modifier.padding(end = 4.dp),
-    )
-}
-
-@Composable
 fun SelectionGrid(
     columns: Int,
     onColumnsChange: (Int) -> Unit,
