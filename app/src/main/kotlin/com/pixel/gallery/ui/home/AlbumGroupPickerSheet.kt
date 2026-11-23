@@ -25,6 +25,7 @@ import com.pixel.gallery.model.normalizeLabelName
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import com.pixel.gallery.ui.components.SelectionGrid
 import com.pixel.gallery.ui.components.SelectionSearchField
+import com.pixel.gallery.ui.components.CreateQueryAction
 
 /** The same bounded, searchable grid used by label selection. One target per album. */
 @Composable
@@ -65,6 +66,13 @@ fun AlbumGroupPickerSheet(
         SelectionSearchField(
             query = query, onQueryChange = { query = it }, placeholder = stringResource(R.string.album_group_search),
             enabled = !isSaving,
+            actions = {
+                if (canCreate) CreateQueryAction(
+                    label = stringResource(R.string.album_group_new),
+                    enabled = !isSaving,
+                    onCreate = { creating = true },
+                )
+            },
         )
         Spacer(Modifier.height(8.dp))
         SelectionGrid(columns = columns, onColumnsChange = onColumnsChange, state = gridState,
@@ -115,15 +123,6 @@ fun AlbumGroupPickerSheet(
             if (matching.isEmpty() && normalized.isNotEmpty() && !canCreate) item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
                 Text(stringResource(R.string.album_group_no_results), style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-            }
-            if (canCreate) item(key = "create", span = { GridItemSpan(maxLineSpan) }) {
-                TextButton(onClick = {
-                    creating = true
-                }, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.album_group_new_from_query, query.trim()), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
             }
             errorMessage?.let { message ->
                 item(key = "error", span = { GridItemSpan(maxLineSpan) }) {

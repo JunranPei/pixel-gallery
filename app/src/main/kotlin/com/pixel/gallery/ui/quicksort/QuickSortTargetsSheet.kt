@@ -1,6 +1,6 @@
 package com.pixel.gallery.ui.quicksort
 
-import com.pixel.gallery.ui.components.CreateAlbumFromQuery
+import com.pixel.gallery.ui.components.CreateQueryAction
 import com.pixel.gallery.model.canCreateAlbumFromQuery
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import com.pixel.gallery.ui.components.ConfirmationReminder
@@ -174,6 +174,13 @@ fun QuickSortTargetsSheet(
             onQueryChange = { query = it; albumNameError = null },
             placeholder = stringResource(R.string.qs_search_albums),
             enabled = !isCreating,
+            actions = {
+                if (canCreate) CreateQueryAction(
+                    label = stringResource(R.string.qs_targets_new_album),
+                    enabled = !isCreating,
+                    onCreate = ::createAlbum,
+                )
+            },
         )
         Row(
             Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -216,9 +223,6 @@ fun QuickSortTargetsSheet(
                     state = albumGridState,
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    if (canCreate) item(key = "create-album", span = { GridItemSpan(maxLineSpan) }) {
-                        CreateAlbumFromQuery(query, !isCreating, ::createAlbum)
-                    }
                     albumNameError?.let { error ->
                         item(key = "create-error", span = { GridItemSpan(maxLineSpan) }) {
                             Text(error, color = MaterialTheme.colorScheme.error)
