@@ -120,6 +120,22 @@ fun LabelEditorSheet(
                 onQueryChange = { query = it },
                 placeholder = stringResource(R.string.labels_search),
                 enabled = !isSaving && selectedIds.isNotEmpty(),
+                actionVisible = canCreate,
+                actions = {
+                    TextButton(
+                        onClick = {
+                            val submittedQuery = query
+                            onApply(LabelEditRequest(newLabelNames = listOf(submittedQuery.trim()))) {
+                                if (query == submittedQuery) query = ""
+                            }
+                        },
+                        enabled = !isSaving && selectedIds.isNotEmpty(),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.labels_new))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.labels_new), maxLines = 1)
+                    }
+                },
             )
             if (orderedSelectedLabels.isNotEmpty()) {
                 Text(stringResource(R.string.labels_selected), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
@@ -183,20 +199,6 @@ fun LabelEditorSheet(
                         onClick = onToggle,
                         emptyIcon = if (label.isSystem) Icons.Default.Favorite else Icons.Outlined.Label,
                     )
-                }
-                if (canCreate) {
-                    item(key = "create", span = { GridItemSpan(maxLineSpan) }) {
-                        TextButton(onClick = {
-                            val submittedQuery = query
-                            onApply(LabelEditRequest(newLabelNames = listOf(submittedQuery.trim()))) {
-                                if (query == submittedQuery) query = ""
-                            }
-                        }, enabled = !isSaving && selectedIds.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.Add, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.labels_new_from_query, query.trim()), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
                 }
                 errorMessage?.let {
                     item(key = "error", span = { GridItemSpan(maxLineSpan) }) {

@@ -1,6 +1,5 @@
 package com.pixel.gallery.ui.quicksort
 
-import com.pixel.gallery.ui.components.CreateAlbumFromQuery
 import com.pixel.gallery.model.canCreateAlbumFromQuery
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import com.pixel.gallery.ui.components.ConfirmationReminder
@@ -174,6 +173,14 @@ fun QuickSortTargetsSheet(
             onQueryChange = { query = it; albumNameError = null },
             placeholder = stringResource(R.string.qs_search_albums),
             enabled = !isCreating,
+            actionVisible = canCreate,
+            actions = {
+                TextButton(onClick = ::createAlbum, enabled = !isCreating) {
+                    Icon(Icons.Outlined.CreateNewFolder, contentDescription = stringResource(R.string.qs_targets_new_album))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.qs_targets_new_album), maxLines = 1)
+                }
+            },
         )
         Row(
             Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -194,7 +201,7 @@ fun QuickSortTargetsSheet(
 
         }
         Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
-            if (filtered.isEmpty() && !canCreate && albumNameError == null) {
+            if (filtered.isEmpty() && albumNameError == null) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         stringResource(when {
@@ -216,9 +223,6 @@ fun QuickSortTargetsSheet(
                     state = albumGridState,
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    if (canCreate) item(key = "create-album", span = { GridItemSpan(maxLineSpan) }) {
-                        CreateAlbumFromQuery(query, !isCreating, ::createAlbum)
-                    }
                     albumNameError?.let { error ->
                         item(key = "create-error", span = { GridItemSpan(maxLineSpan) }) {
                             Text(error, color = MaterialTheme.colorScheme.error)

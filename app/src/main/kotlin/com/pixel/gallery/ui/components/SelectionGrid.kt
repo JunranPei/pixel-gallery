@@ -2,6 +2,12 @@ package com.pixel.gallery.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.filled.Add
@@ -25,6 +31,7 @@ fun SelectionSearchField(
     onQueryChange: (String) -> Unit,
     placeholder: String,
     enabled: Boolean = true,
+    actionVisible: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     Row(
@@ -42,7 +49,13 @@ fun SelectionSearchField(
             singleLine = true,
             enabled = enabled,
         )
-        actions()
+        AnimatedVisibility(
+            visible = actionVisible,
+            enter = fadeIn(tween(180)) + expandHorizontally(tween(180)),
+            exit = fadeOut(tween(180)) + shrinkHorizontally(tween(180)),
+        ) {
+            actions()
+        }
     }
 }
 

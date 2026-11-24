@@ -65,6 +65,14 @@ fun AlbumGroupPickerSheet(
         SelectionSearchField(
             query = query, onQueryChange = { query = it }, placeholder = stringResource(R.string.album_group_search),
             enabled = !isSaving,
+            actionVisible = canCreate,
+            actions = {
+                TextButton(onClick = { creating = true }, enabled = !isSaving) {
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.album_group_new))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.album_group_new), maxLines = 1)
+                }
+            },
         )
         Spacer(Modifier.height(8.dp))
         SelectionGrid(columns = columns, onColumnsChange = onColumnsChange, state = gridState,
@@ -115,15 +123,6 @@ fun AlbumGroupPickerSheet(
             if (matching.isEmpty() && normalized.isNotEmpty() && !canCreate) item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
                 Text(stringResource(R.string.album_group_no_results), style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-            }
-            if (canCreate) item(key = "create", span = { GridItemSpan(maxLineSpan) }) {
-                TextButton(onClick = {
-                    creating = true
-                }, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.album_group_new_from_query, query.trim()), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
             }
             errorMessage?.let { message ->
                 item(key = "error", span = { GridItemSpan(maxLineSpan) }) {
