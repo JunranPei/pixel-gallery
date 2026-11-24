@@ -57,6 +57,7 @@ import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.components.SelectionGrid
 import com.pixel.gallery.ui.components.SelectionSearchField
+import com.pixel.gallery.ui.components.SelectionSearchAction
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import com.pixel.gallery.ui.components.GalleryScrollbar
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
@@ -175,11 +176,12 @@ fun QuickSortTargetsSheet(
             enabled = !isCreating,
             actionVisible = canCreate,
             actions = {
-                TextButton(onClick = ::createAlbum, enabled = !isCreating) {
-                    Icon(Icons.Outlined.CreateNewFolder, contentDescription = stringResource(R.string.qs_targets_new_album))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.qs_targets_new_album), maxLines = 1)
-                }
+                SelectionSearchAction(
+                    label = stringResource(R.string.qs_targets_new_album),
+                    icon = Icons.Outlined.CreateNewFolder,
+                    enabled = !isCreating,
+                    onClick = ::createAlbum,
+                )
             },
         )
         Row(

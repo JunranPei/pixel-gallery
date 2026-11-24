@@ -107,6 +107,7 @@ import com.pixel.gallery.ui.components.GalleryScrollbar
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.components.SelectionGrid
 import com.pixel.gallery.ui.components.SelectionSearchField
+import com.pixel.gallery.ui.components.SelectionSearchAction
 import com.pixel.gallery.ui.components.LocalGalleryMessages
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -557,11 +558,12 @@ fun TransferDestinationContent(
             enabled = !isRunning && !isCreating,
             actionVisible = canCreate,
             actions = {
-                TextButton(onClick = onNewAlbum, enabled = !isRunning && !isCreating) {
-                    Icon(Icons.Filled.CreateNewFolder, contentDescription = stringResource(R.string.transfer_new_album))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.transfer_new_album), maxLines = 1)
-                }
+                SelectionSearchAction(
+                    label = stringResource(R.string.transfer_new_album),
+                    icon = Icons.Filled.CreateNewFolder,
+                    enabled = !isRunning && !isCreating,
+                    onClick = onNewAlbum,
+                )
             },
         )
         Box(Modifier.weight(1f).fillMaxWidth()) {

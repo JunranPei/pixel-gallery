@@ -25,6 +25,7 @@ import com.pixel.gallery.model.normalizeLabelName
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import com.pixel.gallery.ui.components.SelectionGrid
 import com.pixel.gallery.ui.components.SelectionSearchField
+import com.pixel.gallery.ui.components.SelectionSearchAction
 
 /** The same bounded, searchable grid used by label selection. One target per album. */
 @Composable
@@ -67,11 +68,12 @@ fun AlbumGroupPickerSheet(
             enabled = !isSaving,
             actionVisible = canCreate,
             actions = {
-                TextButton(onClick = { creating = true }, enabled = !isSaving) {
-                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.album_group_new))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.album_group_new), maxLines = 1)
-                }
+                SelectionSearchAction(
+                    label = stringResource(R.string.album_group_new),
+                    icon = Icons.Default.Add,
+                    enabled = !isSaving,
+                    onClick = { creating = true },
+                )
             },
         )
         Spacer(Modifier.height(8.dp))

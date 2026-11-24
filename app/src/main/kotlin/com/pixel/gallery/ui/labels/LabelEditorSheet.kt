@@ -38,6 +38,7 @@ import com.pixel.gallery.ui.theme.ExpressiveShapes
 import com.pixel.gallery.ui.components.GalleryScrollbar
 import com.pixel.gallery.ui.components.SelectionGrid
 import com.pixel.gallery.ui.components.SelectionSearchField
+import com.pixel.gallery.ui.components.SelectionSearchAction
 import com.pixel.gallery.ui.components.SelectionBottomSheet
 import com.pixel.gallery.ui.home.AlbumCoverCard
 import com.pixel.gallery.ui.utils.pinchToZoomColumns
@@ -122,19 +123,17 @@ fun LabelEditorSheet(
                 enabled = !isSaving && selectedIds.isNotEmpty(),
                 actionVisible = canCreate,
                 actions = {
-                    TextButton(
+                    SelectionSearchAction(
+                        label = stringResource(R.string.labels_new),
+                        icon = Icons.Default.Add,
+                        enabled = !isSaving && selectedIds.isNotEmpty(),
                         onClick = {
                             val submittedQuery = query
                             onApply(LabelEditRequest(newLabelNames = listOf(submittedQuery.trim()))) {
                                 if (query == submittedQuery) query = ""
                             }
                         },
-                        enabled = !isSaving && selectedIds.isNotEmpty(),
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.labels_new))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.labels_new), maxLines = 1)
-                    }
+                    )
                 },
             )
             if (orderedSelectedLabels.isNotEmpty()) {
