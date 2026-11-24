@@ -10,7 +10,6 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -56,15 +55,6 @@ fun SelectionSearchField(
         ) {
             actions()
         }
-    }
-}
-
-@Composable
-fun CreateAlbumFromQuery(query: String, enabled: Boolean, onCreate: () -> Unit) {
-    TextButton(onClick = onCreate, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-        Icon(Icons.Default.Add, null)
-        Spacer(Modifier.width(8.dp))
-        Text(stringResource(R.string.labels_new_from_query, query.trim()), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
