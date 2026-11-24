@@ -106,8 +106,8 @@ android {
         testInstrumentationRunner = if (imageSchedulingProbe)
             "com.pixel.gallery.integration.ImageSchedulingProbe"
         else "com.pixel.gallery.integration.QuickSortSafetyInstrumentation"
-        versionCode = 2086
-        versionName = "4.3.6.9-auto-multitask"
+        versionCode = 2088
+        versionName = "4.3.6.11-auto-multitask"
     }
 
     signingConfigs {
@@ -179,6 +179,9 @@ android {
         buildConfig = true
     }
 
+    // Reproducible pinned downloads and the JNI loader are prepared by tools/dynamic_listener/prepare.py.
+    sourceSets.getByName("main").jniLibs.srcDir(rootProject.file("build/dynamic-listener/jniLibs"))
+
     dependenciesInfo {
         // Disables dependency metadata when building APKs (for IzzyOnDroid/F-Droid)
         includeInApk = false
@@ -216,6 +219,19 @@ android {
         }
     }
 }
+
+val verifyDynamicListenerLibraries = tasks.register("verifyDynamicListenerLibraries") {
+    doLast {
+        val requiredAbis = if (officialRelease) listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            else listOf("arm64-v8a", "x86_64")
+        for (abi in requiredAbis) for (name in listOf("libgallery_agent.so", "libgallery_diag_loader.so")) {
+            check(rootProject.file("build/dynamic-listener/jniLibs/$abi/$name").isFile) {
+                "Missing dynamic listener library $abi/$name. Run python tools/dynamic_listener/prepare.py --abis ${requiredAbis.joinToString(" ")}."
+            }
+        }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(verifyDynamicListenerLibraries) }
 
 dependencies {
     implementation("com.google.android.material:material:1.14.0")
